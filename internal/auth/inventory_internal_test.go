@@ -1,0 +1,202 @@
+package auth
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/cynative/cynative/internal/auth/exposure"
+	githubhardening "github.com/cynative/cynative/internal/auth/github"
+	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+)
+
+func TestParseGithubLogin(t *testing.T) {
+	t.Parallel()
+
+	if got := parseGithubLogin(http.StatusOK, strings.NewReader(`{"login":"octocat"}`)); got != "@octocat" {
+		t.Errorf("got %q, want @octocat", got)
+	}
+	if got := parseGithubLogin(http.StatusForbidden, strings.NewReader(`{"login":"x"}`)); got != "" {
+		t.Errorf("non-200 → empty, got %q", got)
+	}
+	if got := parseGithubLogin(http.StatusOK, strings.NewReader(`not json`)); got != "" {
+		t.Errorf("bad json → empty, got %q", got)
+	}
+	if got := parseGithubLogin(http.StatusOK, strings.NewReader(`{"login":""}`)); got != "" {
+		t.Errorf("empty login → empty, got %q", got)
+	}
+}
+
+func TestAWSPostureLabel(t *testing.T) {
+	t.Parallel()
+
+	for in, want := range map[string]string{
+		"arn:aws:iam::aws:policy/SecurityAudit": "policy=arn:aws:iam::aws:policy/SecurityAudit",
+		"SecurityAudit":                         "policy=SecurityAudit",
+		"":                                      "policy=",
+	} {
+		if got := awsPostureLabel(in); got != want {
+			t.Errorf("awsPostureLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestGcpPostureLabel(t *testing.T) {
+	t.Parallel()
+
+	if got := gcpPostureLabel("roles/viewer"); got != "role=roles/viewer" {
+		t.Errorf("got %q, want role=roles/viewer", got)
+	}
+}
+
+func TestAzurePostureLabel(t *testing.T) {
+	t.Parallel()
+
+	if got := azurePostureLabel("Reader"); got != "role definition=Reader" {
+		t.Errorf("got %q, want role definition=Reader", got)
+	}
+}
+
+func TestK8sPostureLabel(t *testing.T) {
+	t.Parallel()
+
+	if got := k8sPostureLabel("view"); got != "cluster role=view" {
+		t.Errorf("got %q, want cluster role=view", got)
+	}
+}
+
+func TestGithubPosture(t *testing.T) {
+	t.Parallel()
+
+	if p, w := githubPosture(githubhardening.BaselineExposure()); w ||
+		p != "permissions=default=read,secret-scanning=none" {
+		t.Errorf("githubPosture(baseline) = (%q,%v), want quiet permissions scalar", p, w)
+	}
+	loud := exposure.MergeExposure(githubhardening.BaselineExposure(), exposure.Exposure{"issues": exposure.LevelWrite})
+	if p, w := githubPosture(loud); !w ||
+		p != "permissions=default=read,issues=write,secret-scanning=none" {
+		t.Errorf("githubPosture(write) = (%q,%v), want loud override scalar", p, w)
+	}
+}
+
+func TestGitlabPosture(t *testing.T) {
+	t.Parallel()
+
+	if p, w := gitlabPosture(gitlabclass.BaselineExposure()); w ||
+		p != "permissions=default=read,ci-variables=none" {
+		t.Errorf("gitlabPosture(baseline) = (%q,%v), want quiet permissions scalar", p, w)
+	}
+	loud := exposure.MergeExposure(gitlabclass.BaselineExposure(), exposure.Exposure{"default": exposure.LevelWrite})
+	if p, w := gitlabPosture(loud); !w ||
+		p != "permissions=default=write,ci-variables=none" {
+		t.Errorf("gitlabPosture(write) = (%q,%v), want loud default=write scalar", p, w)
+	}
+}
+
+func TestJoinIdentity(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ p, pr, want string }{
+		{"proj", "me@x", "proj · me@x"}, {"proj", "", "proj"}, {"", "me@x", "me@x"}, {"", "", ""},
+	} {
+		if got := joinIdentity(tt.p, tt.pr); got != tt.want {
+			t.Errorf("joinIdentity(%q,%q) = %q, want %q", tt.p, tt.pr, got, tt.want)
+		}
+	}
+}
+
+func TestEmitOutcome(t *testing.T) {
+	t.Parallel()
+
+	out := connectorOutcome{
+		providers: []Provider{nil, nil},
+		statuses:  []ConnectorStatus{{Name: "aws"}, {Name: "eks"}}, //nolint:exhaustruct // name only.
+		visible:   []bool{true, false},                             // eks status suppressed.
+	}
+	var seen []string
+	got := emitOutcome(out, func(s ConnectorStatus) { seen = append(seen, s.Name) })
+	if len(got) != 2 {
+		t.Errorf("providers = %d, want 2", len(got))
+	}
+	if len(seen) != 1 || seen[0] != "aws" {
+		t.Errorf("emitted %v, want [aws]", seen)
+	}
+	// nil onStatus must not panic.
+	if ps := emitOutcome(out, nil); len(ps) != 2 {
+		t.Errorf("nil onStatus: providers = %d, want 2", len(ps))
+	}
+}
+
+// nameProv is a minimal Provider whose Name identifies its registrar, so the test
+// can assert the RETURNED provider order is registrar order (deterministic).
+type nameProv struct{ n string }
+
+func (p nameProv) Name() string                                    { return p.n }
+func (p nameProv) Description() string                             { return "" }
+func (p nameProv) InjectAuth(*http.Request, json.RawMessage) error { return nil }
+func (p nameProv) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+	return false, nil
+}
+
+func TestDriveConcurrent(t *testing.T) {
+	t.Parallel()
+
+	mk := func(name string, visible bool, delay bool) func() connectorOutcome {
+		return func() connectorOutcome {
+			if delay {
+				time.Sleep(20 * time.Millisecond) // a slow registrar finishes LAST in completion order.
+			}
+
+			return connectorOutcome{
+				providers: []Provider{nameProv{n: name}},
+				statuses:  []ConnectorStatus{{Name: name}}, //nolint:exhaustruct // name only.
+				visible:   []bool{visible},
+			}
+		}
+	}
+
+	var mu sync.Mutex
+	var seen []string
+	registrars := []func() connectorOutcome{
+		mk("slow", true, true), mk("fast", true, false), mk("quiet", false, false),
+	}
+	providers := driveConcurrent(registrars, func(s ConnectorStatus) {
+		mu.Lock()
+		seen = append(seen, s.Name)
+		mu.Unlock()
+	})
+
+	want := []string{"slow", "fast", "quiet"}
+	if len(providers) != len(want) {
+		t.Fatalf("accumulated %d providers, want %d", len(providers), len(want))
+	}
+	for i, w := range want {
+		if got := providers[i].Name(); got != w {
+			t.Errorf("providers[%d] = %q, want %q (return order must be registrar order)", i, got, w)
+		}
+	}
+	if len(seen) != 2 || seen[len(seen)-1] != "slow" {
+		t.Errorf("emitted %v, want [fast, slow] in completion order (slow last)", seen)
+	}
+}
+
+func TestDriveConcurrent_NilOnStatus(t *testing.T) {
+	t.Parallel()
+
+	got := driveConcurrent([]func() connectorOutcome{
+		func() connectorOutcome {
+			return connectorOutcome{ //nolint:exhaustruct // name only.
+				providers: []Provider{nil},
+				statuses:  []ConnectorStatus{{Name: "a"}}, //nolint:exhaustruct // name only.
+				visible:   []bool{true},
+			}
+		},
+	}, nil)
+	if len(got) != 1 {
+		t.Errorf("accumulated %d providers, want 1 (nil onStatus must not panic)", len(got))
+	}
+}

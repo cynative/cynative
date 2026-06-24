@@ -1,0 +1,23 @@
+{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.dynamodb#DynamoDB_20120810": {
+      "type": "service",
+      "version": "2012-08-10",
+      "traits": {
+        "aws.api#service": {
+          "sdkId": "DynamoDB",
+          "arnNamespace": "dynamodb",
+          "endpointPrefix": "dynamodb"
+        },
+        "aws.protocols#awsJson1_0": {}
+      }
+    },
+    "com.amazonaws.dynamodb#PutItem": {
+      "type": "operation"
+    },
+    "com.amazonaws.dynamodb#ListTables": {
+      "type": "operation"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    bytedance/sonic (pulled in transitively by github.com/maximhq/bifrost) JIT-compiles
+    JSON (de)serializers at runtime on amd64 AND arm64, mapping PROT_EXEC pages via plain
+    mmap/mprotect (no MAP_JIT). The notarization-mandated hardened runtime forbids executing
+    unsigned runtime-generated pages, so the kernel SIGKILLs the process ("Code Signature
+    Invalid") on the first Bifrost JSON marshal. allow-unsigned-executable-memory permits
+    sonic's non-MAP_JIT executable pages; allow-jit is included for completeness.
+  -->
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>

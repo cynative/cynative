@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/cynative/cynative/security/advisories/new
+    about: Report a vulnerability privately (do not open a public issue).

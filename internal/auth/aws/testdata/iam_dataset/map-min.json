@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.2",
+  "sdk_method_iam_mappings": {
+    "S3.PutBucketLifecycleConfiguration": [{"action":"s3:PutLifecycleConfiguration"}],
+    "S3Control.PutBucketLifecycleConfiguration": [{"action":"s3-outposts:PutLifecycleConfiguration"}],
+    "S3.GetPublicAccessBlock": [{"action":"s3:GetBucketPublicAccessBlock"}],
+    "S3Control.GetPublicAccessBlock": [{"action":"s3:GetAccountPublicAccessBlock"}],
+    "IoT.GetThing": [{"action":"iot:Describe"},{"action":"iot:GetThingShadow"}],
+    "Iot.GetThing": [{"action":"iot:Describe"},{"action":"iot:DescribeThing"}],
+    "CloudWatchLogs.StartLiveTail": [{"action":"logs:StartLiveTail"}],
+    "ApiGatewayManagementApi.GetConnection": [{"action":"execute-api:ManageConnections"}],
+    "RDS.DescribeDBInstances": [{"action":"rds:DescribeDBInstances"}],
+    "DocDB.DescribeDBInstances": [{"action":"docdb:DescribeDBInstances"}]
+  },
+  "sdk_service_mappings": {
+    "CloudWatchLogs": "logs",
+    "DocDB": "rds",
+    "Neptune": "rds"
+  }
+}

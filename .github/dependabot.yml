@@ -1,0 +1,16 @@
+version: 2
+multi-ecosystem-groups:
+  all-dependencies:
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "fix(deps)"
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"

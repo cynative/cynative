@@ -1,0 +1,268 @@
+{
+  "kind": "ClusterRole",
+  "apiVersion": "rbac.authorization.k8s.io/v1",
+  "metadata": {
+    "name": "view",
+    "uid": "ab937a49-272c-49a0-8c1f-08f1f9dca2b0",
+    "resourceVersion": "1780399882635967009",
+    "creationTimestamp": "2026-06-02T11:31:10Z",
+    "labels": {
+      "kubernetes.io/bootstrapping": "rbac-defaults",
+      "rbac.authorization.k8s.io/aggregate-to-edit": "true"
+    },
+    "annotations": {
+      "rbac.authorization.kubernetes.io/autoupdate": "true"
+    },
+    "managedFields": [
+      {
+        "manager": "clusterrole-aggregation-controller",
+        "operation": "Apply",
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "time": "2026-06-02T11:31:22Z",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:rules": {}
+        }
+      },
+      {
+        "manager": "kube-apiserver",
+        "operation": "Update",
+        "apiVersion": "rbac.authorization.k8s.io/v1",
+        "time": "2026-06-02T11:31:10Z",
+        "fieldsType": "FieldsV1",
+        "fieldsV1": {
+          "f:aggregationRule": {
+            ".": {},
+            "f:clusterRoleSelectors": {}
+          },
+          "f:metadata": {
+            "f:annotations": {
+              ".": {},
+              "f:rbac.authorization.kubernetes.io/autoupdate": {}
+            },
+            "f:labels": {
+              ".": {},
+              "f:kubernetes.io/bootstrapping": {},
+              "f:rbac.authorization.k8s.io/aggregate-to-edit": {}
+            }
+          }
+        }
+      }
+    ]
+  },
+  "rules": [
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        ""
+      ],
+      "resources": [
+        "configmaps",
+        "endpoints",
+        "persistentvolumeclaims",
+        "persistentvolumeclaims/status",
+        "pods",
+        "replicationcontrollers",
+        "replicationcontrollers/scale",
+        "serviceaccounts",
+        "services",
+        "services/status"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        ""
+      ],
+      "resources": [
+        "bindings",
+        "limitranges",
+        "namespaces/status",
+        "pods/log",
+        "pods/status",
+        "replicationcontrollers/status",
+        "resourcequotas",
+        "resourcequotas/status"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        ""
+      ],
+      "resources": [
+        "namespaces"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "",
+        "events.k8s.io"
+      ],
+      "resources": [
+        "events"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "discovery.k8s.io"
+      ],
+      "resources": [
+        "endpointslices"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "apps"
+      ],
+      "resources": [
+        "controllerrevisions",
+        "daemonsets",
+        "daemonsets/status",
+        "deployments",
+        "deployments/scale",
+        "deployments/status",
+        "replicasets",
+        "replicasets/scale",
+        "replicasets/status",
+        "statefulsets",
+        "statefulsets/scale",
+        "statefulsets/status"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "autoscaling"
+      ],
+      "resources": [
+        "horizontalpodautoscalers",
+        "horizontalpodautoscalers/status"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "batch"
+      ],
+      "resources": [
+        "cronjobs",
+        "cronjobs/status",
+        "jobs",
+        "jobs/status"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "extensions"
+      ],
+      "resources": [
+        "daemonsets",
+        "daemonsets/status",
+        "deployments",
+        "deployments/scale",
+        "deployments/status",
+        "ingresses",
+        "ingresses/status",
+        "networkpolicies",
+        "replicasets",
+        "replicasets/scale",
+        "replicasets/status",
+        "replicationcontrollers/scale"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "policy"
+      ],
+      "resources": [
+        "poddisruptionbudgets",
+        "poddisruptionbudgets/status"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "networking.k8s.io"
+      ],
+      "resources": [
+        "ingresses",
+        "ingresses/status",
+        "networkpolicies"
+      ]
+    },
+    {
+      "verbs": [
+        "get",
+        "list",
+        "watch"
+      ],
+      "apiGroups": [
+        "resource.k8s.io"
+      ],
+      "resources": [
+        "resourceclaims",
+        "resourceclaims/status",
+        "resourceclaimtemplates"
+      ]
+    }
+  ],
+  "aggregationRule": {
+    "clusterRoleSelectors": [
+      {
+        "matchLabels": {
+          "rbac.authorization.k8s.io/aggregate-to-view": "true"
+        }
+      }
+    ]
+  }
+}

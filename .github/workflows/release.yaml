@@ -1,0 +1,260 @@
+name: Release Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# At most one release run executes at a time. GitHub may skip intermediate
+# queued runs in the group; that is fine — each run re-derives its work from
+# repository state via release-please.
+concurrency:
+  group: release-pipeline
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Bound the job: the concurrency group means a wedged run blocks later
+    # releases for the default 360 minutes otherwise. The budget covers the
+    # capped long steps (goreleaser 35, verify 5) plus every short step with
+    # slack to spare, so the job limit can never fire mid-step.
+    timeout-minutes: 60
+    steps:
+      # The App must grant contents: write (tag + release), pull-requests:
+      # write (release PRs), and Administration: read (the publish step's
+      # immutable-releases gate).
+      - name: Generate App Token
+        id: generate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            cynative
+            homebrew-tap
+
+      # release-please PHASE 1 — releases only (skip-github-pull-request):
+      # creates the GitHub release as a DRAFT ("draft": true in
+      # release-please-config.json), titled exactly like the tag. The tag is
+      # lazy — it does not exist until this workflow publishes at the end.
+      # The next-release candidate PR is deliberately NOT computed here: a
+      # just-created draft is invisible to release-please (lazy tag, null
+      # tagCommit), so a candidate computed now would be draft-blind and span
+      # bogus history (observed live: full-history 0.4.0 candidates right
+      # after v0.3.1 and v0.3.2). Phase 2 at the end of the run computes the
+      # candidate once the release is published and visible.
+      #
+      # RECOVERY after a failed run (nothing published, nothing immutable):
+      #   gh release delete <tag> --yes
+      #   gh api -X DELETE repos/cynative/cynative/git/refs/tags/<tag>
+      #     ^ ONLY if this flow created the tag (or it is confirmed stale
+      #       debris of a prior failed run). If "Ensure release tag" failed
+      #       because a PRE-EXISTING tag points at the wrong SHA, that tag is
+      #       not this pipeline's to delete — investigate first.
+      #   Restore the release PR's label (release-please tracks released-ness
+      #   via labels, so a bare re-run would otherwise no-op):
+      #     gh api -X DELETE \
+      #       repos/cynative/cynative/issues/<pr>/labels/autorelease%3A%20tagged
+      #     gh api repos/cynative/cynative/issues/<pr>/labels \
+      #       -f "labels[]=autorelease: pending"
+      #   Then re-run the workflow; release-please recreates the draft.
+      #   "Publish release" refuses to run while the repo's immutable-releases
+      #   setting is disabled (the draft stays intact). If "Verify published
+      #   release" fails, the release is already live — investigate its
+      #   content/attestation; if bad, ship a follow-up patch release
+      #   (in-place repair is impossible by design).
+      - id: release-please
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.generate-token.outputs.token }}
+          skip-github-pull-request: true
+
+      # The tag does not exist yet, so check out the exact SHA release-please
+      # cut the release from.
+      - name: Checkout code
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.release-please.outputs.sha }}
+
+      # Materialize the release tag at the verified SHA (or hard-fail if a
+      # pre-existing tag points elsewhere), then fetch it so goreleaser sees a
+      # tagged HEAD.
+      - name: Ensure release tag
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.release-please.outputs.tag_name }}
+          SHA: ${{ steps.release-please.outputs.sha }}
+        run: |
+          scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
+          git fetch origin "refs/tags/${TAG}:refs/tags/${TAG}"
+
+      - name: Set up Go
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Verify signing secrets
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          missing=0
+          for var in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY; do
+            if [ -z "${!var}" ]; then
+              echo "::error::required signing secret ${var} is empty"
+              missing=1
+            fi
+          done
+          exit "${missing}"
+
+      # Builds, signs/notarizes, adopts the release-please draft (matched by
+      # title == tag) and uploads all assets — but does NOT publish:
+      # .goreleaser.yaml sets release.draft, so the workflow owns the publish
+      # step below, after every assertion passes.
+      #
+      # In the pinned goreleaser, sign/notarize failures (including a
+      # notarization outliving its timeout) hard-fail the run before any
+      # upload completes the handoff. The post-run assertion is
+      # defense-in-depth, preserved unchanged from PR #147 (where its
+      # precision trade-offs were settled): it re-checks that both darwin
+      # binaries logged a per-binary "notarized" success line, guarding
+      # against future goreleaser behavior drift. It now runs pre-publish: a
+      # failure here leaves only an editable draft.
+      - name: Run GoReleaser
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        # Step-level cap so a slow build/notarization fails BEFORE publish
+        # instead of letting the job timeout kill the runner between the
+        # publish PATCH and the post-publish verification steps.
+        timeout-minutes: 35
+        run: |
+          set -o pipefail
+          go tool goreleaser release --clean 2>&1 | tee /tmp/goreleaser.log
+          notarized="$(grep -cE '(^|[[:space:]])notarized([[:space:]]|$)' /tmp/goreleaser.log || true)"
+          if [ "${notarized}" -lt 2 ]; then
+            echo "::error::expected 2 notarized darwin binaries, found ${notarized} — investigate the goreleaser log before trusting this release"
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+
+      # ---- Pre-publish assertions ----------------------------------------
+      # Everything below until "Publish release" runs while the release is
+      # still an editable draft: any failure leaves nothing published and
+      # nothing immutable.
+
+      - name: Assert single draft release
+        id: draft
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.release-please.outputs.tag_name }}
+        run: |
+          release_id="$(scripts/release/assert-draft.sh "${GITHUB_REPOSITORY}" "${TAG}")"
+          echo "release_id=${release_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assert exact asset set
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          scripts/release/expected-assets.sh dist > /tmp/expected-assets.tsv
+          scripts/release/assert-assets.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}" /tmp/expected-assets.tsv
+
+      - name: Re-verify tag before publish
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.release-please.outputs.tag_name }}
+          SHA: ${{ steps.release-please.outputs.sha }}
+        run: scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
+
+      # ---- The instant of immutability ------------------------------------
+
+      - name: Publish release
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: scripts/release/publish-release.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}"
+
+      # Detection, not gating — publish cannot be rolled back. A failure here
+      # means: investigate; if the artifacts are bad, ship a follow-up patch
+      # release (in-place repair is impossible by design). All checks are
+      # instant reads of the now-frozen release; attestation verification is
+      # asynchronous (15–20+ minutes) and lives in the Release Attestation
+      # workflow, triggered by the publish above.
+      - name: Verify published release
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.release-please.outputs.tag_name }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+          SHA: ${{ steps.release-please.outputs.sha }}
+        run: |
+          # Short retry against API flakes only — every check inside is an
+          # immediate read of frozen state.
+          for attempt in 1 2 3; do
+            if scripts/release/verify-published.sh "${GITHUB_REPOSITORY}" "${TAG}" "${RELEASE_ID}" /tmp/expected-assets.tsv "${SHA}"; then
+              exit 0
+            fi
+            echo "verify-published attempt ${attempt}/3 failed"
+            if [ "${attempt}" -lt 3 ]; then
+              sleep 5
+            fi
+          done
+          echo "::error::post-publish verification failed after 3 attempts"
+          exit 1
+
+      # Installation tokens live 60 minutes; on a worst-case release run the
+      # phase-2 step below executes ~50 minutes after the first mint, so give
+      # it a fresh token. Skipped on non-release runs (the original token is
+      # minutes old there).
+      - name: Refresh App Token
+        id: refresh-token
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            cynative
+            homebrew-tap
+
+      # release-please PHASE 2 — candidate PR only (skip-github-release).
+      # On normal pushes this is the only place the next-release candidate is
+      # created or updated. On release runs it executes after publish, so the
+      # candidate is computed with the new release visible and correctly
+      # bounded — phase 1 never computes candidates, so the draft-blind bogus
+      # PRs that previously required a cleanup step cannot exist. Deliberately
+      # NOT always(): after a failed release run the draft is unpublished and
+      # a candidate computed here would be draft-blind; skipping means no
+      # candidate is created at all. Residual edge: a push to main while a
+      # failed release awaits recovery computes its candidate draft-blind
+      # (full-history shape — do not merge it); it is rewritten correctly by
+      # the next push after recovery, or close it manually.
+      - name: Compute release candidate PR
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.refresh-token.outputs.token || steps.generate-token.outputs.token }}
+          skip-github-release: true

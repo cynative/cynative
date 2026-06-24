@@ -1,0 +1,9 @@
+{
+  "Name": "s3",
+  "Version": "v1.4",
+  "Operations": [
+    {"Name":"ListBuckets","AuthorizedActions":[{"Name":"ListAllMyBuckets","Service":"s3"}],"SDK":[{"Name":"s3","Method":"list_buckets","Package":"Boto3"}]},
+    {"Name":"ListObjectsV2","AuthorizedActions":[{"Name":"GetObjectAcl","Service":"s3"},{"Name":"ListBucket","Service":"s3"},{"Name":"ListBucket","Service":"s3"}],"SDK":[{"Name":"s3","Method":"list_objects_v2","Package":"Boto3"}]},
+    {"Name":"PutBucketLifecycleConfiguration","AuthorizedActions":[],"SDK":[{"Name":"s3","Method":"put_bucket_lifecycle_configuration","Package":"Boto3"},{"Name":"s3control","Method":"put_bucket_lifecycle_configuration","Package":"Boto3"}]}
+  ]
+}
