@@ -1,0 +1,74 @@
+{
+  "smithy": "2.0",
+  "shapes": {
+    "com.amazonaws.s3#AmazonS3": {
+      "type": "service",
+      "version": "2006-03-01",
+      "traits": {
+        "aws.api#service": {
+          "sdkId": "S3",
+          "arnNamespace": "s3",
+          "endpointPrefix": "s3"
+        },
+        "aws.protocols#restXml": {}
+      }
+    },
+    "com.amazonaws.s3#ListBuckets": {
+      "type": "operation",
+      "input":  {"target": "smithy.api#Unit"},
+      "output": {"target": "smithy.api#Unit"},
+      "traits": {
+        "smithy.api#http": {"method": "GET", "uri": "/?x-id=ListBuckets", "code": 200}
+      }
+    },
+    "com.amazonaws.s3#GetObject": {
+      "type": "operation",
+      "input":  {"target": "smithy.api#Unit"},
+      "output": {"target": "smithy.api#Unit"},
+      "traits": {
+        "smithy.api#http": {"method": "GET", "uri": "/{Bucket}/{Key+}?x-id=GetObject", "code": 200}
+      }
+    },
+    "com.amazonaws.s3#DeleteObject": {
+      "type": "operation",
+      "input":  {"target": "smithy.api#Unit"},
+      "output": {"target": "smithy.api#Unit"},
+      "traits": {
+        "smithy.api#http": {"method": "DELETE", "uri": "/{Bucket}/{Key+}?x-id=DeleteObject", "code": 204}
+      }
+    },
+    "com.amazonaws.s3#AbortMultipartUpload": {
+      "type": "operation",
+      "input":  {"target": "com.amazonaws.s3#AbortMultipartUploadRequest"},
+      "output": {"target": "smithy.api#Unit"},
+      "traits": {
+        "smithy.api#http": {"method": "DELETE", "uri": "/{Bucket}/{Key+}?x-id=AbortMultipartUpload", "code": 204}
+      }
+    },
+    "com.amazonaws.s3#AbortMultipartUploadRequest": {
+      "type": "structure",
+      "members": {
+        "Bucket":       {"target": "smithy.api#String", "traits": {"smithy.api#httpLabel": {}, "smithy.api#required": {}}},
+        "Key":          {"target": "smithy.api#String", "traits": {"smithy.api#httpLabel": {}, "smithy.api#required": {}}},
+        "UploadId":     {"target": "smithy.api#String", "traits": {"smithy.api#httpQuery": "uploadId", "smithy.api#required": {}}},
+        "RequestPayer": {"target": "smithy.api#String", "traits": {"smithy.api#httpHeader": "x-amz-request-payer"}}
+      }
+    },
+    "com.amazonaws.s3#CopyObject": {
+      "type": "operation",
+      "input":  {"target": "com.amazonaws.s3#CopyObjectRequest"},
+      "output": {"target": "smithy.api#Unit"},
+      "traits": {
+        "smithy.api#http": {"method": "PUT", "uri": "/{Bucket}/{Key+}?x-id=CopyObject", "code": 200}
+      }
+    },
+    "com.amazonaws.s3#CopyObjectRequest": {
+      "type": "structure",
+      "members": {
+        "Bucket":     {"target": "smithy.api#String", "traits": {"smithy.api#httpLabel": {}, "smithy.api#required": {}}},
+        "Key":        {"target": "smithy.api#String", "traits": {"smithy.api#httpLabel": {}, "smithy.api#required": {}}},
+        "CopySource": {"target": "smithy.api#String", "traits": {"smithy.api#httpHeader": "x-amz-copy-source", "smithy.api#required": {}}}
+      }
+    }
+  }
+}

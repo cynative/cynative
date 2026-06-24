@@ -1,0 +1,13 @@
+# scripts/demo/sanitize.map.example — copy to sanitize.map.local (gitignored), fill REAL values.
+# Format: <REAL-VALUE><TAB><PLACEHOLDER>. Lines starting with # are ignored.
+# Used by capture.sh for BOTH the sanitize substitution and the exact validate-local denylist.
+# NEVER commit sanitize.map.local — it holds real identifiers.
+#
+# 111122223333	123456789012
+# my-dev-user	ci-deployer
+# my-gcp-project	example-prod
+# my-org/my-repo	example-corp/web-app
+# 198.51.100.23	203.0.113.10
+# fd12:3456:789a:1::1	2001:db8::1
+# 00000000-0000-0000-0000-000000000000	aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+# devbox.internal.example	host.example.com

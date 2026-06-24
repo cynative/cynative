@@ -1,0 +1,64 @@
+name: Release Attestation
+
+# GitHub generates release attestations ASYNCHRONOUSLY — 15–20+ minutes
+# after publish on this repo (v0.3.3 exhausted a 10-minute in-run retry
+# window in the release pipeline). Attestation verification therefore lives
+# here, triggered by the publish event, with a budget sized to the observed
+# lag. A red run of this workflow is the alarm that a published release
+# lacks a valid attestation — the release itself is immutable either way,
+# and the release pipeline already pinned its asset digests and tag binding
+# synchronously.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Ensure gh can verify releases
+        run: scripts/release/ensure-gh-verify.sh
+
+      - name: Verify release attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          # Bounded retry over ~30 minutes for the asynchronous attestation.
+          for attempt in $(seq 1 60); do
+            if gh release verify "${TAG}" --repo "${GITHUB_REPOSITORY}"; then
+              echo "attestation verified for ${TAG}"
+              exit 0
+            fi
+            echo "attempt ${attempt}/60: attestation not yet verifiable"
+            if [ "${attempt}" -lt 60 ]; then
+              sleep 30
+            fi
+          done
+          echo "::error::no valid attestation for ${TAG} after ~30 minutes — investigate before trusting this release"
+          exit 1
+
+      # `gh release verify` proves A valid attestation exists; it does not
+      # cross-check that every published asset is a subject in it. Download
+      # the frozen assets (the release is immutable, so this read is
+      # authoritative) and verify each one — combined with the release run's
+      # digest assertions this closes the chain per asset:
+      # built == frozen == attested.
+      - name: Verify every asset is attested
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p /tmp/release-assets
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --dir /tmp/release-assets
+          for f in /tmp/release-assets/*; do
+            gh release verify-asset "${TAG}" "${f}" --repo "${GITHUB_REPOSITORY}"
+          done
