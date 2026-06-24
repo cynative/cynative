@@ -24,23 +24,35 @@ Cynative runs frontier models to secure your stack. It researches your code, clo
 
 ## How to Install
 
-**Homebrew** (macOS; also works on Linux Homebrew):
+**Homebrew** (macOS + Linux):
 ```bash
 brew install cynative/tap/cynative
 ```
-Upgrade with `brew upgrade cynative`; uninstall with `brew uninstall --cask cynative`.
 
-**Install script** (Linux / macOS, amd64 + arm64):
+**Install script** (macOS + Linux):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh | sh
 ```
-The script detects your OS/arch, downloads the release binary, **verifies its SHA-256 against the release `checksums.txt`, failing closed on a mismatch** — and, when `gh` is installed, checks the GitHub release attestation (advisory by default; set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed attestation fatal) — then installs (no `sudo`) to `~/.local/bin` (override with `CYNATIVE_INSTALL_DIR`). Pin a version with `CYNATIVE_VERSION=v1.0.0`; for a high-integrity install, fetch the script itself from an immutable tag rather than `main`:
+Installs to `~/.local/bin`, no `sudo`. Verifies SHA-256, fails closed. Re-run to upgrade.
+
+**Manual:** grab a binary from [releases](https://github.com/cynative/cynative/releases) and put it on `PATH`.
+
+<details>
+<summary>Verification, pinning & uninstall.</summary>
+
+**Install script** (amd64 + arm64): the script detects your OS/arch, downloads the release binary, then **verifies its SHA-256 against the release `checksums.txt`, failing closed on a mismatch**. When `gh` is installed it also checks the SLSA build-provenance attestation (advisory by default; set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed attestation fatal). Installs (no `sudo`) to `~/.local/bin`, override with `CYNATIVE_INSTALL_DIR`.
+
+Pin a version with `CYNATIVE_VERSION=v0.0.1`. For a high-integrity install, fetch the script itself from an immutable tag rather than `main`:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cynative/cynative/v1.0.0/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/cynative/cynative/v0.0.1/install.sh | sh
 ```
 Re-run the one-liner to upgrade; uninstall with `curl -fsSL …/install.sh | sh -s -- --uninstall`.
 
 **Manual:** download a prebuilt binary + `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put it on your `PATH`. Single static binary, no dependencies.
+
+**Homebrew:** upgrade with `brew upgrade cynative`; uninstall with `brew uninstall cynative`.
+
+</details>
 
 ## How to Run
 
