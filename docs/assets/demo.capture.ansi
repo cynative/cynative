@@ -1,0 +1,203 @@
+                           _   _
+     ___ _   _ _ __   __ _| |_(_)_   _____
+    / __| | | | '_ \ / _` | __| \ \ / / _ \
+   | (__| |_| | | | | (_| | |_| |\ V /  __/
+    \___|\__, |_| |_|\__,_|\__|_| \_/ \___|
+         |___/
+
+  Connectors
+  ────────────────────────────────────────────────
+  ✓ gcp         role=roles/viewer  example-prod · audit@example-prod.iam.gserviceaccount.com  (+gke)
+  ✓ github      permissions=default=read,secret-scanning=none  @example-corp
+  ✓ gitlab      permissions=default=read,ci-variables=none  @example-corp
+  ✓ aws         policy=arn:aws:iam::aws:policy/SecurityAudit · sts=disabled  123456789012 · arn:aws:iam::123456789012:user/audit  (+eks)
+  ✓ kubernetes  cluster role=view  aks-demo-000000.hcp.eastus.azmk8s.io
+  ✓ azure       role definition=Reader  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee  (+aks)
+
+  LLM
+  ────────────────────────────────────────────────
+  ✓ bedrock   us.anthropic.claude-opus-4-8
+
+  Hi — cynative here, ready to investigate your connected environment.                            
+                                                                                                  
+  1. Which IAM users or roles in AWS account 123456789012 have overly permissive or unused        
+  policies?                                                                                       
+  2. Are there any public or misconfigured storage buckets/resources in GCP project example-prod?                                                                                         
+  3. What workloads in the aks-demo AKS cluster run as privileged or expose risky RBAC         
+  bindings?                                                                                       
+                                                                                                  
+  Reply with just the number to run one, or type your own question.                               
+
+
+> Audit example-corp/payments-api for CI->cloud privilege escalation.
+
+  🔧 Tool Call: [38;5;203;48;5;236m code_execution [m                                                                  
+                                                                                                  
+    [38;5;251m[0m                                                                                              
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mrepo[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;173m'example-corp/payments-api'[0m[38;5;187m;[0m[38;5;251m[0m                                                       
+    [38;5;241m// Get repo info and workflows[0m                                                                
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mr[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251mhttp_request[0m[38;5;187m({[0m[38;5;251mmethod[0m[38;5;210m:[0m[38;5;173m'GET'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251murl[0m[38;5;210m:[0m[38;5;173m`https://api.github.com/repos/[0m[38;5;173m${[0m[38;5;251mrepo[0m[38;5;173m}[0m[38;5;173m`[0m[38;5;187m,[0m[38;5;251m[m       
+  [38;5;251m[0m[38;5;251mauth_provider[0m[38;5;210m:[0m[38;5;173m'github'[0m[38;5;187m});[0m[38;5;251m[0m                                                                       
+    [38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'repo status'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;187m);[0m[38;5;251m[0m                                                         
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251minfo[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;251mJSON[0m[38;5;187m.[0m[38;5;251mparse[0m[38;5;187m([0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m);[0m[38;5;251m[0m                                                              
+    [38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'default_branch'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251minfo[0m[38;5;187m.[0m[38;5;251mdefault_branch[0m[38;5;187m,[0m[38;5;251m [0m[38;5;173m'private'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251minfo[0m[38;5;187m.[0m[38;5;206mprivate[0m[38;5;187m,[0m[38;5;251m [0m[38;5;173m'visibility'[0m[38;5;187m,[0m[38;5;251m [m    
+  [38;5;251m[0m[38;5;251minfo[0m[38;5;187m.[0m[38;5;251mvisibility[0m[38;5;187m);[0m[38;5;251m[0m                                                                               
+    [38;5;251m[0m                                                                                              
+    [38;5;241m// list .github/workflows[0m                                                                     
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mwf[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251mhttp_request[0m[38;5;187m({[0m[38;5;251mmethod[0m[38;5;210m:[0m[38;5;173m'GET'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251murl[0m[38;5;210m:[0m[38;5;173m`https://api.github.[m                         
+  [38;5;173mcom/repos/[0m[38;5;173m${[0m[38;5;251mrepo[0m[38;5;173m}[0m[38;5;173m/contents/.github/workflows`[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mauth_provider[0m[38;5;210m:[0m[38;5;173m'github'[0m[38;5;187m});[0m[38;5;251m[0m                        
+    [38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'wf status'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mwf[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;187m);[0m[38;5;251m[0m                                                          
+    [38;5;39mif[0m[38;5;187m([0m[38;5;251mwf[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;210m===[0m[38;5;85m200[0m[38;5;187m){[0m[38;5;251m[0m                                                                          
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mfiles[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;251mJSON[0m[38;5;187m.[0m[38;5;251mparse[0m[38;5;187m([0m[38;5;251mwf[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m);[0m[38;5;251m[0m                                                          
+    [38;5;251m  [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;251mfiles[0m[38;5;187m.[0m[38;5;251mmap[0m[38;5;187m([0m[38;5;251mf[0m[38;5;187m=>({[0m[38;5;251mname[0m[38;5;210m:[0m[38;5;251mf[0m[38;5;187m.[0m[38;5;251mname[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mpath[0m[38;5;210m:[0m[38;5;251mf[0m[38;5;187m.[0m[38;5;251mpath[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251msize[0m[38;5;210m:[0m[38;5;251mf[0m[38;5;187m.[0m[38;5;251msize[0m[38;5;187m})));[0m[38;5;251m[0m                       
+    [38;5;187m}[0m[38;5;251m[0m                                                                                             
+    [38;5;251m[0m                                                                                              
+
+Execute? [y]es once / [a]ll this session / [N]o: 
+
+  🔧 Tool Call: [38;5;203;48;5;236m code_execution [m                                                                  
+                                                                                                  
+    [38;5;251m[0m                                                                                              
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mrepo[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;173m'example-corp/payments-api'[0m[38;5;187m;[0m[38;5;251m[0m                                                       
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mfiles[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;187m[[0m[38;5;173m'deploy.yml'[0m[38;5;187m,[0m[38;5;173m'e2e.yml'[0m[38;5;187m,[0m[38;5;173m'nightly.yml'[0m[38;5;187m,[0m[38;5;173m'release.yml'[0m[38;5;187m];[0m[38;5;251m[0m                           
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mout[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251mmapConcurrent[0m[38;5;187m([0m[38;5;251mfiles[0m[38;5;187m,[0m[38;5;251m [0m[38;5;206masync[0m[38;5;251m [0m[38;5;251mf[0m[38;5;251m [0m[38;5;187m=>[0m[38;5;251m [0m[38;5;187m{[0m[38;5;251m[0m                                           
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mr[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251mhttp_request[0m[38;5;187m({[0m[38;5;251mmethod[0m[38;5;210m:[0m[38;5;173m'GET'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251murl[0m[38;5;210m:[0m[38;5;173m`https://api.github.[m                        
+  [38;5;173mcom/repos/[0m[38;5;173m${[0m[38;5;251mrepo[0m[38;5;173m}[0m[38;5;173m/contents/.github/workflows/[0m[38;5;173m${[0m[38;5;251mf[0m[38;5;173m}[0m[38;5;173m`[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mauth_provider[0m[38;5;210m:[0m[38;5;173m'github'[0m[38;5;187m,[0m[38;5;251m[m                     
+  [38;5;251m[0m[38;5;251mheaders[0m[38;5;210m:[0m[38;5;187m[{[0m[38;5;251mkey[0m[38;5;210m:[0m[38;5;173m'Accept'[0m[38;5;187m,[0m[38;5;251mvalue[0m[38;5;210m:[0m[38;5;173m'application/vnd.github.raw'[0m[38;5;187m}]});[0m[38;5;251m[0m                                  
+    [38;5;251m  [0m[38;5;39mreturn[0m[38;5;251m [0m[38;5;187m{[0m[38;5;251mf[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mstatus[0m[38;5;210m:[0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mbody[0m[38;5;210m:[0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m};[0m[38;5;251m[0m                                                   
+    [38;5;187m});[0m[38;5;251m[0m                                                                                           
+    [38;5;39mfor[0m[38;5;187m([0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mo[0m[38;5;251m [0m[38;5;39mof[0m[38;5;251m [0m[38;5;251mout[0m[38;5;187m){[0m[38;5;251m [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'===== '[0m[38;5;210m+[0m[38;5;251mo[0m[38;5;187m.[0m[38;5;251mf[0m[38;5;210m+[0m[38;5;173m' ('[0m[38;5;210m+[0m[38;5;251mo[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;210m+[0m[38;5;173m') ====='[0m[38;5;187m);[0m[38;5;251m [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;251mo[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m);[0m[38;5;251m [0m[38;5;187m}[0m[38;5;251m[0m
+    [38;5;251m[0m                                                                                              
+
+↳ Auto-approved (session)
+
+  Four workflows use GitHub OIDC to assume four AWS roles. The escalation risk lives in those     
+  roles' [1mtrust policies[m (how loosely they scope the OIDC [38;5;203;48;5;236m sub [m) and their [1mpermissions[m. Let me     
+  inspect them in AWS.                                                                            
+
+
+  🔧 Tool Call: [38;5;203;48;5;236m code_execution [m                                                                  
+                                                                                                  
+    [38;5;251m[0m                                                                                              
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mroles[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;187m[[0m[38;5;173m'ci-deploy-role'[0m[38;5;187m,[0m[38;5;173m'ci-e2e-role'[0m[38;5;187m,[0m[38;5;173m'ci-nightly-role'[0m[38;5;187m,[0m[38;5;173m'ci-release-role'[0m[38;5;187m];[0m[38;5;251m[0m           
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mregion[0m[38;5;210m=[0m[38;5;173m'us-east-1'[0m[38;5;187m;[0m[38;5;251m[0m                                                                     
+    [38;5;39mfunction[0m[38;5;251m [0m[38;5;251miam[0m[38;5;187m([0m[38;5;251maction[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mparams[0m[38;5;187m){[0m[38;5;251m[0m                                                                 
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mqs[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;212mObject[0m[38;5;187m.[0m[38;5;251massign[0m[38;5;187m({[0m[38;5;251mAction[0m[38;5;210m:[0m[38;5;251maction[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mVersion[0m[38;5;210m:[0m[38;5;173m'2010-05-08'[0m[38;5;187m},[0m[38;5;251m [0m[38;5;251mparams[0m[38;5;210m||[0m[38;5;187m{});[0m[38;5;251m[0m                
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mbody[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;212mObject[0m[38;5;187m.[0m[38;5;251mkeys[0m[38;5;187m([0m[38;5;251mqs[0m[38;5;187m).[0m[38;5;251mmap[0m[38;5;187m([0m[38;5;251mk[0m[38;5;187m=>[0m[38;5;212mencodeURIComponent[0m[38;5;187m([0m[38;5;251mk[0m[38;5;187m)[0m[38;5;210m+[0m[38;5;173m'='[0m[38;5;210m+[0m[38;5;212mencodeURIComponent[0m[38;5;187m([0m[38;5;251mqs[0m[38;5;187m[[0m[38;5;251mk[0m[38;5;187m])).[m   
+  [38;5;187m[0m[38;5;251mjoin[0m[38;5;187m([0m[38;5;173m'&'[0m[38;5;187m);[0m[38;5;251m[0m                                                                                      
+    [38;5;251m  [0m[38;5;39mreturn[0m[38;5;251m [0m[38;5;251mhttp_request[0m[38;5;187m({[0m[38;5;251mmethod[0m[38;5;210m:[0m[38;5;173m'POST'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251murl[0m[38;5;210m:[0m[38;5;173m'https://iam.amazonaws.com/'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mauth_provider[0m[38;5;210m:[0m[38;5;173m'aws'[0m[38;5;187m,[0m[38;5;251m[m  
+  [38;5;251m[0m[38;5;251maws_auth[0m[38;5;210m:[0m[38;5;187m{[0m[38;5;251mservice[0m[38;5;210m:[0m[38;5;173m'iam'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mregion[0m[38;5;210m:[0m[38;5;173m'us-east-1'[0m[38;5;187m},[0m[38;5;251m [0m[38;5;251mheaders[0m[38;5;210m:[0m[38;5;187m[{[0m[38;5;251mkey[0m[38;5;210m:[0m[38;5;173m'Content-Type'[0m[38;5;187m,[0m[38;5;251mvalue[0m[38;5;210m:[0m[38;5;173m'application/x-[m
+  [38;5;173mwww-form-urlencoded'[0m[38;5;187m}],[0m[38;5;251m [0m[38;5;251mbody[0m[38;5;187m});[0m[38;5;251m[0m                                                                 
+    [38;5;187m}[0m[38;5;251m[0m                                                                                             
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mres[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251mmapConcurrent[0m[38;5;187m([0m[38;5;251mroles[0m[38;5;187m,[0m[38;5;251m [0m[38;5;206masync[0m[38;5;251m [0m[38;5;251mrole[0m[38;5;187m=>{[0m[38;5;251m[0m                                          
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mg[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251miam[0m[38;5;187m([0m[38;5;173m'GetRole'[0m[38;5;187m,{[0m[38;5;251mRoleName[0m[38;5;210m:[0m[38;5;251mrole[0m[38;5;187m});[0m[38;5;251m[0m                                             
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251map[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251miam[0m[38;5;187m([0m[38;5;173m'ListAttachedRolePolicies'[0m[38;5;187m,{[0m[38;5;251mRoleName[0m[38;5;210m:[0m[38;5;251mrole[0m[38;5;187m});[0m[38;5;251m[0m                           
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mip[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251miam[0m[38;5;187m([0m[38;5;173m'ListRolePolicies'[0m[38;5;187m,{[0m[38;5;251mRoleName[0m[38;5;210m:[0m[38;5;251mrole[0m[38;5;187m});[0m[38;5;251m[0m                                   
+    [38;5;251m  [0m[38;5;39mreturn[0m[38;5;251m [0m[38;5;187m{[0m[38;5;251mrole[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mget[0m[38;5;210m:[0m[38;5;251mg[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mattached[0m[38;5;210m:[0m[38;5;251map[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251minline[0m[38;5;210m:[0m[38;5;251mip[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mstatus[0m[38;5;210m:[0m[38;5;251mg[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;187m};[0m[38;5;251m[0m               
+    [38;5;187m});[0m[38;5;251m[0m                                                                                           
+    [38;5;39mfor[0m[38;5;187m([0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mr[0m[38;5;251m [0m[38;5;39mof[0m[38;5;251m [0m[38;5;251mres[0m[38;5;187m){[0m[38;5;251m[0m                                                                          
+    [38;5;251m  [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'===== '[0m[38;5;210m+[0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mrole[0m[38;5;210m+[0m[38;5;173m' status='[0m[38;5;210m+[0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mstatus[0m[38;5;210m+[0m[38;5;173m' ====='[0m[38;5;187m);[0m[38;5;251m[0m                                  
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mdoc[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;251mxml[0m[38;5;187m.[0m[38;5;251mparse[0m[38;5;187m([0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mget[0m[38;5;187m);[0m[38;5;251m[0m                                                               
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mad[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;251mdoc[0m[38;5;187m.[0m[38;5;251mGetRoleResponse[0m[38;5;210m?[0m[38;5;187m.[0m[38;5;251mGetRoleResult[0m[38;5;210m?[0m[38;5;187m.[0m[38;5;251mRole[0m[38;5;210m?[0m[38;5;187m.[0m[38;5;251mAssumeRolePolicyDocument[0m[38;5;187m;[0m[38;5;251m[0m              
+    [38;5;251m  [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'TRUST:'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;212mdecodeURIComponent[0m[38;5;187m([0m[38;5;251mad[0m[38;5;187m));[0m[38;5;251m[0m                                              
+    [38;5;251m  [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'ATTACHED:'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mJSON[0m[38;5;187m.[0m[38;5;251mstringify[0m[38;5;187m([0m[38;5;251mxml[0m[38;5;187m.[0m[38;5;251mparse[0m[38;5;187m([0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251mattached[0m[38;5;187m).[m                              
+  [38;5;187m[0m[38;5;251mListAttachedRolePoliciesResponse[0m[38;5;187m.[0m[38;5;251mListAttachedRolePoliciesResult[0m[38;5;187m.[0m[38;5;251mAttachedPolicies[0m[38;5;187m));[0m[38;5;251m[0m             
+    [38;5;251m  [0m[38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'INLINE:'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mJSON[0m[38;5;187m.[0m[38;5;251mstringify[0m[38;5;187m([0m[38;5;251mxml[0m[38;5;187m.[0m[38;5;251mparse[0m[38;5;187m([0m[38;5;251mr[0m[38;5;187m.[0m[38;5;251minline[0m[38;5;187m).[0m[38;5;251mListRolePoliciesResponse[0m[38;5;187m.[m         
+  [38;5;187m[0m[38;5;251mListRolePoliciesResult[0m[38;5;187m.[0m[38;5;251mPolicyNames[0m[38;5;187m));[0m[38;5;251m[0m                                                           
+    [38;5;187m}[0m[38;5;251m[0m                                                                                             
+    [38;5;251m[0m                                                                                              
+
+↳ Auto-approved (session)
+
+  Critical issue spotted ([38;5;203;48;5;236m ci-release-role [m: wildcard subject + IAMFullAccess). Let me grab the   
+  remaining inline policy and confirm the analysis before reporting.                              
+
+
+  🔧 Tool Call: [38;5;203;48;5;236m code_execution [m                                                                  
+                                                                                                  
+    [38;5;251m[0m                                                                                              
+    [38;5;39mfunction[0m[38;5;251m [0m[38;5;251miam[0m[38;5;187m([0m[38;5;251maction[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mparams[0m[38;5;187m){[0m[38;5;251m[0m                                                                 
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mqs[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;212mObject[0m[38;5;187m.[0m[38;5;251massign[0m[38;5;187m({[0m[38;5;251mAction[0m[38;5;210m:[0m[38;5;251maction[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mVersion[0m[38;5;210m:[0m[38;5;173m'2010-05-08'[0m[38;5;187m},[0m[38;5;251m [0m[38;5;251mparams[0m[38;5;210m||[0m[38;5;187m{});[0m[38;5;251m[0m                
+    [38;5;251m  [0m[38;5;206mconst[0m[38;5;251m [0m[38;5;251mbody[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;212mObject[0m[38;5;187m.[0m[38;5;251mkeys[0m[38;5;187m([0m[38;5;251mqs[0m[38;5;187m).[0m[38;5;251mmap[0m[38;5;187m([0m[38;5;251mk[0m[38;5;187m=>[0m[38;5;212mencodeURIComponent[0m[38;5;187m([0m[38;5;251mk[0m[38;5;187m)[0m[38;5;210m+[0m[38;5;173m'='[0m[38;5;210m+[0m[38;5;212mencodeURIComponent[0m[38;5;187m([0m[38;5;251mqs[0m[38;5;187m[[0m[38;5;251mk[0m[38;5;187m])).[m   
+  [38;5;187m[0m[38;5;251mjoin[0m[38;5;187m([0m[38;5;173m'&'[0m[38;5;187m);[0m[38;5;251m[0m                                                                                      
+    [38;5;251m  [0m[38;5;39mreturn[0m[38;5;251m [0m[38;5;251mhttp_request[0m[38;5;187m({[0m[38;5;251mmethod[0m[38;5;210m:[0m[38;5;173m'POST'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251murl[0m[38;5;210m:[0m[38;5;173m'https://iam.amazonaws.com/'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mauth_provider[0m[38;5;210m:[0m[38;5;173m'aws'[0m[38;5;187m,[0m[38;5;251m[m  
+  [38;5;251m[0m[38;5;251maws_auth[0m[38;5;210m:[0m[38;5;187m{[0m[38;5;251mservice[0m[38;5;210m:[0m[38;5;173m'iam'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mregion[0m[38;5;210m:[0m[38;5;173m'us-east-1'[0m[38;5;187m},[0m[38;5;251m [0m[38;5;251mheaders[0m[38;5;210m:[0m[38;5;187m[{[0m[38;5;251mkey[0m[38;5;210m:[0m[38;5;173m'Content-Type'[0m[38;5;187m,[0m[38;5;251mvalue[0m[38;5;210m:[0m[38;5;173m'application/x-[m
+  [38;5;173mwww-form-urlencoded'[0m[38;5;187m}],[0m[38;5;251m [0m[38;5;251mbody[0m[38;5;187m});[0m[38;5;251m[0m                                                                 
+    [38;5;187m}[0m[38;5;251m[0m                                                                                             
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251mp[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;206mawait[0m[38;5;251m [0m[38;5;251miam[0m[38;5;187m([0m[38;5;173m'GetRolePolicy'[0m[38;5;187m,{[0m[38;5;251mRoleName[0m[38;5;210m:[0m[38;5;173m'ci-deploy-role'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;251mPolicyName[0m[38;5;210m:[0m[38;5;173m'deploy-artifacts-[m 
+  [38;5;173mro'[0m[38;5;187m});[0m[38;5;251m[0m                                                                                          
+    [38;5;206mconst[0m[38;5;251m [0m[38;5;251md[0m[38;5;251m [0m[38;5;210m=[0m[38;5;251m [0m[38;5;251mxml[0m[38;5;187m.[0m[38;5;251mparse[0m[38;5;187m([0m[38;5;251mp[0m[38;5;187m.[0m[38;5;251mbody[0m[38;5;187m).[0m[38;5;251mGetRolePolicyResponse[0m[38;5;187m.[0m[38;5;251mGetRolePolicyResult[0m[38;5;187m;[0m[38;5;251m[0m                        
+    [38;5;251mconsole[0m[38;5;187m.[0m[38;5;251mlog[0m[38;5;187m([0m[38;5;173m'deploy-artifacts-ro:'[0m[38;5;187m,[0m[38;5;251m [0m[38;5;212mdecodeURIComponent[0m[38;5;187m([0m[38;5;251md[0m[38;5;187m.[0m[38;5;251mPolicyDocument[0m[38;5;187m));[0m[38;5;251m[0m                    
+    [38;5;251m[0m                                                                                              
+
+↳ Auto-approved (session)
+
+  The picture is clear. Let me verify the two real findings.                                      
+
+
+  [38;5;39;1m## [m[38;5;39;1m🔬 Verification[m[38;5;39;1m panel[m                                                                        
+                                                                                                  
+  • ✅ CI OIDC role ci-release-role allows full IAM privilege escalation from any repo ref —      
+  verified                                                                                        
+  • ✅ ci-deploy-role and ci-nightly-role trust any branch=main but lack environment/ref          
+  tightening best practice — verified                                                             
+
+
+  [38;5;228;48;5;63;1m [m[38;5;228;48;5;63;1mCI → Cloud Privilege Escalation Audit: [m[38;5;203;48;5;236;1m example-corp/payments-api [m[38;5;228;48;5;63;1m [m                              
+                                                                                                  
+  The repo (private) has 4 [38;5;203;48;5;236m workflow_dispatch [m workflows, each using GitHub OIDC ([38;5;203;48;5;236m id-token:[m      
+  [38;5;203;48;5;236mwrite [m) to assume an AWS role in account [1m123456789012[m via [38;5;203;48;5;236m aws-actions/configure-aws-[m           
+  [38;5;203;48;5;236mcredentials@v4 [m. The escalation risk is in the roles' trust scoping and permissions, not the    
+  workflow YAML itself.                                                                           
+                                                                                                  
+  [38;5;39;1m## [m[38;5;39;1m🔴 CRITICAL — [m[38;5;203;48;5;236;1m ci-release-role [m[38;5;39;1m: full IAM takeover from any repo[m[38;5;39;1m ref[m                         
+                                                                                                  
+  The role's trust policy scopes the OIDC subject with a [1mwildcard[m:                                
+                                                                                                  
+    [38;5;251mStringLike  sub = "repo:example-corp/payments-api:*"[0m                                            
+                                                                                                  
+  and has [38;5;203;48;5;236m IAMFullAccess [m (AWS managed) attached.                                                 
+                                                                                                  
+  [1mImpact:[m Any workflow run in this repo qualifies — [3many branch, any tag, any [m[38;5;203;48;5;236m pull_request [m[3m, any[m  
+  [3menvironment[m — not just protected releases. An attacker who can trigger a workflow (e.g. a       
+  malicious PR, a pushed branch, or an injected step in any branch) can assume [38;5;203;48;5;236m ci-release-role [m  
+  and use IAMFullAccess to escalate account-wide: attach [38;5;203;48;5;236m AdministratorAccess [m to itself, create  
+  new users/access keys, or rewrite any role's trust policy. This is a complete CI→cloud account  
+  compromise path.                                                                                
+                                                                                                  
+  [1mFix (both needed):[m                                                                              
+                                                                                                  
+  1. Tighten the trust subject — pin to a protected environment or specific ref, e.g.             
+  [38;5;203;48;5;236m repo:example-corp/payments-api:environment:release [m or [38;5;203;48;5;236m :ref:refs/tags/* [m (combined with tag     
+  protection rules).                                                                              
+  2. Replace [38;5;203;48;5;236m IAMFullAccess [m with a minimal policy covering only the release task. Full IAM is    
+  almost never required for a release pipeline.                                                   
+                                                                                                  
+  [38;5;39;1m## [m[38;5;39;1m✅ The other three roles are scoped reasonably (for[m[38;5;39;1m contrast)[m                                
+                                                                                                  
+   Role              │ Trust subject          │ Permissions                  │ Verdict            
+  ───────────────────┼────────────────────────┼──────────────────────────────┼────────────────────
+   [38;5;203;48;5;236m ci-deploy-role [m  │ [38;5;203;48;5;236m :ref:refs/heads/main [m │ inline:                      │ Least privilege ✔  
+                     │                        │ [38;5;203;48;5;236m s3:GetObject [m/[38;5;203;48;5;236m s3:ListBucke[m │                    
+                     │                        │ [38;5;203;48;5;236mt [m on [38;5;203;48;5;236m example-deploy-[m       │                    
+                     │                        │ [38;5;203;48;5;236martifacts [m only              │                    
+   [38;5;203;48;5;236m ci-nightly-role [m │ [38;5;203;48;5;236m :ref:refs/heads/main [m │ [38;5;203;48;5;236m CloudWatchReadOnlyAccess [m   │ Read-only ✔        
+   [38;5;203;48;5;236m ci-e2e-role [m     │ [38;5;203;48;5;236m :environment:e2e [m     │ [38;5;203;48;5;236m AmazonS3ReadOnlyAccess [m     │ Env-scoped; S3     
+                     │                        │ (account-wide S3 read)       │ read is broad but  
+                     │                        │                              │ low risk           
+                                                                                                  
+  Minor hardening note: [38;5;203;48;5;236m ci-deploy-role [m/[38;5;203;48;5;236m ci-nightly-role [m trust the [38;5;203;48;5;236m main [m branch ref rather than
+  a deployment environment — fine, but consider environment-based subjects with required reviewers
+  for tighter control. [38;5;203;48;5;236m ci-e2e-role [m's [38;5;203;48;5;236m AmazonS3ReadOnlyAccess [m is broader than needed (account-  
+  wide bucket read) but is read-only and env-gated.                                               
+                                                                                                  
+  [38;5;39;1m## [m[38;5;39;1mBottom[m[38;5;39;1m line[m                                                                                  
+                                                                                                  
+  One real escalation path: [38;5;203;48;5;236m ci-release-role [m[1m = wildcard trust + IAMFullAccess = full account[m     
+  [1mcompromise from any ref in the repo.[m Remediate that role's trust condition and permissions as   
+  priority. The other three are not escalation vectors.                                           
+
+── 184.3s · 8 model calls · 5 tool calls · 2 verifiers · bedrock/us.anthropic.claude-opus-4-8
+   turn     24.8k fresh in (14.3k cache write) · 55.5k cached · 6.7k out · 87.0k total
+
+> 

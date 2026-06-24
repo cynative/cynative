@@ -1,0 +1,27 @@
+{
+  "api": {
+    "compute": {
+      "restUrl": "https://www.googleapis.com/discovery/v1/apis/compute/v1/rest",
+      "methods": {
+        "compute.instances.insert": {
+          "permissions": [
+            {"name": "compute.instances.create", "discoveryMethodologies": ["restcrawliamblockv1"]},
+            {"name": "iam.serviceAccounts.actAs", "condition": {"bodyPathExists": "$.serviceAccounts[].email"}, "discoveryMethodologies": ["manual"]},
+            {"name": "compute.subnetworks.use", "discoveryMethodologies": ["restcrawlv1"]}
+          ]
+        },
+        "compute.instances.get": {
+          "permissions": [
+            {"name": "compute.instances.get", "discoveryMethodologies": ["restcrawliamblockv1"]}
+          ]
+        },
+        "compute.instances.lowconf": {
+          "permissions": [
+            {"name": "compute.instances.lowconf", "discoveryMethodologies": ["restcrawlv1"]}
+          ]
+        },
+        "compute.instances.empty": {}
+      }
+    }
+  }
+}
