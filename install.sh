@@ -2,7 +2,7 @@
 # cynative installer.
 #   curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh | sh
 # Env: CYNATIVE_VERSION (default: latest), CYNATIVE_INSTALL_DIR (default: ~/.local/bin),
-#      CYNATIVE_REQUIRE_ATTESTATION=1 (make a failed `gh attestation verify` fatal).
+#      CYNATIVE_REQUIRE_ATTESTATION=1 (make a failed release-attestation check fatal).
 # For high-integrity installs, fetch this script from an immutable ref instead of `main`:
 #   curl -fsSL https://raw.githubusercontent.com/cynative/cynative/<tag-or-sha>/install.sh | sh
 set -eu
@@ -76,7 +76,7 @@ got=$(cd "$tmp" && sha256 "$ARCHIVE" | awk '{print $1}')
 [ "$matches" = "$got" ] || err "checksum mismatch: want ${matches} got ${got}"
 
 if command -v gh >/dev/null 2>&1; then
-  if gh attestation verify "$tmp/$ARCHIVE" -R "$REPO" >/dev/null 2>&1; then
+  if gh release verify-asset "$VERSION" "$tmp/$ARCHIVE" --repo "$REPO" >/dev/null 2>&1; then
     printf 'attestation verified\n' >&2
   elif [ "${CYNATIVE_REQUIRE_ATTESTATION:-0}" = "1" ]; then
     err "attestation verification failed (CYNATIVE_REQUIRE_ATTESTATION=1)"
@@ -96,5 +96,8 @@ mv "$INSTALL_DIR/.${BINARY}.tmp.$$" "$INSTALL_DIR/$BINARY" || err "install move 
 printf 'installed %s %s to %s/%s\n' "$BINARY" "$VERSION" "$INSTALL_DIR" "$BINARY" >&2
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
-  *) printf 'note: %s is not on PATH — add: export PATH="%s:$PATH"\n' "$INSTALL_DIR" "$INSTALL_DIR" >&2 ;;
+  *)
+    # shellcheck disable=SC2016  # the printed $PATH is intentionally literal (a copy-paste hint).
+    printf 'note: %s is not on PATH — add: export PATH="%s:$PATH"\n' "$INSTALL_DIR" "$INSTALL_DIR" >&2
+    ;;
 esac
