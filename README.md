@@ -5,14 +5,14 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 
 <!-- BEGIN agent-about -->
-Cynative runs frontier models to secure your stack. It researches your code, cloud and runtime by writing and running code in a read-only sandbox and verifies every finding live.
+Cynative runs frontier models to secure your stack. It researches your code, cloud and runtime in a built-in sandbox and verifies every finding live - read-only by default.
 
 ## What makes it special
 
 - **🔗 Code-to-runtime**: Reasons across source, cloud and runtime together
-- **🧪 Writes its own code**: Researches at scale in its own fully isolated sandbox
-- **👁️ Read-only by default**: Every call is classified and authorized, writes are an explicit opt-in
-- **✅ Evidence-backed**: Findings are verified live in your environment
+- **🧪 Sandbox**: Generates and runs code to research at scale
+- **👁️ Read-only**: Every call is classified and authorized by default, writes are an explicit opt-in
+- **✅ Evidence-backed**: Findings are verified live
 - **📖 Sovereign**: Apache-2.0, bring your own model, runs entirely in your environment
 <!-- END agent-about -->
 
