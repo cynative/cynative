@@ -23,3 +23,85 @@ jobs:
 
       - name: Check
         run: make check
+
+  windows-installer-checks:
+    name: Windows installer (lint + unit)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Windows binary still compiles
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/cynative
+          GOOS=windows GOARCH=arm64 go build -o /dev/null ./cmd/cynative
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          Invoke-ScriptAnalyzer -Path install.ps1 -Settings test/PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: Pester unit tests
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5.0 -Force   # avoid resolving the OS-bundled Pester 3.x
+          $r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0) { exit 1 }
+
+  windows-installer-e2e:
+    name: Windows installer (e2e)
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Stage a fake release (exe -> zip -> checksums) and serve it
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'stage'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          go build -o (Join-Path $stage 'cynative.exe') ./cmd/cynative
+          Compress-Archive -Path (Join-Path $stage 'cynative.exe') `
+            -DestinationPath (Join-Path $stage 'cynative_Windows_x86_64.zip') -Force
+          $hash = (Get-FileHash -Algorithm SHA256 `
+            -LiteralPath (Join-Path $stage 'cynative_Windows_x86_64.zip')).Hash.ToLower()
+          "$hash  cynative_Windows_x86_64.zip" | Set-Content -LiteralPath (Join-Path $stage 'checksums.txt')
+          # Serve the staged release on loopback (the only allowed insecure base).
+          Start-Process python -ArgumentList '-m','http.server','8000' -WorkingDirectory $stage
+          # Wait for the server to accept connections before the test runs (avoid a startup race).
+          $ok = $false
+          foreach ($i in 1..30) {
+            try { Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8000/checksums.txt' -TimeoutSec 2 | Out-Null; $ok = $true; break }
+            catch { Start-Sleep -Milliseconds 500 }
+          }
+          if (-not $ok) { throw 'staging server did not come up' }
+          # Export env for the test and the installer.
+          "CYN_E2E_STAGE=$stage"                              | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CYN_E2E_INSTALL_DIR=$(Join-Path $env:RUNNER_TEMP 'bin')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CYNATIVE_VERSION=v0.0.0-e2e"                       | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CYNATIVE_BASE_URL=http://127.0.0.1:8000"           | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CYNATIVE_INSTALL_DIR=$(Join-Path $env:RUNNER_TEMP 'bin')" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Run the E2E test under Windows PowerShell 5.1
+        shell: powershell      # 5.1, not pwsh (7) — this is the floor we target.
+        run: |
+          # Pre-register NuGet so Set-PSRepository/Install-Module can't block on an
+          # interactive provider-install prompt under Windows PowerShell 5.1.
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5.0 -Force   # avoid resolving the OS-bundled Pester 3.4
+          $r = Invoke-Pester -Path test/install.e2e.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0) { exit 1 }

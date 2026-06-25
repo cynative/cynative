@@ -24,23 +24,37 @@ Cynative runs frontier models to secure your stack. It researches your code, clo
 
 ## How to Install
 
-**Homebrew** (macOS; also works on Linux Homebrew):
+**Homebrew** (macOS / Linux — recommended):
 ```bash
 brew install cynative/tap/cynative
 ```
-Upgrade with `brew upgrade cynative`; uninstall with `brew uninstall --cask cynative`.
-
-**Install script** (Linux / macOS, amd64 + arm64):
+**Install script** (macOS / Linux — verifies the download's SHA-256 against the release `checksums.txt`, failing closed):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh | sh
 ```
-The script detects your OS/arch, downloads the release binary, **verifies its SHA-256 against the release `checksums.txt`, failing closed on a mismatch** - and, when `gh` is installed, checks the GitHub release attestation (advisory by default; set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed attestation fatal) - then installs (no `sudo`) to `~/.local/bin` (override with `CYNATIVE_INSTALL_DIR`). Pin a version with `CYNATIVE_VERSION=v1.0.0`; for a high-integrity install, fetch the script itself from an immutable tag rather than `main`:
-```bash
-curl -fsSL https://raw.githubusercontent.com/cynative/cynative/v1.0.0/install.sh | sh
+**Windows** (Scoop):
+```powershell
+scoop bucket add cynative https://github.com/cynative/scoop-bucket
+scoop install cynative
 ```
-Re-run the one-liner to upgrade; uninstall with `curl -fsSL …/install.sh | sh -s -- --uninstall`.
 
-**Manual:** download a prebuilt binary + `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put it on your `PATH`. Single static binary, no dependencies.
+<details>
+<summary><strong>Updating, uninstalling, Windows details, version pinning &amp; manual download</strong></summary>
+
+**Update / uninstall**
+
+| Method | Update | Uninstall |
+|---|---|---|
+| Homebrew | `brew upgrade cynative` | `brew uninstall --cask cynative` |
+| Install script | re-run the one-liner | `curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh \| sh -s -- --uninstall` |
+| Scoop | `scoop update cynative` | `scoop uninstall cynative` |
+
+**Windows (PowerShell script):** `irm https://raw.githubusercontent.com/cynative/cynative/main/install.ps1 | iex`; uninstall with `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cynative/cynative/main/install.ps1))) -Uninstall`.
+
+**Install-script options:** pin a version with `CYNATIVE_VERSION=v1.0.0`; change the target directory with `CYNATIVE_INSTALL_DIR` (default `~/.local/bin`, no `sudo`). The script checks the GitHub release attestation when `gh` is installed (advisory by default); set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed check fatal. For a high-integrity install, fetch the script from an immutable tag instead of `main`.
+
+**Manual:** download a prebuilt binary and `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put the binary on your `PATH`. Single static binary, no dependencies.
+</details>
 
 ## How to Run
 
