@@ -97,6 +97,9 @@ jobs:
       - name: Run the E2E test under Windows PowerShell 5.1
         shell: powershell      # 5.1, not pwsh (7) — this is the floor we target.
         run: |
+          # Pre-register NuGet so Set-PSRepository/Install-Module can't block on an
+          # interactive provider-install prompt under Windows PowerShell 5.1.
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module Pester -MinimumVersion 5.5.0 -Force -Scope CurrentUser -SkipPublisherCheck
           Import-Module Pester -MinimumVersion 5.5.0 -Force   # avoid resolving the OS-bundled Pester 3.4
