@@ -114,3 +114,21 @@ Describe 'Resolve-CynAttestationAction' {
         Resolve-CynAttestationAction -GhAvailable $false -Required $true | Should -Be 'fail'
     }
 }
+
+Describe 'Shell wiring' {
+    # The "no auto-run on dot-source" guarantee is proven implicitly: this whole suite
+    # dot-sources install.ps1 in BeforeAll and never makes a network call, so the guard
+    # held. Here we assert the entry points exist (and that the guard line is present so a
+    # future edit can't silently delete it).
+    It 'defines the main entry point' {
+        Get-Command Invoke-CynMain -CommandType Function | Should -Not -BeNullOrEmpty
+    }
+    It 'defines install and uninstall entry points' {
+        Get-Command Invoke-CynInstall -CommandType Function | Should -Not -BeNullOrEmpty
+        Get-Command Invoke-CynUninstall -CommandType Function | Should -Not -BeNullOrEmpty
+    }
+    It 'guards main behind a not-dot-sourced check' {
+        (Get-Content "$PSScriptRoot/../install.ps1" -Raw) |
+            Should -Match ([regex]::Escape("InvocationName -ne '.'"))
+    }
+}

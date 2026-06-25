@@ -129,6 +129,128 @@ function Resolve-CynAttestationAction {
     return 'skip'
 }
 
+function Get-CynString {
+    param([Parameter(Mandatory)][string]$Url)
+    (Invoke-WebRequest -UseBasicParsing -Uri $Url -Headers @{ 'User-Agent' = 'cynative-install' }).Content
+}
+
+function Save-CynFile {
+    param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][string]$Path)
+    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -Headers @{ 'User-Agent' = 'cynative-install' }
+}
+
+function New-CynTempDir {
+    $p = Join-Path ([IO.Path]::GetTempPath()) ('cynative-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $p | Out-Null
+    $p
+}
+
+function Get-CynLatestVersion {
+    param([Parameter(Mandatory)][string]$Repo)
+    $tag = (Get-CynString -Url "https://api.github.com/repos/$Repo/releases/latest" | ConvertFrom-Json).tag_name
+    if (-not $tag) { throw 'cynative-install: could not resolve latest release tag' }
+    $tag
+}
+
+function Invoke-CynAttestation {
+    param([string]$Repo, [string]$Version, [string]$ArchivePath)
+    $gh = [bool](Get-Command gh -ErrorAction SilentlyContinue)
+    $required = ($env:CYNATIVE_REQUIRE_ATTESTATION -eq '1')
+    switch (Resolve-CynAttestationAction -GhAvailable $gh -Required $required) {
+        'fail' { throw 'cynative-install: CYNATIVE_REQUIRE_ATTESTATION=1 but gh is not installed' }
+        'skip' { return }
+        'verify' {
+            & gh release verify-asset $Version $ArchivePath --repo $Repo *> $null
+            if ($LASTEXITCODE -eq 0) { Write-Host 'attestation verified' }
+            elseif ($required) { throw 'cynative-install: attestation verification failed (CYNATIVE_REQUIRE_ATTESTATION=1)' }
+            else { Write-Host 'warning: attestation not verified (continuing)' }
+        }
+    }
+}
+
+function Install-CynBinary {
+    param([string]$Src, [string]$InstallDir, [string]$Binary)
+    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $dest = Join-Path $InstallDir $Binary
+    $stage = Join-Path $InstallDir ('.' + $Binary + '.tmp.' + $PID)
+    Copy-Item -LiteralPath $Src -Destination $stage -Force
+    try {
+        Move-Item -LiteralPath $stage -Destination $dest -Force
+    } catch {
+        # A locked target (running cynative.exe) surfaces as IOException OR
+        # UnauthorizedAccessException OR a PS-wrapped error depending on the share mode,
+        # so catch broadly and keep the underlying message for diagnostics.
+        Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
+        throw "cynative-install: could not replace $dest — close any running cynative and re-run ($($_.Exception.Message))"
+    }
+}
+
+function Add-CynToUserPath {
+    param([string]$Dir)
+    $current = [string][Environment]::GetEnvironmentVariable('Path', 'User')
+    if (Test-CynPathContains -PathValue $current -Dir $Dir) { return }
+    [Environment]::SetEnvironmentVariable('Path', (Add-CynPathEntry -PathValue $current -Dir $Dir), 'User')
+    Write-Host "added $Dir to your user PATH — open a new terminal for it to take effect"
+}
+
+function Remove-CynFromUserPath {
+    param([string]$Dir)
+    $current = [string][Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not (Test-CynPathContains -PathValue $current -Dir $Dir)) { return }
+    [Environment]::SetEnvironmentVariable('Path', (Remove-CynPathEntry -PathValue $current -Dir $Dir), 'User')
+    Write-Host "removed $Dir from your user PATH"
+}
+
+function Invoke-CynInstall {
+    param([string]$Repo, [string]$Binary, [string]$InstallDir)
+    $arch = Resolve-CynArch
+    $archive = Get-CynArchiveName -Arch $arch
+    $version = if ($env:CYNATIVE_VERSION) { $env:CYNATIVE_VERSION } else { Get-CynLatestVersion -Repo $Repo }
+    $base = Resolve-CynBaseUrl -Repo $Repo -Version $version
+    Write-Host "downloading $archive @ $version"
+    $tmp = New-CynTempDir
+    try {
+        $archivePath = Join-Path $tmp $archive
+        Save-CynFile -Url "$base/$archive" -Path $archivePath
+        $expected = Get-CynExpectedHash -ChecksumsText (Get-CynString -Url "$base/checksums.txt") -ArchiveName $archive
+        $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash
+        if (-not (Test-CynHashMatch -Expected $expected -Actual $actual)) {
+            throw "cynative-install: checksum mismatch for $archive (want $expected got $actual)"
+        }
+        Invoke-CynAttestation -Repo $Repo -Version $version -ArchivePath $archivePath
+        Expand-Archive -LiteralPath $archivePath -DestinationPath $tmp -Force
+        Install-CynBinary -Src (Join-Path $tmp $Binary) -InstallDir $InstallDir -Binary $Binary
+        Add-CynToUserPath -Dir $InstallDir
+        Write-Host "installed cynative $version to $InstallDir\$Binary"
+    } finally {
+        Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-CynUninstall {
+    param([string]$InstallDir, [string]$Binary)
+    $dest = Join-Path $InstallDir $Binary
+    if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Force; Write-Host "removed $dest" }
+    else { Write-Host "$dest not found (nothing to remove)" }
+    Remove-CynFromUserPath -Dir $InstallDir
+}
+
+function Invoke-CynMain {
+    param([switch]$Uninstall)
+    [Net.ServicePointManager]::SecurityProtocol = `
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $ProgressPreference = 'SilentlyContinue'
+    $ErrorActionPreference = 'Stop'
+
+    $repo = 'cynative/cynative'
+    $binary = 'cynative.exe'
+    $installDir = if ($env:CYNATIVE_INSTALL_DIR) { $env:CYNATIVE_INSTALL_DIR } `
+                  else { Join-Path $env:LOCALAPPDATA 'cynative\bin' }
+
+    if ($Uninstall) { Invoke-CynUninstall -InstallDir $installDir -Binary $binary }
+    else { Invoke-CynInstall -Repo $repo -Binary $binary -InstallDir $installDir }
+}
+
 # Run main only when executed directly (not when dot-sourced by Pester).
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-CynMain -Uninstall:$Uninstall
