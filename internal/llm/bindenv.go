@@ -26,7 +26,7 @@ func collectEnvKeys(t reflect.Type, prefix string, out *[]string) {
 		t = t.Elem()
 	}
 
-	if t == envVarType {
+	if t == secretVarType {
 		*out = append(*out, prefix)
 
 		return

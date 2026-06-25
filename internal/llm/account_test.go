@@ -166,7 +166,7 @@ func newLiteralKey(name, value string) schemas.Key {
 	return schemas.Key{ //nolint:exhaustruct // optional Bifrost fields intentionally omitted
 		ID:     name,
 		Name:   name,
-		Value:  schemas.EnvVar{Val: value, FromEnv: false, EnvVar: ""},
+		Value:  schemas.SecretVar{Val: value},
 		Models: schemas.WhiteList{"*"},
 		Weight: 1.0,
 	}

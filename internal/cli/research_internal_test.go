@@ -182,7 +182,7 @@ func validCfg() config.Config {
 			Keys: []schemas.Key{{ //nolint:exhaustruct // optional fields intentionally omitted
 				ID:     "k",
 				Name:   "k",
-				Value:  schemas.EnvVar{Val: "test-key", FromEnv: false, EnvVar: ""},
+				Value:  schemas.SecretVar{Val: "test-key"},
 				Models: schemas.WhiteList{"*"},
 				Weight: 1.0,
 			}},

@@ -16,7 +16,7 @@ import (
 )
 
 // testAccount builds a minimal FileAccount for chat-model tests. Key.Value is a
-// bschemas.EnvVar, so a literal key is built via newLiteralKey (account_test.go).
+// bschemas.SecretVar, so a literal key is built via newLiteralKey (account_test.go).
 func testAccount() *llm.FileAccount {
 	return &llm.FileAccount{
 		Entry: llm.ProviderEntry{ //nolint:exhaustruct // only the fields under test populated
