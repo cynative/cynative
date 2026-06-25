@@ -44,6 +44,7 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `sgl`          | ✅ supported       | (none — local endpoint)         | [sgl.md](sgl.md) |
 | `elevenlabs`   | ❌ not chat-capable | n/a                            | [elevenlabs.md](elevenlabs.md) |
 | `runway`       | ❌ not chat-capable | n/a                            | [runway.md](runway.md) |
+| `runware`      | ❌ not chat-capable | n/a                            | [runware.md](runware.md) |
 
 ## Shared YAML reference
 

@@ -10,15 +10,18 @@ import (
 	"github.com/cynative/cynative/internal/llm"
 )
 
-// Compile-time pin: ValidateEnvVars reads three specific field names on
-// schemas.EnvVar (Val, FromEnv, EnvVar). If Bifrost renames any of them in
-// a future version, this declaration fails the build instead of silently
-// regressing env-var validation at runtime.
-var _ = schemas.EnvVar{
-	Val:     "",
-	FromEnv: false,
-	EnvVar:  "",
-}
+// Compile-time pin: ValidateEnvVars and EnvSecretVar depend on this schemas.SecretVar
+// API surface — the exported Val field, the NewSecretVar constructor, and the
+// IsFromEnv/GetValue/EnvKey methods. If Bifrost renames any of them in a future
+// version, these declarations fail the build instead of silently regressing
+// env-var validation at runtime.
+var (
+	_                                 = schemas.SecretVar{Val: ""}
+	_ func(string) *schemas.SecretVar = schemas.NewSecretVar
+	_ func(*schemas.SecretVar) bool   = (*schemas.SecretVar).IsFromEnv
+	_ func(*schemas.SecretVar) string = (*schemas.SecretVar).GetValue
+	_ func(*schemas.SecretVar) string = (*schemas.SecretVar).EnvKey
+)
 
 func TestValidateEnvVars_NoEnvVars(t *testing.T) {
 	t.Parallel()
@@ -27,7 +30,7 @@ func TestValidateEnvVars_NoEnvVars(t *testing.T) {
 		Provider: "openai",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "k",
-			Value:  schemas.EnvVar{Val: "literal", FromEnv: false, EnvVar: ""},
+			Value:  schemas.SecretVar{Val: "literal"},
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 		}},
@@ -44,7 +47,7 @@ func TestValidateEnvVars_ResolvedEnvVar(t *testing.T) {
 		Provider: "openai",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "k",
-			Value:  schemas.EnvVar{Val: "resolved", FromEnv: true, EnvVar: "env.OPENAI_KEY"},
+			Value:  llm.EnvSecretVar("env.OPENAI_KEY", "resolved"),
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 		}},
@@ -61,7 +64,7 @@ func TestValidateEnvVars_UnsetEnvVar(t *testing.T) {
 		Provider: "openai",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "k",
-			Value:  schemas.EnvVar{Val: "", FromEnv: true, EnvVar: "env.UNSET_OPENAI"},
+			Value:  llm.EnvSecretVar("env.UNSET_OPENAI", ""),
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 		}},
@@ -82,14 +85,14 @@ func TestValidateEnvVars_NestedStructEnvVar(t *testing.T) {
 		Provider: "vertex",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "sa",
-			Value:  schemas.EnvVar{Val: "literal", FromEnv: false, EnvVar: ""},
+			Value:  schemas.SecretVar{Val: "literal"},
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 			VertexKeyConfig: &schemas.VertexKeyConfig{
-				ProjectID:       schemas.EnvVar{Val: "p", FromEnv: false, EnvVar: ""},
-				AuthCredentials: schemas.EnvVar{Val: "", FromEnv: true, EnvVar: "env.UNSET_VERTEX_AUTH_CREDS"},
-				Region:          schemas.EnvVar{Val: "us-central1", FromEnv: false, EnvVar: ""},
-				ProjectNumber:   schemas.EnvVar{Val: "12345", FromEnv: false, EnvVar: ""},
+				ProjectID:       schemas.SecretVar{Val: "p"},
+				AuthCredentials: llm.EnvSecretVar("env.UNSET_VERTEX_AUTH_CREDS", ""),
+				Region:          schemas.SecretVar{Val: "us-central1"},
+				ProjectNumber:   schemas.SecretVar{Val: "12345"},
 			},
 		}},
 	}
@@ -102,16 +105,16 @@ func TestValidateEnvVars_NestedStructEnvVar(t *testing.T) {
 func TestValidateEnvVars_PointerEnvVarUnset(t *testing.T) {
 	t.Parallel()
 
-	clientID := schemas.EnvVar{Val: "", FromEnv: true, EnvVar: "env.UNSET_AZ_CLIENT_ID"}
+	clientID := llm.EnvSecretVar("env.UNSET_AZ_CLIENT_ID", "")
 	entry := llm.ProviderEntry{ //nolint:exhaustruct // only Provider+Keys populated
 		Provider: "azure",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "az",
-			Value:  schemas.EnvVar{Val: "literal", FromEnv: false, EnvVar: ""},
+			Value:  schemas.SecretVar{Val: "literal"},
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 			AzureKeyConfig: &schemas.AzureKeyConfig{ //nolint:exhaustruct // only Endpoint and ClientID populated
-				Endpoint: schemas.EnvVar{Val: "https://example.com", FromEnv: false, EnvVar: ""},
+				Endpoint: schemas.SecretVar{Val: "https://example.com"},
 				ClientID: &clientID,
 			},
 		}},
@@ -129,11 +132,11 @@ func TestValidateEnvVars_PointerEnvVarNil(t *testing.T) {
 		Provider: "azure",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "az",
-			Value:  schemas.EnvVar{Val: "literal", FromEnv: false, EnvVar: ""},
+			Value:  schemas.SecretVar{Val: "literal"},
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 			AzureKeyConfig: &schemas.AzureKeyConfig{ //nolint:exhaustruct // ClientID nil is the test case
-				Endpoint: schemas.EnvVar{Val: "https://example.com", FromEnv: false, EnvVar: ""},
+				Endpoint: schemas.SecretVar{Val: "https://example.com"},
 			},
 		}},
 	}
@@ -149,7 +152,7 @@ func TestValidateEnvVars_LiteralEmptyDoesNotError(t *testing.T) {
 		Provider: "openai",
 		Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
 			Name:   "k",
-			Value:  schemas.EnvVar{Val: "", FromEnv: false, EnvVar: ""},
+			Value:  schemas.SecretVar{Val: ""},
 			Models: schemas.WhiteList{"*"},
 			Weight: 1,
 		}},

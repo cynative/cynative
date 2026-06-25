@@ -59,6 +59,7 @@ var AllBifrostProviders = []schemas.ModelProvider{ //nolint:gochecknoglobals // 
 	schemas.Replicate,
 	schemas.VLLM,
 	schemas.Runway,
+	schemas.Runware,
 	schemas.Fireworks,
 }
 
@@ -68,7 +69,7 @@ var AllBifrostProviders = []schemas.ModelProvider{ //nolint:gochecknoglobals // 
 // single-env fallback" (Bedrock uses the AWS credential chain; Vertex needs
 // structured project/region config in llm.vertex.* and gets credentials via
 // the Google ADC chain; Ollama/VLLM/SGL authenticate via the local endpoint
-// URL; Elevenlabs/Runway aren't chat-capable). The "ok bool" returned by
+// URL; Elevenlabs/Runway/Runware aren't chat-capable). The "ok bool" returned by
 // CanonicalEnvKey distinguishes
 // "provider not configured here" from "configured, but no env fallback".
 //
@@ -100,6 +101,7 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{ //nolint:gocheckno
 	schemas.SGL:         "",
 	schemas.Elevenlabs:  "",
 	schemas.Runway:      "",
+	schemas.Runware:     "",
 }
 
 // CanonicalEnvKey reports the conventional environment variable for the given

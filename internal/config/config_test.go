@@ -412,7 +412,7 @@ func TestValidate_Valid(t *testing.T) {
 			Provider: "openai",
 			Model:    "gpt-5",
 			Keys: []schemas.Key{{ //nolint:exhaustruct // only required fields populated
-				Value: schemas.EnvVar{Val: "k", FromEnv: false, EnvVar: ""},
+				Value: schemas.SecretVar{Val: "k"},
 			}},
 		},
 	}
@@ -748,7 +748,7 @@ func TestLoad_EnvVarReferenceResolved(t *testing.T) {
 	}
 
 	got := cfg.LLM.Keys[0].Value
-	if !got.FromEnv {
+	if !got.IsFromEnv() {
 		t.Errorf("FromEnv: got false, want true")
 	}
 	if got.Val != "sk-resolved" {
@@ -822,7 +822,8 @@ func TestLoad_AzureEndpoint_ResolvesFromEnv(t *testing.T) {
 	if got := cfg.LLM.Keys[0].AzureKeyConfig.Endpoint.Val; got != "https://r.openai.azure.com" {
 		t.Errorf("endpoint: got %q", got)
 	}
-	if got := cfg.LLM.Keys[0].Value; got.Val != "az-canonical" || got.EnvVar != "AZURE_OPENAI_API_KEY" || !got.FromEnv {
+	if got := cfg.LLM.Keys[0].Value; got.Val != "az-canonical" || got.EnvKey() != "AZURE_OPENAI_API_KEY" ||
+		!got.IsFromEnv() {
 		t.Errorf("canonical key value: got %+v, want {Val:az-canonical EnvVar:AZURE_OPENAI_API_KEY FromEnv:true}", got)
 	}
 }

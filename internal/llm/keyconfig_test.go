@@ -151,7 +151,7 @@ func TestValidateKeyPresence(t *testing.T) {
 				Provider: "openai",
 				Model:    "gpt-5.5",
 				Keys: []schemas.Key{keyWithConfig(func(k *schemas.Key) {
-					k.Value = schemas.EnvVar{Val: "sk-test", FromEnv: false, EnvVar: ""}
+					k.Value = schemas.SecretVar{Val: "sk-test"}
 				})},
 			},
 			nil,

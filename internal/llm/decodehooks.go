@@ -11,11 +11,11 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
-// envVarType is the [reflect.Type] of schemas.EnvVar, cached at package init.
-var envVarType = reflect.TypeFor[schemas.EnvVar]() //nolint:gochecknoglobals // cached reflect.Type
+// secretVarType is the [reflect.Type] of schemas.SecretVar, cached at package init.
+var secretVarType = reflect.TypeFor[schemas.SecretVar]() //nolint:gochecknoglobals // cached reflect.Type
 
-// envVarPtrType is the [reflect.Type] of *schemas.EnvVar, cached at package init.
-var envVarPtrType = reflect.TypeFor[*schemas.EnvVar]() //nolint:gochecknoglobals // cached reflect.Type
+// secretVarPtrType is the [reflect.Type] of *schemas.SecretVar, cached at package init.
+var secretVarPtrType = reflect.TypeFor[*schemas.SecretVar]() //nolint:gochecknoglobals // cached reflect.Type
 
 // durationType is the [reflect.Type] of [time.Duration], cached at package init.
 var durationType = reflect.TypeFor[time.Duration]() //nolint:gochecknoglobals // cached reflect.Type
@@ -24,16 +24,16 @@ var durationType = reflect.TypeFor[time.Duration]() //nolint:gochecknoglobals //
 var stringMapType = reflect.TypeFor[map[string]string]() //nolint:gochecknoglobals // cached reflect.Type
 
 // StringToEnvVarHookFunc returns a mapstructure decode hook that turns a YAML
-// string into a schemas.EnvVar via ResolveEnvVar. An "env.X" prefix is resolved
-// through env (not the process environment): the resolved value goes in Val with
-// FromEnv=true; if the variable is unset, Val is empty and ValidateEnvVars
-// surfaces the error at startup.
+// string into a schemas.SecretVar via ResolveEnvVar. An "env.X" prefix is resolved
+// through env (not the process environment): the resolved value goes in the
+// SecretVar with its env reference preserved; if the variable is unset, the value
+// is empty and ValidateEnvVars surfaces the error at startup.
 func StringToEnvVarHookFunc(env LookupEnv) mapstructure.DecodeHookFunc {
 	return func(from, to reflect.Type, data any) (any, error) {
 		if from.Kind() != reflect.String {
 			return data, nil
 		}
-		if to != envVarType {
+		if to != secretVarType {
 			return data, nil
 		}
 		s, ok := data.(string)
@@ -44,7 +44,7 @@ func StringToEnvVarHookFunc(env LookupEnv) mapstructure.DecodeHookFunc {
 	}
 }
 
-// StringToEnvVarPtrHookFunc is the *schemas.EnvVar variant of
+// StringToEnvVarPtrHookFunc is the *schemas.SecretVar variant of
 // StringToEnvVarHookFunc, used for pointer fields (client_id, session_token,
 // CACertPEM, etc.).
 func StringToEnvVarPtrHookFunc(env LookupEnv) mapstructure.DecodeHookFunc {
@@ -52,7 +52,7 @@ func StringToEnvVarPtrHookFunc(env LookupEnv) mapstructure.DecodeHookFunc {
 		if from.Kind() != reflect.String {
 			return data, nil
 		}
-		if to != envVarPtrType {
+		if to != secretVarPtrType {
 			return data, nil
 		}
 		s, ok := data.(string)

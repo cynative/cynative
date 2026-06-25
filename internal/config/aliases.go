@@ -46,23 +46,23 @@ func materializeKey(entry *llm.ProviderEntry, env llm.LookupEnv) {
 // keyValueForEntry resolves the synthesized key's Value: the api_key alias if
 // set, else the provider's canonical env var when no keys are configured. The
 // bool is false when no value source applies (e.g. Bedrock's AWS chain).
-func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.EnvVar, bool) {
+func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.SecretVar, bool) {
 	if entry.APIKey != "" {
 		// Route through ResolveEnvVar so an "env.X" value resolves the variable
-		// through env (FromEnv=true); a literal passes through unchanged. This
-		// matches keys[].value and lets ValidateEnvVars surface an unset
-		// reference as a clean load-time error.
+		// through env (as an env-typed SecretVar); a literal passes through
+		// unchanged. This matches keys[].value and lets ValidateEnvVars surface
+		// an unset reference as a clean load-time error.
 		return llm.ResolveEnvVar(entry.APIKey, env), true
 	}
 	if len(entry.Keys) == 0 {
 		if envName, ok := llm.CanonicalEnvKey(schemas.ModelProvider(entry.Provider)); ok {
 			if val, found := env(envName); found && val != "" {
-				return schemas.EnvVar{Val: val, FromEnv: true, EnvVar: envName}, true
+				return llm.EnvSecretVar("env."+envName, val), true
 			}
 		}
 	}
 
-	return schemas.EnvVar{Val: "", FromEnv: false, EnvVar: ""}, false
+	return schemas.SecretVar{}, false
 }
 
 // anyHoistedKeyConfig reports whether any hoisted per-provider key config is set.

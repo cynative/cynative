@@ -27,20 +27,20 @@ func TestStringToEnvVarHookFunc_LiteralString(t *testing.T) {
 
 	hook := llm.StringToEnvVarHookFunc(mapEnv(nil))
 	from := reflect.TypeFor[string]()
-	to := reflect.TypeFor[schemas.EnvVar]()
+	to := reflect.TypeFor[schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, "literal-key")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ev, ok := got.(schemas.EnvVar)
+	ev, ok := got.(schemas.SecretVar)
 	if !ok {
-		t.Fatalf("expected schemas.EnvVar, got %T", got)
+		t.Fatalf("expected schemas.SecretVar, got %T", got)
 	}
 	if ev.Val != "literal-key" {
 		t.Errorf("Val: got %q, want literal-key", ev.Val)
 	}
-	if ev.FromEnv {
+	if ev.IsFromEnv() {
 		t.Errorf("FromEnv: got true, want false for literal")
 	}
 }
@@ -50,24 +50,24 @@ func TestStringToEnvVarHookFunc_EnvReferenceSet(t *testing.T) {
 
 	hook := llm.StringToEnvVarHookFunc(mapEnv(map[string]string{"HOOK_TEST_SET": "resolved"}))
 	from := reflect.TypeFor[string]()
-	to := reflect.TypeFor[schemas.EnvVar]()
+	to := reflect.TypeFor[schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, "env.HOOK_TEST_SET")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ev, ok := got.(schemas.EnvVar)
+	ev, ok := got.(schemas.SecretVar)
 	if !ok {
-		t.Fatalf("expected schemas.EnvVar, got %T", got)
+		t.Fatalf("expected schemas.SecretVar, got %T", got)
 	}
 	if ev.Val != "resolved" {
 		t.Errorf("Val: got %q, want resolved", ev.Val)
 	}
-	if !ev.FromEnv {
+	if !ev.IsFromEnv() {
 		t.Errorf("FromEnv: got false, want true")
 	}
-	if ev.EnvVar != "env.HOOK_TEST_SET" {
-		t.Errorf("EnvVar: got %q, want env.HOOK_TEST_SET", ev.EnvVar)
+	if ev.GetRawRef() != "env.HOOK_TEST_SET" {
+		t.Errorf("EnvVar: got %q, want env.HOOK_TEST_SET", ev.GetRawRef())
 	}
 }
 
@@ -76,20 +76,20 @@ func TestStringToEnvVarHookFunc_EnvReferenceUnset(t *testing.T) {
 
 	hook := llm.StringToEnvVarHookFunc(mapEnv(nil))
 	from := reflect.TypeFor[string]()
-	to := reflect.TypeFor[schemas.EnvVar]()
+	to := reflect.TypeFor[schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, "env.HOOK_TEST_UNSET_X")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ev, ok := got.(schemas.EnvVar)
+	ev, ok := got.(schemas.SecretVar)
 	if !ok {
-		t.Fatalf("expected schemas.EnvVar, got %T", got)
+		t.Fatalf("expected schemas.SecretVar, got %T", got)
 	}
 	if ev.Val != "" {
 		t.Errorf("Val: got %q, want empty", ev.Val)
 	}
-	if !ev.FromEnv {
+	if !ev.IsFromEnv() {
 		t.Errorf("FromEnv: got false, want true (caller validates emptiness later)")
 	}
 }
@@ -99,7 +99,7 @@ func TestStringToEnvVarHookFunc_NonStringSource_Passthrough(t *testing.T) {
 
 	hook := llm.StringToEnvVarHookFunc(mapEnv(nil))
 	from := reflect.TypeFor[int]()
-	to := reflect.TypeFor[schemas.EnvVar]()
+	to := reflect.TypeFor[schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, 42)
 	if err != nil {
@@ -138,7 +138,7 @@ func TestStringToEnvVarHookFunc_NamedStringSource_Passthrough(t *testing.T) {
 	hook := llm.StringToEnvVarHookFunc(mapEnv(nil))
 	val := namedString("x")
 	from := reflect.TypeFor[namedString]() // Kind() == reflect.String, but type is namedString
-	to := reflect.TypeFor[schemas.EnvVar]()
+	to := reflect.TypeFor[schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, val)
 	if err != nil {
@@ -154,15 +154,15 @@ func TestStringToEnvVarPtrHookFunc_Literal(t *testing.T) {
 
 	hook := llm.StringToEnvVarPtrHookFunc(mapEnv(nil))
 	from := reflect.TypeFor[string]()
-	to := reflect.TypeFor[*schemas.EnvVar]()
+	to := reflect.TypeFor[*schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, "literal")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ev, ok := got.(*schemas.EnvVar)
+	ev, ok := got.(*schemas.SecretVar)
 	if !ok {
-		t.Fatalf("expected *schemas.EnvVar, got %T", got)
+		t.Fatalf("expected *schemas.SecretVar, got %T", got)
 	}
 	if ev == nil || ev.Val != "literal" {
 		t.Errorf("Val: got %v, want literal", ev)
@@ -174,20 +174,20 @@ func TestStringToEnvVarPtrHookFunc_EnvReference(t *testing.T) {
 
 	hook := llm.StringToEnvVarPtrHookFunc(mapEnv(map[string]string{"HOOK_PTR_TEST_SET": "ptr-resolved"}))
 	from := reflect.TypeFor[string]()
-	to := reflect.TypeFor[*schemas.EnvVar]()
+	to := reflect.TypeFor[*schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, "env.HOOK_PTR_TEST_SET")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ev, ok := got.(*schemas.EnvVar)
+	ev, ok := got.(*schemas.SecretVar)
 	if !ok {
-		t.Fatalf("expected *schemas.EnvVar, got %T", got)
+		t.Fatalf("expected *schemas.SecretVar, got %T", got)
 	}
 	if ev.Val != "ptr-resolved" {
 		t.Errorf("Val: got %q, want ptr-resolved", ev.Val)
 	}
-	if !ev.FromEnv {
+	if !ev.IsFromEnv() {
 		t.Errorf("FromEnv: got false, want true")
 	}
 }
@@ -197,7 +197,7 @@ func TestStringToEnvVarPtrHookFunc_NonStringSource_Passthrough(t *testing.T) {
 
 	hook := llm.StringToEnvVarPtrHookFunc(mapEnv(nil))
 	from := reflect.TypeFor[int]()
-	to := reflect.TypeFor[*schemas.EnvVar]()
+	to := reflect.TypeFor[*schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, 7)
 	if err != nil {
@@ -230,7 +230,7 @@ func TestStringToEnvVarPtrHookFunc_NamedStringSource_Passthrough(t *testing.T) {
 	hook := llm.StringToEnvVarPtrHookFunc(mapEnv(nil))
 	val := namedString("y")
 	from := reflect.TypeFor[namedString]() // Kind() == reflect.String, but type is namedString
-	to := reflect.TypeFor[*schemas.EnvVar]()
+	to := reflect.TypeFor[*schemas.SecretVar]()
 
 	got, err := callTypeHook(hook, from, to, val)
 	if err != nil {
