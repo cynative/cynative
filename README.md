@@ -40,6 +40,21 @@ curl -fsSL https://raw.githubusercontent.com/cynative/cynative/v1.0.0/install.sh
 ```
 Re-run the one-liner to upgrade; uninstall with `curl -fsSL …/install.sh | sh -s -- --uninstall`.
 
+**Windows** — Scoop (recommended) or the install script:
+```powershell
+# Scoop (https://scoop.sh): auto-upgradable, SHA-256 verified by the manifest
+scoop bucket add cynative https://github.com/cynative/scoop-bucket
+scoop install cynative
+
+# or the install script (no admin; installs to %LOCALAPPDATA%\cynative\bin)
+irm https://raw.githubusercontent.com/cynative/cynative/main/install.ps1 | iex
+```
+The script verifies the download's SHA-256 against the release `checksums.txt` (failing
+closed on a mismatch) and, when `gh` is installed, checks the GitHub release attestation.
+Pin a version with `$env:CYNATIVE_VERSION`; uninstall with
+`& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cynative/cynative/main/install.ps1))) -Uninstall`.
+See [docs/install-windows.md](docs/install-windows.md) for upgrades, verification, and locked-down environments.
+
 **Manual:** download a prebuilt binary + `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put it on your `PATH`. Single static binary, no dependencies.
 
 ## How to Run
