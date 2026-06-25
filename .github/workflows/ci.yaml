@@ -23,3 +23,35 @@ jobs:
 
       - name: Check
         run: make check
+
+  windows-installer-checks:
+    name: Windows installer (lint + unit)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Windows binary still compiles
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/cynative
+          GOOS=windows GOARCH=arm64 go build -o /dev/null ./cmd/cynative
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          Invoke-ScriptAnalyzer -Path install.ps1 -Settings test/PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: Pester unit tests
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5.0 -Force   # avoid resolving the OS-bundled Pester 3.x
+          $r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0) { exit 1 }
