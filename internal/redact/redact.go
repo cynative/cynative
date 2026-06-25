@@ -54,8 +54,8 @@ func (r *Redactor) Redact(s string) string {
 
 // RedactPreservingLocation redacts s like Redact but leaves redirect Location
 // URLs intact, mirroring RedactHeader's Location exemption so signed GitHub/S3
-// download redirects survive backstop redaction and stay followable
-// (issue #156/#173). It is for tool-result content at the sandbox and
+// download redirects survive backstop redaction and stay followable.
+// It is for tool-result content at the sandbox and
 // model-egress boundaries; on content with no Location it equals Redact.
 func (r *Redactor) RedactPreservingLocation(s string) string {
 	var saved []string
@@ -95,7 +95,7 @@ func locationSentinel(i int) string {
 
 // RedactHeader rewrites h in place. A denylisted header's values become
 // [REDACTED:header]; the Location header is left untouched (redirect-following
-// depends on signed Location URLs — issue #156/#173); every other header value
+// depends on signed Location URLs); every other header value
 // is content-redacted via Redact (so a token in an arbitrary header is caught).
 func (r *Redactor) RedactHeader(h http.Header) {
 	r.redactFields(h, true)

@@ -287,7 +287,7 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 
 	// Detect the terminal background once, before runInitialPhase / the interactive
 	// loop start any turn's keystroke watcher — so the OSC 11/DA1 probe reply cannot
-	// race the watcher and be misread as Esc (issue #285). Placed after the LLM
+	// race the watcher and be misread as Esc. Placed after the LLM
 	// abort-gates so a config/init failure (which runs no turn) skips the probe.
 	d.ui.PrimeBackground(cfg.RenderStyle)
 

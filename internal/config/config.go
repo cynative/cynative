@@ -125,7 +125,7 @@ type GitLabConfig struct {
 // CacheConfig configures the shared on-disk cache for connector hardening
 // metadata (service catalogs, IAM datasets, model archives). It is pure data;
 // per-consumer namespacing happens at the composition root, and a generic
-// namespacing API is deferred to internal/cache (#132).
+// namespacing API is deferred to internal/cache.
 type CacheConfig struct {
 	Dir string        `mapstructure:"dir" json:"dir" default:"~/.cynative/cache" errmsg:"cache.dir must be a writable directory path"`                          //nolint:lll // struct tags
 	TTL time.Duration `mapstructure:"ttl" json:"ttl" default:"24h"               errmsg:"cache.ttl must be at least 1m (Go duration syntax)" validate:"min=1m"` //nolint:lll // struct tags

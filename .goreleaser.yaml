@@ -91,7 +91,7 @@ notarize:
         timeout: 15m
 
 release:
-  # Immutable-releases handoff (docs/superpowers/specs/2026-06-10-immutable-releases-design.md):
+  # Immutable-releases handoff:
   # release-please creates a DRAFT titled exactly like the tag (e.g. "v0.4.0").
   # goreleaser must adopt that draft — matched by draft title == the git tag
   # string (hardcoded in findRelease) — keep its changelog body, upload, and

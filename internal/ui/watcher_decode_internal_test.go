@@ -234,7 +234,7 @@ func TestKeyDecoder_OSC11ReplyNoInterrupt(t *testing.T) {
 	t.Parallel()
 
 	// A real OSC 11 background-color reply terminated with ST (ESC '\'). The
-	// watcher used to read its leading "ESC ]" as a lone Esc (issue #285).
+	// watcher used to read its leading "ESC ]" as a lone Esc.
 	d := &keyDecoder{} //nolint:exhaustruct // mode zero is modeGround.
 	got, mode := countInterrupts(d, []byte("\x1b]11;rgb:1c1c/1c1c/1c1c\x1b\\"))
 	if got != 0 {
@@ -300,7 +300,7 @@ func TestKeyDecoder_StringSeqEscNonTerminatorKeepsConsuming(t *testing.T) {
 func TestKeyDecoder_OSCReplyDuringApprovalNoDecision(t *testing.T) {
 	t.Parallel()
 
-	// The exact #285 safety property: an OSC reply read during an open approval
+	// The exact safety property: an OSC reply read during an open approval
 	// window must yield no decision (and no interrupt).
 	d := &keyDecoder{approvalActive: true} //nolint:exhaustruct // mode zero is modeGround.
 	for _, b := range []byte("\x1b]11;rgb:1c1c/1c1c/1c1c\x1b\\") {

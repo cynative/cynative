@@ -69,8 +69,7 @@ func (e *PolicyEvaluator) AllowedAll(ctx context.Context, actions []string) (boo
 		// relies on resource scoping, conditions, or explicit Deny on specific
 		// resources is enforced AWS-side for assumed-role identities (scoped
 		// credential), but for IAM-user/root — which sign with base credentials —
-		// only the action name is checked here (resource-aware simulation is
-		// tracked in #309; see docs/connectors/aws.md, Limitations).
+		// only the action name is checked here (a known limitation; see docs/connectors/aws.md, Limitations).
 		out, err := e.api.SimulateCustomPolicy(ctx, &iam.SimulateCustomPolicyInput{
 			PolicyInputList: []string{e.policyDoc},
 			ActionNames:     []string{action},

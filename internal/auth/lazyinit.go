@@ -13,7 +13,7 @@ import (
 // lazyInit.bootstrapContext): it is a session-level setup step, so a short
 // model-chosen request timeout — or the GCP permission-catalog enumeration,
 // which pages through every testable IAM permission on the project — must not be
-// able to abort it and cache a not_ready failure for the whole session (#241).
+// able to abort it and cache a not_ready failure for the whole session.
 const hardeningBootstrapTimeout = 90 * time.Second
 
 // lazyInit is the shared deferred-initialization scaffold embedded by the
@@ -55,7 +55,7 @@ func (l *lazyInit) ensureReady(ctx context.Context) error {
 // bootstrapTimeout it detaches from the caller's deadline/cancellation
 // (context.WithoutCancel) and applies the dedicated budget, so a short
 // model-chosen request timeout cannot abort — and then permanently cache the
-// failure of — the hardening bootstrap (#241). A non-positive budget leaves the
+// failure of — the hardening bootstrap. A non-positive budget leaves the
 // caller context unchanged (used by test-only lazyInit constructions).
 func (l *lazyInit) bootstrapContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if l.bootstrapTimeout <= 0 {

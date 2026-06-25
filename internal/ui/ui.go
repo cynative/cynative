@@ -243,7 +243,7 @@ func assemble(base *UI, opts ...Option) *UI {
 // primeIfAdaptive runs the one-time terminal background detection up front, but only
 // when the resolved style is adaptive AND a keystroke watcher exists (controller !=
 // nil) — the only configuration that can race the watcher against lipgloss's OSC
-// probe (issue #285). It is idempotent via detectOnce; non-controller UIs skip it and
+// probe. It is idempotent via detectOnce; non-controller UIs skip it and
 // detect lazily on first render as before.
 func (u *UI) primeIfAdaptive(resolved string) {
 	if resolved != adaptiveStyle || u.controller == nil {

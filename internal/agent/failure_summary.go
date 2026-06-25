@@ -74,7 +74,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 	turn = completePendingToolResults(turn)
 	turn = append(turn, schema.UserMessage(stopSummaryDirective))
 	// Cancel the summary call on the first graceful stop too, like the main loop, so a
-	// hung/slow summarize does not wait out the provider timeout (issue #270).
+	// hung/slow summarize does not wait out the provider timeout.
 	gctx, gcancel := context.WithCancel(ctx)
 	gstop := a.cancelOnInterrupt(gcancel, interruptPollInterval)
 	msg, err := a.model.Generate(gctx, turn, nil) // nil tools — the model cannot call tools.

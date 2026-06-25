@@ -83,7 +83,7 @@ func (c *iamClient) GetRole(ctx context.Context, roleName string) (RoleDefinitio
 // maxTestablePermissionsPageSize is the API maximum for
 // queryTestablePermissions (default 100). Requesting the max minimises the
 // number of sequential round trips through the project's full permission set,
-// keeping the one-time bootstrap well inside its budget (#241).
+// keeping the one-time bootstrap well inside its budget.
 const maxTestablePermissionsPageSize = 1000
 
 // QueryTestablePermissions pages through queryTestablePermissions for

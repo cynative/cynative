@@ -67,8 +67,8 @@ func (u *UI) renderAdaptive(text, style string) (string, error) {
 
 // PrimeBackground performs the one-time terminal background detection up front,
 // before any keystroke watcher or raw-mode line editor reads the terminal, so the
-// OSC 11/DA1 probe reply cannot be stolen by a concurrent reader and misread as Esc
-// (issue #285). It extends renderAdaptive's gate (adaptive style) with a
+// OSC 11/DA1 probe reply cannot be stolen by a concurrent reader and misread as Esc.
+// It extends renderAdaptive's gate (adaptive style) with a
 // controller-present check, so it is a no-op under notty/NO_COLOR or when there is
 // no controller (no watcher to protect).
 func (u *UI) PrimeBackground(style string) {

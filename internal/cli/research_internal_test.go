@@ -1134,7 +1134,7 @@ func TestRunResearch_InteractiveSeedError_TurnFooterNoSession(t *testing.T) {
 // TestRunResearch_InteractiveSeedInterruptBeforeGenerate_NoSessionFooter: a seed
 // interrupted before its first Generate records zero round-trips; ErrInterrupted
 // falls through into the loop, an immediate "exit" returns nil, and the gate
-// (RoundTrips==0) correctly suppresses the session footer. Pins Codex finding #1.
+// (RoundTrips==0) correctly suppresses the session footer.
 func TestRunResearch_InteractiveSeedInterruptBeforeGenerate_NoSessionFooter(t *testing.T) {
 	t.Parallel()
 
@@ -1163,7 +1163,7 @@ func TestRunResearch_InteractiveSeedInterruptBeforeGenerate_NoSessionFooter(t *t
 // fires unconditionally after Generate, loop.go:95), the loop returns the error
 // (ctx.Err()!=nil), and the deferred session footer renders because RoundTrips>0.
 // The agent must be wired to the SAME acc so the round-trip lands where the gate
-// reads it. Pins Codex finding #1 (plan review).
+// reads it.
 func TestInteractiveLoop_CancelledWithActivity_RendersSessionFooter(t *testing.T) {
 	t.Parallel()
 
@@ -2192,7 +2192,7 @@ func TestRunTask_CanceledContext_QuietExit(t *testing.T) {
 
 // TestRunResearch_PrimesBackgroundBeforeFirstRender verifies that PrimeBackground
 // is called exactly once before the first RenderMessage, so the OSC 11 terminal
-// background probe cannot race the keystroke watcher (issue #285).
+// background probe cannot race the keystroke watcher.
 func TestRunResearch_PrimesBackgroundBeforeFirstRender(t *testing.T) {
 	t.Parallel()
 
@@ -2214,7 +2214,7 @@ func TestRunResearch_PrimesBackgroundBeforeFirstRender(t *testing.T) {
 		t.Fatalf("PrimeBackground not recorded: %v", u.order)
 	}
 	// Priming must precede the first adaptive render, else the lazy probe would race
-	// the keystroke watcher (issue #285).
+	// the keystroke watcher.
 	if renderIdx >= 0 && primeIdx > renderIdx {
 		t.Errorf("prime (idx %d) must precede first render (idx %d): %v", primeIdx, renderIdx, u.order)
 	}

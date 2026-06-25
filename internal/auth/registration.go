@@ -83,7 +83,7 @@ func availStatus(name, posture, identity string, warn bool) ConnectorStatus {
 // boundedIdentity returns "" immediately (the goroutine is abandoned and its
 // result discarded — acceptable for a best-effort display probe). This does not
 // rely on fn honoring ctx, so a token-source acquisition without a context
-// parameter cannot stall startup (Codex #5). The timeout is a parameter so tests
+// parameter cannot stall startup. The timeout is a parameter so tests
 // can use a tiny one; production callers pass identityProbeTimeout.
 func boundedIdentity(ctx context.Context, timeout time.Duration, fn func(context.Context) string) string {
 	ictx, cancel := context.WithTimeout(ctx, timeout)
