@@ -219,6 +219,7 @@ func testDeps() *deps {
 		stdinIsTTY:  true,
 		hasTerminal: true,
 		readStdin:   func() (string, bool, error) { return "", false, nil },
+		version:     "cynative 9.9.9\n  commit:   deadbeefcafe",
 	}
 	d.run = d.runResearch
 

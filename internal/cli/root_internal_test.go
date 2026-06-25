@@ -205,3 +205,66 @@ func TestSilenceGracefulStop_SilencesLLMUnavailable(t *testing.T) {
 		t.Errorf("ExitCodeFor(ErrLLMUnavailable) = %d, want 1", ExitCodeFor(ErrLLMUnavailable))
 	}
 }
+
+func TestNewRootCmd_Version(t *testing.T) {
+	t.Parallel()
+
+	configLoaded := false
+
+	d := testDeps()
+	d.version = "cynative 9.9.9\n  commit:   deadbeefcafe"
+	d.loadConfig = func(string) (config.Config, error) {
+		configLoaded = true
+
+		return validCfg(), nil
+	}
+
+	buf, err := runWithArgs(t, d, []string{"--version"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got, want := buf.String(), d.version+"\n"; got != want {
+		t.Errorf("--version output = %q, want %q", got, want)
+	}
+	if configLoaded {
+		t.Error("--version must short-circuit before PersistentPreRunE (loadConfig was called)")
+	}
+}
+
+func TestNewRootCmd_Version_BypassesArgValidation(t *testing.T) {
+	t.Parallel()
+
+	d := testDeps()
+	d.version = "cynative 9.9.9"
+
+	// Three positional args would normally fail Args: cobra.MaximumNArgs(1); the
+	// version short-circuit runs before ValidateArgs, so this must still succeed.
+	buf, err := runWithArgs(t, d, []string{"--version", "extra", "args"})
+	if err != nil {
+		t.Fatalf("--version with extra args must not error: %v", err)
+	}
+	if got, want := buf.String(), "cynative 9.9.9\n"; got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+}
+
+func TestNewRootCmd_VerboseShorthandWinsOverVersion(t *testing.T) {
+	t.Parallel()
+
+	rootCmd := NewRootCmd(testDeps())
+	// InitDefaultVersionFlag is what Execute() calls; running it here registers the
+	// --version flag the same way, so we can assert the shorthand ownership.
+	rootCmd.InitDefaultVersionFlag()
+
+	if sh := rootCmd.Flags().ShorthandLookup("v"); sh == nil || sh.Name != "verbose" {
+		t.Fatalf("-v must resolve to --verbose, got %+v", sh)
+	}
+
+	vf := rootCmd.Flags().Lookup("version")
+	if vf == nil {
+		t.Fatal("--version flag must be registered when Version is set")
+	}
+	if vf.Shorthand != "" {
+		t.Errorf("--version must carry no shorthand, got -%s", vf.Shorthand)
+	}
+}

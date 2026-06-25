@@ -52,6 +52,14 @@ to seed it. Use -p/--print to run a single task non-interactively and exit
 	rootCmd.Flags().BoolVar(&flags.autoApprove, "auto-approve", false, "Skip interactive approval for tool calls")
 	rootCmd.Flags().BoolVarP(&flags.verbose, "verbose", "v", false, "Print tool call outputs to stderr")
 
+	// Version enables cobra's built-in --version flag, which short-circuits in
+	// Execute() before ValidateArgs/PersistentPreRunE — so `cynative --version`
+	// prints and exits without loading config or credentials. We registered
+	// --verbose/-v above, so by the time cobra's InitDefaultVersionFlag runs (at
+	// Execute) the -v shorthand is taken and --version gets none (we add no -V).
+	rootCmd.Version = d.version
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
+
 	return rootCmd
 }
 
