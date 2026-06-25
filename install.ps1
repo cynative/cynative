@@ -160,7 +160,15 @@ function Invoke-CynAttestation {
         'fail' { throw 'cynative-install: CYNATIVE_REQUIRE_ATTESTATION=1 but gh is not installed' }
         'skip' { return }
         'verify' {
-            & gh release verify-asset $Version $ArchivePath --repo $Repo *> $null
+            # gh may be installed but unusable (not authenticated, or no GH_TOKEN in CI).
+            # Under $ErrorActionPreference='Stop', a native command's stderr becomes a
+            # terminating error on Windows PowerShell 5.1, so soften it here: a gh failure
+            # must degrade to a warning (or a fail when required), never abort the install
+            # on its own. Read the exit code to decide.
+            $prevEA = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { & gh release verify-asset $Version $ArchivePath --repo $Repo 2>&1 | Out-Null }
+            finally { $ErrorActionPreference = $prevEA }
             if ($LASTEXITCODE -eq 0) { Write-Host 'attestation verified' }
             elseif ($required) { throw 'cynative-install: attestation verification failed (CYNATIVE_REQUIRE_ATTESTATION=1)' }
             else { Write-Host 'warning: attestation not verified (continuing)' }
