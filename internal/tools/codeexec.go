@@ -165,7 +165,7 @@ func (t *codeExecutionTool) Run(ctx context.Context, argumentsInJSON string) (st
 		// sandbox.ErrScript with the full diagnostic already in out; hand that to the
 		// model. Mark the audit outcome failed — but only when no inner call already
 		// recorded a failure, so an uncaught inner http_request error (already counted
-		// and propagated) is not double-counted toward the halt (issue #270).
+		// and propagated) is not double-counted toward the halt.
 		if f, ok := audit.FailureFrom(ctx); !ok || f.Count() == 0 {
 			audit.MarkFailed(ctx)
 		}

@@ -19,7 +19,7 @@ import (
 // go-gh's TokenForHost(host) returns (token, source) — NOT an error — so the `_`
 // discards the SOURCE; the resolver's only err source is ctx.Done() (a hung-keyring
 // resolution timeout). The hung goroutine is abandoned, not cancelled (go-gh has no
-// ctx-aware API) — accepted (Codex plan-review [1]/[5]). Shell I/O.
+// ctx-aware API) — accepted. Shell I/O.
 func resolveGithubToken(ctx context.Context) (string, bool, error) {
 	type res struct {
 		token   string

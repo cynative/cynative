@@ -35,13 +35,13 @@ func TestWalkMap_PopulatedMap(t *testing.T) {
 }
 
 // TestWalkMap_PropagatesError exercises the error-return branch of walkMap by
-// constructing a map whose value is a schemas.EnvVar with FromEnv=true and an
+// constructing a map whose value is a schemas.SecretVar that is env-sourced with an
 // empty Val — walkMap should surface ErrEnvVarUnset.
 func TestWalkMap_PropagatesError(t *testing.T) {
 	t.Parallel()
 
-	m := map[string]schemas.EnvVar{
-		"k": {Val: "", FromEnv: true, EnvVar: "env.UNSET_MAP_VAL"},
+	m := map[string]schemas.SecretVar{
+		"k": EnvSecretVar("env.UNSET_MAP_VAL", ""),
 	}
 	err := walkEnvVars(reflect.ValueOf(m))
 	if !errors.Is(err, ErrEnvVarUnset) {

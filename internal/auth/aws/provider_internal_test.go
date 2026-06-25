@@ -199,7 +199,7 @@ func TestProvider_AuthorizeAction_collisionUnion(t *testing.T) {
 
 func TestProvider_AuthorizeAction_virtualHostedClassifiesObjectOps(t *testing.T) {
 	t.Parallel()
-	// End-to-end #258 regression: a virtual-hosted (or access-point) request carries
+	// End-to-end regression: a virtual-hosted (or access-point) request carries
 	// the bucket in the host, so AuthorizeAction must classify object ops correctly
 	// and gate the RIGHT IAM action — s3:GetObject for an object GET (not
 	// s3:ListBucket), and s3:ListBucket for a bucket-root GET (not s3:ListAllMyBuckets).
@@ -264,7 +264,7 @@ func TestProvider_AuthorizeAction_hostHeaderOverrideVirtualHosted(t *testing.T) 
 	// and SigV4-signs (transport.authorizeHostOverride pins it; the signer signs
 	// req.Host). So a path-style URL plus a virtual-hosted Host override is a wire
 	// vhost object GET and must classify to GetObject, not the bucket-level
-	// ListObjects — closing the Host-override vector of #258.
+	// ListObjects — closing the Host-override vector.
 	model := &ServiceModel{
 		Dir: "s3", ARNNamespace: "s3", EndpointPrefix: "s3", SigningName: "s3",
 		Protocol: ProtocolRestXML,

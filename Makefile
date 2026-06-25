@@ -31,7 +31,7 @@ SHELL_COMPLEXITY_MAX := 6
 # standalone tools are AST-only (no generate needed); the gate fails closed on any
 # non-zero exit (a violation OR a tool error), and the leading grep closes the only
 # backdoor — the tools' native //gocyclo:ignore///gocognit:ignore skip directives,
-# which they honor but //nolint they do not. See issue #126.
+# which they honor but //nolint they do not.
 shell-complexity:
 	@files=$$(find . -path ./vendor -prune -o -name '*_shell.go' -not -name '*_test.go' -print); \
 	if grep -nE '//(gocyclo|gocognit):ignore' $$files; then \

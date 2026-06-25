@@ -88,11 +88,11 @@ func TestLoad_CanonicalEnvFallback_OpenAI(t *testing.T) {
 	if got.Val != "sk-canonical" {
 		t.Errorf("Val: got %q, want sk-canonical", got.Val)
 	}
-	if !got.FromEnv {
+	if !got.IsFromEnv() {
 		t.Errorf("FromEnv: got false, want true")
 	}
-	if got.EnvVar != "OPENAI_API_KEY" {
-		t.Errorf("EnvVar: got %q, want OPENAI_API_KEY", got.EnvVar)
+	if got.EnvKey() != "OPENAI_API_KEY" {
+		t.Errorf("EnvVar: got %q, want OPENAI_API_KEY", got.EnvKey())
 	}
 }
 
@@ -194,8 +194,8 @@ func TestLoad_CanonicalEnvFallback_AllProviders(t *testing.T) {
 			if got.Val != "synth-"+c.provider {
 				t.Errorf("Val: got %q, want synth-%s", got.Val, c.provider)
 			}
-			if got.EnvVar != c.envName {
-				t.Errorf("EnvVar: got %q, want %s", got.EnvVar, c.envName)
+			if got.EnvKey() != c.envName {
+				t.Errorf("EnvVar: got %q, want %s", got.EnvKey(), c.envName)
 			}
 		})
 	}
@@ -307,11 +307,11 @@ func TestLoad_APIKeyAlias_EnvForm_Resolves(t *testing.T) {
 	if got.Val != "resolved-sk" {
 		t.Errorf("Val: got %q, want resolved-sk", got.Val)
 	}
-	if !got.FromEnv {
+	if !got.IsFromEnv() {
 		t.Errorf("FromEnv: got false, want true")
 	}
-	if got.EnvVar != "env.CYN_TEST_APIKEY" {
-		t.Errorf("EnvVar: got %q, want env.CYN_TEST_APIKEY", got.EnvVar)
+	if got.GetRawRef() != "env.CYN_TEST_APIKEY" {
+		t.Errorf("EnvVar: got %q, want env.CYN_TEST_APIKEY", got.GetRawRef())
 	}
 }
 

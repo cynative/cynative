@@ -142,7 +142,7 @@ func TestCatalogShellStaleCacheFallback(t *testing.T) {
 	}
 }
 
-// TestCatalogShellPartialFetchIsCachedUntilTTL documents the accepted #132
+// TestCatalogShellPartialFetchIsCachedUntilTTL documents the accepted
 // behavior change: a transient doc failure yields a PARTIAL catalog that IS
 // cached and served for the whole TTL — the dropped service is denied (not in
 // catalog) until refresh, never over-permitted.

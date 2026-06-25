@@ -31,7 +31,7 @@ WORKFLOW:
 
 	// providerPreamble introduces the auth providers when they are present. It nudges
 	// the model to use only the providers the question requires rather than reaching
-	// across the whole estate (issue #200), without removing any provider from view.
+	// across the whole estate, without removing any provider from view.
 	providerPreamble = "\n\nThe following authentication providers are available for the http_request tool. " +
 		"Use only the providers the question requires — for a single-provider question, that one provider " +
 		"is enough — by setting the `auth_provider` field in the tool arguments. The credentials are " +
@@ -58,14 +58,14 @@ WORKFLOW:
 	// subject so a narrow ask does not trigger a broad estate-wide sweep or
 	// lateral pivots into other providers/accounts/services. Phrased as positive
 	// imperatives (not prohibitions), which travel better across the smaller and
-	// local models an operator may configure, not just frontier ones (issue #200).
+	// local models an operator may configure, not just frontier ones.
 	scopeDisciplineClause = "\n\nSCOPE: Anchor every step to the subject of the question. Investigate only " +
 		"the resources, services, accounts, and providers directly required to answer what was asked. " +
 		"Reach beyond them only when the task explicitly calls for it. Choose the narrowest enumeration " +
 		"that answers the question, and stop once you can answer it."
 
 	// haltAndAskClause steers the model to stop and ask for a required identifier rather
-	// than guessing or probing candidates (the model-behavior half of issue #252). Phrased
+	// than guessing or probing candidates (the model-behavior half of the halt-and-ask design). Phrased
 	// as a positive imperative, like scopeDisciplineClause, so it travels to small models.
 	haltAndAskClause = "\n\nWhen a value the task requires is missing — a project, account, " +
 		"or subscription ID, a region, a repository, or any identifier you would otherwise have " +

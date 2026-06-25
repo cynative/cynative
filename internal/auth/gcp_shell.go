@@ -53,7 +53,7 @@ func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig
 		// budget rather than the 30s smithyHTTPTimeout: queryTestablePermissions
 		// pages through every testable IAM permission on the project, and any
 		// bootstrap stage that times out is cached as not_ready for the whole
-		// session (#241). The overall resolve is also capped by ctx
+		// session. The overall resolve is also capped by ctx
 		// (hardeningBootstrapTimeout, decoupled from the request).
 		//
 		// The IAM roles client must be authenticated: a plain http.Client passed

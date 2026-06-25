@@ -143,7 +143,7 @@ func GetProviders(cfg HardeningConfig, verbose bool, onStatus func(ConnectorStat
 func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 	// Resolve the Azure target cloud once (config override → AZURE_AUTHORITY_HOST →
 	// az CLI config → public) and thread it to the credential chain, the probe
-	// scope, and both the azure/aks providers — matching tryRegisterAzure (#227).
+	// scope, and both the azure/aks providers — matching tryRegisterAzure.
 	azureCloud := azurehardening.ResolveCloudFromEnv(cfg.Azure.Cloud, os.LookupEnv)
 
 	return &registrationDeps{ //nolint:exhaustruct // identity seams set inline below.

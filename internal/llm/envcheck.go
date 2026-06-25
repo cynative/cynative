@@ -3,14 +3,13 @@ package llm
 import (
 	"fmt"
 	"reflect"
-	"strings"
 
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
 // ValidateEnvVars walks the given ProviderEntry and returns ErrEnvVarUnset
-// for any schemas.EnvVar (or *schemas.EnvVar) whose FromEnv is true but
-// whose Val is empty — meaning the referenced env var was unset (or set to
+// for any schemas.SecretVar (or *schemas.SecretVar) that is env-sourced but
+// whose value is empty — meaning the referenced env var was unset (or set to
 // the empty string) at startup. Discovery is purely type-based, so new
 // Bifrost fields that carry env-var references are validated without
 // per-field updates.
@@ -38,10 +37,10 @@ func walkEnvVars(
 	}
 }
 
-// walkStruct walks a struct value: if it is a schemas.EnvVar it validates it
+// walkStruct walks a struct value: if it is a schemas.SecretVar it validates it
 // directly; otherwise it recurses into each exported field.
 func walkStruct(v reflect.Value) error {
-	if v.Type() == envVarType {
+	if v.Type() == secretVarType {
 		return checkEnvVar(v)
 	}
 	for _, f := range v.Fields() {
@@ -55,12 +54,11 @@ func walkStruct(v reflect.Value) error {
 	return nil
 }
 
-// checkEnvVar validates a single schemas.EnvVar value.
+// checkEnvVar validates a single schemas.SecretVar value.
 func checkEnvVar(v reflect.Value) error {
-	ev := v.Interface().(schemas.EnvVar) //nolint:forcetypeassert,errcheck // envVarType equality above guarantees this assertion succeeds.
-	if ev.FromEnv && ev.Val == "" {
-		name := strings.TrimPrefix(ev.EnvVar, "env.")
-		return fmt.Errorf("%w: %s", ErrEnvVarUnset, name)
+	sv := v.Interface().(schemas.SecretVar) //nolint:forcetypeassert,errcheck // secretVarType equality above guarantees this assertion succeeds.
+	if sv.IsFromEnv() && sv.GetValue() == "" {
+		return fmt.Errorf("%w: %s", ErrEnvVarUnset, sv.EnvKey())
 	}
 	return nil
 }

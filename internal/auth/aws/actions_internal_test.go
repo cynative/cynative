@@ -175,7 +175,7 @@ func TestActionResolver_failsClosedWhenServiceRefUnavailable(t *testing.T) {
 	}
 }
 
-// TestActionResolver_bug4_S3NamesResolveViaServiceRef pins the bug #4 fix: the
+// TestActionResolver_bug4_S3NamesResolveViaServiceRef pins the S3-name-resolution fix: the
 // real ServiceRefRegistry over the recorded fixture resolves the S3 name
 // mismatches authoritatively. ListObjectsV2 deliberately over-lists
 // s3:GetObjectAcl alongside s3:ListBucket — require-all keeps both (spec §9).

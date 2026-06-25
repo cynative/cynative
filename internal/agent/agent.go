@@ -100,7 +100,7 @@ type Agent struct {
 	// verbose is the writer sub-runs render their output to; renderTurn also writes
 	// per-tool-call notices here under --verbose. It is shared across all concurrent
 	// sub-runs (each sub-run's out is set to verbose), so it must remain a
-	// write-tolerant sink — stderr or io.Discard — until #140 adds framed per-run
+	// write-tolerant sink — stderr or io.Discard — until a future change adds framed per-run
 	// output. Nil when --verbose is not set (verboseWriter falls back to io.Discard).
 	verbose         io.Writer
 	systemPrompt    string

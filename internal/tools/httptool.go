@@ -100,8 +100,8 @@ func (t *httpRequestTool) Run(ctx context.Context, argumentsInJSON string) (stri
 		return fmt.Sprintf("Error executing tool: %v", err), nil
 	}
 	// A server rejection (4xx/5xx) is a non-OK outcome: surface it to the failure
-	// recorder so the agent's consecutive-failure counter sees it (issue #252). A
-	// sub-4xx response is progress, so a mixed fan-out is not treated as stuck (#270).
+	// recorder so the agent's consecutive-failure counter sees it. A
+	// sub-4xx response is progress, so a mixed fan-out is not treated as stuck.
 	if status >= statusFloor {
 		audit.MarkFailed(ctx)
 	} else {
@@ -116,7 +116,7 @@ func (t *httpRequestTool) Run(ctx context.Context, argumentsInJSON string) (stri
 // StructuredRunner), so it mirrors Run's failure signaling: a 4xx/5xx is surfaced to
 // the failure recorder, whose context descends from the outer code_execution call, so
 // repeated blocked requests inside a script still trip the consecutive-failure halt
-// instead of looking like successful inner calls (issue #252/#270).
+// instead of looking like successful inner calls.
 func (t *httpRequestTool) StructuredRun(ctx context.Context, argumentsInJSON string) (string, error) {
 	resp, err := t.client.ExecuteStructured(ctx, argumentsInJSON, t.providers)
 	if err != nil {

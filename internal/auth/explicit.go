@@ -17,7 +17,7 @@ func envSet(lookupEnv func(string) (string, bool), key string) bool {
 // awsExplicitlyConfigured reports whether the host carries an explicit AWS
 // credential/config signal. Mere existence of ~/.aws/config is intentionally NOT
 // a signal: it commonly holds only a default region with no credentials, which
-// would otherwise re-trigger the issue #221 noise. Credential-bearing config is
+// would otherwise re-trigger the noise. Credential-bearing config is
 // caught via the *_FILE / *_PROFILE env vars, the ~/.aws/credentials file, or a
 // credential-declaring [default] profile (defaultProfileHasCreds, computed by the
 // shell from ~/.aws/config) — so a default SSO/credential_process/role profile
@@ -51,7 +51,7 @@ func awsExplicitlyConfigured(
 // ~/.aws/config with the AWS SDK's own grammar (so [profile default] aliasing,
 // inline comments, ':'/'=' separators and key casing all match the SDK) and
 // passes the resolved SharedConfig here for the pure decision. A region-only
-// profile has no such field, so issue #221's region-only case stays ambient.
+// profile has no such field, so the region-only case stays ambient.
 func sharedConfigHasCreds(sc awsconfig.SharedConfig) bool {
 	return sc.Credentials.HasKeys() ||
 		sc.CredentialSource != "" ||

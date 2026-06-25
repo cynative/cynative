@@ -262,7 +262,7 @@ func (c *Client) do(
 		Timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		// Never follow redirects: the build-time gates (AuthorizeHost,
 		// AuthorizeAction, Inject) and the approval prompt run once per request,
-		// so a followed hop would bypass them all (issue #156). The 3xx is
+		// so a followed hop would bypass them all. The 3xx is
 		// surfaced to the model, which must request the Location URL explicitly
 		// — re-entering the full gate chain.
 		CheckRedirect: func(*http.Request, []*http.Request) error {

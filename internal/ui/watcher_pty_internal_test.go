@@ -59,8 +59,7 @@ func newPTYController(t *testing.T) (*os.File, *TerminalController) {
 
 // TestTerminalController_NoTripOnOSCReply feeds the leading bytes of an OSC 11 reply
 // (no ST, so a regression would produce exactly one graceful interrupt — never the
-// second, [os.Exit]-causing one) and asserts the watcher does NOT trip. This is the
-// #285 regression guard.
+// second, [os.Exit]-causing one) and asserts the watcher does NOT trip. Regression guard.
 func TestTerminalController_NoTripOnOSCReply(t *testing.T) {
 	t.Parallel()
 
@@ -77,7 +76,7 @@ func TestTerminalController_NoTripOnOSCReply(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 
 	if ctrl.Interrupted() {
-		t.Fatalf("watcher tripped on a terminal OSC 11 reply (issue #285 regression)")
+		t.Fatalf("watcher tripped on a terminal OSC 11 reply")
 	}
 }
 
