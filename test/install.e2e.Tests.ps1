@@ -7,27 +7,39 @@ BeforeAll {
 
     function Read-UserPath { [Environment]::GetEnvironmentVariable('Path', 'User') }
 
+    # Run a child powershell.exe and capture its exit code + combined output. Force
+    # 'Continue' around the call: under the caller's Stop preference, a child stderr line
+    # (an installer `throw`, or gh's "set GH_TOKEN" noise on the runner) would otherwise be
+    # raised as a terminating NativeCommandError on Windows PowerShell 5.1 *before* we could
+    # capture it. With Continue it lands in $out as text, so assertions can inspect it.
+    function Invoke-Child {
+        param([Parameter(Mandatory)][string[]]$PsArgs)
+        $prevEA = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass @PsArgs 2>&1 | Out-String
+        } finally {
+            $ErrorActionPreference = $prevEA
+        }
+        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+    }
+
     # The `-File` invocation (the supported scripted path + the arg-bound uninstall).
     function Invoke-InstallerFile {
         param([string[]]$ExtraArgs = @())
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:ScriptPath @ExtraArgs 2>&1 | Out-String
-        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+        Invoke-Child -PsArgs (@('-File', $script:ScriptPath) + $ExtraArgs)
     }
 
     # The documented `irm <url>/install.ps1 | iex` install. Reading the local file stands
     # in for `irm`; the iex/stream invocation mode and the $MyInvocation.InvocationName the
     # dot-source guard depends on are identical whether the text came from irm or disk.
     function Invoke-InstallerIex {
-        $cmd = "Get-Content -Raw -LiteralPath '$script:ScriptPathQ' | iex"
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
-        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+        Invoke-Child -PsArgs @('-Command', "Get-Content -Raw -LiteralPath '$script:ScriptPathQ' | iex")
     }
 
     # The documented uninstall: & ([scriptblock]::Create((irm <url>/install.ps1))) -Uninstall
     function Invoke-UninstallScriptblock {
-        $cmd = "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$script:ScriptPathQ'))) -Uninstall"
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
-        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
+        Invoke-Child -PsArgs @('-Command', "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$script:ScriptPathQ'))) -Uninstall")
     }
 }
 
