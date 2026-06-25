@@ -2,6 +2,8 @@ BeforeAll {
     $script:InstallDir = $env:CYN_E2E_INSTALL_DIR
     $script:Exe        = Join-Path $script:InstallDir 'cynative.exe'
     $script:ScriptPath = (Resolve-Path "$PSScriptRoot/../install.ps1").Path
+    # Double any single quote so the path is safe inside a single-quoted -Command literal.
+    $script:ScriptPathQ = $script:ScriptPath.Replace("'", "''")
 
     function Read-UserPath { [Environment]::GetEnvironmentVariable('Path', 'User') }
 
@@ -16,14 +18,14 @@ BeforeAll {
     # in for `irm`; the iex/stream invocation mode and the $MyInvocation.InvocationName the
     # dot-source guard depends on are identical whether the text came from irm or disk.
     function Invoke-InstallerIex {
-        $cmd = "Get-Content -Raw -LiteralPath '$script:ScriptPath' | iex"
+        $cmd = "Get-Content -Raw -LiteralPath '$script:ScriptPathQ' | iex"
         $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
         [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
     }
 
     # The documented uninstall: & ([scriptblock]::Create((irm <url>/install.ps1))) -Uninstall
     function Invoke-UninstallScriptblock {
-        $cmd = "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$script:ScriptPath'))) -Uninstall"
+        $cmd = "& ([scriptblock]::Create((Get-Content -Raw -LiteralPath '$script:ScriptPathQ'))) -Uninstall"
         $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $cmd 2>&1 | Out-String
         [pscustomobject]@{ Code = $LASTEXITCODE; Output = $out }
     }
@@ -52,6 +54,7 @@ Describe 'install.ps1 end-to-end (Windows)' {
         $r = Invoke-InstallerIex
         $r.Code | Should -Be 0
         Test-Path -LiteralPath $script:Exe | Should -BeTrue
+        (Read-UserPath) | Should -Match ([regex]::Escape($script:InstallDir))
         & $script:Exe --help | Out-Null
         $LASTEXITCODE | Should -Be 0
     }
