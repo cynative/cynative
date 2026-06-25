@@ -49,6 +49,34 @@ function Resolve-CynBaseUrl {
     "https://github.com/$Repo/releases/download/$Version"
 }
 
+function Get-CynExpectedHash {
+    param(
+        [Parameter(Mandatory)][string]$ChecksumsText,
+        [Parameter(Mandatory)][string]$ArchiveName
+    )
+    $found = @()
+    foreach ($line in ($ChecksumsText -split "`n")) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed) { continue }
+        $parts = $trimmed -split '\s+', 2          # "<hash><whitespace><filename>"
+        if ($parts.Count -eq 2 -and $parts[1].Trim() -eq $ArchiveName) {
+            $found += $parts[0].Trim()
+        }
+    }
+    if ($found.Count -ne 1) {
+        throw "cynative-install: expected exactly one checksum entry for $ArchiveName, found $($found.Count)"
+    }
+    $found[0]
+}
+
+function Test-CynHashMatch {
+    param(
+        [Parameter(Mandatory)][string]$Expected,
+        [Parameter(Mandatory)][string]$Actual
+    )
+    $Expected.Trim() -ieq $Actual.Trim()
+}
+
 # Run main only when executed directly (not when dot-sourced by Pester).
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-CynMain -Uninstall:$Uninstall
