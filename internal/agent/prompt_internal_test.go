@@ -105,9 +105,9 @@ func TestSystemPrompt_DiscoverAndActGuidance(t *testing.T) {
 		}
 	}
 
-	// #177 fan-out guidance must be preserved alongside it.
+	// fan-out guidance must be preserved alongside it.
 	if !strings.Contains(p, "mapConcurrent(items, fn, limit)") {
-		t.Errorf("prompt dropped #177 fan-out guidance: %q", p)
+		t.Errorf("prompt dropped fan-out guidance: %q", p)
 	}
 }
 
@@ -413,7 +413,7 @@ func TestSystemPrompt_ProviderMinimization(t *testing.T) {
 		}
 	}
 
-	// The old advertising framing must be gone — it is the pressure source #200 names.
+	// The old advertising framing must be gone — it is the pressure source the scope discipline addresses.
 	if strings.Contains(out, "You can use them") {
 		t.Errorf("prompt still uses the old 'You can use them' advertising framing: %q", out)
 	}

@@ -48,7 +48,7 @@ type toolset struct {
 // runState carries one run's mutable execution state. Each run — the top-level
 // turn or a task sub-run — gets its own instance, so concurrent sub-runs share
 // no mutable state on *Agent (the prerequisite for the verifier panel and for
-// programmatic task fan-out, #140).
+// programmatic task fan-out).
 type runState struct {
 	depth int       // Sub-agent nesting depth; 0 = top-level. Immutable after creation.
 	out   io.Writer // This run's rendering target.
@@ -58,7 +58,7 @@ type runState struct {
 	// runID correlates every record of one turn (main run + its task sub-runs).
 	runID string
 	// consecutiveFailures counts no-progress tool calls in this run; reset on any
-	// progress. At maxConsecutiveFailures the run halts into a model summary (#252).
+	// progress. At maxConsecutiveFailures the run halts into a model summary.
 	consecutiveFailures int
 }
 
@@ -86,7 +86,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 		}
 
 		// Cancel a hung/slow model call on the first graceful stop, so a one-shot is
-		// not stuck for the provider timeout waiting on Generate (issue #270); the
+		// not stuck for the provider timeout waiting on Generate; the
 		// poll mirrors invokeIO's in-flight cancellation.
 		gctx, gcancel := context.WithCancel(ctx)
 		gstop := a.cancelOnInterrupt(gcancel, interruptPollInterval)
@@ -244,7 +244,7 @@ type callOutcome struct {
 	// http_request calls each credit the consecutive-failure halt (0 for an OK/scoped call).
 	failures int
 	// progress counts the useful sub-outcomes (sub-4xx responses); when > 0 the call made
-	// progress, so a mixed-success fan-out resets the streak instead of halting (#270).
+	// progress, so a mixed-success fan-out resets the streak instead of halting.
 	progress int
 }
 
@@ -396,7 +396,7 @@ func (a *Agent) invokeIO(
 
 	// A graceful stop during the call cancels its context, so a long-running
 	// code_execution script stops launching further http_request calls promptly
-	// instead of running to its own timeout before the post-dispatch halt (issue #270).
+	// instead of running to its own timeout before the post-dispatch halt.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := a.cancelOnInterrupt(cancel, interruptPollInterval)
@@ -425,7 +425,7 @@ func (a *Agent) invokeIO(
 	}
 
 	// Framing: a denial is a trusted host/user control signal — return it
-	// unframed. Uses the existing sentinel (issue #160; out of scope to change).
+	// unframed. Uses the existing sentinel.
 	ret := wrapUntrusted(tc.Name, out)
 	if a.deniedResult != "" && out == a.deniedResult {
 		ret = out

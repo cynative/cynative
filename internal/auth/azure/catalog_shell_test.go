@@ -128,7 +128,7 @@ func TestCatalogShellStaleCacheFallback(t *testing.T) {
 	}
 }
 
-// TestCatalogShellProviderOpsFailureIsCachedUntilTTL documents the accepted #132
+// TestCatalogShellProviderOpsFailureIsCachedUntilTTL documents the accepted
 // behavior change: a providerOps failure yields an empty-Providers catalog that
 // IS cached and authoritative for the TTL. Layer-3 host pinning still works
 // (Clouds populated); Layer-2 action checks deny until refresh — never

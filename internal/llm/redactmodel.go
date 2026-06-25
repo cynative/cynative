@@ -13,7 +13,7 @@ import (
 // — leaving ToolCallBlock (model-authored code) and the tool schemas
 // untouched. Tool-result content is redacted with RedactPreservingLocation so a
 // signed redirect Location URL survives (transport leaves it intact for
-// redirect-following — issue #156/#173); operator/model text is fully redacted.
+// redirect-following); operator/model text is fully redacted.
 // It copies the transcript rather than mutating it, so it is safe to share
 // across the main loop, task sub-agents, and the concurrent verifier panel.
 type RedactingChatModel struct {

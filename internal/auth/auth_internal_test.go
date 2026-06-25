@@ -879,7 +879,7 @@ func TestInject_RejectsURLUserinfo(t *testing.T) {
 	}
 }
 
-// TestInject_MTLSProvidersRejectSeededHeader is the issue #157 acceptance
+// TestInject_MTLSProvidersRejectSeededHeader is the acceptance
 // check: the two providers whose mTLS InjectAuth paths set no header must
 // never let a model-supplied Authorization reach the wire. The gate fires
 // before any provider code runs, so neither provider needs functional

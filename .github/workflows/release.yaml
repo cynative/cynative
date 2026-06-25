@@ -129,7 +129,7 @@ jobs:
       # In the pinned goreleaser, sign/notarize failures (including a
       # notarization outliving its timeout) hard-fail the run before any
       # upload completes the handoff. The post-run assertion is
-      # defense-in-depth, preserved unchanged from PR #147 (where its
+      # defense-in-depth, preserved unchanged (its
       # precision trade-offs were settled): it re-checks that both darwin
       # binaries logged a per-binary "notarized" success line, guarding
       # against future goreleaser behavior drift. It now runs pre-publish: a

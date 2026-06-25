@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # scripts/demo/capture.sh — regenerate the README demo screenshot assets.
-# See docs/superpowers/plans/2026-06-23-readme-demo-screenshot-refresh.md for the pipeline.
 # Real identifiers are NEVER stored here. Exact real->placeholder pairs live in
 # scripts/demo/sanitize.map.local (gitignored; see sanitize.map.example). This committed
 # file carries only placeholders + generic structural patterns, so it is public-safe.
@@ -112,7 +111,7 @@ cols = int(os.environ.get("COLUMNS", "100"))
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\a\x1b]*(?:\a|\x1b\\)')
 strip = lambda b: ANSI.sub('', b.decode('utf-8', 'replace'))
 APPROVAL = re.compile(r'Execute\?.*\[N\]o')
-OSC11 = b"\x1b]11;?"; OSC11_REPLY = b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07"  # answer bg-color probe (#285/#301)
+OSC11 = b"\x1b]11;?"; OSC11_REPLY = b"\x1b]11;rgb:1e1e/1e1e/2e2e\x07"  # answer bg-color probe
 buf = bytearray()
 pid, fd = pty.fork()
 if pid == 0:

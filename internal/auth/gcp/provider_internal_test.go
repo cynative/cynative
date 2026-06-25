@@ -400,7 +400,7 @@ func buildCRMProvider(t *testing.T, granted map[string]bool) *Provider {
 
 // GET /v3/projects under a role granting resourcemanager.projects.list is authorized.
 // This also pins classification of GET /v3/projects -> cloudresourcemanager.projects.list
-// (the issue #246 repro): a merge-order regression would surface here as ErrClassifierUnknownOp.
+// (the regression repro): a merge-order regression would surface here as ErrClassifierUnknownOp.
 func TestProviderAuthorizeActionCRMProjectsListAllowed(t *testing.T) {
 	t.Parallel()
 
