@@ -75,3 +75,29 @@ Describe 'Test-CynHashMatch' {
     It 'is case-insensitive' { Test-CynHashMatch -Expected 'ABCD' -Actual 'abcd' | Should -BeTrue }
     It 'rejects a mismatch' { Test-CynHashMatch -Expected 'abcd' -Actual 'ef01' | Should -BeFalse }
 }
+
+Describe 'PATH helpers' {
+    It 'detects a present dir case-insensitively, ignoring a trailing slash' {
+        Test-CynPathContains -PathValue 'C:\Tools;C:\Foo\Bin\' -Dir 'c:\foo\bin' | Should -BeTrue
+    }
+    It 'reports absent when not present' {
+        Test-CynPathContains -PathValue 'C:\Tools' -Dir 'C:\Foo\Bin' | Should -BeFalse
+    }
+    It 'appends a missing dir' {
+        Add-CynPathEntry -PathValue 'C:\Tools' -Dir 'C:\Foo\Bin' | Should -Be 'C:\Tools;C:\Foo\Bin'
+    }
+    It 'is idempotent when already present' {
+        Add-CynPathEntry -PathValue 'C:\Foo\Bin' -Dir 'C:\foo\bin\' | Should -Be 'C:\Foo\Bin'
+    }
+    It 'appends to an empty PATH without a leading separator' {
+        Add-CynPathEntry -PathValue '' -Dir 'C:\Foo\Bin' | Should -Be 'C:\Foo\Bin'
+    }
+    It 'removes a present dir and preserves the rest' {
+        Remove-CynPathEntry -PathValue 'C:\Tools;C:\Foo\Bin\;C:\Other' -Dir 'c:\foo\bin' |
+            Should -Be 'C:\Tools;C:\Other'
+    }
+    It 'leaves PATH unchanged when the dir is absent' {
+        Remove-CynPathEntry -PathValue 'C:\Tools;C:\Other' -Dir 'C:\Foo\Bin' |
+            Should -Be 'C:\Tools;C:\Other'
+    }
+}

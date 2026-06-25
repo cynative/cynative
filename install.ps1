@@ -77,6 +77,48 @@ function Test-CynHashMatch {
     $Expected.Trim() -ieq $Actual.Trim()
 }
 
+function Get-CynNormalizedDir {
+    param([Parameter(Mandatory)][string]$Dir)
+    $Dir.Trim().TrimEnd('\', '/')
+}
+
+function Test-CynPathContains {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PathValue,
+        [Parameter(Mandatory)][string]$Dir
+    )
+    $target = Get-CynNormalizedDir -Dir $Dir
+    foreach ($entry in ($PathValue -split ';')) {
+        if (-not $entry) { continue }
+        if ((Get-CynNormalizedDir -Dir $entry) -ieq $target) { return $true }
+    }
+    return $false
+}
+
+function Add-CynPathEntry {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PathValue,
+        [Parameter(Mandatory)][string]$Dir
+    )
+    if (Test-CynPathContains -PathValue $PathValue -Dir $Dir) { return $PathValue }
+    if ([string]::IsNullOrEmpty($PathValue)) { return $Dir }
+    ($PathValue.TrimEnd(';') + ';' + $Dir)
+}
+
+function Remove-CynPathEntry {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PathValue,
+        [Parameter(Mandatory)][string]$Dir
+    )
+    $target = Get-CynNormalizedDir -Dir $Dir
+    $kept = foreach ($entry in ($PathValue -split ';')) {
+        if (-not $entry) { continue }
+        if ((Get-CynNormalizedDir -Dir $entry) -ieq $target) { continue }
+        $entry
+    }
+    ($kept -join ';')
+}
+
 # Run main only when executed directly (not when dot-sourced by Pester).
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-CynMain -Uninstall:$Uninstall
