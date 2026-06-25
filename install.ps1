@@ -25,6 +25,30 @@ function Get-CynArchiveName {
     "cynative_Windows_$Arch.zip"
 }
 
+function Test-CynUrlAllowed {
+    param([Parameter(Mandatory)][string]$Url)
+    $uri = [uri]$Url
+    if ($uri.Scheme -eq 'https') { return $true }
+    # Uri.IsLoopback is true for localhost, 127.0.0.1, and ::1.
+    if ($uri.Scheme -eq 'http' -and $uri.IsLoopback) { return $true }
+    return $false
+}
+
+function Resolve-CynBaseUrl {
+    param(
+        [string]$Override = $env:CYNATIVE_BASE_URL,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$Version
+    )
+    if ($Override) {
+        if (-not (Test-CynUrlAllowed -Url $Override)) {
+            throw "cynative-install: CYNATIVE_BASE_URL must be https:// (or http:// on loopback for tests): '$Override'"
+        }
+        return $Override.TrimEnd('/')
+    }
+    "https://github.com/$Repo/releases/download/$Version"
+}
+
 # Run main only when executed directly (not when dot-sourced by Pester).
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-CynMain -Uninstall:$Uninstall

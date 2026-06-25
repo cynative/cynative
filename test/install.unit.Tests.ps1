@@ -22,3 +22,28 @@ Describe 'Get-CynArchiveName' {
         Get-CynArchiveName -Arch 'x86_64' | Should -Be 'cynative_Windows_x86_64.zip'
     }
 }
+
+Describe 'Test-CynUrlAllowed' {
+    It 'allows https' { Test-CynUrlAllowed -Url 'https://example.com/x' | Should -BeTrue }
+    It 'allows http on loopback' { Test-CynUrlAllowed -Url 'http://127.0.0.1:8000/x' | Should -BeTrue }
+    It 'allows http on localhost' { Test-CynUrlAllowed -Url 'http://localhost:8000/x' | Should -BeTrue }
+    It 'rejects http on a public host' { Test-CynUrlAllowed -Url 'http://evil.example/x' | Should -BeFalse }
+}
+
+Describe 'Resolve-CynBaseUrl' {
+    It 'defaults to the GitHub releases download URL' {
+        Resolve-CynBaseUrl -Override '' -Repo 'cynative/cynative' -Version 'v1.0.0' |
+            Should -Be 'https://github.com/cynative/cynative/releases/download/v1.0.0'
+    }
+    It 'accepts an https override and strips the trailing slash' {
+        Resolve-CynBaseUrl -Override 'https://mirror.example/dl/' -Repo 'r' -Version 'v' |
+            Should -Be 'https://mirror.example/dl'
+    }
+    It 'accepts a loopback http override (test seam)' {
+        Resolve-CynBaseUrl -Override 'http://127.0.0.1:8000' -Repo 'r' -Version 'v' |
+            Should -Be 'http://127.0.0.1:8000'
+    }
+    It 'rejects a non-loopback http override' {
+        { Resolve-CynBaseUrl -Override 'http://evil.example' -Repo 'r' -Version 'v' } | Should -Throw
+    }
+}
