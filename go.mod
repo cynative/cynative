@@ -26,7 +26,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jmespath/go-jmespath v0.4.1-0.20220621161143-b0104c826a24
-	github.com/maximhq/bifrost/core v1.5.22
+	github.com/maximhq/bifrost/core v1.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/net v0.56.0
