@@ -2,9 +2,9 @@ package ui
 
 import (
 	"bytes"
-	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	"github.com/cynative/cynative/internal/tools"
 )
@@ -13,14 +13,13 @@ import (
 // reports a fixed Interrupted() and, on BeginApproval, returns the channels the
 // caller selects on. The test seeds dec/intr before calling.
 type fakeController struct {
-	interrupted    bool
-	tripOnBegin    bool // when set, BeginApproval flips interrupted true (a stop racing the keystroke).
-	closeIntrAsync bool // when set, BeginApproval closes intr from a goroutine (interrupt arrives mid-wait).
-	tripAtCall     int  // when >0, Interrupted() returns true from this 1-based call onward (a stop racing the print).
-	intrCalls      int  // counts Interrupted() invocations (drives tripAtCall).
-	dec            chan tools.Decision
-	intr           chan struct{}
-	cleanups       int
+	interrupted bool
+	tripOnBegin bool // when set, BeginApproval flips interrupted true (a stop racing the keystroke).
+	tripAtCall  int  // when >0, Interrupted() returns true from this 1-based call onward (a stop racing the print).
+	intrCalls   int  // counts Interrupted() invocations (drives tripAtCall).
+	dec         chan tools.Decision
+	intr        chan struct{}
+	cleanups    int
 }
 
 func (f *fakeController) Interrupted() bool {
@@ -35,11 +34,6 @@ func (f *fakeController) Interrupted() bool {
 func (f *fakeController) BeginApproval() (<-chan tools.Decision, <-chan struct{}, func()) {
 	if f.tripOnBegin {
 		f.interrupted = true
-	}
-	if f.closeIntrAsync {
-		// Yield first so the caller clears the non-blocking entry guard and parks in
-		// the blocking wait before the interrupt lands — so the wait-select denies.
-		go func() { runtime.Gosched(); close(f.intr) }()
 	}
 
 	return f.dec, f.intr, func() { f.cleanups++ }
@@ -104,22 +98,37 @@ func TestApproveSingleKey_InterruptedDuringPromptDenies(t *testing.T) {
 func TestApproveSingleKey_InterruptArrivesWhileWaitingDenies(t *testing.T) {
 	t.Parallel()
 
-	// intr is open at the entry guard (no buffered decision), so the wait commits;
-	// the interrupt then arrives while we block and the second select denies. dec is
-	// an open, never-fed channel so the only way out of the wait is the intr close.
-	intr := make(chan struct{})
-	c := &fakeController{
-		interrupted: false, closeIntrAsync: true,
-		dec: make(chan tools.Decision), intr: intr, cleanups: 0,
-	}
-	u, _ := newControllerUI(t, c)
+	// The interrupt arrives WHILE the wait-select is blocked, not at the entry guard,
+	// so the wait-select's interrupt branch denies (rather than the fast-path guard).
+	// synctest makes the ordering deterministic: intr is closed only once the approval
+	// goroutine is durably blocked in the wait-select. dec is an open, never-fed channel
+	// so the only way out of the wait is the intr close.
+	synctest.Test(t, func(t *testing.T) {
+		intr := make(chan struct{})
+		c := &fakeController{
+			interrupted: false,
+			dec:         make(chan tools.Decision), intr: intr, cleanups: 0,
+		}
+		u, _ := newControllerUI(t, c)
 
-	if got := u.PromptToolApproval("t", "{}", "dark", false); got != tools.Deny {
-		t.Errorf("interrupt arriving mid-wait got %v, want Deny", got)
-	}
-	if c.cleanups != 1 {
-		t.Errorf("cleanup called %d times, want 1", c.cleanups)
-	}
+		var got tools.Decision
+		done := make(chan struct{})
+		go func() {
+			got = u.PromptToolApproval("t", "{}", "dark", false)
+			close(done)
+		}()
+
+		synctest.Wait() // approval goroutine is now durably blocked in the wait-select.
+		close(intr)     // interrupt arrives mid-wait → the wait-select denies.
+		<-done
+
+		if got != tools.Deny {
+			t.Errorf("interrupt arriving mid-wait got %v, want Deny", got)
+		}
+		if c.cleanups != 1 {
+			t.Errorf("cleanup called %d times, want 1", c.cleanups)
+		}
+	})
 }
 
 func TestApproveSingleKey_BufferedDecisionLosesToRacedInterrupt(t *testing.T) {
