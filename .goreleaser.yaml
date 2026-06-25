@@ -57,6 +57,18 @@ homebrew_casks:
         export CYNATIVE_LLM_MODEL=claude-opus-4-8
         export ANTHROPIC_API_KEY=...
 
+scoops:
+  - repository:
+      owner: cynative
+      name: scoop-bucket
+      branch: main
+    # Scoop's recommended layout keeps manifests in a `bucket/` subdirectory
+    # (mirrors the official ScoopInstaller bucket template).
+    directory: bucket
+    homepage: "https://github.com/cynative/cynative"
+    description: "Agentic security research across your code, cloud and runtime — read-only by construction"
+    license: "Apache-2.0"
+
 notarize:
   macos:
     - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
