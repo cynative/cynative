@@ -136,6 +136,12 @@ cynative -p "CI workflows that can assume privileged cloud roles"
 cat main.tf | cynative -p "review this Terraform for misconfigurations"
 ```
 
+Check the build with `--version` (prints version, commit, build date, Go version, and platform, then exits - no config or credentials required):
+
+```bash
+cynative --version
+```
+
 **Interactive session:**  the > prompt has full line editing and history - arrow keys move the cursor and recall earlier questions.
 
 **Stopping mid-task:** while a task is running, press **Esc** or **Ctrl-C** once to gracefully stop it (the agent finishes any already-running call, then stops and prints `⏸ Stopped`).
