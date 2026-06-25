@@ -37,6 +37,7 @@ jobs:
           repositories: |
             cynative
             homebrew-tap
+            scoop-bucket
 
       # release-please PHASE 1 — releases only (skip-github-pull-request):
       # creates the GitHub release as a DRAFT ("draft": true in
@@ -240,6 +241,7 @@ jobs:
           repositories: |
             cynative
             homebrew-tap
+            scoop-bucket
 
       # release-please PHASE 2 — candidate PR only (skip-github-release).
       # On normal pushes this is the only place the next-release candidate is
