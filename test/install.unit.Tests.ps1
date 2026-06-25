@@ -101,3 +101,16 @@ Describe 'PATH helpers' {
             Should -Be 'C:\Tools;C:\Other'
     }
 }
+
+Describe 'Resolve-CynAttestationAction' {
+    It 'verifies when gh is available' {
+        Resolve-CynAttestationAction -GhAvailable $true -Required $false | Should -Be 'verify'
+        Resolve-CynAttestationAction -GhAvailable $true -Required $true  | Should -Be 'verify'
+    }
+    It 'skips when gh is absent and not required' {
+        Resolve-CynAttestationAction -GhAvailable $false -Required $false | Should -Be 'skip'
+    }
+    It 'fails closed when gh is absent but required' {
+        Resolve-CynAttestationAction -GhAvailable $false -Required $true | Should -Be 'fail'
+    }
+}

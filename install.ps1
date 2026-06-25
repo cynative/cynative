@@ -119,6 +119,16 @@ function Remove-CynPathEntry {
     ($kept -join ';')
 }
 
+function Resolve-CynAttestationAction {
+    param(
+        [Parameter(Mandatory)][bool]$GhAvailable,
+        [Parameter(Mandatory)][bool]$Required
+    )
+    if ($GhAvailable) { return 'verify' }
+    if ($Required) { return 'fail' }
+    return 'skip'
+}
+
 # Run main only when executed directly (not when dot-sourced by Pester).
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-CynMain -Uninstall:$Uninstall
