@@ -15,7 +15,7 @@ Describe 'install.ps1 end-to-end (Windows)' {
         (Run-Installer) | Should -Be 0
         Test-Path -LiteralPath $script:Exe | Should -BeTrue
         (Read-UserPath) | Should -Match ([regex]::Escape($script:InstallDir))
-        # Invoke by full path — the registry PATH write is not visible in this process.
+        # Invoke by full path - the registry PATH write is not visible in this process.
         & $script:Exe --help | Out-Null
         $LASTEXITCODE | Should -Be 0
     }
