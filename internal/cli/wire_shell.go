@@ -18,6 +18,7 @@ import (
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/tools"
 	"github.com/cynative/cynative/internal/ui"
+	"github.com/cynative/cynative/internal/version"
 )
 
 // maxStdinBytes caps piped stdin folded into the task (1 MiB) so an unbounded or
@@ -143,6 +144,7 @@ func newDeps() *deps {
 		hasTerminal: hasTerminal,
 		readStdin:   readStdin,
 		interrupter: interrupter,
+		version:     version.Get().String(),
 	}
 	d.run = d.runResearch
 

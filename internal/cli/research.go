@@ -158,6 +158,7 @@ type deps struct {
 	hasTerminal          bool
 	readStdin            func() (data string, truncated bool, err error)
 	interrupter          agent.Interrupter
+	version              string // pre-rendered `--version` output; resolved in newDeps.
 }
 
 // runRoot reads any piped stdin, resolves the invocation, and dispatches to run.
