@@ -4,7 +4,7 @@
 #   irm https://raw.githubusercontent.com/cynative/cynative/v1.0.0/install.ps1 | iex
 # Env: CYNATIVE_VERSION (default latest), CYNATIVE_INSTALL_DIR (default %LOCALAPPDATA%\cynative\bin),
 #      CYNATIVE_REQUIRE_ATTESTATION=1 (fail closed on a failed/absent attestation check),
-#      CYNATIVE_BASE_URL (download base override; https required unless loopback — for testing).
+#      CYNATIVE_BASE_URL (download base override; https required unless loopback - for testing).
 param([switch]$Uninstall)
 
 function Resolve-CynArch {
@@ -181,7 +181,7 @@ function Install-CynBinary {
         # UnauthorizedAccessException OR a PS-wrapped error depending on the share mode,
         # so catch broadly and keep the underlying message for diagnostics.
         Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
-        throw "cynative-install: could not replace $dest — close any running cynative and re-run ($($_.Exception.Message))"
+        throw "cynative-install: could not replace $dest - close any running cynative and re-run ($($_.Exception.Message))"
     }
 }
 
@@ -190,7 +190,7 @@ function Add-CynToUserPath {
     $current = [string][Environment]::GetEnvironmentVariable('Path', 'User')
     if (Test-CynPathContains -PathValue $current -Dir $Dir) { return }
     [Environment]::SetEnvironmentVariable('Path', (Add-CynPathEntry -PathValue $current -Dir $Dir), 'User')
-    Write-Host "added $Dir to your user PATH — open a new terminal for it to take effect"
+    Write-Host "added $Dir to your user PATH - open a new terminal for it to take effect"
 }
 
 function Remove-CynFromUserPath {
