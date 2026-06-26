@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/cynative/cynative/compare/v1.1.0...v1.2.0) (2026-06-26)
+
+
+### Features
+
+* self-evident connector status lines + startup ceiling validation ([#15](https://github.com/cynative/cynative/issues/15)) ([0048bc7](https://github.com/cynative/cynative/commit/0048bc72df6a007fad23bea59fbcf1b60e401327))
+
 ## [1.1.0](https://github.com/cynative/cynative/compare/v1.0.0...v1.1.0) (2026-06-25)
 
 
