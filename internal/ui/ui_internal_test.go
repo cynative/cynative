@@ -858,54 +858,46 @@ func TestRenderBanner_WritesPlain(t *testing.T) {
 func TestFormatConnector(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		v    ConnectorView
-		want []string
-	}{
-		{
-			"ok+identity",
-			ConnectorView{State: ConnectorOK, Name: "aws", Posture: "SecurityAudit", Identity: "123 · arn"},
-			[]string{"✓", "aws", "SecurityAudit", "123 · arn"},
-		},
-		{
-			"warn",
-			ConnectorView{State: ConnectorWarn, Name: "github", Posture: "default=write", Identity: "@me"},
-			[]string{"⚠", "github", "default=write", "@me"},
-		},
-		{
-			"error→reason in posture col",
-			ConnectorView{State: ConnectorError, Name: "azure", Posture: "no usable credentials"},
-			[]string{"✗", "azure", "no usable credentials"},
-		},
-		{
-			"ok no identity",
-			ConnectorView{State: ConnectorOK, Name: "kubernetes", Posture: "cluster_role=view"},
-			[]string{"✓", "kubernetes", "cluster_role=view"},
-		},
-		{
-			"managed fold",
-			ConnectorView{
-				State: ConnectorOK, Name: "aws", Posture: "SecurityAudit", Identity: "123 · arn", Managed: "eks",
-			},
-			[]string{"✓", "aws", "SecurityAudit", "123 · arn", "(+eks)"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+	t.Run("all_fields", func(t *testing.T) {
+		t.Parallel()
 
-			out := formatConnector(tt.v)
-			for _, w := range tt.want {
-				if !strings.Contains(out, w) {
-					t.Errorf("line missing %q; got %q", w, out)
-				}
-			}
-			if strings.Contains(out, "\x1b[") {
-				t.Errorf("plain line must not contain ANSI: %q", out)
-			}
+		v := ConnectorView{
+			State:    ConnectorOK,
+			Name:     "aws",
+			Posture:  "access=default(read-only) · enforced=client · policy=arn:aws:iam::aws:policy/SecurityAudit",
+			Identity: "774148217555 · arn:aws:iam::774148217555:user/x",
+			Managed:  "eks",
+		}
+		got := formatConnector(v)
+		want := "  ✓ aws         access=default(read-only) · enforced=client · " +
+			"policy=arn:aws:iam::aws:policy/SecurityAudit · 774148217555 · arn:aws:iam::774148217555:user/x · (+eks)\n"
+		if got != want {
+			t.Fatalf("formatConnector =\n%q\nwant\n%q", got, want)
+		}
+	})
+
+	t.Run("warn_glyph", func(t *testing.T) {
+		t.Parallel()
+
+		got := formatConnector(ConnectorView{
+			State: ConnectorWarn, Name: "github", Posture: "default=write", Identity: "@me",
 		})
-	}
+		if !strings.Contains(got, "⚠") {
+			t.Errorf("warn glyph missing: %q", got)
+		}
+		if !strings.Contains(got, " · @me") {
+			t.Errorf("identity delimiter missing: %q", got)
+		}
+	})
+
+	t.Run("error_glyph", func(t *testing.T) {
+		t.Parallel()
+
+		got := formatConnector(ConnectorView{State: ConnectorError, Name: "azure", Posture: "no usable credentials"})
+		if !strings.Contains(got, "✗") {
+			t.Errorf("error glyph missing: %q", got)
+		}
+	})
 }
 
 func TestRenderConnector_Writes(t *testing.T) {

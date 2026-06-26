@@ -517,15 +517,15 @@ func connectorGlyph(s ConnectorState) string {
 	return g
 }
 
-// formatConnector renders one inventory line ("  <glyph> <name> <posture> <identity>",
-// identity omitted when empty), at the terminal-default foreground.
+// formatConnector renders one inventory line ("  <glyph> <name> <posture> · <identity> · (+managed)",
+// identity and managed omitted when empty), at the terminal-default foreground.
 func formatConnector(v ConnectorView) string {
 	out := fmt.Sprintf("  %s %-11s %s", connectorGlyph(v.State), v.Name, v.Posture)
 	if v.Identity != "" {
-		out += "  " + v.Identity
+		out += " · " + v.Identity
 	}
 	if v.Managed != "" {
-		out += "  (+" + v.Managed + ")"
+		out += " · (+" + v.Managed + ")"
 	}
 
 	return out + "\n"
