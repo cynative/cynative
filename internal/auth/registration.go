@@ -112,9 +112,10 @@ func boundedIdentity(ctx context.Context, timeout time.Duration, fn func(context
 // resolves it (which does NOT contact AWS for static env/file keys) and STS
 // GetCallerIdentity is the live liveness check that also yields the display
 // identity. On a successful probe the eager scope resolution runs fail-soft to
-// determine the sts= label and build the pre-scoped credential chain. The probe
-// is ctx-bounded and retried once on a transient error. A load failure is always
-// loud; a credential failure is explicit-gated, escalated to loud when transient.
+// determine the enforced= token and build the pre-scoped credential chain. The
+// probe is ctx-bounded and retried once on a transient error. A load failure is
+// always loud; a credential failure is explicit-gated, escalated to loud when
+// transient.
 func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connectorOutcome {
 	cfg, loadErr := d.loadAWS(ctx)
 

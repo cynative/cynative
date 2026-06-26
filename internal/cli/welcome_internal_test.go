@@ -61,4 +61,7 @@ func TestConnectorMeta_ManagedK8s(t *testing.T) {
 	if got.Posture != "access=default(read-only) · enforced=client · cluster role=view" {
 		t.Errorf("eks posture = %q", got.Posture)
 	}
+	if got.Identity != "123" {
+		t.Errorf("eks identity = %q, want %q", got.Identity, "123")
+	}
 }

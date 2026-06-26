@@ -70,10 +70,10 @@ func driveConcurrent(registrars []func() connectorOutcome, onStatus func(Connect
 	return providers
 }
 
-// awsPostureLabel renders the inventory posture from an IAM policy ARN as the full
-// ARN with the "policy=" term (e.g. "policy=arn:aws:iam::aws:policy/SecurityAudit").
-// The " · sts=<label>" downscoping suffix is appended by the AWS registration
-// outcome (workstream B2), not here.
+// awsPostureLabel returns the ceiling-id token for the AWS inventory posture:
+// "policy=<ARN>" (e.g. "policy=arn:aws:iam::aws:policy/SecurityAudit"). The
+// full posture string (access= · enforced= · policy=) is assembled by buildPosture
+// in registerAWS.
 func awsPostureLabel(policyARN string) string {
 	return "policy=" + policyARN
 }

@@ -149,7 +149,7 @@ The AWS connector line in the startup connector inventory shows the access level
 - `enforced=` — the enforcement locus:
   - `client` — in-process host-pinning and action-authorization gate; applies to IAM-user and root identities (no AWS-side credential scope).
   - `client+aws` — client-side gate **plus** an STS-scoped session for this assumed-role identity; both boundaries are active.
-  - `client+aws(unverified)` — the eager STS probe could not pre-confirm the scope (for example a transient error); the scope resolves at first request, still providing the AWS-side boundary. If that request-time resolution degrades to unscoped, Cynative emits a one-line `⚠️ aws_hardening: cred_scope degraded to disabled (reason=…)` warning to stderr — the only runtime signal for that lazy degrade; the line then shows `enforced=client`.
+  - `client+aws(unverified)` — the eager STS probe could not pre-confirm the scope (for example a transient error); the scope resolves at first request, still providing the AWS-side boundary. If that request-time resolution degrades to unscoped, Cynative emits a one-line `⚠️ aws_hardening: cred_scope degraded to disabled (reason=…)` warning to stderr — the only runtime signal for that lazy degrade; subsequent requests then run client-only (no AWS-side credential scope). The startup inventory line is not updated after it is printed.
 - `policy=` — the configured IAM policy ARN the action gate and (when active) the STS scope enforce.
 - Identity — the resolved account number and caller ARN from `sts:GetCallerIdentity`.
 - `(+eks)` — the EKS connector is folded in (registered with the same credentials).

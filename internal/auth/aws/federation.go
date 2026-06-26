@@ -31,8 +31,9 @@ const (
 )
 
 // reasonAssumeRoleUnavailable is the machine-readable reason an assumed-role
-// scope degraded to disabled. It surfaces in the inventory sts= column
-// (ScopeLabel) and the request-time degrade log, so it is pinned as a constant.
+// scope degraded to disabled. It surfaces as the enforced=client token in the
+// startup inventory and in the request-time degrade log, so it is pinned as a
+// constant.
 const reasonAssumeRoleUnavailable = "assume_role_unavailable"
 
 // CredScopeDecision is the result of DetectCredScope: the chosen mode plus
@@ -217,9 +218,10 @@ func ResolveScope(
 	scoped := &ScopedProvider{ //nolint:exhaustruct // degraded/degradeOnce zero-valued.
 		Base: base, Mode: decision.Mode, RoleARN: decision.RoleARN,
 		// ErrOut stays nil for the eager probe below: a degrade here is already
-		// surfaced by the inventory sts= column (ScopeLabel), so logging it too
-		// would be redundant. It is armed to errOut only if the probe does NOT
-		// degrade, so a later request-time (lazy) degrade still reaches the operator.
+		// surfaced by the enforced=client token in the startup inventory and the
+		// stderr aws_hardening notice, so logging it again here would be redundant.
+		// It is armed to errOut only if the probe does NOT degrade, so a later
+		// request-time (lazy) degrade still reaches the operator.
 		PolicyARN: policyARN, STS: stsClient, ErrOut: nil,
 	}
 	chain := aws.NewCredentialsCache(scoped)

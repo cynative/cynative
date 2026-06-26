@@ -455,8 +455,9 @@ func TestResolveScope_Success_keepsDecidedMode(t *testing.T) {
 
 // TestResolveScope_EagerDegrade_isSilent pins that an eager-probe degrade
 // (definitive AccessDenied at registration) emits NO log even when an errOut is
-// provided: the inventory sts= column (ScopeLabel) already surfaces that signal,
-// so logging here too would be redundant.
+// provided: the enforced=client token in the startup inventory and the stderr
+// aws_hardening notice already surface that signal, so logging here too would be
+// redundant.
 func TestResolveScope_EagerDegrade_isSilent(t *testing.T) {
 	t.Parallel()
 	api := &stsAPIMock{
@@ -474,7 +475,7 @@ func TestResolveScope_EagerDegrade_isSilent(t *testing.T) {
 		t.Fatalf("got mode=%v reason=%q, want disabled/assume_role_unavailable", res.Mode, res.Reason)
 	}
 	if buf.Len() != 0 {
-		t.Errorf("eager degrade must be silent (sts= column carries the signal), got %q", buf.String())
+		t.Errorf("eager degrade must be silent (enforced=client in inventory carries the signal), got %q", buf.String())
 	}
 }
 
