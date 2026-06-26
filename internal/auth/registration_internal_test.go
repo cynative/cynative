@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -49,7 +51,8 @@ func wantLoudSkip(t *testing.T, out connectorOutcome) {
 // stubDeps returns a registrationDeps whose seams all succeed and whose builders
 // return non-nil stub providers. Individual tests override the fields they probe.
 func stubDeps() *registrationDeps {
-	return &registrationDeps{ //nolint:exhaustruct // posture labels default empty.
+	return &registrationDeps{ //nolint:exhaustruct // posture labels default empty; scopeNotifyOut set to Discard.
+		scopeNotifyOut: io.Discard,
 		lookupEnv:      envFrom(nil),
 		fileExists:     func(string) bool { return false },
 		homeDir:        "/home/u",
@@ -838,6 +841,67 @@ func TestRegisterGCP_CeilingValidationFails_Skips(t *testing.T) {
 	}
 	if out.statuses[0].Available {
 		t.Errorf("connector should be unavailable")
+	}
+}
+
+func TestAWSScopeDegraded(t *testing.T) {
+	t.Parallel()
+
+	assumeDecision := awshardening.CredScopeDecision{
+		Mode: awshardening.CredScopeAssumeRole,
+	} //nolint:exhaustruct // mode only.
+	disabledDecision := awshardening.CredScopeDecision{
+		Mode: awshardening.CredScopeDisabled,
+	} //nolint:exhaustruct // mode only.
+	degraded := awshardening.ScopeResult{ //nolint:exhaustruct // mode+reason.
+		Mode:   awshardening.CredScopeDisabled,
+		Reason: "assume_role_unavailable",
+	}
+
+	if msg, emit := awsScopeDegraded(
+		assumeDecision,
+		degraded,
+	); !emit ||
+		!strings.Contains(msg, "assume_role_unavailable") {
+		t.Errorf("degrade not reported: %q %v", msg, emit)
+	}
+	if _, emit := awsScopeDegraded(disabledDecision, degraded); emit {
+		t.Errorf("iam-user/root should not report a degrade")
+	}
+	inForce := awshardening.ScopeResult{Mode: awshardening.CredScopeAssumeRole} //nolint:exhaustruct // mode only.
+	if _, emit := awsScopeDegraded(assumeDecision, inForce); emit {
+		t.Errorf("in-force scope should not report a degrade")
+	}
+}
+
+func TestRegisterAWS_StartupScopeDegrade_Notifies(t *testing.T) {
+	t.Parallel()
+
+	d := stubDeps()
+	// Force an assumed-role identity whose eager scoping degrades.
+	d.validateAWS = func(context.Context, aws.Config) (string, string, string, error) {
+		return "123 · arn:aws:sts::123:assumed-role/Foo/sess", "arn:aws:sts::123:assumed-role/Foo/sess", "123", nil
+	}
+	d.resolveScopeAWS = func(context.Context, string, string, aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider) {
+		return awshardening.ScopeResult{
+			Mode:   awshardening.CredScopeDisabled,
+			Reason: "assume_role_unavailable",
+		}, nil //nolint:exhaustruct // mode+reason.
+	}
+	var buf bytes.Buffer
+	d.scopeNotifyOut = &buf
+
+	out := d.registerAWS(context.Background(), true)
+
+	if !out.statuses[0].Available {
+		t.Fatalf("aws should stay available on a scope degrade")
+	}
+	if !strings.Contains(out.statuses[0].Posture, "enforced=client ·") {
+		t.Errorf("degraded posture should read enforced=client, got %q", out.statuses[0].Posture)
+	}
+	if !strings.Contains(buf.String(), "cred_scope degraded") ||
+		!strings.Contains(buf.String(), "assume_role_unavailable") {
+		t.Errorf("expected degrade notice, got %q", buf.String())
 	}
 }
 

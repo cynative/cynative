@@ -151,6 +151,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		fileExists:             fileExists,
 		homeDir:                homeDirOrEmpty(),
 		awsDefaultProfileCreds: awsDefaultProfileFileHasCreds(),
+		scopeNotifyOut:         os.Stderr,
 
 		tokenForHost:   resolveGithubToken,
 		validateGithub: validateGithubToken,

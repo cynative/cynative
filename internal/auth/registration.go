@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -26,6 +27,9 @@ type registrationDeps struct {
 	fileExists             func(string) bool
 	homeDir                string
 	awsDefaultProfileCreds bool
+	// scopeNotifyOut receives the one-line startup credential-scope degrade notice
+	// for AWS. Set to os.Stderr in buildRegistrationDeps and io.Discard in stubDeps.
+	scopeNotifyOut io.Writer
 
 	tokenForHost   func(ctx context.Context) (token string, present bool, err error)
 	validateGithub func(ctx context.Context, token string) (login string, err error)
@@ -117,6 +121,7 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 	var (
 		credErr     error
 		identity    string
+		rawARN      string
 		scopeResult awshardening.ScopeResult
 		scoped      aws.CredentialsProvider
 	)
@@ -128,11 +133,12 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 			if err := d.retrieveAWS(pctx, cfg); err != nil {
 				return err
 			}
-			display, rawARN, account, err := d.validateAWS(pctx, cfg) // GCI: liveness + identity, bounded by pctx.
+			display, arn, account, err := d.validateAWS(pctx, cfg) // GCI: liveness + identity, bounded by pctx.
 			if err != nil {
 				return err
 			}
 			identity = display
+			rawARN = arn
 			// Eager scope is fail-soft (never returns an error), so it does not
 			// trigger a retry and runs exactly once on the successful probe.
 			scopeResult, scoped = d.resolveScopeAWS(pctx, account, rawARN, cfg)
@@ -158,6 +164,10 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 			fmt.Sprintf("aws_hardening: skipped (policy validation failed): %v", verr))
 	}
 
+	if msg, emit := awsScopeDegraded(awshardening.DetectCredScope(rawARN), scopeResult); emit {
+		fmt.Fprint(d.scopeNotifyOut, msg)
+	}
+
 	awsProv, eks := d.buildAWS(cfg, scoped)
 	posture := buildPosture(awsAccess(d.awsPolicyARN), awsEnforced(scopeResult), awsPostureLabel(d.awsPolicyARN))
 	status := availStatus(awsProviderName, posture, identity, false)
@@ -168,6 +178,18 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 		statuses:  []ConnectorStatus{status},
 		visible:   []bool{true},
 	}
+}
+
+// awsScopeDegraded reports the startup degrade notice for an assumed-role identity
+// whose eager credential scoping fell back to unscoped. It returns ("", false)
+// for IAM-user/root (unscoped by design) and for a scope that stayed in force.
+func awsScopeDegraded(decision awshardening.CredScopeDecision, result awshardening.ScopeResult) (string, bool) {
+	if decision.Mode != awshardening.CredScopeAssumeRole || result.Mode != awshardening.CredScopeDisabled {
+		return "", false
+	}
+
+	return fmt.Sprintf("⚠️ aws_hardening: cred_scope degraded to disabled (reason=%s) — "+
+		"requests run with full base AWS credentials, gated client-side only.\n", result.Reason), true
 }
 
 // registerGCP discovers ADC and validates it by minting a token (the live check)
