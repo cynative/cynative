@@ -200,3 +200,51 @@ func TestDriveConcurrent_NilOnStatus(t *testing.T) {
 		t.Errorf("accumulated %d providers, want 1 (nil onStatus must not panic)", len(got))
 	}
 }
+
+func TestBuildPosture(t *testing.T) {
+	t.Parallel()
+
+	got := buildPosture(accessDefault, enforcedClient, "role=roles/viewer")
+	want := "access=default(read-only) · enforced=client · role=roles/viewer"
+	if got != want {
+		t.Fatalf("buildPosture = %q, want %q", got, want)
+	}
+}
+
+func TestAccessHelpers(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"aws default", awsAccess(defaultAWSPolicyARN), accessDefault},
+		{"aws custom", awsAccess("arn:aws:iam::123456789012:policy/My"), accessCustom},
+		{"gcp default", gcpAccess(defaultGCPRole), accessDefault},
+		{"gcp custom", gcpAccess("roles/editor"), accessCustom},
+		{"azure default exact", azureAccess("Reader"), accessDefault},
+		{"azure default casefold", azureAccess("reader"), accessDefault},
+		{"azure custom guid", azureAccess("acdd72a7-3385-48ef-bd42-f606fba81ae7"), accessCustom},
+		{"k8s default", k8sAccess("view"), accessDefault},
+		{"k8s custom", k8sAccess("edit"), accessCustom},
+		{"exposure default (nil)", exposureAccess(nil), accessDefault},
+		{"exposure default (empty)", exposureAccess(map[string]string{}), accessDefault},
+		{"exposure custom", exposureAccess(map[string]string{"issues": "write"}), accessCustom},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func TestManagedK8sPosture(t *testing.T) {
+	t.Parallel()
+
+	got := ManagedK8sPosture("view")
+	want := "access=default(read-only) · enforced=client · cluster role=view"
+	if got != want {
+		t.Fatalf("ManagedK8sPosture = %q, want %q", got, want)
+	}
+}

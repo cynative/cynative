@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"strings"
+
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
@@ -117,4 +119,68 @@ func joinIdentity(project, principal string) string {
 	default:
 		return principal
 	}
+}
+
+// buildPosture renders the connector inventory posture: the access level, the
+// enforcement locus, and the configured ceiling id, joined by " · ".
+func buildPosture(access, enforced, ceiling string) string {
+	return "access=" + access + " · enforced=" + enforced + " · " + ceiling
+}
+
+// awsAccess reports default(read-only) when the policy ARN is the curated default
+// (exact match), custom otherwise.
+func awsAccess(policyARN string) string {
+	if policyARN == defaultAWSPolicyARN {
+		return accessDefault
+	}
+
+	return accessCustom
+}
+
+// gcpAccess reports default(read-only) for the curated default role, custom otherwise.
+func gcpAccess(role string) string {
+	if role == defaultGCPRole {
+		return accessDefault
+	}
+
+	return accessCustom
+}
+
+// azureAccess reports default(read-only) for the curated default role definition,
+// case-insensitively (the Azure role lookup is case-insensitive); custom otherwise
+// (configuring the Reader GUID instead of the name reads as custom).
+func azureAccess(roleDef string) string {
+	if strings.EqualFold(roleDef, defaultAzureRoleDefinition) {
+		return accessDefault
+	}
+
+	return accessCustom
+}
+
+// k8sAccess reports default(read-only) for the curated default ClusterRole, custom otherwise.
+func k8sAccess(clusterRole string) string {
+	if clusterRole == defaultClusterRole {
+		return accessDefault
+	}
+
+	return accessCustom
+}
+
+// exposureAccess reports default(read-only) when the operator supplied no
+// permissions override (the secure baseline is in force), custom otherwise.
+// Raw-config check (not [maps.Equal] on the effective ceiling) so a redundant
+// no-op override reads consistently as custom.
+func exposureAccess(operator map[string]string) string {
+	if len(operator) == 0 {
+		return accessDefault
+	}
+
+	return accessCustom
+}
+
+// ManagedK8sPosture builds the inventory/prompt posture for a managed K8s
+// connector (eks/gke/aks) from its configured ClusterRole. Exported so the cli
+// can attach prompt metadata for connectors that have no own inventory line.
+func ManagedK8sPosture(clusterRole string) string {
+	return buildPosture(k8sAccess(clusterRole), enforcedClient, k8sPostureLabel(clusterRole))
 }
