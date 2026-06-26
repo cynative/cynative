@@ -330,9 +330,13 @@ def scan(f, data):
     # 2001:db8::/32 doc range is exempt. The lookbehind keeps ARN '::' from matching.
     for m in set(re.findall(r'(?<![\w:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![\w:])', data)):
         if m.count(":") >= 2 and not safe_ip(m): leaks.add((f, "ipv6?", m))
-    # UUIDs (subscription/tenant/cluster ids): only the documented placeholder UUID is exempt.
+    # UUIDs (subscription/tenant/cluster ids): exempt only the documented placeholder UUID and
+    # the world-fixed, publicly-documented Azure built-in "Reader" role-definition GUID, which the
+    # connector inventory surfaces by design (same value in every tenant; not a secret). Every other
+    # UUID is still flagged.
+    exempt_uuids = {placeholder_uuid, "acdd72a7-3385-48ef-bd42-f606fba81ae7"}
     for m in set(re.findall(r'\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', data)):
-        if m.lower() != placeholder_uuid: leaks.add((f, "uuid?", m))
+        if m.lower() not in exempt_uuids: leaks.add((f, "uuid?", m))
 for f in files:
     try: data = open(f, "rb").read().decode("utf-8", "replace")
     except OSError as e: print(f"validate: cannot read {f}: {e}", file=sys.stderr); sys.exit(2)
