@@ -11,6 +11,7 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 
+	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 )
@@ -36,26 +37,26 @@ type registrationDeps struct {
 	loadAWS         func(context.Context) (aws.Config, error)
 	retrieveAWS     func(context.Context, aws.Config) error
 	validateAWS     func(context.Context, aws.Config) (string, string, string, error) // display, rawARN, account, err.
-	resolveScopeAWS func(ctx context.Context, account, rawARN string, cfg aws.Config) (string, aws.CredentialsProvider)
+	resolveScopeAWS func(ctx context.Context, account, rawARN string, cfg aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider)
 	buildAWS        func(aws.Config, aws.CredentialsProvider) (*awsProvider, *eksProvider)
-	awsPosture      string
+	awsPolicyARN    string
 
 	findGCP     func(context.Context) (*google.Credentials, error)
 	probeGCP    func(context.Context) error
 	gcpIdentity func(context.Context, *google.Credentials) string
 	buildGCP    func(*google.Credentials) (*gcpProvider, *gkeProvider)
-	gcpPosture  string
+	gcpRole     string
 
-	newAzure      func() (azcore.TokenCredential, error)
-	probeAzure    func(context.Context, azcore.TokenCredential) error
-	azureIdentity func(context.Context, azcore.TokenCredential) string
-	buildAzure    func(azcore.TokenCredential) (*azureProvider, *aksProvider)
-	azurePosture  string
+	newAzure            func() (azcore.TokenCredential, error)
+	probeAzure          func(context.Context, azcore.TokenCredential) error
+	azureIdentity       func(context.Context, azcore.TokenCredential) string
+	buildAzure          func(azcore.TokenCredential) (*azureProvider, *aksProvider)
+	azureRoleDefinition string
 
-	loadKube   func() (resolvedCluster, error, error)
-	buildKube  func(resolvedCluster) *kubernetesProvider
-	probeKube  func(ctx context.Context, p *kubernetesProvider) error
-	k8sPosture string
+	loadKube       func() (resolvedCluster, error, error)
+	buildKube      func(resolvedCluster) *kubernetesProvider
+	probeKube      func(ctx context.Context, p *kubernetesProvider) error
+	k8sClusterRole string
 }
 
 // identityProbeTimeout bounds each connector's display-only identity capture so a
@@ -111,10 +112,10 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 	cfg, loadErr := d.loadAWS(ctx)
 
 	var (
-		credErr  error
-		identity string
-		stsLabel string
-		scoped   aws.CredentialsProvider
+		credErr     error
+		identity    string
+		scopeResult awshardening.ScopeResult
+		scoped      aws.CredentialsProvider
 	)
 	if loadErr == nil {
 		pctx, cancel := context.WithTimeout(ctx, credentialProbeTimeout)
@@ -131,7 +132,7 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 			identity = display
 			// Eager scope is fail-soft (never returns an error), so it does not
 			// trigger a retry and runs exactly once on the successful probe.
-			stsLabel, scoped = d.resolveScopeAWS(pctx, account, rawARN, cfg)
+			scopeResult, scoped = d.resolveScopeAWS(pctx, account, rawARN, cfg)
 
 			return nil
 		})
@@ -145,8 +146,8 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 	}
 
 	awsProv, eks := d.buildAWS(cfg, scoped)
-	// d.awsPosture is "policy=<full ARN>" (B1c); append the eager sts= label.
-	status := availStatus(awsProviderName, d.awsPosture+" · sts="+stsLabel, identity, false)
+	posture := buildPosture(awsAccess(d.awsPolicyARN), awsEnforced(scopeResult), awsPostureLabel(d.awsPolicyARN))
+	status := availStatus(awsProviderName, posture, identity, false)
 	status.Managed = eksProviderName
 
 	return connectorOutcome{
@@ -189,7 +190,8 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 	})
 	gcpProv, gke := d.buildGCP(creds)
 
-	status := availStatus(gcpProviderName, d.gcpPosture, identity, false)
+	posture := buildPosture(gcpAccess(d.gcpRole), enforcedClient, gcpPostureLabel(d.gcpRole))
+	status := availStatus(gcpProviderName, posture, identity, false)
 	status.Managed = gkeProviderName
 
 	return connectorOutcome{
@@ -229,7 +231,10 @@ func (d *registrationDeps) registerAzure(ctx context.Context, verbose bool) conn
 	})
 	azureProv, aks := d.buildAzure(cred)
 
-	status := availStatus(azureProviderName, d.azurePosture, identity, false)
+	// TODO(Task 4): append resolved GUID via azurePostureLabel.
+	azureCeiling := "role definition=" + d.azureRoleDefinition
+	posture := buildPosture(azureAccess(d.azureRoleDefinition), enforcedClient, azureCeiling)
+	status := availStatus(azureProviderName, posture, identity, false)
 	status.Managed = aksProviderName
 
 	return connectorOutcome{
@@ -267,9 +272,11 @@ func (d *registrationDeps) registerKube(verbose bool) connectorOutcome {
 			fmt.Sprintf("kubernetes_hardening: skipped (cluster validation failed): %v", err))
 	}
 
+	posture := buildPosture(k8sAccess(d.k8sClusterRole), enforcedClient, k8sPostureLabel(d.k8sClusterRole))
+
 	return connectorOutcome{
 		providers: []Provider{p},
-		statuses:  []ConnectorStatus{availStatus(kubernetesProviderName, d.k8sPosture, rc.host, false)},
+		statuses:  []ConnectorStatus{availStatus(kubernetesProviderName, posture, rc.host, false)},
 		visible:   []bool{true},
 	}
 }
@@ -313,7 +320,7 @@ func (d *registrationDeps) githubOutcome(
 	}
 
 	exposure := githubhardening.BuildExposure(ghCfg.Permissions)
-	posture, warn := githubPosture(exposure)
+	posture, warn := githubPosture(exposure, ghCfg.Permissions)
 	gh := newGithubProvider(token, exposure, githubhardening.NewTableSource(ghCfg.Config, newGithubOpenAPIFetcher()))
 	gh.errOut = os.Stderr
 
@@ -369,7 +376,7 @@ func (d *registrationDeps) gitlabOutcome(
 	}
 
 	exposure := gitlabclass.BuildExposure(glCfg.Permissions)
-	posture, warn := gitlabPosture(exposure)
+	posture, warn := gitlabPosture(exposure, glCfg.Permissions)
 
 	return connectorOutcome{
 		providers: []Provider{gl},

@@ -168,7 +168,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 			return err
 		},
 		validateAWS: validateAWSIdentity,
-		resolveScopeAWS: func(ctx context.Context, account, rawARN string, c aws.Config) (string, aws.CredentialsProvider) {
+		resolveScopeAWS: func(ctx context.Context, account, rawARN string, c aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider) {
 			return resolveScopeAWS(ctx, account, rawARN, cfg.AWS.PolicyARN, c)
 		},
 		buildAWS: func(c aws.Config, scoped aws.CredentialsProvider) (*awsProvider, *eksProvider) {
@@ -178,7 +178,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 
 			return hardened, eks
 		},
-		awsPosture: awsPostureLabel(cfg.AWS.PolicyARN),
+		awsPolicyARN: cfg.AWS.PolicyARN,
 
 		findGCP: func(ctx context.Context) (*google.Credentials, error) {
 			return google.FindDefaultCredentials(ctx, gcpScope)
@@ -191,7 +191,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 
 			return buildHardenedGCPProvider(creds.TokenSource, cfg.GCP), gke
 		},
-		gcpPosture: gcpPostureLabel(cfg.GCP.Role),
+		gcpRole: cfg.GCP.Role,
 
 		newAzure: func() (azcore.TokenCredential, error) { return azurehardening.NewCredentialChain(azureCloud) },
 		probeAzure: func(ctx context.Context, cred azcore.TokenCredential) error {
@@ -206,7 +206,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 
 			return buildHardenedAzureProvider(cred, cfg.Azure, azureCloud), aks
 		},
-		azurePosture: azurePostureLabel(cfg.Azure.RoleDefinition),
+		azureRoleDefinition: cfg.Azure.RoleDefinition,
 
 		loadKube: loadSelectedCluster,
 		buildKube: func(rc resolvedCluster) *kubernetesProvider {
@@ -220,7 +220,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 
 			return err
 		},
-		k8sPosture: k8sPostureLabel(cfg.Kubernetes.ClusterRole),
+		k8sClusterRole: cfg.Kubernetes.ClusterRole,
 	}
 }
 
@@ -243,20 +243,20 @@ func validateAWSIdentity(ctx context.Context, c aws.Config) (string, string, str
 
 // resolveScopeAWS performs the eager STS credential-scope resolution at
 // registration time. It classifies the caller ARN, builds a ScopedProvider via
-// ResolveScope, and returns the inventory sts= label plus the pre-built scoped
-// chain. It is fail-soft: a transient error returns the decided-mode label so AWS
-// stays available; only a definitive degrade renders "disabled (degraded: <reason>)".
+// ResolveScope, and returns the structured ScopeResult plus the pre-built scoped
+// chain. It is fail-soft: a transient error returns the decided-mode result so AWS
+// stays available; only a definitive degrade renders Mode=CredScopeDisabled.
 // The chain is always valid (wraps a ScopedProvider that resolves the true scope at
 // request time).
 func resolveScopeAWS(
 	ctx context.Context, account, rawARN, policyARN string, cfg aws.Config,
-) (string, aws.CredentialsProvider) {
+) (awshardening.ScopeResult, aws.CredentialsProvider) {
 	_ = account // available for future use (e.g. partition-aware policy selection).
 	cfg.Region = resolveRegion(cfg.Region)
 	decision := awshardening.DetectCredScope(rawARN)
 	result := awshardening.ResolveScope(ctx, decision, sts.NewFromConfig(cfg), policyARN, cfg.Credentials, os.Stderr)
 
-	return awshardening.ScopeLabel(result), result.Credentials
+	return result, result.Credentials
 }
 
 // gcpRegistrationIdentity resolves a best-effort display identity: project from

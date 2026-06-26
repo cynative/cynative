@@ -16,6 +16,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
+	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 )
@@ -70,8 +71,8 @@ func stubDeps() *registrationDeps {
 		validateAWS: func(context.Context, aws.Config) (string, string, string, error) {
 			return "123 · arn:aws:iam::123:user/u", "arn:aws:iam::123:user/u", "123", nil
 		},
-		resolveScopeAWS: func(context.Context, string, string, aws.Config) (string, aws.CredentialsProvider) {
-			return "disabled", nil
+		resolveScopeAWS: func(context.Context, string, string, aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider) {
+			return awshardening.ScopeResult{Mode: awshardening.CredScopeDisabled}, nil //nolint:exhaustruct // bare.
 		},
 		buildAWS: func(aws.Config, aws.CredentialsProvider) (*awsProvider, *eksProvider) {
 			return &awsProvider{}, &eksProvider{} //nolint:exhaustruct // bare.
@@ -599,7 +600,7 @@ func TestGithubOutcome(t *testing.T) {
 		d := stubDeps()
 		cfg := GithubHardeningConfig{Permissions: map[string]string{"default": "write"}}
 		got := d.githubOutcome(context.Background(), cfg, false)
-		wantPosture, _ := githubPosture(githubhardening.BuildExposure(cfg.Permissions))
+		wantPosture, _ := githubPosture(githubhardening.BuildExposure(cfg.Permissions), cfg.Permissions)
 		if len(got.providers) != 1 || !got.statuses[0].Available ||
 			!got.statuses[0].Warn || got.statuses[0].Posture != wantPosture {
 			t.Fatalf("want registered + Warn=true + Posture=%q, got %+v", wantPosture, got)
@@ -662,7 +663,7 @@ func TestGitlabOutcome(t *testing.T) {
 		//nolint:exhaustruct // only permissions.
 		cfg := GitLabHardeningConfig{Permissions: map[string]string{"default": "write"}}
 		got := d.gitlabOutcome(context.Background(), cfg, false)
-		wantPosture, _ := gitlabPosture(gitlabclass.BuildExposure(cfg.Permissions))
+		wantPosture, _ := gitlabPosture(gitlabclass.BuildExposure(cfg.Permissions), cfg.Permissions)
 		if !got.statuses[0].Warn || got.statuses[0].Posture != wantPosture {
 			t.Fatalf("want Warn=true + Posture=%q, got %+v", wantPosture, got)
 		}
@@ -760,29 +761,35 @@ func TestRegisterAWS_ScopeDegraded_rendersDisabledStillAvailable(t *testing.T) {
 	d.validateAWS = func(context.Context, aws.Config) (string, string, string, error) {
 		return "123 · arn:aws:sts::123:assumed-role/SSO/sess", "arn:aws:sts::123:assumed-role/SSO/sess", "123", nil
 	}
-	d.resolveScopeAWS = func(context.Context, string, string, aws.Config) (string, aws.CredentialsProvider) {
-		return "disabled (degraded: assume_role_unavailable)", nil
+	d.resolveScopeAWS = func(context.Context, string, string, aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider) {
+		return awshardening.ScopeResult{ //nolint:exhaustruct // mode+reason only.
+			Mode:   awshardening.CredScopeDisabled,
+			Reason: "assume_role_unavailable",
+		}, nil
 	}
 	out := d.registerAWS(context.Background(), false)
 	if len(out.providers) != 2 || !out.statuses[0].Available {
 		t.Fatalf("degrade must keep AWS available: %+v", out)
 	}
-	if !strings.Contains(out.statuses[0].Posture, "sts=disabled (degraded:") {
-		t.Fatalf("posture=%q, want sts=disabled (degraded: …)", out.statuses[0].Posture)
+	if !strings.Contains(out.statuses[0].Posture, "enforced=client ·") {
+		t.Fatalf("posture=%q, want enforced=client · …", out.statuses[0].Posture)
 	}
 }
 
-func TestRegisterAWS_ScopeAssumeRole_rendersStsLabel(t *testing.T) {
+func TestRegisterAWS_ScopeAssumeRole_rendersEnforcedLabel(t *testing.T) {
 	t.Parallel()
 	d := stubDeps()
 	d.validateAWS = func(context.Context, aws.Config) (string, string, string, error) {
 		return "123 · arn:aws:iam::123:user/u", "arn:aws:iam::123:user/u", "123", nil
 	}
-	d.resolveScopeAWS = func(context.Context, string, string, aws.Config) (string, aws.CredentialsProvider) {
-		return "assume_role", nil
+	d.resolveScopeAWS = func(context.Context, string, string, aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider) {
+		return awshardening.ScopeResult{ //nolint:exhaustruct // mode+verified only.
+			Mode:     awshardening.CredScopeAssumeRole,
+			Verified: true,
+		}, nil
 	}
 	out := d.registerAWS(context.Background(), false)
-	if !strings.Contains(out.statuses[0].Posture, "· sts=assume_role") {
-		t.Fatalf("posture=%q, want policy=… · sts=assume_role", out.statuses[0].Posture)
+	if !strings.Contains(out.statuses[0].Posture, "enforced=client+aws ·") {
+		t.Fatalf("posture=%q, want enforced=client+aws · …", out.statuses[0].Posture)
 	}
 }

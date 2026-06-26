@@ -3,6 +3,7 @@ package auth
 import (
 	"strings"
 
+	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
@@ -83,10 +84,23 @@ func gcpPostureLabel(role string) string {
 	return "role=" + role
 }
 
-// azurePostureLabel renders the Azure inventory posture as "role definition=<name>"
-// — the configured connectors.azure.role_definition verbatim.
-func azurePostureLabel(roleDefinition string) string {
-	return "role definition=" + roleDefinition
+// azurePostureLabel renders the Azure ceiling id as "role definition=<name> (<guid>)".
+func azurePostureLabel(roleDefinition, guid string) string {
+	return "role definition=" + roleDefinition + " (" + guid + ")"
+}
+
+// awsEnforced maps an eager AWS credential-scope result to the enforcement-locus
+// token: server-side STS scope in force (client+aws), in force but unconfirmed
+// (client+aws(unverified)), or client-only.
+func awsEnforced(r awshardening.ScopeResult) string {
+	if r.Mode != awshardening.CredScopeAssumeRole {
+		return enforcedClient
+	}
+	if r.Verified {
+		return enforcedClientAWS
+	}
+
+	return enforcedClientAWSUnverified
 }
 
 // k8sPostureLabel renders the inventory posture for a Kubernetes connector as
@@ -95,18 +109,20 @@ func k8sPostureLabel(clusterRole string) string {
 	return "cluster role=" + clusterRole
 }
 
-// githubPosture renders the github inventory posture as the compact effective-
-// ceiling scalar (e.g. "permissions=default=read,secret-scanning=none") and whether
-// it is loud (any write-broadening or opened secret-scanning is a ⚠).
-func githubPosture(e exposure.Exposure) (string, bool) {
-	return "permissions=" + githubhardening.InventoryPosture(e), githubhardening.PostureLoud(e)
+// githubPosture renders the github inventory posture (access · enforced · permissions)
+// and whether it is loud.
+func githubPosture(e exposure.Exposure, operator map[string]string) (string, bool) {
+	ceiling := "permissions=" + githubhardening.InventoryPosture(e)
+
+	return buildPosture(exposureAccess(operator), enforcedClient, ceiling), githubhardening.PostureLoud(e)
 }
 
-// gitlabPosture renders the gitlab inventory posture as the compact effective-
-// ceiling scalar (e.g. "permissions=default=read,ci-variables=none") and whether it
-// is loud (any write-broadening or opened ci-variables is a ⚠).
-func gitlabPosture(e exposure.Exposure) (string, bool) {
-	return "permissions=" + gitlabclass.InventoryPosture(e), gitlabclass.PostureLoud(e)
+// gitlabPosture renders the gitlab inventory posture (access · enforced · permissions)
+// and whether it is loud.
+func gitlabPosture(e exposure.Exposure, operator map[string]string) (string, bool) {
+	ceiling := "permissions=" + gitlabclass.InventoryPosture(e)
+
+	return buildPosture(exposureAccess(operator), enforcedClient, ceiling), gitlabclass.PostureLoud(e)
 }
 
 // joinIdentity joins non-empty project and principal with " · ".
