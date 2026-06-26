@@ -460,8 +460,9 @@ func TestSystemPrompt_AccessCeilingClause(t *testing.T) {
 
 	for _, want := range []string{
 		"configured access ceiling in brackets",
-		"policy, role, role definition, cluster role, or permissions",
-		"Stay within that ceiling",
+		"enforced=client` is an ACTIVE control",
+		"fetch the ceiling document with http_request",
+		"Stay within the ceiling",
 		"do not assume you are blocked from reads it grants",
 		"per-request authorizer enforces the ceiling",
 	} {

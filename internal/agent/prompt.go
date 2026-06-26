@@ -73,17 +73,24 @@ WORKFLOW:
 		"probing candidates."
 
 	// accessCeilingClause tells the model that each connector's bracketed posture is
-	// its configured access ceiling and to stay within it. Phrased as positive
-	// imperatives (like scopeDisciplineClause/haltAndAskClause) so it travels across
-	// small/local models. It references the bracket generically, in each connector's
-	// own terms, and deliberately adds no read/write classification label — the
-	// operator chose to show the configured id, not infer a level.
+	// its configured access ceiling and to stay within it. Explains the new
+	// structured bracket format (access=… · enforced=… · <ceiling id>), clarifies
+	// that enforced=client is an ACTIVE in-process gate (not a block on permissionless
+	// calls), and tells the model it may fetch the ceiling document on demand via
+	// http_request. Phrased as positive imperatives (like scopeDisciplineClause/
+	// haltAndAskClause) so it travels across small/local models.
 	accessCeilingClause = "\n\nEach connector lists its configured access ceiling in " +
-		"brackets, in its own terms (policy, role, role definition, cluster role, or " +
-		"permissions). Stay within that ceiling: do not attempt write or mutating " +
-		"operations through a connector whose ceiling is read-only, and do not assume " +
-		"you are blocked from reads it grants. The per-request authorizer enforces the " +
-		"ceiling regardless — an out-of-scope call is denied and only wastes a turn."
+		"brackets as `access=… · enforced=… · <ceiling id>`. `access=default(read-only)` " +
+		"means the curated read-only default is in force; `access=custom` means the operator " +
+		"set a different ceiling (level not asserted). `enforced=client` is an ACTIVE control — " +
+		"the in-process action gate — not a block: do not refuse read-only or permissionless " +
+		"calls because of it. `enforced=client+aws` adds a server-side STS scope. Stay within " +
+		"the ceiling: do not attempt write or mutating operations through a read-only connector, " +
+		"and do not assume you are blocked from reads it grants. When you need the exact rules, " +
+		"fetch the ceiling document with http_request — AWS iam:GetPolicy + iam:GetPolicyVersion, " +
+		"GCP roles.get, Azure roleDefinitions read (each granted by the read-only defaults); for " +
+		"Kubernetes rely on the cluster role name, since `view` cannot read RBAC. The per-request " +
+		"authorizer enforces the ceiling regardless — an out-of-scope call is denied and wastes a turn."
 )
 
 // systemPrompt builds the cynative context (run-anywhere identity framing,

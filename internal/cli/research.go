@@ -266,12 +266,17 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 
 	var llmShown bool
 
+	managedClusterRoles := map[string]string{
+		"eks": cfg.Connectors.EKS.ClusterRole,
+		"gke": cfg.Connectors.GKE.ClusterRole,
+		"aks": cfg.Connectors.AKS.ClusterRole,
+	}
 	a, err := d.newAgent(ctx, agent.Config{
 		Model:            llm.NewRedactingChatModel(cm, redact.New()),
 		Cfg:              cfg,
 		Tools:            toolSet,
 		Providers:        providers,
-		Connectors:       connectorMeta(views),
+		Connectors:       connectorMeta(views, managedClusterRoles),
 		About:            cynative.About(),
 		Renderer:         d.ui.RenderMessage,
 		VerboseWriter:    verboseWriter,

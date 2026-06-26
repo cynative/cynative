@@ -16,7 +16,7 @@ func TestConnectorMeta(t *testing.T) {
 		{State: ui.ConnectorError, Name: "gcp", Posture: "no usable credentials", Identity: ""},
 	}
 
-	meta := connectorMeta(views)
+	meta := connectorMeta(views, nil)
 
 	if len(meta) != 2 {
 		t.Fatalf("len(meta) = %d, want 2 (error view omitted)", len(meta))
@@ -35,7 +35,30 @@ func TestConnectorMeta(t *testing.T) {
 func TestConnectorMeta_Empty(t *testing.T) {
 	t.Parallel()
 
-	if meta := connectorMeta(nil); len(meta) != 0 {
-		t.Errorf("connectorMeta(nil) = %+v, want empty", meta)
+	if meta := connectorMeta(nil, nil); len(meta) != 0 {
+		t.Errorf("connectorMeta(nil, nil) = %+v, want empty", meta)
+	}
+}
+
+func TestConnectorMeta_ManagedK8s(t *testing.T) {
+	t.Parallel()
+
+	views := []ui.ConnectorView{
+		{
+			State:    ui.ConnectorOK,
+			Name:     "aws",
+			Posture:  "access=default(read-only) · enforced=client · policy=x",
+			Identity: "123",
+			Managed:  "eks",
+		},
+	}
+	meta := connectorMeta(views, map[string]string{"eks": "view"})
+
+	got, ok := meta["eks"]
+	if !ok {
+		t.Fatalf("expected an eks meta entry")
+	}
+	if got.Posture != "access=default(read-only) · enforced=client · cluster role=view" {
+		t.Errorf("eks posture = %q", got.Posture)
 	}
 }
