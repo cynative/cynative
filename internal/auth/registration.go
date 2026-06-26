@@ -51,7 +51,7 @@ type registrationDeps struct {
 	gcpIdentity     func(context.Context, *google.Credentials) string
 	buildGCP        func(*google.Credentials) (*gcpProvider, *gkeProvider)
 	gcpRole         string
-	validateGCPRole func(ctx context.Context, creds *google.Credentials, role string) error
+	validateGCPRole func(ctx context.Context, role string) error
 
 	newAzure            func() (azcore.TokenCredential, error)
 	probeAzure          func(context.Context, azcore.TokenCredential) error
@@ -115,7 +115,8 @@ func boundedIdentity(ctx context.Context, timeout time.Duration, fn func(context
 // determine the enforced= token and build the pre-scoped credential chain. The
 // probe is ctx-bounded and retried once on a transient error. A load failure is
 // always loud; a credential failure is explicit-gated, escalated to loud when
-// transient.
+// transient. A ceiling-validation failure (policy) is always loud regardless of
+// explicit/verbose: the credential is confirmed present, so it is never ambient.
 func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connectorOutcome {
 	cfg, loadErr := d.loadAWS(ctx)
 
@@ -161,7 +162,7 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 		explicit := awsExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir, d.awsDefaultProfileCreds)
 
 		return skipOutcome(awsProviderName, explicit, verbose,
-			escalateForTransient(emitWhenExplicitOrVerbose, verr),
+			emitAlways,
 			fmt.Sprintf("aws_hardening: skipped (policy validation failed): %v", verr))
 	}
 
@@ -196,8 +197,10 @@ func awsScopeDegraded(decision awshardening.CredScopeDecision, result awshardeni
 // registerGCP discovers ADC and validates it by minting a token (the live check)
 // regardless of explicit config, so a host whose ADC/metadata source cannot
 // actually mint a token is not registered. The probe is ctx-bounded and retried
-// once on a transient error. Any skip is explicit-gated, escalated to loud when
-// transient. On success it captures a bounded, display-only identity.
+// once on a transient error. A credential skip is explicit-gated, escalated to
+// loud when transient. A ceiling-validation failure (role) is always loud
+// regardless of explicit/verbose: the credential is confirmed present. On
+// success it captures a bounded, display-only identity.
 func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connectorOutcome {
 	// findGCP MUST use the unbounded ctx: google.FindDefaultCredentials' returned
 	// TokenSource retains the supplied context, and the registered provider mints
@@ -223,11 +226,11 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 
 	vctx, vcancel := context.WithTimeout(ctx, ceilingValidationTimeout)
 	defer vcancel()
-	if verr := retryProbe(func() error { return d.validateGCPRole(vctx, creds, d.gcpRole) }); verr != nil {
+	if verr := retryProbe(func() error { return d.validateGCPRole(vctx, d.gcpRole) }); verr != nil {
 		explicit := gcpExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir)
 
 		return skipOutcome(gcpProviderName, explicit, verbose,
-			escalateForTransient(emitWhenExplicitOrVerbose, verr),
+			emitAlways,
 			fmt.Sprintf("gcp_hardening: skipped (role validation failed): %v", verr))
 	}
 
@@ -251,9 +254,11 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 // token (the live check) regardless of explicit config — removing the prior
 // optimistic registration, so a host with no usable Azure credential is not
 // registered. The probe is ctx-bounded and retried once on a transient error.
-// Any skip is explicit-gated, escalated to loud when transient. On success it
-// captures a bounded, display-only identity. The credential chain is unchanged
-// (its own subprocess auth — az/azd/pwsh — is acceptable).
+// A credential skip is explicit-gated, escalated to loud when transient. A
+// ceiling-validation failure (role definition) is always loud regardless of
+// explicit/verbose: the credential is confirmed present. On success it captures
+// a bounded, display-only identity. The credential chain is unchanged (its own
+// subprocess auth — az/azd/pwsh — is acceptable).
 func (d *registrationDeps) registerAzure(ctx context.Context, verbose bool) connectorOutcome {
 	cred, chainErr := d.newAzure()
 
@@ -283,7 +288,7 @@ func (d *registrationDeps) registerAzure(ctx context.Context, verbose bool) conn
 		explicit := azureExplicitlyConfigured(d.lookupEnv)
 
 		return skipOutcome(azureProviderName, explicit, verbose,
-			escalateForTransient(emitWhenExplicitOrVerbose, verr),
+			emitAlways,
 			fmt.Sprintf("azure_hardening: skipped (role definition validation failed): %v", verr))
 	}
 

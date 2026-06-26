@@ -14,9 +14,15 @@ import (
 const gcpScope = "https://www.googleapis.com/auth/cloud-platform"
 
 // validateGCPRole confirms the configured GCP role resolves (ceiling only; not
-// the full lazy bootstrap). Shell: real IAM Roles client over an oauth2-authed
-// HTTP client (a plain client disables ADC auth and 401s).
-func validateGCPRole(ctx context.Context, creds *google.Credentials, role string) error {
+// the full lazy bootstrap). Shell: mints a fresh, ctx-bounded credential source
+// (like probeGCPToken) so a hung ADC/token endpoint cannot stall startup beyond
+// ceilingValidationTimeout. A plain [http.Client] disables ADC auth and 401s,
+// so an oauth2-authed client is required for the IAM Roles API.
+func validateGCPRole(ctx context.Context, role string) error {
+	creds, err := google.FindDefaultCredentials(ctx, gcpScope)
+	if err != nil {
+		return err
+	}
 	authedClient := oauth2.NewClient(ctx, creds.TokenSource)
 	authedClient.Timeout = ceilingValidationTimeout
 	rc, err := gcphardening.NewIAMRolesClient(ctx, gcphardening.IAMClientConfig{HTTPClient: authedClient})

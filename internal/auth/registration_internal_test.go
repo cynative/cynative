@@ -92,7 +92,7 @@ func stubDeps() *registrationDeps {
 		buildKube:         func(resolvedCluster) *kubernetesProvider { return &kubernetesProvider{} },                              //nolint:exhaustruct // bare.
 		probeKube:         func(context.Context, *kubernetesProvider) error { return nil },
 		validateAWSPolicy: func(context.Context, aws.Config, string) error { return nil },
-		validateGCPRole:   func(context.Context, *google.Credentials, string) error { return nil },
+		validateGCPRole:   func(context.Context, string) error { return nil },
 		validateAzureRole: func(context.Context, azcore.TokenCredential, string) (string, error) {
 			return "acdd72a7-3385-48ef-bd42-f606fba81ae7", nil
 		},
@@ -827,7 +827,7 @@ func TestRegisterGCP_CeilingValidationFails_Skips(t *testing.T) {
 	t.Parallel()
 
 	d := stubDeps()
-	d.validateGCPRole = func(context.Context, *google.Credentials, string) error {
+	d.validateGCPRole = func(context.Context, string) error {
 		return errors.New("roles/viewer not found or access denied")
 	}
 
@@ -842,6 +842,78 @@ func TestRegisterGCP_CeilingValidationFails_Skips(t *testing.T) {
 	if out.statuses[0].Available {
 		t.Errorf("connector should be unavailable")
 	}
+}
+
+// TestCeilingValidationLoudWhenAmbient proves that a post-credential-success
+// ceiling-validation failure is LOUD (visible) even when explicit=false and
+// verbose=false. This is a credential-present-but-ceiling-broken case — never
+// an ambient absence — so it must always be shown.
+func TestCeilingValidationLoudWhenAmbient(t *testing.T) {
+	t.Parallel()
+
+	t.Run("shouldEmit(emitAlways, false, false) is true", func(t *testing.T) {
+		t.Parallel()
+		if !shouldEmit(emitAlways, false, false) {
+			t.Fatal("shouldEmit(emitAlways, false, false) must be true")
+		}
+	})
+
+	t.Run("aws ceiling failure is loud when ambient and quiet (not verbose)", func(t *testing.T) {
+		t.Parallel()
+		d := stubDeps()
+		// No explicit env: ambient (explicit=false). verbose=false.
+		d.validateAWSPolicy = func(context.Context, aws.Config, string) error {
+			return errors.New("AccessDenied: iam:SimulateCustomPolicy")
+		}
+		out := d.registerAWS(context.Background(), false)
+		if len(out.providers) != 0 {
+			t.Fatalf("expected no providers, got %d", len(out.providers))
+		}
+		if !out.visible[0] {
+			t.Fatal("ceiling-validation failure must be visible even when ambient and non-verbose")
+		}
+		if !strings.Contains(out.statuses[0].Reason, "policy") {
+			t.Fatalf("reason=%q, want a policy-validation reason", out.statuses[0].Reason)
+		}
+	})
+
+	t.Run("gcp ceiling failure is loud when ambient and quiet (not verbose)", func(t *testing.T) {
+		t.Parallel()
+		d := stubDeps()
+		// No explicit env: ambient (explicit=false). verbose=false.
+		d.validateGCPRole = func(context.Context, string) error {
+			return errors.New("roles/viewer not found")
+		}
+		out := d.registerGCP(context.Background(), false)
+		if len(out.providers) != 0 {
+			t.Fatalf("expected no providers, got %d", len(out.providers))
+		}
+		if !out.visible[0] {
+			t.Fatal("ceiling-validation failure must be visible even when ambient and non-verbose")
+		}
+		if !strings.Contains(out.statuses[0].Reason, "role") {
+			t.Fatalf("reason=%q, want a role-validation reason", out.statuses[0].Reason)
+		}
+	})
+
+	t.Run("azure ceiling failure is loud when ambient and quiet (not verbose)", func(t *testing.T) {
+		t.Parallel()
+		d := stubDeps()
+		// No explicit env: ambient (explicit=false). verbose=false.
+		d.validateAzureRole = func(context.Context, azcore.TokenCredential, string) (string, error) {
+			return "", errors.New("role definition not found")
+		}
+		out := d.registerAzure(context.Background(), false)
+		if len(out.providers) != 0 {
+			t.Fatalf("expected no providers, got %d", len(out.providers))
+		}
+		if !out.visible[0] {
+			t.Fatal("ceiling-validation failure must be visible even when ambient and non-verbose")
+		}
+		if !strings.Contains(out.statuses[0].Reason, "role") {
+			t.Fatalf("reason=%q, want a role-definition-validation reason", out.statuses[0].Reason)
+		}
+	})
 }
 
 func TestAWSScopeDegraded(t *testing.T) {
