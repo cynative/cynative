@@ -151,7 +151,17 @@ The configured identity must be able to read whichever ClusterRole you select
 (`get clusterroles/<name>`). Widening it past `view` widens Cynative's permitted
 verbs — see the [shared model](kubernetes.md#configuration).
 
-The configured ClusterRole is shown in the startup connector inventory as `cluster role=view` (or whichever role you configure), so operators can confirm the authorization policy in force at a glance.
+The configured ClusterRole is shown in the startup connector inventory, for example:
+
+```text
+✓ k8s    access=default(read-only) · enforced=client · cluster role=view · cluster-host
+```
+
+- `access=default(read-only)` when `connectors.kubernetes.cluster_role` is `view`; `access=custom` for any other ClusterRole.
+- `enforced=client` — Kubernetes decouples authn from authz; the in-process ClusterRole-based authorization check is the sole client-side control.
+- `cluster role=<name>` — the configured ClusterRole verbatim.
+
+Operators can confirm the authorization policy in force at a glance.
 
 ## Limitations
 

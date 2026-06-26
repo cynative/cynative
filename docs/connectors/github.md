@@ -123,7 +123,17 @@ Cynative redacts secret-shaped content and credential-named fields from response
 
 ### Reading the posture
 
-The configured exposure ceiling is shown in the startup connector inventory, on the GitHub connector line, as `permissions=<effective-ceiling>` — for example `permissions=default=read,secret-scanning=none`. When the ceiling is widened — `default=write`, an opened `secret-scanning`, or any `category:write` override — the line is loud (`⚠`) and names exactly what was widened, so broadening exposure is never silent. The model also receives the effective ceiling in its system prompt, so it knows which operations are permitted without attempting them.
+The startup connector inventory line for GitHub shows the access level, enforcement locus, and configured ceiling, for example:
+
+```text
+✓ github access=default(read-only) · enforced=client · permissions=default=read,secret-scanning=none · @user
+```
+
+- `access=default(read-only)` when no `connectors.github.permissions` override is configured (the secure baseline is in force); `access=custom` when any override is set.
+- `enforced=client` — the in-process per-request classifier is an active control that gates every request before the token is attached; the model receives the effective ceiling in its system prompt.
+- `permissions=<effective-ceiling>` — the configured ceiling verbatim.
+
+When the ceiling is widened — `default=write`, an opened `secret-scanning`, or any `category:write` override — the line is loud (`⚠`) and names exactly what was widened, so broadening exposure is never silent.
 
 When the category routing table cannot be fetched (no network and no local cache), the connector still registers and its line shows the configured `permissions=` ceiling, but every `api.github.com` request is denied at request time with a `github_hardening: category table not ready` error until the table becomes available.
 

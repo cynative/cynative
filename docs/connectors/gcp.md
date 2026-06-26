@@ -117,7 +117,17 @@ In request order:
 - **Permissionless reads.** A small fixed set of methods need no IAM permission and are allowed without a role check: `oauth2.tokeninfo`, `discovery.apis.getRest`, `discovery.apis.list`, and any `*.testIamPermissions` probe. These are pinned by an explicit allow-list rather than matched by prefix.
 - **Response redaction.** Secret-shaped content and credential-named fields are redacted from responses before the model sees them. Redaction is a defense-in-depth layer, not a reason to treat returned GCP data as public — see the limitations below.
 
-The default role is `roles/viewer`. The configured role is shown in the startup connector inventory as `role=roles/viewer` (or the custom role you configure), so operators can confirm the gate is active at a glance. The model also receives the effective role in its system prompt.
+The default role is `roles/viewer`. The configured role is **validated at startup** — a role that cannot be fetched, is disabled, or is soft-deleted causes the `gcp` and `gke` connectors to be skipped with a clear reason. The resolved role is shown in the startup connector inventory, for example:
+
+```text
+✓ gcp    access=default(read-only) · enforced=client · role=roles/viewer · my-project · sa@… · (+gke)
+```
+
+- `access=default(read-only)` when `connectors.gcp.role` is `roles/viewer`; `access=custom` for any other role.
+- `enforced=client` — GCP has no general credential-downscoping primitive; the in-process per-operation IAM permission check is the sole client-side control.
+- `role=<role>` — the configured role verbatim.
+
+The model also receives the effective role in its system prompt.
 
 ### Choosing your exposure level
 

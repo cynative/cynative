@@ -111,7 +111,17 @@ The checks below run in request order, before any ARM token is attached:
 
 At connection time — after the token is attached but before any bytes go on the wire — a dial-time guard authorizes the DNS-resolved IP, denying internal ranges (loopback, link-local including cloud metadata, RFC1918, ULA) by default, which closes DNS-rebinding and TOCTOU windows. Finally, Cynative redacts secret-shaped content and credential-named fields from responses before the model sees them — treat returned Azure data as sensitive regardless.
 
-Hardening metadata (the service catalog) is cached under the shared `cache.dir` and refreshed after `cache.ttl`; the role definition is fetched live per run. The configured role definition is shown in the startup connector inventory as `role definition=Reader` (or the role you configure), so operators can confirm the role in force. The model also receives the effective role definition in its system prompt.
+Hardening metadata (the service catalog) is cached under the shared `cache.dir` and refreshed after `cache.ttl`; the role definition is **fetched live per run and validated at startup** — a role definition that cannot be resolved or fetched causes the `azure` and `aks` connectors to be skipped with a clear reason. The resolved role definition (name and GUID) is shown in the startup connector inventory, for example:
+
+```text
+✓ azure  access=default(read-only) · enforced=client · role definition=Reader (acdd72a7-3385-48ef-bd42-f606fba81ae7) · tenant#user · (+aks)
+```
+
+- `access=default(read-only)` when `connectors.azure.role_definition` is `Reader` (case-insensitive); `access=custom` for any other role.
+- `enforced=client` — Azure has no credential-downscoping primitive; the in-process per-operation RBAC check is the sole client-side control.
+- `role definition=<name> (<guid>)` — the configured role name and its resolved GUID, so operators can confirm the exact role version in force.
+
+The model also receives the effective role definition in its system prompt.
 
 ### Choosing your exposure level
 

@@ -7,12 +7,12 @@
 
   Connectors
   ────────────────────────────────────────────────
-  ✓ gcp         role=roles/viewer  example-prod · audit@example-prod.iam.gserviceaccount.com  (+gke)
-  ✓ github      permissions=default=read,secret-scanning=none  @example-corp
-  ✓ gitlab      permissions=default=read,ci-variables=none  @example-corp
-  ✓ aws         policy=arn:aws:iam::aws:policy/SecurityAudit · sts=disabled  123456789012 · arn:aws:iam::123456789012:user/audit  (+eks)
-  ✓ kubernetes  cluster role=view  aks-demo-000000.hcp.eastus.azmk8s.io
-  ✓ azure       role definition=Reader  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee  (+aks)
+  ✓ gcp         access=default(read-only) · enforced=client · role=roles/viewer  example-prod · audit@example-prod.iam.gserviceaccount.com  (+gke)
+  ✓ github      access=default(read-only) · enforced=client · permissions=default=read,secret-scanning=none  @example-corp
+  ✓ gitlab      access=default(read-only) · enforced=client · permissions=default=read,ci-variables=none  @example-corp
+  ✓ aws         access=default(read-only) · enforced=client · policy=arn:aws:iam::aws:policy/SecurityAudit  123456789012 · arn:aws:iam::123456789012:user/audit  (+eks)
+  ✓ kubernetes  access=default(read-only) · enforced=client · cluster role=view  aks-demo-000000.hcp.eastus.azmk8s.io
+  ✓ azure       access=default(read-only) · enforced=client · role definition=Reader (acdd72a7-3385-48ef-bd42-f606fba81ae7)  aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee  (+aks)
 
   LLM
   ────────────────────────────────────────────────

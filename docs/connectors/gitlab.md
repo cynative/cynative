@@ -175,7 +175,17 @@ Cynative redacts secret-shaped content and credential-named fields from response
 
 ### Reading the posture
 
-The configured exposure ceiling is shown in the startup connector inventory, on the GitLab connector line, as `permissions=default=read,ci-variables=none`. When the ceiling is widened — `default=write`, an opened `ci-variables`, or any `category:write` override — the line is loud (`⚠`) and names exactly what was widened, so broadening exposure is never silent. The model also receives the effective ceiling in its system prompt, so it knows which operations are permitted without attempting them.
+The startup connector inventory line for GitLab shows the access level, enforcement locus, and configured ceiling, for example:
+
+```text
+✓ gitlab access=default(read-only) · enforced=client · permissions=default=read,ci-variables=none · @user
+```
+
+- `access=default(read-only)` when no `connectors.gitlab.permissions` override is configured (the secure baseline is in force); `access=custom` when any override is set.
+- `enforced=client` — the in-process per-request classifier is an active control that gates every request before the token is attached; the model receives the effective ceiling in its system prompt.
+- `permissions=<effective-ceiling>` — the configured ceiling verbatim.
+
+When the ceiling is widened — `default=write`, an opened `ci-variables`, or any `category:write` override — the line is loud (`⚠`) and names exactly what was widened, so broadening exposure is never silent.
 
 When the category routing table cannot be resolved (no network **and** no local cache), the connector fails closed: every classification-dependent request is denied with a `gitlab_hardening: category table not ready` error returned to the model.
 

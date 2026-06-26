@@ -10,7 +10,7 @@
 | Read-only by default | ✓ |
 | Enforcement model | IAM action simulation (`iam:SimulateCustomPolicy`) against the configured policy |
 | Configurable exposure | ✓ any IAM policy ARN (default `SecurityAudit`); the choice is also enforced server-side via the STS scope for assumed-role identities |
-| Credential downscoping | ✓ STS-scoped session, AWS-side — assumed-role identities only (`sts=assume_role`); IAM-user and root run unscoped |
+| Credential downscoping | ✓ STS-scoped session, AWS-side — assumed-role identities only (`enforced=client+aws`); IAM-user and root run unscoped (`enforced=client`) |
 | Host pinning | ✓ (host→service/region; rejects IP literals, localhost, VPC endpoints) |
 | Dial-time IP authorization | ✓ (default internal-range deny) |
 | Model-supplied-credential rejection | ✓ |
@@ -113,7 +113,7 @@ For **assumed-role identities**, Cynative re-vends the credentials via STS `Assu
 
 **IAM-user and root identities run unscoped** — cynative uses their base credentials directly. They are gated solely by the client-side host-pinning and action-authorization checks; there is no AWS-side credential backstop for those identities. Cynative no longer mints `GetFederationToken` sessions, which could not call IAM APIs and so defeated IAM auditing.
 
-The active mode is shown in the startup connector inventory as `sts=<mode>` (see [Reading the posture](#reading-the-posture)) so operators can confirm whether the AWS-side boundary is in force for their identity.
+The active enforcement mode is shown in the startup connector inventory as `enforced=<mode>` (see [Reading the posture](#reading-the-posture)) so operators can confirm whether the AWS-side boundary is in force for their identity.
 
 ### Host pinning
 
@@ -139,20 +139,22 @@ Redaction is a defense-in-depth layer, not a reason to treat returned AWS data a
 
 ### Reading the posture
 
-The AWS connector line in the startup connector inventory shows two terms:
+The AWS connector line in the startup connector inventory shows the access level, the enforcement locus, the configured policy, and the resolved identity:
 
 ```text
-policy=arn:aws:iam::aws:policy/SecurityAudit · sts=disabled
+✓ aws    access=default(read-only) · enforced=client+aws · policy=arn:aws:iam::aws:policy/SecurityAudit · 774148217555 · arn:…/role · (+eks)
 ```
 
-`policy=` is the configured IAM policy the action gate and (when active) the STS scope enforce.
+- `access=` — `default(read-only)` when `connectors.aws.policy` is the curated default (`arn:aws:iam::aws:policy/SecurityAudit`); `custom` for any other policy (the level is not asserted — choose a read-only policy explicitly).
+- `enforced=` — the enforcement locus:
+  - `client` — in-process host-pinning and action-authorization gate; applies to IAM-user and root identities (no AWS-side credential scope).
+  - `client+aws` — client-side gate **plus** an STS-scoped session for this assumed-role identity; both boundaries are active.
+  - `client+aws(unverified)` — the eager STS probe could not pre-confirm the scope (for example a transient error); the scope resolves at first request, still providing the AWS-side boundary. If that request-time resolution degrades to unscoped, Cynative emits a one-line `⚠️ aws_hardening: cred_scope degraded to disabled (reason=…)` warning to stderr — the only runtime signal for that lazy degrade; the line then shows `enforced=client`.
+- `policy=` — the configured IAM policy ARN the action gate and (when active) the STS scope enforce.
+- Identity — the resolved account number and caller ARN from `sts:GetCallerIdentity`.
+- `(+eks)` — the EKS connector is folded in (registered with the same credentials).
 
-`sts=` is the credential-downscoping status resolved eagerly at startup, with these values:
-
-- `assume_role` — STS `AssumeRole` scoping is active; the agent runs with a time-limited role-session scoped to the configured policy.
-- `assume_role (unverified)` — the eager STS probe could not confirm the scope (for example a transient STS error); the real scope resolves on the first request, and the logged mode is a best-effort estimate. If that request-time resolution degrades to unscoped, Cynative emits a one-line `⚠️ aws_hardening: cred_scope degraded to disabled (reason=…) — requests now run with full base AWS credentials …` warning to stderr — the only runtime signal for that lazy degrade.
-- `disabled` — no credential scoping; applies to IAM-user and root identities by design. The host-pinning and action-authorization gates remain in force; there is no AWS-side credential backstop.
-- `disabled (degraded: <reason>)` — the eager startup probe attempted scoping for an assumed-role identity and was denied (for example `assume_role_unavailable`); the session falls back to the base, unscoped credentials and only the host-pinning and action-authorization gates are in force. This column value is the signal — no separate stderr diagnostic is emitted for a degrade detected at startup.
+For an assumed-role identity whose eager scoping degrades at startup, the line shows `enforced=client` and a one-line `⚠️ aws_hardening: cred_scope degraded to disabled (reason=…) — …` notice is printed to stderr.
 
 If hardening initialization fails at first use (for example the IAM policy cannot be fetched), the request is denied with an `aws_hardening: not_ready: …` error returned to the model, and the failure is cached for the rest of the session. (Credential or identity problems that prevent the connector from registering surface at startup as `aws_hardening: skipped …` instead.)
 
@@ -219,7 +221,8 @@ export CYNATIVE_CACHE_TTL=24h
 
 ## Limitations
 
-- Credential downscoping (assumed-role identities) is best effort. An unrecognized caller ARN renders `sts=disabled (degraded: unrecognized_arn)`; an assumed-role self-assumption denial degrades to `sts=disabled (degraded: assume_role_unavailable)`. Invalid or unfetchable policy documents are hard failures. IAM-user and root identities show `sts=disabled` by design — they run unscoped, gated solely by host pinning and the action gate.
+- Credential downscoping (assumed-role identities) is best effort. An unrecognized caller ARN or a self-assumption denial degrades the STS scope to disabled; the inventory line shows `enforced=client` and a `⚠️ aws_hardening: cred_scope degraded to disabled (reason=…)` notice is printed to stderr. IAM-user and root identities always show `enforced=client` by design — they run unscoped, gated solely by host pinning and the action gate.
+- A configured **custom** policy that the caller's credentials cannot read (`iam:GetPolicy` / `iam:GetPolicyVersion` denied) **fails registration at startup** — the AWS and EKS connectors are skipped with a clear reason, because the action gate evaluates the policy document via `SimulateCustomPolicy`. Use a managed policy the caller can read, or grant `iam:GetPolicy` and `iam:GetPolicyVersion` on the custom policy ARN.
 - Cynative no longer mints `GetFederationToken` sessions. A **federated-user caller's own base credentials** are already a `GetFederationToken` session that cannot call IAM APIs. Hardening initialization fetches the configured IAM policy document through IAM APIs; because that session cannot call those APIs, Cynative fails initialization for federated-user callers instead of continuing in disabled mode. Switch to an IAM-user or assumed-role identity to use the AWS connector.
 - The assumed-role path re-assumes the underlying role with Cynative's configured `PolicyArns`; it does not inherit a session policy that may already narrow the current shell session. A heavily session-scoped caller can therefore get broader read access than its current session, though still capped by the configured policy.
 - The AWS-side read-only backstop depends on `connectors.aws.policy` being read-only and applies **only to assumed-role identities**. For IAM-user and root, the action-authorization gate is the sole control; there is no AWS-side credential backstop. If you configure a managed policy that grants mutating actions, both the STS scope (for assumed-role) and the action-authorization gate follow that policy.
