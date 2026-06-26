@@ -11,7 +11,7 @@ Cynative runs frontier models to secure your stack. It researches your code, clo
 
 - **🧪 Sandbox**: Generates and runs code to research at scale
 - **🔗 Code-to-runtime**: Reasons across source, cloud and runtime together
-- **🚦 Action-gate**: Reads flow free, writes stop at an explicit opt-in
+- **🚦 Action-gate**: Read-only, classified and enforced on every call
 - **✅ Evidence-backed**: Verifies each finding from multiple angles
 - **📖 Sovereign**: Local, bring your own model - stays entirely in your environment
 <!-- END agent-about -->
