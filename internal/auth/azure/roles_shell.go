@@ -102,6 +102,23 @@ func (a roleDefsAdapter) NewListPager(
 	return a.c.NewListPager(scope, opts)
 }
 
+// RoleID resolves roleNameOrID to its role-definition GUID (the Name field).
+// Implements roleClient; matches by GUID or properties.roleName case-insensitively.
+func (c *roleClientImpl) RoleID(ctx context.Context, roleNameOrID string) (string, error) {
+	pager := c.defs.NewListPager(c.scope, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return "", fmt.Errorf("roleDefinitions list: %w", err)
+		}
+		if id, ok := selectRoleID(page.Value, roleNameOrID); ok {
+			return id, nil
+		}
+	}
+
+	return "", fmt.Errorf("role %q not found", roleNameOrID)
+}
+
 // RolePermissions resolves roleNameOrID to its static permission set. A bare GUID
 // is matched against the definition name; otherwise it is matched against
 // properties.roleName (case-insensitive). Implements roleClient.

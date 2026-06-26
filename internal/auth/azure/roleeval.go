@@ -9,10 +9,11 @@ import (
 
 //go:generate go tool moq -out roles_mock_test.go . roleClient
 
-// roleClient fetches the configured role definition's static permissions by name
-// or GUID. Real impl (roleDefinitions.get) in roles_shell.go.
+// roleClient fetches the configured role definition's permissions and resolves
+// its GUID. Real impl (roleDefinitions list) in roles_shell.go.
 type roleClient interface {
 	RolePermissions(ctx context.Context, roleNameOrID string) (RolePermissions, error)
+	RoleID(ctx context.Context, roleNameOrID string) (string, error)
 }
 
 // RolePermissions is one role definition's control-plane permission set.

@@ -59,3 +59,19 @@ func selectRolePermissions(values []*armauthorization.RoleDefinition, want strin
 	}
 	return RolePermissions{}, false
 }
+
+// selectRoleID scans one page of role definitions for the first that matches
+// want and returns its GUID (the role definition Name). It applies the same
+// nil guards as selectRolePermissions.
+func selectRoleID(values []*armauthorization.RoleDefinition, want string) (string, bool) {
+	for _, rd := range values {
+		if rd == nil || rd.Properties == nil {
+			continue
+		}
+		if matchesRole(rd, want) && rd.Name != nil {
+			return *rd.Name, true
+		}
+	}
+
+	return "", false
+}

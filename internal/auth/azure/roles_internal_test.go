@@ -6,6 +6,29 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 )
 
+func TestSelectRoleID(t *testing.T) {
+	t.Parallel()
+
+	guid := "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+	values := []*armauthorization.RoleDefinition{
+		nil,
+		{Properties: nil, Name: new("ignored")},
+		{
+			Name:       new(guid),
+			Properties: &armauthorization.RoleDefinitionProperties{RoleName: new("Reader")},
+		},
+	}
+
+	got, ok := selectRoleID(values, "reader") // case-insensitive match by RoleName.
+	if !ok || got != guid {
+		t.Fatalf("selectRoleID = %q, %v; want %q, true", got, ok, guid)
+	}
+
+	if _, found := selectRoleID(values, "Owner"); found {
+		t.Errorf("selectRoleID matched a non-existent role")
+	}
+}
+
 func TestMatchesRole(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
