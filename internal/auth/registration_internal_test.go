@@ -77,17 +77,22 @@ func stubDeps() *registrationDeps {
 		buildAWS: func(aws.Config, aws.CredentialsProvider) (*awsProvider, *eksProvider) {
 			return &awsProvider{}, &eksProvider{} //nolint:exhaustruct // bare.
 		},
-		findGCP:       func(context.Context) (*google.Credentials, error) { return &google.Credentials{}, nil }, //nolint:exhaustruct // zero.
-		probeGCP:      func(context.Context) error { return nil },
-		gcpIdentity:   func(context.Context, *google.Credentials) string { return "proj · me@x" },
-		buildGCP:      func(*google.Credentials) (*gcpProvider, *gkeProvider) { return &gcpProvider{}, &gkeProvider{} }, //nolint:exhaustruct // bare.
-		newAzure:      func() (azcore.TokenCredential, error) { return fakeTokenCred{}, nil },
-		probeAzure:    func(context.Context, azcore.TokenCredential) error { return nil },
-		azureIdentity: func(context.Context, azcore.TokenCredential) string { return "me@tenant" },
-		buildAzure:    func(azcore.TokenCredential) (*azureProvider, *aksProvider) { return &azureProvider{}, &aksProvider{} }, //nolint:exhaustruct // bare.
-		loadKube:      func() (resolvedCluster, error, error) { return resolvedCluster{}, nil, nil },                           //nolint:exhaustruct // zero.
-		buildKube:     func(resolvedCluster) *kubernetesProvider { return &kubernetesProvider{} },                              //nolint:exhaustruct // bare.
-		probeKube:     func(context.Context, *kubernetesProvider) error { return nil },
+		findGCP:           func(context.Context) (*google.Credentials, error) { return &google.Credentials{}, nil }, //nolint:exhaustruct // zero.
+		probeGCP:          func(context.Context) error { return nil },
+		gcpIdentity:       func(context.Context, *google.Credentials) string { return "proj · me@x" },
+		buildGCP:          func(*google.Credentials) (*gcpProvider, *gkeProvider) { return &gcpProvider{}, &gkeProvider{} }, //nolint:exhaustruct // bare.
+		newAzure:          func() (azcore.TokenCredential, error) { return fakeTokenCred{}, nil },
+		probeAzure:        func(context.Context, azcore.TokenCredential) error { return nil },
+		azureIdentity:     func(context.Context, azcore.TokenCredential) string { return "me@tenant" },
+		buildAzure:        func(azcore.TokenCredential) (*azureProvider, *aksProvider) { return &azureProvider{}, &aksProvider{} }, //nolint:exhaustruct // bare.
+		loadKube:          func() (resolvedCluster, error, error) { return resolvedCluster{}, nil, nil },                           //nolint:exhaustruct // zero.
+		buildKube:         func(resolvedCluster) *kubernetesProvider { return &kubernetesProvider{} },                              //nolint:exhaustruct // bare.
+		probeKube:         func(context.Context, *kubernetesProvider) error { return nil },
+		validateAWSPolicy: func(context.Context, aws.Config, string) error { return nil },
+		validateGCPRole:   func(context.Context, *google.Credentials, string) error { return nil },
+		validateAzureRole: func(context.Context, azcore.TokenCredential, string) (string, error) {
+			return "acdd72a7-3385-48ef-bd42-f606fba81ae7", nil
+		},
 	}
 }
 
@@ -792,4 +797,85 @@ func TestRegisterAWS_ScopeAssumeRole_rendersEnforcedLabel(t *testing.T) {
 	if !strings.Contains(out.statuses[0].Posture, "enforced=client+aws ·") {
 		t.Fatalf("posture=%q, want enforced=client+aws · …", out.statuses[0].Posture)
 	}
+}
+
+func TestRegisterAWS_CeilingValidationFails_Skips(t *testing.T) {
+	t.Parallel()
+
+	d := stubDeps()
+	d.validateAWSPolicy = func(context.Context, aws.Config, string) error {
+		return errors.New("AccessDenied: not authorized to perform iam:GetPolicy")
+	}
+
+	out := d.registerAWS(context.Background(), true)
+
+	if len(out.providers) != 0 {
+		t.Fatalf("expected no providers on ceiling-validation failure, got %d", len(out.providers))
+	}
+	if got := out.statuses[0].Reason; !strings.Contains(got, "policy") {
+		t.Errorf("reason = %q, want a policy-validation reason", got)
+	}
+	if out.statuses[0].Available {
+		t.Errorf("connector should be unavailable")
+	}
+}
+
+func TestRegisterGCP_CeilingValidationFails_Skips(t *testing.T) {
+	t.Parallel()
+
+	d := stubDeps()
+	d.validateGCPRole = func(context.Context, *google.Credentials, string) error {
+		return errors.New("roles/viewer not found or access denied")
+	}
+
+	out := d.registerGCP(context.Background(), true)
+
+	if len(out.providers) != 0 {
+		t.Fatalf("expected no providers on ceiling-validation failure, got %d", len(out.providers))
+	}
+	if got := out.statuses[0].Reason; !strings.Contains(got, "role") {
+		t.Errorf("reason = %q, want a role-validation reason", got)
+	}
+	if out.statuses[0].Available {
+		t.Errorf("connector should be unavailable")
+	}
+}
+
+func TestRegisterAzure_Validation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("validation failure skips with reason", func(t *testing.T) {
+		t.Parallel()
+		d := stubDeps()
+		d.validateAzureRole = func(context.Context, azcore.TokenCredential, string) (string, error) {
+			return "", errors.New("role definition not found")
+		}
+		out := d.registerAzure(context.Background(), true)
+		if len(out.providers) != 0 {
+			t.Fatalf("expected no providers on ceiling-validation failure, got %d", len(out.providers))
+		}
+		if got := out.statuses[0].Reason; !strings.Contains(got, "role") {
+			t.Errorf("reason = %q, want a role-definition-validation reason", got)
+		}
+		if out.statuses[0].Available {
+			t.Errorf("connector should be unavailable")
+		}
+	})
+
+	t.Run("validation success posture contains GUID", func(t *testing.T) {
+		t.Parallel()
+		d := stubDeps()
+		const wantGUID = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+		d.azureRoleDefinition = "Reader"
+		d.validateAzureRole = func(context.Context, azcore.TokenCredential, string) (string, error) {
+			return wantGUID, nil
+		}
+		out := d.registerAzure(context.Background(), false)
+		if len(out.providers) == 0 || !out.statuses[0].Available {
+			t.Fatalf("expected providers+available, got %+v", out)
+		}
+		if got := out.statuses[0].Posture; !strings.Contains(got, "Reader ("+wantGUID+")") {
+			t.Errorf("posture = %q, want it to contain %q", got, "Reader ("+wantGUID+")")
+		}
+	})
 }

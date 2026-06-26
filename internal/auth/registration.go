@@ -34,24 +34,27 @@ type registrationDeps struct {
 	buildGitLab    func(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error)
 	validateGitLab func(ctx context.Context, p *gitlabProvider) (username string, err error)
 
-	loadAWS         func(context.Context) (aws.Config, error)
-	retrieveAWS     func(context.Context, aws.Config) error
-	validateAWS     func(context.Context, aws.Config) (string, string, string, error) // display, rawARN, account, err.
-	resolveScopeAWS func(ctx context.Context, account, rawARN string, cfg aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider)
-	buildAWS        func(aws.Config, aws.CredentialsProvider) (*awsProvider, *eksProvider)
-	awsPolicyARN    string
+	loadAWS           func(context.Context) (aws.Config, error)
+	retrieveAWS       func(context.Context, aws.Config) error
+	validateAWS       func(context.Context, aws.Config) (string, string, string, error) // display, rawARN, account, err.
+	resolveScopeAWS   func(ctx context.Context, account, rawARN string, cfg aws.Config) (awshardening.ScopeResult, aws.CredentialsProvider)
+	buildAWS          func(aws.Config, aws.CredentialsProvider) (*awsProvider, *eksProvider)
+	awsPolicyARN      string
+	validateAWSPolicy func(ctx context.Context, cfg aws.Config, policyARN string) error
 
-	findGCP     func(context.Context) (*google.Credentials, error)
-	probeGCP    func(context.Context) error
-	gcpIdentity func(context.Context, *google.Credentials) string
-	buildGCP    func(*google.Credentials) (*gcpProvider, *gkeProvider)
-	gcpRole     string
+	findGCP         func(context.Context) (*google.Credentials, error)
+	probeGCP        func(context.Context) error
+	gcpIdentity     func(context.Context, *google.Credentials) string
+	buildGCP        func(*google.Credentials) (*gcpProvider, *gkeProvider)
+	gcpRole         string
+	validateGCPRole func(ctx context.Context, creds *google.Credentials, role string) error
 
 	newAzure            func() (azcore.TokenCredential, error)
 	probeAzure          func(context.Context, azcore.TokenCredential) error
 	azureIdentity       func(context.Context, azcore.TokenCredential) string
 	buildAzure          func(azcore.TokenCredential) (*azureProvider, *aksProvider)
 	azureRoleDefinition string
+	validateAzureRole   func(ctx context.Context, cred azcore.TokenCredential, roleDef string) (string, error)
 
 	loadKube       func() (resolvedCluster, error, error)
 	buildKube      func(resolvedCluster) *kubernetesProvider
@@ -145,6 +148,16 @@ func (d *registrationDeps) registerAWS(ctx context.Context, verbose bool) connec
 			escalateForTransient(policy, cmpErr(loadErr, credErr)), msg)
 	}
 
+	vctx, vcancel := context.WithTimeout(ctx, ceilingValidationTimeout)
+	defer vcancel()
+	if verr := retryProbe(func() error { return d.validateAWSPolicy(vctx, cfg, d.awsPolicyARN) }); verr != nil {
+		explicit := awsExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir, d.awsDefaultProfileCreds)
+
+		return skipOutcome(awsProviderName, explicit, verbose,
+			escalateForTransient(emitWhenExplicitOrVerbose, verr),
+			fmt.Sprintf("aws_hardening: skipped (policy validation failed): %v", verr))
+	}
+
 	awsProv, eks := d.buildAWS(cfg, scoped)
 	posture := buildPosture(awsAccess(d.awsPolicyARN), awsEnforced(scopeResult), awsPostureLabel(d.awsPolicyARN))
 	status := availStatus(awsProviderName, posture, identity, false)
@@ -183,6 +196,16 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 
 		return skipOutcome(gcpProviderName, explicit, verbose,
 			escalateForTransient(emitWhenExplicitOrVerbose, cmpErr(findErr, probeErr)), msg)
+	}
+
+	vctx, vcancel := context.WithTimeout(ctx, ceilingValidationTimeout)
+	defer vcancel()
+	if verr := retryProbe(func() error { return d.validateGCPRole(vctx, creds, d.gcpRole) }); verr != nil {
+		explicit := gcpExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir)
+
+		return skipOutcome(gcpProviderName, explicit, verbose,
+			escalateForTransient(emitWhenExplicitOrVerbose, verr),
+			fmt.Sprintf("gcp_hardening: skipped (role validation failed): %v", verr))
 	}
 
 	identity := boundedIdentity(ctx, identityProbeTimeout, func(ictx context.Context) string {
@@ -226,14 +249,31 @@ func (d *registrationDeps) registerAzure(ctx context.Context, verbose bool) conn
 			escalateForTransient(emitWhenExplicitOrVerbose, cmpErr(chainErr, probeErr)), msg)
 	}
 
+	vctx, vcancel := context.WithTimeout(ctx, ceilingValidationTimeout)
+	defer vcancel()
+	var guid string
+	if verr := retryProbe(func() error {
+		g, e := d.validateAzureRole(vctx, cred, d.azureRoleDefinition)
+		guid = g
+		return e
+	}); verr != nil {
+		explicit := azureExplicitlyConfigured(d.lookupEnv)
+
+		return skipOutcome(azureProviderName, explicit, verbose,
+			escalateForTransient(emitWhenExplicitOrVerbose, verr),
+			fmt.Sprintf("azure_hardening: skipped (role definition validation failed): %v", verr))
+	}
+
 	identity := boundedIdentity(ctx, identityProbeTimeout, func(ictx context.Context) string {
 		return d.azureIdentity(ictx, cred)
 	})
 	azureProv, aks := d.buildAzure(cred)
 
-	// TODO(Task 4): append resolved GUID via azurePostureLabel.
-	azureCeiling := "role definition=" + d.azureRoleDefinition
-	posture := buildPosture(azureAccess(d.azureRoleDefinition), enforcedClient, azureCeiling)
+	posture := buildPosture(
+		azureAccess(d.azureRoleDefinition),
+		enforcedClient,
+		azurePostureLabel(d.azureRoleDefinition, guid),
+	)
 	status := availStatus(azureProviderName, posture, identity, false)
 	status.Managed = aksProviderName
 

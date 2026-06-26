@@ -178,7 +178,8 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 
 			return hardened, eks
 		},
-		awsPolicyARN: cfg.AWS.PolicyARN,
+		awsPolicyARN:      cfg.AWS.PolicyARN,
+		validateAWSPolicy: validateAWSPolicy,
 
 		findGCP: func(ctx context.Context) (*google.Credentials, error) {
 			return google.FindDefaultCredentials(ctx, gcpScope)
@@ -191,7 +192,8 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 
 			return buildHardenedGCPProvider(creds.TokenSource, cfg.GCP), gke
 		},
-		gcpRole: cfg.GCP.Role,
+		gcpRole:         cfg.GCP.Role,
+		validateGCPRole: validateGCPRole,
 
 		newAzure: func() (azcore.TokenCredential, error) { return azurehardening.NewCredentialChain(azureCloud) },
 		probeAzure: func(ctx context.Context, cred azcore.TokenCredential) error {
@@ -207,6 +209,9 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 			return buildHardenedAzureProvider(cred, cfg.Azure, azureCloud), aks
 		},
 		azureRoleDefinition: cfg.Azure.RoleDefinition,
+		validateAzureRole: func(ctx context.Context, cred azcore.TokenCredential, roleDef string) (string, error) {
+			return validateAzureRole(ctx, cred, azureCloud, roleDef)
+		},
 
 		loadKube: loadSelectedCluster,
 		buildKube: func(rc resolvedCluster) *kubernetesProvider {

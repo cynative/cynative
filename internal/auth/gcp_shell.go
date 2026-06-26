@@ -13,6 +13,21 @@ import (
 // gcpScope is the cloud-platform scope used for ADC discovery and the probe.
 const gcpScope = "https://www.googleapis.com/auth/cloud-platform"
 
+// validateGCPRole confirms the configured GCP role resolves (ceiling only; not
+// the full lazy bootstrap). Shell: real IAM Roles client over an oauth2-authed
+// HTTP client (a plain client disables ADC auth and 401s).
+func validateGCPRole(ctx context.Context, creds *google.Credentials, role string) error {
+	authedClient := oauth2.NewClient(ctx, creds.TokenSource)
+	authedClient.Timeout = ceilingValidationTimeout
+	rc, err := gcphardening.NewIAMRolesClient(ctx, gcphardening.IAMClientConfig{HTTPClient: authedClient})
+	if err != nil {
+		return err
+	}
+	_, err = gcphardening.FetchRolePermissions(ctx, rc, role)
+
+	return err
+}
+
 // probeGCPToken validates that ADC can mint a token, using a SEPARATE
 // credentials source bound to the caller's (already-bounded) ctx so the
 // registered (Background-bound) source is never poisoned by the probe's

@@ -14,6 +14,13 @@ import (
 // former per-connector gcpProbeTimeout / azureProbeTimeout values.
 const credentialProbeTimeout = 5 * time.Second
 
+// ceilingValidationTimeout bounds the registration-time fetch+validation of the
+// configured ceiling (AWS policy doc, GCP role, Azure role definition). It is
+// larger than credentialProbeTimeout because the ceiling fetch is a real
+// multi-call API round-trip, not a token mint; it is decoupled so a slow ceiling
+// fetch on a healthy credential does not false-skip the connector.
+const ceilingValidationTimeout = 30 * time.Second
+
 // isTransientProbeErr reports whether a registration-probe error is operational
 // /transient (a timeout/cancellation, a network timeout, or an HTTP 429/5xx)
 // as opposed to a definitive answer (no credential, access denied).

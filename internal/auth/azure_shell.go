@@ -10,6 +10,25 @@ import (
 	azurehardening "github.com/cynative/cynative/internal/auth/azure"
 )
 
+// validateAzureRole confirms the configured role definition exists and returns
+// its GUID. Shell: real ARM role-definitions client.
+func validateAzureRole(
+	ctx context.Context,
+	cred azcore.TokenCredential,
+	azureCloud azurehardening.CloudConfig,
+	roleDef string,
+) (string, error) {
+	rc, err := azurehardening.NewRoleClient(azurehardening.RoleClientConfig{ //nolint:exhaustruct // overrides only.
+		Credential: cred,
+		Cloud:      azureCloud,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return rc.RoleID(ctx, roleDef)
+}
+
 // probeAzureToken validates the credential chain can mint an ARM token for the
 // resolved cloud's ARM audience using the caller's (already-bounded) ctx. It
 // validates the CHAIN, not the env credential in isolation, so a partial AZURE_*
