@@ -5,17 +5,17 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 
 <!-- BEGIN agent-about -->
-Point a frontier model at your code, cloud and runtime - and let it find what matters.
+Cynative runs frontier models across your code, cloud and runtime - and finds what matters.
 
 Ask it to reason through your infra, trace attack paths, surface overprivileged identities, hunt threats, triage your scanners' findings down to what's real or research anything you'd page an engineer for - each finding cross-checked and traced back to where the risk was introduced.
 
-It codes in an ephemeral sandbox, querying your APIs in parallel so one question scales across your whole stack. Every call is classified and gated before a credential is attached - unlike coding agents & MCP servers, it stays read-only however broad your access is.
+It codes in an ephemeral sandbox, querying your APIs in parallel so one question spans your whole stack. Every call is classified and gated before a credential is attached - unlike coding agents & MCP servers, it stays read-only however broad your access is.
 
-Run it on production with confidence.
+Point it at production with confidence.
 
 ## What makes it special
 
-- **🔗 Code-to-runtime**: Reasons across GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system
+- **🔗 Code-to-runtime**: Reasons through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system
 - **🏠 Sovereign**: Runs locally with your own model, entirely in your environment
 - **🚦 Action-gate**: Authorizes every call against a read-only policy
 - **🧪 Sandbox**: Generates and runs code to research at scale
