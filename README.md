@@ -1,19 +1,25 @@
-# Cynative - Security Research Agent
+# Cynative - Agentic Security
 
 [![CI](https://github.com/cynative/cynative/actions/workflows/ci.yaml/badge.svg)](https://github.com/cynative/cynative/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/cynative/cynative)](https://github.com/cynative/cynative/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 
 <!-- BEGIN agent-about -->
-Cynative runs frontier models to secure your stack. It researches your code, cloud and runtime in a built-in sandbox - read-only by default.
+Point a frontier model at your code, cloud and runtime - and let it find what matters.
+
+Ask it to reason through your infra, trace attack paths, surface overprivileged identities, hunt threats, triage your scanners' findings down to what's real or research anything you'd page an engineer for - each finding cross-checked and traced back to where the risk was introduced.
+
+It codes in an ephemeral sandbox, querying your APIs in parallel so one question scales across your whole stack. Every call is classified and gated before a credential is attached - unlike coding agents & MCP servers, it stays read-only however broad your access is.
+
+Run it on production with confidence.
 
 ## What makes it special
 
+- **🔗 Code-to-runtime**: Reasons across GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system
+- **🏠 Sovereign**: Runs locally with your own model, entirely in your environment
+- **🚦 Action-gate**: Authorizes every call against a read-only policy
 - **🧪 Sandbox**: Generates and runs code to research at scale
-- **🔗 Code-to-runtime**: Reasons across source, cloud and runtime together
-- **🚦 Action-gate**: Read-only, classified and enforced on every call
-- **✅ Evidence-backed**: Verifies each finding from multiple angles
-- **📖 Sovereign**: Local, bring your own model - stays entirely in your environment
+- **✅ Evidence-backed**: Cross-checks and verifies every finding
 <!-- END agent-about -->
 
 <p align="center">
