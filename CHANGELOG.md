@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/cynative/cynative/compare/v1.2.0...v1.2.1) (2026-06-29)
+
+
+### Bug Fixes
+
+* **deps:** Bump github.com/aws/smithy-go in the all-dependencies group ([#20](https://github.com/cynative/cynative/issues/20)) ([b06d1c9](https://github.com/cynative/cynative/commit/b06d1c966440a5f3567cbf75f3e4eeb0d69eba2d))
+
 ## [1.2.0](https://github.com/cynative/cynative/compare/v1.1.0...v1.2.0) (2026-06-26)
 
 
