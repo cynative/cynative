@@ -14,6 +14,10 @@ class Cynative < Formula
   license "Apache-2.0"
 
   on_macos do
+    # cynative is built with Go 1.26, whose macOS floor is 12 (Monterey), so gate
+    # installs there — unsupported hosts fail before downloading an unrunnable binary.
+    depends_on macos: ">= :monterey"
+
     on_arm do
       url "https://github.com/cynative/cynative/releases/download/v#{version}/cynative_Darwin_arm64.tar.gz"
       sha256 "${sha_darwin_arm}"
