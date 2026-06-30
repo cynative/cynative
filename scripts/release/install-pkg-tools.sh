@@ -3,7 +3,7 @@
 #   rcodesign  — version pinned in tools/rcodesign/Cargo.toml (dependabot: cargo)
 #   bomutils   — third_party/bomutils submodule              (dependabot: gitsubmodule)
 #   xar        — third_party/xar submodule                   (dependabot: gitsubmodule)
-# Idempotent: skips any tool already present. Installs to ${PKGTOOLS_PREFIX:-/usr/local}/bin.
+# Idempotent per tool (skips any tool already on PATH); the apt build-deps step always runs. Installs to ${PKGTOOLS_PREFIX:-/usr/local}/bin.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

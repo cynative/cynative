@@ -132,6 +132,7 @@ jobs:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
         run: |
+          umask 077
           scripts/release/install-pkg-tools.sh
           d="$(mktemp -d)"
           printf '%s' "${MACOS_SIGN_P12}" | base64 -d > "${d}/app.p12"

@@ -25,7 +25,10 @@ grep -q 'chains_to_apple_root_ca: true' <<<"${pkg_sig}" || { echo "::error::pkg 
 # NOTE: `print-signature-info` does NOT surface the staple — it only reads the XAR TOC signature.
 # rcodesign staples by appending a `t8lr`-magic notarization-ticket trailer to the .pkg (verified
 # against a real Apple-accepted+stapled pkg). Detect that trailer directly (fail-closed).
-grep -Pqa '\x74\x38\x6c\x72' "${pkg}" \
+# rcodesign appends a fixed ~1706-byte notarization-ticket trailer starting with the `t8lr`
+# magic at the very end of the .pkg (validated: magic at EOF-1706 across real stapled pkgs).
+# Anchor to the tail so a coincidental `t8lr` elsewhere in the payload can't false-pass.
+tail -c 4096 "${pkg}" | grep -Pqa '\x74\x38\x6c\x72' \
   || { echo "::error::pkg missing stapled notarization ticket (no t8lr trailer)" >&2; exit 1; }
 
 # 3. Payload contents + ownership.

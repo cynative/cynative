@@ -98,8 +98,14 @@ submodule SHA when the upstream moves.
 The `pkg-tools.yaml` CI job (`Packaging toolchain` workflow) fires on any PR that
 touches `tools/rcodesign/**`, `third_party/**`, `.gitmodules`, or the packaging
 scripts. It installs the full toolchain and runs a smoke assembly (unsigned pkg
-from a test binary) to confirm the bump doesn't break the build. Dependabot PRs
-must pass this job before they are eligible for auto-merge.
+from a test binary) to confirm the bump doesn't break the build.
+
+NOTE: this job is advisory unless it is added to the branch ruleset's *required
+status checks*. GitHub auto-merge only waits on the repo's configured required
+checks — currently `Lint & Test` and `Validate PR title` — so a dependabot bump
+could auto-merge once those pass, even if `pkg-tools.yaml` has not yet run or has
+failed. To make it a hard gate on auto-merge, add the `Build & smoke-test macOS
+packaging toolchain` check to the `default` ruleset's required status checks.
 
 ---
 
