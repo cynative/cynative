@@ -20,9 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     # Bound the job: the concurrency group means a wedged run blocks later
     # releases for the default 360 minutes otherwise. The budget covers the
-    # capped long steps (goreleaser 35, verify 5) plus every short step with
-    # slack to spare, so the job limit can never fire mid-step.
-    timeout-minutes: 60
+    # capped long steps (goreleaser 35, pkg build/notarize 20, verify 5) plus
+    # every short step with slack to spare, so the job limit can never fire
+    # mid-step.
+    timeout-minutes: 90
     steps:
       # The App must grant contents: write (tag + release), pull-requests:
       # write (release PRs), and Administration: read (the publish step's
@@ -76,13 +77,15 @@ jobs:
           skip-github-pull-request: true
 
       # The tag does not exist yet, so check out the exact SHA release-please
-      # cut the release from.
+      # cut the release from. submodules: recursive is required so the
+      # packaging toolchain (bomutils/xar) is available to install-pkg-tools.sh.
       - name: Checkout code
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           ref: ${{ steps.release-please.outputs.sha }}
+          submodules: recursive
 
       # Materialize the release tag at the verified SHA (or hard-fail if a
       # pre-existing tag points elsewhere), then fetch it so goreleaser sees a
@@ -111,9 +114,11 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_INSTALLER_P12: ${{ secrets.MACOS_INSTALLER_P12 }}
+          MACOS_INSTALLER_PASSWORD: ${{ secrets.MACOS_INSTALLER_PASSWORD }}
         run: |
           missing=0
-          for var in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY; do
+          for var in MACOS_SIGN_P12 MACOS_SIGN_PASSWORD MACOS_NOTARY_ISSUER_ID MACOS_NOTARY_KEY_ID MACOS_NOTARY_KEY MACOS_INSTALLER_P12 MACOS_INSTALLER_PASSWORD; do
             if [ -z "${!var}" ]; then
               echo "::error::required signing secret ${var} is empty"
               missing=1
@@ -121,33 +126,29 @@ jobs:
           done
           exit "${missing}"
 
-      # Builds, signs/notarizes, adopts the release-please draft (matched by
-      # title == tag) and uploads all assets — but does NOT publish:
-      # .goreleaser.yaml sets release.draft, so the workflow owns the publish
-      # step below, after every assertion passes.
-      #
-      # In the pinned goreleaser, sign/notarize failures (including a
-      # notarization outliving its timeout) hard-fail the run before any
-      # upload completes the handoff. The post-run assertion is
-      # defense-in-depth, preserved unchanged (its
-      # precision trade-offs were settled): it re-checks that both darwin
-      # binaries logged a per-binary "notarized" success line, guarding
-      # against future goreleaser behavior drift. It now runs pre-publish: a
-      # failure here leaves only an editable draft.
+      - name: Install packaging tools & stage signing material
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+        run: |
+          scripts/release/install-pkg-tools.sh
+          d="$(mktemp -d)"
+          printf '%s' "${MACOS_SIGN_P12}" | base64 -d > "${d}/app.p12"
+          printf '%s' "${MACOS_SIGN_PASSWORD}" > "${d}/app.pw"
+          chmod 600 "${d}/app.p12" "${d}/app.pw"
+          { echo "MACOS_SIGN_P12_FILE=${d}/app.p12"; echo "MACOS_SIGN_PASSWORD_FILE=${d}/app.pw"; } >> "${GITHUB_ENV}"
+
+      # Builds and signs darwin binaries via goreleaser hooks (signing material
+      # is available via MACOS_SIGN_P12_FILE/MACOS_SIGN_PASSWORD_FILE exported
+      # in the previous step). GoReleaser no longer notarizes; the dedicated
+      # "Build, sign, notarize & staple macOS pkgs" step below handles that.
       - name: Run GoReleaser
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
-        # Step-level cap so a slow build/notarization fails BEFORE publish
-        # instead of letting the job timeout kill the runner between the
-        # publish PATCH and the post-publish verification steps.
+        # Step-level cap so a slow build fails BEFORE publish instead of letting
+        # the job timeout kill the runner between the publish PATCH and the
+        # post-publish verification steps.
         timeout-minutes: 35
-        run: |
-          set -o pipefail
-          go tool goreleaser release --clean 2>&1 | tee /tmp/goreleaser.log
-          notarized="$(grep -cE '(^|[[:space:]])notarized([[:space:]]|$)' /tmp/goreleaser.log || true)"
-          if [ "${notarized}" -lt 2 ]; then
-            echo "::error::expected 2 notarized darwin binaries, found ${notarized} — investigate the goreleaser log before trusting this release"
-            exit 1
-          fi
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
@@ -155,6 +156,55 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+        run: |
+          set -o pipefail
+          go tool goreleaser release --clean 2>&1 | tee /tmp/goreleaser.log
+
+      - name: Build, sign, notarize & staple macOS pkgs
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        timeout-minutes: 20
+        env:
+          MACOS_INSTALLER_P12: ${{ secrets.MACOS_INSTALLER_P12 }}
+          MACOS_INSTALLER_PASSWORD: ${{ secrets.MACOS_INSTALLER_PASSWORD }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          VERSION: ${{ steps.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          umask 077                                   # secret files default-private (Codex M3)
+          d="$(mktemp -d)"; trap 'rm -rf "${d}"' EXIT
+          printf '%s' "${MACOS_INSTALLER_P12}" | base64 -d > "${d}/inst.p12"
+          printf '%s' "${MACOS_INSTALLER_PASSWORD}" > "${d}/inst.pw"
+          printf '%s' "${MACOS_NOTARY_KEY}" | base64 -d > "${d}/notary.p8" 2>/dev/null \
+            || printf '%s' "${MACOS_NOTARY_KEY}" > "${d}/notary.p8"
+          rcodesign encode-app-store-connect-api-key -o "${d}/notary.json" \
+            "${MACOS_NOTARY_ISSUER_ID}" "${MACOS_NOTARY_KEY_ID}" "${d}/notary.p8"
+          chmod 600 "${d}/inst.p12" "${d}/inst.pw" "${d}/notary.p8" "${d}/notary.json"
+          ver="${VERSION#v}"
+          : > /tmp/pkg-assets.tsv
+          for pair in "arm64:arm64" "amd64:x86_64"; do
+            goarch="${pair%%:*}"; label="${pair##*:}"
+            # jq -er + exactly-one-match guard so a miss errors instead of yielding "" (Codex m1).
+            bin="$(jq -er --arg a "${goarch}" 'map(select(.type=="Binary" and .goos=="darwin" and .goarch==$a))|if length==1 then .[0].path else error("expected one darwin binary for "+$a) end' dist/artifacts.json)"
+            tgz="$(jq -er --arg n "cynative_Darwin_${label}.tar.gz" 'map(select(.type=="Archive" and .name==$n))|if length==1 then .[0].path else error("expected one archive "+$n) end' dist/artifacts.json)"
+            pkg="dist/cynative_Darwin_${label}.pkg"
+            scripts/release/assemble-macos-pkg.sh "${goarch}" "${bin}" "${ver}" "${pkg}"
+            MACOS_INSTALLER_P12_FILE="${d}/inst.p12" MACOS_INSTALLER_PASSWORD_FILE="${d}/inst.pw" \
+              MACOS_NOTARY_API_KEY_JSON="${d}/notary.json" \
+              scripts/release/sign-notarize-pkg.sh "${pkg}"
+            scripts/release/assert-pkg.sh "${pkg}" "${bin}"
+            scripts/release/assert-binary-equivalence.sh "${bin}" "${tgz}" "${pkg}"
+            printf '%s\t%s\t%s\n' "$(basename "${pkg}")" "$(sha256sum "${pkg}" | cut -d' ' -f1)" "${pkg}" >> /tmp/pkg-assets.tsv
+          done
+          cat /tmp/pkg-assets.tsv
+
+      - name: Upload pkgs to draft release
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          TAG: ${{ steps.release-please.outputs.tag_name }}
+        run: gh release upload "${TAG}" dist/*.pkg --clobber --repo "${GITHUB_REPOSITORY}"
 
       # ---- Pre-publish assertions ----------------------------------------
       # Everything below until "Publish release" runs while the release is
@@ -178,6 +228,8 @@ jobs:
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: |
           scripts/release/expected-assets.sh dist > /tmp/expected-assets.tsv
+          cat /tmp/pkg-assets.tsv >> /tmp/expected-assets.tsv
+          LC_ALL=C sort -o /tmp/expected-assets.tsv /tmp/expected-assets.tsv
           scripts/release/assert-assets.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}" /tmp/expected-assets.tsv
 
       - name: Re-verify tag before publish
@@ -242,6 +294,21 @@ jobs:
             cynative
             homebrew-tap
             scoop-bucket
+
+      - name: Render & push Homebrew cask
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.refresh-token.outputs.token || steps.generate-token.outputs.token }}
+          VERSION: ${{ steps.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          ver="${VERSION#v}"
+          arm="$(awk -F'\t' '$1=="cynative_Darwin_arm64.pkg"{print $2}' /tmp/pkg-assets.tsv)"
+          intel="$(awk -F'\t' '$1=="cynative_Darwin_x86_64.pkg"{print $2}' /tmp/pkg-assets.tsv)"
+          # Never push a cask with an empty/garbage sha256 (Codex M6).
+          [[ "${arm}"   =~ ^[0-9a-f]{64}$ ]] || { echo "::error::missing arm64 pkg sha256" >&2; exit 1; }
+          [[ "${intel}" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::missing x86_64 pkg sha256" >&2; exit 1; }
+          scripts/release/publish-cask.sh "${ver}" "${arm}" "${intel}"
 
       # release-please PHASE 2 — candidate PR only (skip-github-release).
       # On normal pushes this is the only place the next-release candidate is
