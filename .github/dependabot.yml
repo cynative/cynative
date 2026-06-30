@@ -14,3 +14,11 @@ updates:
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
+  - package-ecosystem: "cargo"
+    directory: "/tools/rcodesign"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"

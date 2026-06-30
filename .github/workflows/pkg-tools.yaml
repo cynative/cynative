@@ -1,0 +1,37 @@
+name: Packaging toolchain
+
+on:
+  pull_request:
+    paths:
+      - "tools/rcodesign/**"
+      - "third_party/**"
+      - ".gitmodules"
+      - "scripts/release/install-pkg-tools.sh"
+      - "scripts/release/assemble-macos-pkg.sh"
+      - ".github/workflows/pkg-tools.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-toolchain:
+    name: Build & smoke-test macOS packaging toolchain
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          submodules: recursive
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Install packaging toolchain
+        run: scripts/release/install-pkg-tools.sh
+      - name: Smoke-assemble an unsigned pkg
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o /tmp/cyn ./cmd/cynative
+          scripts/release/assemble-macos-pkg.sh arm64 /tmp/cyn 0.0.0 /tmp/test.pkg
+          xar -tf /tmp/test.pkg
+          ( cd /tmp && rm -rf x && mkdir x && cd x && xar -xf /tmp/test.pkg \
+              && gunzip -c base.pkg/Payload | cpio -idm 2>/dev/null && test -x usr/local/bin/cynative )
+          echo "toolchain + assembly OK"
