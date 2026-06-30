@@ -33,7 +33,9 @@ until rcodesign sign \
 done
 
 # Verify hardened runtime + both JIT entitlements BEFORE replacing the original.
-info="$(rcodesign print-signature-info "${tmp}" 2>/dev/null || true)"
+# print-signature-info exits 0 on success (unlike analyze-certificate), so no `|| true`;
+# keep stderr so a real signing failure shows a legible rcodesign error, not "runtime flag missing".
+info="$(rcodesign print-signature-info "${tmp}")"
 grep -qi 'runtime'                          <<<"${info}" || { echo "::error::hardened runtime flag missing" >&2; exit 1; }
 grep -q  'allow-unsigned-executable-memory' <<<"${info}" || { echo "::error::allow-unsigned-executable-memory missing" >&2; exit 1; }
 grep -q  'allow-jit'                        <<<"${info}" || { echo "::error::allow-jit missing" >&2; exit 1; }
