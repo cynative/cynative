@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Cynative</title>
+  <volume-check>
+    <allowed-os-versions>
+      <os-version min="11.0"/>
+    </allowed-os-versions>
+  </volume-check>
+  <options customize="never" require-scripts="false" hostArchitectures="@HOST_ARCH@"/>
+  <choices-outline>
+    <line choice="default"/>
+  </choices-outline>
+  <choice id="default" title="Cynative">
+    <pkg-ref id="@IDENTIFIER@"/>
+  </choice>
+  <pkg-ref id="@IDENTIFIER@" version="@VERSION@" auth="root">#base.pkg</pkg-ref>
+</installer-gui-script>
