@@ -33,7 +33,7 @@ grep -Pqa '\x74\x38\x6c\x72' "${pkg}" \
 # the Payload cpio itself (numeric). The Bom is built with `mkbom -u 0 -g 0`, so it matches
 # the Payload by construction; macOS Installer reads the Bom natively at install time.
 ( cd "${work}" && xar -xf "${pkg}" base.pkg/Payload base.pkg/Bom )
-own="$(gunzip -c "${work}/base.pkg/Payload" | cpio -itnv 2>/dev/null | awk '$NF ~ /usr\/local\/bin\/cynative$/{print $3" "$4}')"
+own="$(gunzip -c "${work}/base.pkg/Payload" | cpio -itnv 2>/dev/null | awk '$NF ~ /(^|\/)usr\/local\/bin\/cynative$/{print $3" "$4}')"
 [ "${own}" = "0 0" ] || { echo "::error::payload binary not root:wheel (got owner '${own}')" >&2; exit 1; }
 ( cd "${work}" && gunzip -c base.pkg/Payload | cpio -idm 2>/dev/null )
 test -f "${work}/usr/local/bin/cynative" || { echo "::error::payload missing /usr/local/bin/cynative" >&2; exit 1; }
@@ -44,7 +44,7 @@ a="$(sha256sum "${ref}" | cut -d' ' -f1)"; b="$(sha256sum "${work}/usr/local/bin
 
 # 5. Hardened runtime + BOTH JIT entitlements on the payload binary (Codex M5).
 info="$(rcodesign print-signature-info "${work}/usr/local/bin/cynative" 2>/dev/null || true)"
-grep -qi runtime                         <<<"${info}" || { echo "::error::payload binary missing hardened runtime" >&2; exit 1; }
+grep -qE 'CodeSignatureFlags\([^)]*RUNTIME' <<<"${info}" || { echo "::error::payload binary missing hardened runtime" >&2; exit 1; }
 grep -q  allow-unsigned-executable-memory <<<"${info}" || { echo "::error::payload binary missing allow-unsigned-executable-memory" >&2; exit 1; }
 grep -q  allow-jit                        <<<"${info}" || { echo "::error::payload binary missing allow-jit" >&2; exit 1; }
 echo "assert-pkg OK: ${pkg}"
