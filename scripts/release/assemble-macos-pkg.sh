@@ -5,6 +5,7 @@ set -euo pipefail
 
 goarch="$1"; binary="$2"; version="$3"; out_arg="$4"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p "$(dirname "${out_arg}")"
 out="$(cd "$(dirname "${out_arg}")" && pwd)/$(basename "${out_arg}")"   # absolutize before any cd
 
 case "${goarch}" in
@@ -19,7 +20,7 @@ mkdir -p "${root}/usr/local/bin" "${flat}/base.pkg"
 install -m 0755 "${binary}" "${root}/usr/local/bin/cynative"
 
 # Payload: deterministic cpio (odc), root:wheel ownership, gzip.
-( cd "${root}" && find . | LC_ALL=C sort | cpio -o --format odc -R 0:0 2>/dev/null | gzip -c ) \
+( cd "${root}" && find . | LC_ALL=C sort | cpio -o --format odc -R 0:0 | gzip -c ) \
   > "${flat}/base.pkg/Payload"
 
 # Bom: matching root:wheel ownership.
