@@ -14,18 +14,26 @@ func Classify(idx MethodIndex, req *http.Request) (string, error) {
 	method := strings.ToUpper(req.Method)
 	path := strings.Trim(req.URL.Path, "/")
 
-	ids := slices.Sorted(maps.Keys(idx)) // deterministic iteration.
+	keys := slices.Sorted(maps.Keys(idx)) // deterministic iteration.
+
+	seen := map[string]bool{}
 
 	var survivors []string
 
-	for _, id := range ids {
-		md := idx[id]
+	for _, key := range keys {
+		md := idx[key]
 		if !strings.EqualFold(md.HTTPMethod, method) {
 			continue
 		}
 
-		if matchTemplate(effectiveTemplate(md), path) {
-			survivors = append(survivors, id)
+		// Return the authoritative Discovery id (md.ID), never the map key: the
+		// multi-version merge may store a method under a disambiguated key when its
+		// id collides with a sibling version (see mergeServiceDocs). Dedup by id so
+		// two index entries that resolve to the same operation are one survivor, not
+		// a false ambiguity.
+		if matchTemplate(effectiveTemplate(md), path) && !seen[md.ID] {
+			seen[md.ID] = true
+			survivors = append(survivors, md.ID)
 		}
 	}
 

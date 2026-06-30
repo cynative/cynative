@@ -260,7 +260,7 @@ func TestMergeServiceDocs(t *testing.T) {
 	a := ServiceDoc{
 		RootURL: "https://iam.googleapis.com/",
 		Methods: MethodIndex{
-			"iam.roles.get":            {ID: "iam.roles.get", HTTPMethod: "GET"},
+			"iam.roles.get":            {ID: "iam.roles.get", HTTPMethod: "GET", FlatPath: "v1/roles/{rolesId}"},
 			"iam.serviceAccounts.list": {ID: "iam.serviceAccounts.list", HTTPMethod: "GET"},
 		},
 		Endpoints: []string{"a.example.com"},
@@ -269,24 +269,101 @@ func TestMergeServiceDocs(t *testing.T) {
 		RootURL: "https://iam.googleapis.com/",
 		Methods: MethodIndex{
 			"iam.policies.get": {ID: "iam.policies.get", HTTPMethod: "GET"},
-			"iam.roles.get":    {ID: "iam.roles.get", HTTPMethod: "POST"}, // id collision: later-seen (b) wins.
+			// Same Discovery id as a's, but a different request signature (a later
+			// version's path): a cross-version collision that must NOT drop a's
+			// method — both signatures stay routable.
+			"iam.roles.get": {ID: "iam.roles.get", HTTPMethod: "GET", FlatPath: "v2/roles/{rolesId}"},
 		},
 		Endpoints: []string{"b.example.com"},
 	}
 
 	got := mergeServiceDocs(a, b)
 
-	if len(got.Methods) != 3 {
-		t.Fatalf("merged methods = %d, want 3 (union)", len(got.Methods))
+	if len(got.Methods) != 4 {
+		t.Fatalf("merged methods = %d, want 4 (disjoint union + both signatures of the shared id)", len(got.Methods))
 	}
-	if got.Methods["iam.roles.get"].HTTPMethod != "POST" {
-		t.Error("id collision: later-seen (b) entry must win (matches the prior overwrite behavior)")
+	// Both version paths of the shared id survive — neither version overwrites the other.
+	var rolesGetTemplates []string
+	for _, md := range got.Methods {
+		if md.ID == "iam.roles.get" {
+			rolesGetTemplates = append(rolesGetTemplates, md.FlatPath)
+		}
+	}
+	if len(rolesGetTemplates) != 2 {
+		t.Errorf("shared id must keep both version signatures, got flatPaths %v", rolesGetTemplates)
 	}
 	if _, ok := got.Methods["iam.policies.get"]; !ok {
 		t.Error("b-only method must be merged in")
 	}
 	if len(got.Endpoints) != 2 {
 		t.Errorf("merged endpoints = %v, want both", got.Endpoints)
+	}
+}
+
+// TestMergeServiceDocsSameSignatureOverwrites pins that a genuine re-fetch of the
+// SAME method (same id, same method+template signature) overwrites rather than
+// accumulating a duplicate — so a re-modeled GA version does not bloat the index.
+func TestMergeServiceDocsSameSignatureOverwrites(t *testing.T) {
+	t.Parallel()
+
+	a := ServiceDoc{Methods: MethodIndex{
+		"svc.res.get": {ID: "svc.res.get", HTTPMethod: "GET", FlatPath: "v1/res/{resId}", Path: "old"},
+	}}
+	b := ServiceDoc{Methods: MethodIndex{
+		"svc.res.get": {ID: "svc.res.get", HTTPMethod: "GET", FlatPath: "v1/res/{resId}", Path: "new"},
+	}}
+
+	got := mergeServiceDocs(a, b)
+
+	if len(got.Methods) != 1 {
+		t.Fatalf("same-signature merge = %d methods, want 1 (overwrite, no duplicate)", len(got.Methods))
+	}
+	if got.Methods["svc.res.get"].Path != "new" {
+		t.Error("same-signature collision: later-seen (b) entry must overwrite")
+	}
+}
+
+// TestAssembleCatalogMultiVersionSameID pins the cloudresourcemanager v1+v3
+// regression: both versions define cloudresourcemanager.projects.list with the
+// SAME Discovery id but DIFFERENT request paths (v1/projects vs v3/projects).
+// The id-keyed merge must keep BOTH templates so a request to EITHER version
+// classifies — not only the last-fetched (v3) one, which would leave the most
+// common enumeration call (GET /v1/projects) unclassifiable and fail-closed.
+func TestAssembleCatalogMultiVersionSameID(t *testing.T) {
+	t.Parallel()
+
+	crmDoc := func(flatPath string) restDoc {
+		return restDoc{
+			RootURL:     "https://cloudresourcemanager.googleapis.com/",
+			ServicePath: "",
+			Methods: map[string]methodDoc{
+				"projects.list": {
+					ID:         "cloudresourcemanager.projects.list",
+					HTTPMethod: "GET",
+					FlatPath:   flatPath,
+				},
+			},
+		}
+	}
+	// Directory order: v1 first, then v3 (mirrors the live directory where v3 is
+	// last and "preferred", so it wins the prior overwrite merge).
+	data, err := assembleCatalog([]fetchedDoc{
+		{name: "cloudresourcemanager", doc: crmDoc("v1/projects"), ok: true},
+		{name: "cloudresourcemanager", doc: crmDoc("v3/projects"), ok: true},
+	})
+	if err != nil {
+		t.Fatalf("assembleCatalog: %v", err)
+	}
+
+	idx := data.Services["cloudresourcemanager"].Methods
+	for _, path := range []string{
+		"https://cloudresourcemanager.googleapis.com/v1/projects",
+		"https://cloudresourcemanager.googleapis.com/v3/projects",
+	} {
+		got, cerr := Classify(idx, req(t, "GET", path))
+		if cerr != nil || got != "cloudresourcemanager.projects.list" {
+			t.Errorf("Classify(%s) = %q err=%v, want cloudresourcemanager.projects.list", path, got, cerr)
+		}
 	}
 }
 

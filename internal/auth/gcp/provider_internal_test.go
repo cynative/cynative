@@ -398,19 +398,93 @@ func buildCRMProvider(t *testing.T, granted map[string]bool) *Provider {
 	return NewProvider(cat, perms, newRoleEvaluator(granted), "roles/viewer")
 }
 
-// GET /v3/projects under a role granting resourcemanager.projects.list is authorized.
+// TestProviderAuthorizeActionCRMProjectsListV1Allowed pins the multi-version
+// merge regression end to end: when the catalog merges cloudresourcemanager v1
+// and v3 (both define cloudresourcemanager.projects.list, at v1/projects vs
+// v3/projects), BOTH the GET /v1/projects and GET /v3/projects enumeration calls
+// classify and authorize under a role granting the union {projects.get,
+// projects.list} (roles/viewer grants both). Before the fix the id-keyed merge
+// kept only v3, so GET /v1/projects — the call a read-only audit naturally reaches
+// for first — failed closed as ErrClassifierUnknownOp before the permission
+// override was ever consulted.
+func TestProviderAuthorizeActionCRMProjectsListV1Allowed(t *testing.T) {
+	t.Parallel()
+
+	crmDoc := func(flatPath string) restDoc {
+		return restDoc{
+			RootURL: "https://cloudresourcemanager.googleapis.com/",
+			Methods: map[string]methodDoc{
+				"projects.list": {ID: "cloudresourcemanager.projects.list", HTTPMethod: "GET", FlatPath: flatPath},
+			},
+		}
+	}
+	data, err := assembleCatalog([]fetchedDoc{
+		{name: "cloudresourcemanager", doc: crmDoc("v1/projects"), ok: true},
+		{name: "cloudresourcemanager", doc: crmDoc("v3/projects"), ok: true},
+	})
+	if err != nil {
+		t.Fatalf("assembleCatalog: %v", err)
+	}
+	cat := newCatalog(func(context.Context) (DiscoveryData, error) { return data, nil })
+	perms := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), emptyDataset{})
+	eval := newRoleEvaluator(map[string]bool{
+		"resourcemanager.projects.get":  true,
+		"resourcemanager.projects.list": true,
+	})
+	p := NewProvider(cat, perms, eval, "roles/viewer")
+
+	for _, path := range []string{
+		"https://cloudresourcemanager.googleapis.com/v1/projects",
+		"https://cloudresourcemanager.googleapis.com/v3/projects",
+	} {
+		if aerr := p.AuthorizeAction(
+			context.Background(),
+			httpReq(t, "GET", path),
+			gcpArgs(t, "cloudresourcemanager"),
+		); aerr != nil {
+			t.Errorf("AuthorizeAction(%s) under a granting role should be authorized, got %v", path, aerr)
+		}
+	}
+}
+
+// GET /v3/projects under a role granting the projects.list union is authorized.
 // This also pins classification of GET /v3/projects -> cloudresourcemanager.projects.list
 // (the regression repro): a merge-order regression would surface here as ErrClassifierUnknownOp.
 func TestProviderAuthorizeActionCRMProjectsListAllowed(t *testing.T) {
 	t.Parallel()
 
-	p := buildCRMProvider(t, map[string]bool{"resourcemanager.projects.list": true})
+	p := buildCRMProvider(t, map[string]bool{
+		"resourcemanager.projects.get":  true,
+		"resourcemanager.projects.list": true,
+	})
 	if err := p.AuthorizeAction(
 		context.Background(),
 		httpReq(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
 		gcpArgs(t, "cloudresourcemanager"),
 	); err != nil {
 		t.Fatalf("projects.list under a granting role should be authorized, got %v", err)
+	}
+}
+
+// TestProviderAuthorizeActionCRMProjectsListRequiresGet pins the version-collision
+// security fix. v1 GET /v1/projects is an UNFILTERED list that Google authorizes by
+// resourcemanager.projects.get (it "Lists Projects that the caller has the
+// resourcemanager.projects.get permission on"), while v3's parent-scoped list needs
+// resourcemanager.projects.list. Both share the Discovery id
+// cloudresourcemanager.projects.list, so the override requires the UNION — a ceiling
+// role granting only .list (but not .get) must NOT authorize project enumeration,
+// or it would expose .get-level data the operator's ceiling never granted.
+func TestProviderAuthorizeActionCRMProjectsListRequiresGet(t *testing.T) {
+	t.Parallel()
+
+	p := buildCRMProvider(t, map[string]bool{"resourcemanager.projects.list": true}) // .list but NOT .get.
+	err := p.AuthorizeAction(
+		context.Background(),
+		httpReq(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
+		gcpArgs(t, "cloudresourcemanager"),
+	)
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("projects.list with .list but not .get must be ErrPermissionDenied, got %v", err)
 	}
 }
 

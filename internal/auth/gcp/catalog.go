@@ -98,20 +98,49 @@ func hostToService(d DiscoveryData) map[string]string {
 // methods — iam v2 carries only 6 policy methods and would erase v1's roles/
 // serviceAccounts surface, leaving those operations unclassifiable. Where ids
 // are DISJOINT across versions (iam v1 roles/serviceAccounts vs v2 policies),
-// the union recovers both. Where ids are SHARED (compute v1/beta/alpha all
-// define compute.instances.list with different version paths), the MethodIndex
-// is keyed by id so only one template can survive: b (the later-fetched doc)
-// wins, exactly matching the prior overwrite behavior — so the same GA version
-// keeps working and none regresses. Endpoints are concatenated (the consumer,
-// hostToService, is idempotent). Allocates fresh containers; does not mutate
-// either input.
+// the union recovers both.
+//
+// Where ids are SHARED across versions but route to DIFFERENT request signatures
+// (cloudresourcemanager v1+v3 both define cloudresourcemanager.projects.list, at
+// GET v1/projects vs GET v3/projects; organizations.search is POST v1/... vs GET
+// v3/...), both are distinct routable operations and BOTH must survive — keying
+// the index by id alone would drop whichever version is fetched first, making its
+// real paths unclassifiable and fail-closed (the v1 enumeration calls a read-only
+// audit naturally reaches for). The first occurrence keeps the canonical id key;
+// each later different-signature sibling is stored under a disambiguated internal
+// key. The key is never surfaced — Classify returns md.ID — so the permission
+// resolver and caller still see the Discovery id. A genuine same-signature
+// re-fetch (identical method+template) still overwrites, so a re-modeled GA
+// version does not accumulate duplicates. Endpoints are concatenated (the
+// consumer, hostToService, is idempotent). Allocates fresh containers; does not
+// mutate either input.
 func mergeServiceDocs(a, b ServiceDoc) ServiceDoc {
 	merged := make(MethodIndex, len(a.Methods)+len(b.Methods))
 	maps.Copy(merged, a.Methods)
-	maps.Copy(merged, b.Methods)
+	for id, md := range b.Methods {
+		if existing, clash := merged[id]; clash && methodSignature(existing) != methodSignature(md) {
+			merged[disambiguatedKey(md)] = md
+			continue
+		}
+		merged[id] = md
+	}
 	a.Methods = merged
 	a.Endpoints = slices.Concat(a.Endpoints, b.Endpoints)
 	return a
+}
+
+// methodSignature is the (HTTP method, request-path template) tuple Classify
+// matches a request against. Two methods sharing a Discovery id but differing in
+// signature are distinct routable operations across API versions.
+func methodSignature(md MethodDescriptor) string {
+	return strings.ToUpper(md.HTTPMethod) + " " + effectiveTemplate(md)
+}
+
+// disambiguatedKey derives a collision-free MethodIndex key for a method whose
+// Discovery id is already held by a different-signature sibling version. Internal
+// only: Classify returns md.ID, so this key never reaches the resolver or caller.
+func disambiguatedKey(md MethodDescriptor) string {
+	return md.ID + "\x00" + methodSignature(md)
 }
 
 // ResolveService verifies the parsed candidate against the live catalog. For

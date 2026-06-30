@@ -19,6 +19,15 @@ const DefaultDiscoveryDirectoryURL = "https://discovery.googleapis.com/discovery
 // defaultHTTPTimeout is the per-request timeout for Discovery HTTPS fetches.
 const defaultHTTPTimeout = 30 * time.Second
 
+// discoveryCacheFile is the on-disk catalog cache basename. The trailing format
+// version is bumped whenever the serialized DiscoveryData representation changes,
+// so a cache written by an older binary is ignored (cache miss → refetch) rather
+// than served stale. v2: the multi-version merge now stores same-id sibling
+// methods under disambiguated keys (see mergeServiceDocs); a v1 cache holds only
+// the last-version-wins index, which would keep e.g. GET /v1/projects failing
+// closed after an upgrade until the 24h TTL expired.
+const discoveryCacheFile = "discovery.v2.json"
+
 // CatalogConfig configures the real Discovery-backed catalog.
 type CatalogConfig struct {
 	cache.Config
@@ -36,8 +45,8 @@ type CatalogConfig struct {
 func NewCatalog(cfg CatalogConfig) Catalog {
 	cfg = applyDefaults(cfg)
 	tc := &cache.TTLCache[DiscoveryData]{
-		DataPath: filepath.Join(cfg.Dir, "catalog", "discovery.json"),
-		MetaPath: filepath.Join(cfg.Dir, "catalog", "discovery.json.meta"),
+		DataPath: filepath.Join(cfg.Dir, "catalog", discoveryCacheFile),
+		MetaPath: filepath.Join(cfg.Dir, "catalog", discoveryCacheFile+".meta"),
 		TTL:      cfg.TTL,
 		Clock:    cfg.Clock,
 		Fetch: func(ctx context.Context) ([]byte, error) {

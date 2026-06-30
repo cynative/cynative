@@ -85,28 +85,38 @@ func defaultPrefixMap() map[string]string {
 
 // methodPermissionOverrides pins discovery methods whose true required IAM
 // permission neither derive-then-validate nor the iam-dataset tier can resolve:
-//   - projects.list / folders.list derive the CORRECT resourcemanager.<res>.list,
-//     but that permission is parent-scoped (org/folder) and therefore absent from
-//     the project-scoped queryTestablePermissions catalog, so derive-then-validate
-//     fails. projects.list has only a low-confidence restcrawlv1 dataset entry
-//     (excluded); folders.list has a high-confidence dataset entry, but pinning it
-//     keeps folder listing independent of the external iam-dataset.
+//   - projects.list is special: its Discovery id is shared by BOTH the v1
+//     unfiltered list (GET /v1/projects), which Google authorizes by
+//     resourcemanager.projects.get — its doc reads "Lists Projects that the caller
+//     has the resourcemanager.projects.get permission on" — AND the v3 parent-
+//     scoped list (GET /v3/projects?parent=…), which requires
+//     resourcemanager.projects.list. The multi-version catalog merge makes both
+//     versions routable under the one id (see mergeServiceDocs), so the override
+//     requires the UNION {projects.get, projects.list}: neither version can then
+//     under-require, so a .list-only ceiling role cannot authorize the unfiltered
+//     v1 enumeration that exposes .get-level data, while roles/viewer (the default,
+//     granting both) is unaffected. The .list permission is itself parent-scoped
+//     (org/folder) and absent from the project-scoped queryTestablePermissions
+//     catalog, so derive-then-validate cannot resolve it either.
+//   - folders.list derives the CORRECT resourcemanager.folders.list, but that
+//     permission is parent-scoped and absent from the project-scoped catalog, so
+//     derive-then-validate fails. It has a high-confidence dataset entry, but
+//     pinning it keeps folder listing independent of the external iam-dataset.
 //   - the *.search methods filter results to what the caller can .get, so they
 //     require resourcemanager.<resource>.get — NOT a ".search" permission, which
 //     does not exist. Their search verb derives a non-existent permission and
 //     they have no high-confidence dataset entry.
 //
-// Values encode the v3 method semantics and are sourced from Google's Discovery
-// descriptions + the live IAM API (the catalog strips per-method permission data,
-// so they cannot be validated at runtime). The pin is returned unconditionally,
-// independent of which API version wins the catalog merge.
+// Values are sourced from Google's Discovery descriptions + the live IAM API (the
+// catalog strips per-method permission data, so they cannot be validated at
+// runtime) and cover every API version sharing the id (see projects.list).
 //
 // INVARIANT: every value must be a READ permission (preserving the read-only gate
 // posture; pinned by TestOverridesAreReadOnly) and must never be a strict subset
 // of the method's true required permission set (a subset could under-require and
 // false-allow). Re-verify against Google's Discovery before adding or editing.
 var methodPermissionOverrides = map[string][]string{ //nolint:gochecknoglobals // immutable pinned set.
-	"cloudresourcemanager.projects.list":        {"resourcemanager.projects.list"},
+	"cloudresourcemanager.projects.list":        {"resourcemanager.projects.get", "resourcemanager.projects.list"},
 	"cloudresourcemanager.projects.search":      {"resourcemanager.projects.get"},
 	"cloudresourcemanager.folders.list":         {"resourcemanager.folders.list"},
 	"cloudresourcemanager.folders.search":       {"resourcemanager.folders.get"},

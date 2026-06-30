@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -254,13 +255,18 @@ func TestPermissionResolverOverrides(t *testing.T) {
 
 	tests := []struct {
 		methodID string
-		want     string
+		want     []string
 	}{
-		{"cloudresourcemanager.projects.list", "resourcemanager.projects.list"},
-		{"cloudresourcemanager.projects.search", "resourcemanager.projects.get"},
-		{"cloudresourcemanager.folders.list", "resourcemanager.folders.list"},
-		{"cloudresourcemanager.folders.search", "resourcemanager.folders.get"},
-		{"cloudresourcemanager.organizations.search", "resourcemanager.organizations.get"},
+		// projects.list requires the UNION: its id is shared by the v1 unfiltered
+		// list (true perm .get) and the v3 parent-scoped list (true perm .list).
+		{
+			"cloudresourcemanager.projects.list",
+			[]string{"resourcemanager.projects.get", "resourcemanager.projects.list"},
+		},
+		{"cloudresourcemanager.projects.search", []string{"resourcemanager.projects.get"}},
+		{"cloudresourcemanager.folders.list", []string{"resourcemanager.folders.list"}},
+		{"cloudresourcemanager.folders.search", []string{"resourcemanager.folders.get"}},
+		{"cloudresourcemanager.organizations.search", []string{"resourcemanager.organizations.get"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.methodID, func(t *testing.T) {
@@ -269,8 +275,8 @@ func TestPermissionResolverOverrides(t *testing.T) {
 			if src != SourceResolved {
 				t.Fatalf("Resolve(%q) source = %v, want SourceResolved (perms=%v)", tc.methodID, src, perms)
 			}
-			if len(perms) != 1 || perms[0] != tc.want {
-				t.Errorf("Resolve(%q) perms = %v, want [%s]", tc.methodID, perms, tc.want)
+			if !slices.Equal(perms, tc.want) {
+				t.Errorf("Resolve(%q) perms = %v, want %v", tc.methodID, perms, tc.want)
 			}
 		})
 	}
@@ -321,13 +327,13 @@ func TestPermissionResolverOverrideReturnsIndependentSlice(t *testing.T) {
 	t.Parallel()
 
 	r := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), emptyDataset{})
-	want := []string{"resourcemanager.projects.list"}
+	want := []string{"resourcemanager.projects.get", "resourcemanager.projects.list"}
 
 	perms, _ := r.Resolve(context.Background(), "cloudresourcemanager.projects.list")
 	perms[0] = "mutated"
 
 	perms2, _ := r.Resolve(context.Background(), "cloudresourcemanager.projects.list")
-	if len(perms2) != 1 || perms2[0] != want[0] {
+	if !slices.Equal(perms2, want) {
 		t.Fatalf("override slice not independent: second Resolve = %v, want %v", perms2, want)
 	}
 }
