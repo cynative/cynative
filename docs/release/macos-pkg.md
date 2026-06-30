@@ -43,9 +43,9 @@ for each architecture pair (`arm64` → `cynative_Darwin_arm64.pkg`,
 
 3. **Notarize + staple**: submits the signed `.pkg` to Apple's notary service
    via `rcodesign notary-submit --staple`, using the App Store Connect API key
-   (`MACOS_NOTARY_API_KEY_JSON`). Only the `.pkg` is submitted to the notary —
-   the byte-identical tarball binary passes Gatekeeper's online check via the
-   registered cdhash.
+   (`MACOS_NOTARY_API_KEY_JSON`, assembled from `MACOS_NOTARY_ISSUER_ID`/`MACOS_NOTARY_KEY_ID`/`MACOS_NOTARY_KEY` via `rcodesign encode-app-store-connect-api-key`).
+   Only the `.pkg` is submitted to the notary — the byte-identical tarball
+   binary passes Gatekeeper's online check via the registered cdhash.
 
 4. **Assertion**: `scripts/release/assert-pkg.sh` and
    `scripts/release/assert-binary-equivalence.sh` verify the notarized `.pkg`
@@ -156,7 +156,16 @@ Two requirements here are non-negotiable:
    the leaf Developer ID cert, not the full chain.
 
 Both secrets are stored base64-encoded in GitHub Actions secrets. The pipeline
-decodes them with `printf '%s' "${SECRET}" | base64 -d > /tmp/cert.p12`.
+decodes them securely into a private temporary directory with restricted permissions:
+
+```bash
+umask 077
+d="$(mktemp -d)"; trap 'rm -rf "${d}"' EXIT
+printf '%s' "${SECRET}" | base64 -d > "${d}/cert.p12"
+chmod 600 "${d}/cert.p12"
+```
+
+This ensures credentials are never written to a predictable global path.
 
 ---
 
