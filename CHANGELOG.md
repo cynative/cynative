@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/cynative/cynative/compare/v1.3.0...v1.4.0) (2026-06-30)
+
+
+### Features
+
+* split macOS distribution — Homebrew Formula + direct-download pkg ([#28](https://github.com/cynative/cynative/issues/28)) ([052f445](https://github.com/cynative/cynative/commit/052f44573b0621a304a18ebae71bfa3de2c59ba8))
+
 ## [1.3.0](https://github.com/cynative/cynative/compare/v1.2.1...v1.3.0) (2026-06-30)
 
 
