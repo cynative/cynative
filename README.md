@@ -55,8 +55,6 @@ scoop install cynative
 | Install script | re-run the one-liner | `curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh \| sh -s -- --uninstall` |
 | Scoop | `scoop update cynative` | `scoop uninstall cynative` |
 
-**Previously installed the cask?** Homebrew now ships cynative as a Formula (a fast, `sudo`-free CLI install). Switch once with `brew uninstall --cask cynative` then `brew install cynative/tap/cynative`. The signed, notarized, stapled `.pkg` is still published for direct download (see below).
-
 **Windows (PowerShell script):** `irm https://raw.githubusercontent.com/cynative/cynative/main/install.ps1 | iex`; uninstall with `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/cynative/cynative/main/install.ps1))) -Uninstall`.
 
 **Install-script options:** pin a version with `CYNATIVE_VERSION=v1.0.0`; change the target directory with `CYNATIVE_INSTALL_DIR` (default `~/.local/bin`, no `sudo`). The script checks the GitHub release attestation when `gh` is installed (advisory by default); set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed check fatal. For a high-integrity install, fetch the script from an immutable tag instead of `main`.
