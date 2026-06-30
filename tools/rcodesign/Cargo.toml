@@ -1,0 +1,11 @@
+[package]
+name = "cynative-ci-tool-pins"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Version source-of-truth for rcodesign (published crate name: apple-codesign).
+# Dependabot's cargo ecosystem bumps this pin; scripts/release/install-pkg-tools.sh
+# reads it and installs the matching prebuilt rcodesign release. Not compiled in CI.
+[dependencies]
+apple-codesign = "=0.29.0"

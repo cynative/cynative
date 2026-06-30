@@ -1,0 +1,6 @@
+[submodule "third_party/bomutils"]
+	path = third_party/bomutils
+	url = https://github.com/hogliux/bomutils.git
+[submodule "third_party/xar"]
+	path = third_party/xar
+	url = https://github.com/mackyle/xar.git
