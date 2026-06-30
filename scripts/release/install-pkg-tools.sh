@@ -18,7 +18,7 @@ rcodesign_version() {
 install_build_deps() {
   sudo apt-get update
   sudo apt-get install -y build-essential autoconf automake libtool pkg-config \
-    libxml2-dev libssl-dev zlib1g-dev git curl
+    libxml2-dev libssl-dev zlib1g-dev git curl cpio
 }
 
 install_rcodesign() {

@@ -200,10 +200,27 @@ jobs:
           done
           cat /tmp/pkg-assets.tsv
 
+      # Refresh the installation token before the publish-critical writes: the
+      # original token (minted at job start, 60-min lifetime) can be near expiry
+      # after GoReleaser + the pkg build/notarize steps. A 401 here would leave an
+      # unpublished draft after all artifacts were built.
+      - name: Refresh App Token (pre-publish)
+        id: prepublish-token
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            cynative
+            homebrew-tap
+            scoop-bucket
+
       - name: Upload pkgs to draft release
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           TAG: ${{ steps.release-please.outputs.tag_name }}
         run: gh release upload "${TAG}" dist/*.pkg --clobber --repo "${GITHUB_REPOSITORY}"
 
@@ -216,7 +233,7 @@ jobs:
         id: draft
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           TAG: ${{ steps.release-please.outputs.tag_name }}
         run: |
           release_id="$(scripts/release/assert-draft.sh "${GITHUB_REPOSITORY}" "${TAG}")"
@@ -225,7 +242,7 @@ jobs:
       - name: Assert exact asset set
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: |
           scripts/release/expected-assets.sh dist > /tmp/expected-assets.tsv
@@ -236,7 +253,7 @@ jobs:
       - name: Re-verify tag before publish
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           TAG: ${{ steps.release-please.outputs.tag_name }}
           SHA: ${{ steps.release-please.outputs.sha }}
         run: scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
@@ -246,7 +263,7 @@ jobs:
       - name: Publish release
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: scripts/release/publish-release.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}"
 
@@ -260,7 +277,7 @@ jobs:
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         timeout-minutes: 5
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           TAG: ${{ steps.release-please.outputs.tag_name }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
           SHA: ${{ steps.release-please.outputs.sha }}
