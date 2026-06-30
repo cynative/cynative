@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/cynative/cynative/compare/v1.2.1...v1.3.0) (2026-06-30)
+
+
+### Features
+
+* ship signed, notarized, stapled macOS .pkg installers from Linux CI ([#24](https://github.com/cynative/cynative/issues/24)) ([9149528](https://github.com/cynative/cynative/commit/91495286abf1e8b68f8415cc6310fddc54d124d3))
+
+
+### Bug Fixes
+
+* **deps:** bump github.com/sigstore/rekor to v1.5.2 (CVE-2026-48702) ([#22](https://github.com/cynative/cynative/issues/22)) ([3db8f69](https://github.com/cynative/cynative/commit/3db8f6974677824db80cf4d0264a38bcc9997404))
+* **deps:** Bump the all-dependencies group with 5 updates ([#25](https://github.com/cynative/cynative/issues/25)) ([db454e4](https://github.com/cynative/cynative/commit/db454e4382ed4757449c057ec6b9955e518ea13f))
+
 ## [1.2.1](https://github.com/cynative/cynative/compare/v1.2.0...v1.2.1) (2026-06-29)
 
 
