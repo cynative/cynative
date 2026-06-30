@@ -51,7 +51,7 @@ scoop install cynative
 
 | Method | Update | Uninstall |
 |---|---|---|
-| Homebrew | `brew upgrade cynative` | `brew uninstall --cask cynative` |
+| Homebrew | `brew upgrade cynative` | `brew uninstall --cask cynative` (removes `/usr/local/bin/cynative` and forgets the `com.cynative.cynative` pkgutil receipt) |
 | Install script | re-run the one-liner | `curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh \| sh -s -- --uninstall` |
 | Scoop | `scoop update cynative` | `scoop uninstall cynative` |
 
@@ -59,7 +59,9 @@ scoop install cynative
 
 **Install-script options:** pin a version with `CYNATIVE_VERSION=v1.0.0`; change the target directory with `CYNATIVE_INSTALL_DIR` (default `~/.local/bin`, no `sudo`). The script checks the GitHub release attestation when `gh` is installed (advisory by default); set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed check fatal. For a high-integrity install, fetch the script from an immutable tag instead of `main`.
 
-**Manual:** download a prebuilt binary and `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put the binary on your `PATH`. Single static binary, no dependencies.
+**macOS (manual):** download `cynative_Darwin_arm64.pkg` (Apple Silicon) or `cynative_Darwin_x86_64.pkg` (Intel) from the [releases page](https://github.com/cynative/cynative/releases) and install with `sudo installer -pkg <file> -target /` (or double-click). These are signed, notarized and **stapled** — no first-run Gatekeeper prompt. The raw `cynative_Darwin_*.tar.gz` archives remain for scripting/CI; a quarantined tarball binary's first GUI launch needs internet for the online notarization check (terminal/`install.sh`/Homebrew use is unaffected).
+
+**Linux / Windows (manual):** download a prebuilt binary and `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put the binary on your `PATH`. Single static binary, no dependencies.
 </details>
 
 ## How to Run
