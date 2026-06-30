@@ -52,6 +52,14 @@ jobs:
       # authoritative) and verify each one — combined with the release run's
       # digest assertions this closes the chain per asset:
       # built == frozen == attested.
+      #
+      # The macOS .pkg installers are uploaded to the draft release before
+      # publish (release.yaml "Upload pkgs to draft release" step), so they
+      # are present as release assets at publish time. GitHub's immutable-
+      # release attestation covers ALL assets attached at publish time
+      # (docs.github.com/en/code-security/concepts/supply-chain-security/
+      # immutable-releases), so the wildcard loop below naturally includes
+      # the .pkg files without any extra attestation step.
       - name: Verify every asset is attested
         env:
           GH_TOKEN: ${{ github.token }}
