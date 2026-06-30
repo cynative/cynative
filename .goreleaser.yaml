@@ -23,6 +23,9 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      post:
+        - cmd: scripts/release/sign-darwin-binary.sh "{{ .Path }}" "{{ .Target }}"
 
 archives:
   - formats: [tar.gz]
@@ -43,20 +46,6 @@ checksum:
 source:
   enabled: true
 
-homebrew_casks:
-  - name: cynative
-    repository:
-      owner: cynative
-      name: homebrew-tap
-      branch: main
-    homepage: "https://github.com/cynative/cynative"
-    description: "Agentic security research across your code, cloud and runtime — read-only by construction"
-    caveats: |
-      Set your LLM provider, model and an API key before first run, e.g.:
-        export CYNATIVE_LLM_PROVIDER=anthropic
-        export CYNATIVE_LLM_MODEL=claude-opus-4-8
-        export ANTHROPIC_API_KEY=...
-
 scoops:
   - repository:
       owner: cynative
@@ -68,39 +57,6 @@ scoops:
     homepage: "https://github.com/cynative/cynative"
     description: "Agentic security research across your code, cloud and runtime — read-only by construction"
     license: "Apache-2.0"
-
-notarize:
-  macos:
-    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
-      sign:
-        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
-        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
-        # The hardened runtime (mandatory for notarization) SIGKILLs the process
-        # ("Code Signature Invalid") the moment bytedance/sonic — a transitive dep of
-        # github.com/maximhq/bifrost — executes its first JIT-compiled JSON serializer,
-        # because sonic maps PROT_EXEC pages via plain mmap/mprotect (no MAP_JIT) on both
-        # amd64 and arm64. These entitlements grant the runtime exception that lets those
-        # pages execute; without them every macOS release binary dies before the first
-        # model reply. See .goreleaser/entitlements.plist for the full rationale.
-        entitlements: "./.goreleaser/entitlements.plist"
-      notarize:
-        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
-        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
-        key: "{{ .Env.MACOS_NOTARY_KEY }}"
-        # Known goreleaser v2.16 quirk: with wait enabled the status poll
-        # interval is a mistyped 10ns (internal/pipe/notary/macos.go passes a
-        # bare 10 into a time.Duration), so the wait loop polls Apple back to
-        # back; the timeout below caps that window.
-        wait: true
-        # Apple caps App Store Connect JWT lifetime at ~20 minutes and quill
-        # mints one token for the whole wait with lifetime = timeout + 2m, so
-        # any timeout above ~18m makes every submission fail 401 Unauthenticated.
-        # 15m keeps the token valid with margin (typical notarization is <5m).
-        # A notarization outliving this hard-fails the release before publish
-        # (quill returns the timeout as an error); the release workflow's
-        # post-run assertion on the per-binary "notarized" log lines is
-        # defense-in-depth against future goreleaser behavior drift.
-        timeout: 15m
 
 release:
   # Immutable-releases handoff:
