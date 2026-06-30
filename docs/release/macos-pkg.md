@@ -95,17 +95,19 @@ submodule SHA when the upstream moves.
 
 ### Smoke-testing bumps before auto-merge
 
-The `pkg-tools.yaml` CI job (`Packaging toolchain` workflow) fires on any PR that
-touches `tools/rcodesign/**`, `third_party/**`, `.gitmodules`, or the packaging
-scripts. It installs the full toolchain and runs a smoke assembly (unsigned pkg
-from a test binary) to confirm the bump doesn't break the build.
+The `pkg-tools.yaml` CI job (`Packaging toolchain` workflow) runs on **every** PR
+so its `Build & smoke-test macOS packaging toolchain` status check is always
+reported. It only does work — install the full toolchain and run a smoke assembly
+(unsigned pkg from a test binary) — when the PR actually changes the pinned tools
+(`tools/rcodesign/**`, `third_party/**`, `.gitmodules`, or `install-pkg-tools.sh` /
+`assemble-macos-pkg.sh`); on any other PR it passes trivially. (It must always run
+and report: a paths-filtered workflow that is *skipped* leaves a required status
+check stuck pending and blocks unrelated PRs.)
 
-NOTE: this job is advisory unless it is added to the branch ruleset's *required
-status checks*. GitHub auto-merge only waits on the repo's configured required
-checks — currently `Lint & Test` and `Validate PR title` — so a dependabot bump
-could auto-merge once those pass, even if `pkg-tools.yaml` has not yet run or has
-failed. To make it a hard gate on auto-merge, add the `Build & smoke-test macOS
-packaging toolchain` check to the `default` ruleset's required status checks.
+This check is a **required status check** in the `default` branch ruleset, so a
+dependabot rcodesign/submodule bump that breaks the toolchain build cannot
+auto-merge. To re-create or move the gate, add/remove the `Build & smoke-test
+macOS packaging toolchain` context in the ruleset's required status checks.
 
 ---
 

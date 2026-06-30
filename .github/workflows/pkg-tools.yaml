@@ -1,14 +1,13 @@
 name: Packaging toolchain
 
+# Runs on EVERY pull request (no paths filter) so this job's status check is
+# always reported. A paths-filtered workflow that is skipped leaves a *required*
+# status check stuck pending and blocks unrelated PRs from merging — so to make
+# this a required check (gating dependabot tool-pin bumps), the job must always
+# report. The expensive toolchain build runs only when the pinned tools actually
+# change; otherwise the job passes trivially.
 on:
   pull_request:
-    paths:
-      - "tools/rcodesign/**"
-      - "third_party/**"
-      - ".gitmodules"
-      - "scripts/release/install-pkg-tools.sh"
-      - "scripts/release/assemble-macos-pkg.sh"
-      - ".github/workflows/pkg-tools.yaml"
 
 permissions:
   contents: read
@@ -21,13 +20,32 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          submodules: recursive
+          fetch-depth: 0
+      - name: Detect packaging-toolchain changes
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Two-dot diff of base..merge-commit is exactly this PR's changes.
+          if git diff --name-only "${BASE_SHA}" HEAD | grep -qE '^(tools/rcodesign/|third_party/|\.gitmodules$|scripts/release/install-pkg-tools\.sh$|scripts/release/assemble-macos-pkg\.sh$|\.github/workflows/pkg-tools\.yaml$)'; then
+            echo "relevant=true" >> "${GITHUB_OUTPUT}"
+            echo "Packaging-toolchain files changed — building and smoke-testing the toolchain."
+          else
+            echo "relevant=false" >> "${GITHUB_OUTPUT}"
+            echo "No packaging-toolchain changes in this PR — skipping the build (check passes trivially)."
+          fi
+      - name: Check out toolchain submodules
+        if: steps.detect.outputs.relevant == 'true'
+        run: git submodule update --init third_party/bomutils third_party/xar
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.detect.outputs.relevant == 'true'
         with:
           go-version-file: go.mod
       - name: Install packaging toolchain
+        if: steps.detect.outputs.relevant == 'true'
         run: scripts/release/install-pkg-tools.sh
       - name: Smoke-assemble an unsigned pkg
+        if: steps.detect.outputs.relevant == 'true'
         run: |
           GOOS=darwin GOARCH=arm64 go build -o /tmp/cyn ./cmd/cynative
           scripts/release/assemble-macos-pkg.sh arm64 /tmp/cyn 0.0.0 /tmp/test.pkg
