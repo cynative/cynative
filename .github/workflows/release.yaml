@@ -313,7 +313,7 @@ jobs:
             homebrew-tap
             scoop-bucket
 
-      - name: Render & push Homebrew cask
+      - name: Render & push Homebrew formula
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
           GH_TOKEN: ${{ steps.refresh-token.outputs.token || steps.generate-token.outputs.token }}
@@ -321,12 +321,12 @@ jobs:
         run: |
           set -euo pipefail
           ver="${VERSION#v}"
-          arm="$(awk -F'\t' '$1=="cynative_Darwin_arm64.pkg"{print $2}' /tmp/pkg-assets.tsv)"
-          intel="$(awk -F'\t' '$1=="cynative_Darwin_x86_64.pkg"{print $2}' /tmp/pkg-assets.tsv)"
-          # Never push a cask with an empty/garbage sha256 (Codex M6).
-          [[ "${arm}"   =~ ^[0-9a-f]{64}$ ]] || { echo "::error::missing arm64 pkg sha256" >&2; exit 1; }
-          [[ "${intel}" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::missing x86_64 pkg sha256" >&2; exit 1; }
-          scripts/release/publish-cask.sh "${ver}" "${arm}" "${intel}"
+          # /tmp/expected-assets.tsv (name<TAB>sha256<TAB>path) was written by
+          # "Assert exact asset set" earlier in this job; publish-tap.sh derives
+          # the four tarball digests from it, fails closed on any bad/missing one,
+          # writes Formula/cynative.rb, removes the legacy Casks/cynative.rb, and
+          # pushes the tap once.
+          scripts/release/publish-tap.sh "${ver}" /tmp/expected-assets.tsv
 
       # release-please PHASE 2 — candidate PR only (skip-github-release).
       # On normal pushes this is the only place the next-release candidate is

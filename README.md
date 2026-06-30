@@ -51,7 +51,7 @@ scoop install cynative
 
 | Method | Update | Uninstall |
 |---|---|---|
-| Homebrew | `brew upgrade cynative` | `brew uninstall --cask cynative` (removes `/usr/local/bin/cynative` and forgets the `com.cynative.cynative` pkgutil receipt) |
+| Homebrew | `brew upgrade cynative` | `brew uninstall cynative` |
 | Install script | re-run the one-liner | `curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh \| sh -s -- --uninstall` |
 | Scoop | `scoop update cynative` | `scoop uninstall cynative` |
 
