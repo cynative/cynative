@@ -56,7 +56,7 @@ shellcheck:
 		echo "FAIL: shellcheck $$have != pinned $(SHELLCHECK_VERSION) — install the pinned release: https://github.com/koalaman/shellcheck/releases/tag/v$(SHELLCHECK_VERSION)"; \
 		exit 1; \
 	fi
-	@git ls-files -z '*.sh' | xargs -0 -r shellcheck && echo "OK: shellcheck ($(SHELLCHECK_VERSION))"
+	@git ls-files -z '*.sh' | xargs -0 shellcheck && echo "OK: shellcheck ($(SHELLCHECK_VERSION))"
 
 # pwsh-lint: PSScriptAnalyzer on install.ps1 at the pinned module version. Presence-
 # check with a readable install hint first (install-free — never installs the module).
