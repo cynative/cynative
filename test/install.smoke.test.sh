@@ -51,25 +51,8 @@ exit 1
 EOF
 chmod +x "$stub/gh"
 
-cat > "$workdir/serve.py" <<'PY'
-import sys, functools, http.server
-srv_dir, portfile = sys.argv[1], sys.argv[2]
-
-
-class Quiet(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-
-handler = functools.partial(Quiet, directory=srv_dir)
-httpd = http.server.HTTPServer(("127.0.0.1", 0), handler)
-with open(portfile, "w") as f:
-    f.write(str(httpd.server_address[1]))
-httpd.serve_forever()
-PY
-
 portfile="$workdir/port"
-python3 "$workdir/serve.py" "$srv" "$portfile" &
+python3 "$root/test/serve-fixture.py" "$srv" "$portfile" &
 server_pid=$!
 
 i=0
