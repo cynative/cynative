@@ -158,11 +158,7 @@ cynative -p "CI workflows that can assume privileged cloud roles"
 cat main.tf | cynative -p "review this Terraform for misconfigurations"
 ```
 
-Check the build with `--version` (prints version, commit, build date, Go version, and platform, then exits - no config or credentials required):
-
-```bash
-cynative --version
-```
+**Always provide the least-privileged, read-only credential needed**: Cynative reaches AWS, GCP, Azure, EKS/GKE/AKS, self-managed Kubernetes, GitHub and GitLab using the credentials already in your shell - it keeps no separate credential store.
 
 **Interactive session:**  the > prompt has full line editing and history - arrow keys move the cursor and recall earlier questions.
 
@@ -186,11 +182,11 @@ Finding verification (`verify_findings` tool) makes extra model calls, budget fo
 
 Cynative prints a short operational footer (timing, token usage) to **stderr** - redirecting stdout (`cynative -p "..." > out.txt`) keeps the captured answer clean.
 
+`--version` Prints version, commit, build date, Go version, and platform.
+
 ## Connectors
 
-Cynative reaches AWS, GCP, Azure, EKS/GKE/AKS, self-managed Kubernetes, GitHub and GitLab using the credentials already in your shell - it keeps no separate credential store. Always provide the least-privileged, read-only credential needed.
-
-Enforcement layers:
+On top of the credentials in your shell, Cynative enforces read-only at three layers:
 - **Network** - every request host is pinned to its mapped service and region
   and the resolved IP is verified before connect, your agent can reach
   your infrastructure and nothing else.
@@ -210,7 +206,7 @@ Enforcement layers:
   so AWS IAM enforces the boundary too. IAM-user and root identities run with
   their base credentials, gated by the action gate above.
 
-See [docs/connectors/README.md](docs/connectors/README.md) for credential
+Cynative connects AWS, GCP, Azure, EKS/GKE/AKS, self-managed Kubernetes, GitHub and GitLab. See [docs/connectors/README.md](docs/connectors/README.md) for credential
 discovery, hardening, limitations and connector-specific examples.
 
 ## Code execution & tool orchestration
