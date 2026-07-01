@@ -1,5 +1,5 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
-	windows-build shellcheck pwsh-lint pwsh-test sh-test
+	windows-build shellcheck pwsh-lint pwsh-test sh-test install-e2e
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -109,3 +109,15 @@ shell-complexity:
 # here instead of duplicating them). Example: `make -s print-SHELLCHECK_VERSION`.
 print-%:
 	@echo '$($*)'
+
+# install-e2e: real-artifact install e2e for release confidence (issue #41).
+# Standalone (NOT part of `make check`): builds a real Linux archive via a
+# goreleaser snapshot, serves it from a loopback fixture server, runs the real
+# install.sh, verifies `cynative --version`, uninstalls, and proves a checksum
+# failure fails closed. Presence-checks python3 (fixture server) with an install
+# hint, mirroring the sh-test/shellcheck install-free pattern.
+install-e2e:
+	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, needed by the install e2e loopback fixture server (test/install.e2e.test.sh)."; exit 1; }
+	go tool goreleaser release --snapshot --clean
+	sh test/install.e2e.test.sh ./dist
+	@echo "OK: install-e2e (real archive install + version + uninstall + checksum-failure)"
