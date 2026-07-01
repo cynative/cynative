@@ -44,7 +44,7 @@ ensure_freeze() {
   # Install into a USER-PRIVATE cache dir (mode 0700), never a world-writable /tmp path, so a local
   # attacker can't pre-plant a malicious `freeze` at a predictable path that we'd then execute.
   local dir="${XDG_CACHE_HOME:-$HOME/.cache}/cynative-freeze-${FREEZE_VERSION}"
-  [[ -x "$dir/freeze" ]] || { mkdir -p -m 700 "$dir"; GOBIN="$dir" go install "github.com/charmbracelet/freeze@${FREEZE_VERSION}" || die "go install freeze failed"; }
+  [[ -x "$dir/freeze" ]] || { mkdir -p "$dir"; chmod 700 "$dir"; GOBIN="$dir" go install "github.com/charmbracelet/freeze@${FREEZE_VERSION}" || die "go install freeze failed"; }
   FREEZE_BIN="$dir/freeze"
 }
 list_artifacts() { ls "$CAPTURE" "${COL_PREFIX}"*.svg 2>/dev/null || true; }
