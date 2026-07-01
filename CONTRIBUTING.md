@@ -10,8 +10,9 @@ board.
 - `make` and a POSIX shell.
 - Go tooling (`golangci-lint`, `moq`, complexity checkers) is pinned via `go.mod`
   and invoked through `make` — no separate installs. The shell/PowerShell gate
-  (`make check-scripts`) additionally needs `shellcheck` and PowerShell 7 with
-  Pester/PSScriptAnalyzer; those versions are pinned in the `Makefile` and installed
+  (`make check-scripts`) additionally needs `shellcheck`, PowerShell 7 with
+  Pester/PSScriptAnalyzer, and `python3` (the `install.sh` loopback smoke test's
+  fixture server); those versions are pinned in the `Makefile` and installed
   separately (`make check-scripts` prints an install hint if one is missing).
 
 On a fresh checkout, generate the gitignored mocks before running package tests:
@@ -28,7 +29,8 @@ Every PR must pass `make check`, which runs two halves:
   format-diff + the full race-enabled test suite + a `GOOS=windows` cross-build);
   100% `go.mod`-pinned. **The pre-commit hook runs this.**
 - `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer on
-  `install.ps1`, and the Pester unit tests, each at a version pinned in the `Makefile`.
+  `install.ps1`, the Pester unit tests, and the POSIX `install.sh` unit + loopback smoke
+  tests (`sh-test`, which needs `python3`), each at a version pinned in the `Makefile`.
 
 ```bash
 make check

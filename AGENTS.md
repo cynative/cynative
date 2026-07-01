@@ -8,7 +8,7 @@ All targets are wired through `make`. Lint and test rely on `go tool golangci-li
 
 - `make check` — the full gate CI runs: `check-go` + `check-scripts`.
 - `make check-go` — generate + lint + shell-complexity + format-diff + test + `windows-build` (GOOS=windows amd64/arm64 cross-compile); 100% `go.mod`-pinned/hermetic; **the pre-commit hook runs this**.
-- `make check-scripts` — `shellcheck` (all tracked `*.sh`, pinned `v0.11.0`) + PSScriptAnalyzer on `install.ps1` + Pester unit tests (pinned `1.25.0`/`5.7.1`). Install-free: asserts each pinned tool/module is present and fails with an install hint otherwise (needs `shellcheck` + PowerShell 7). These external tool versions are pinned in the `Makefile` and bumped by hand — Dependabot has no PowerShell Gallery or raw-binary ecosystem.
+- `make check-scripts` — `shellcheck` (all tracked `*.sh`, pinned `v0.11.0`) + PSScriptAnalyzer on `install.ps1` + Pester unit tests (pinned `1.25.0`/`5.7.1`) + `sh-test` (the POSIX `install.sh` unit tests plus a `python3`-backed loopback fixture-server smoke test that exercises the `CYNATIVE_BASE_URL` download-base seam end-to-end and its non-loopback-HTTP reject). Install-free: asserts each pinned tool/module is present and fails with an install hint otherwise (needs `shellcheck` + PowerShell 7 + `python3`). The pinned PowerShell/shellcheck versions are set in the `Makefile` and bumped by hand — Dependabot has no PowerShell Gallery or raw-binary ecosystem.
 - `make generate` — `go generate ./...` (regenerates the `moq` mocks).
 - `make lint` — `go tool golangci-lint run`.
 - `make format` — `go tool golangci-lint fmt --diff` (prints diffs; does not write).
