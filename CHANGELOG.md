@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.1](https://github.com/cynative/cynative/compare/v1.4.0...v1.4.1) (2026-07-01)
+
+
+### Bug Fixes
+
+* **gcp:** keep all Discovery API versions in the action-gate catalog ([#32](https://github.com/cynative/cynative/issues/32)) ([c3a8c4f](https://github.com/cynative/cynative/commit/c3a8c4fb2f53fe76e00cd4fa443bbcff7fed6055))
+* use bare :monterey symbol in Homebrew depends_on macos ([#30](https://github.com/cynative/cynative/issues/30)) ([e016735](https://github.com/cynative/cynative/commit/e016735b4d06f6cd182c181c0f64230ac9f97efd))
+
 ## [1.4.0](https://github.com/cynative/cynative/compare/v1.3.0...v1.4.0) (2026-06-30)
 
 
