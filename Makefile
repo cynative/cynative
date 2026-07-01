@@ -118,6 +118,6 @@ print-%:
 # hint, mirroring the sh-test/shellcheck install-free pattern.
 install-e2e:
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, needed by the install e2e loopback fixture server (test/install.e2e.test.sh)."; exit 1; }
-	go tool goreleaser release --snapshot --clean
+	go tool goreleaser release --snapshot --clean --skip=before
 	sh test/install.e2e.test.sh ./dist
 	@echo "OK: install-e2e (real archive install + version + uninstall + checksum-failure)"

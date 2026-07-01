@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # GoReleaser post-build hook: sign a darwin Mach-O with Developer ID Application.
-# Usage: sign-darwin-binary.sh <binary-path> <target e.g. darwin_arm64>
+# Usage: sign-darwin-binary.sh <binary-path> <target e.g. darwin_arm64> [isSnapshot=false]
 set -euo pipefail
 
 binary="$1"; target="${2:-}"; snapshot="${3:-false}"
