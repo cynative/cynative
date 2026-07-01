@@ -3,11 +3,19 @@
 # Usage: sign-darwin-binary.sh <binary-path> <target e.g. darwin_arm64>
 set -euo pipefail
 
-binary="$1"; target="${2:-}"
+binary="$1"; target="${2:-}"; snapshot="${3:-false}"
 case "${target}" in
   darwin_*) ;;
   *) exit 0 ;;   # non-darwin target: nothing to sign
 esac
+
+# Snapshot builds (goreleaser --snapshot, e.g. the install e2e) are never releases,
+# so there is nothing to sign. Default is "false" (fail-closed): a real release or a
+# dropped 3rd arg still attempts signing and fails loudly on missing material.
+if [ "${snapshot}" = "true" ]; then
+  echo "snapshot build: skipping darwin signing (${target})" >&2
+  exit 0
+fi
 
 : "${MACOS_SIGN_P12_FILE:?MACOS_SIGN_P12_FILE unset}"
 : "${MACOS_SIGN_PASSWORD_FILE:?MACOS_SIGN_PASSWORD_FILE unset}"

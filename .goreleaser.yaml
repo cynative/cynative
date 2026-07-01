@@ -25,7 +25,7 @@ builds:
       - arm64
     hooks:
       post:
-        - cmd: scripts/release/sign-darwin-binary.sh "{{ .Path }}" "{{ .Target }}"
+        - cmd: scripts/release/sign-darwin-binary.sh "{{ .Path }}" "{{ .Target }}" "{{ .IsSnapshot }}"
 
 archives:
   - formats: [tar.gz]
