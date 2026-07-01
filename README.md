@@ -30,11 +30,11 @@ Point it at production with confidence.
 
 ## How to Install
 
-**Homebrew** (macOS / Linux — recommended):
+**Homebrew** (macOS / Linux - recommended):
 ```bash
 brew install cynative/tap/cynative
 ```
-**Install script** (macOS / Linux — verifies the download's SHA-256 against the release `checksums.txt`, failing closed):
+**Install script** (macOS / Linux - verifies the download's SHA-256 against the release `checksums.txt`, failing closed):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cynative/cynative/main/install.sh | sh
 ```
@@ -289,7 +289,7 @@ Configure under `audit:` in `~/.cynative/config.yaml`, or via env:
 
 ## Contributing
 
-Contributions welcome — new connectors, providers, evaluation datasets, and
+Contributions welcome - new connectors, providers, evaluation datasets, and
 improvements across the board. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev
 setup, the `make check` gate, and PR conventions, and [SECURITY.md](SECURITY.md)
 for reporting vulnerabilities.
