@@ -1,5 +1,5 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
-	windows-build shellcheck pwsh-lint pwsh-test
+	windows-build shellcheck pwsh-lint pwsh-test sh-test
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -19,7 +19,7 @@ check-go: generate lint shell-complexity format test windows-build
 
 # Non-Go, system-tool checks. Install-free: each target asserts its pinned tool /
 # module version is present and fails with an install hint otherwise.
-check-scripts: shellcheck pwsh-lint pwsh-test
+check-scripts: shellcheck pwsh-lint pwsh-test sh-test
 
 generate:
 	go generate ./...
@@ -69,6 +69,15 @@ pwsh-lint:
 pwsh-test:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + Pester $(PESTER_VERSION)."; exit 1; }
 	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
+
+# sh-test: POSIX install.sh unit + loopback smoke tests. Presence-check python3
+# (the smoke test's loopback fixture server) with an install hint, mirroring the
+# shellcheck/pwsh install-free pattern.
+sh-test:
+	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found — needed by the install.sh loopback smoke test (test/install.smoke.test.sh)."; exit 1; }
+	@sh test/install.unit.test.sh
+	@sh test/install.smoke.test.sh
+	@echo "OK: sh-test (install.sh unit + loopback smoke)"
 
 SHELL_COMPLEXITY_MAX := 6
 
