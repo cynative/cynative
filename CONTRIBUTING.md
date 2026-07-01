@@ -8,8 +8,11 @@ board.
 
 - A Go toolchain matching the version in [`go.mod`](go.mod).
 - `make` and a POSIX shell.
-- All tooling (`golangci-lint`, `moq`, complexity checkers) is pinned via `go.mod`
-  and invoked through `make` — no separate installs.
+- Go tooling (`golangci-lint`, `moq`, complexity checkers) is pinned via `go.mod`
+  and invoked through `make` — no separate installs. The shell/PowerShell gate
+  (`make check-scripts`) additionally needs `shellcheck` and PowerShell 7 with
+  Pester/PSScriptAnalyzer; those versions are pinned in the `Makefile` and installed
+  separately (`make check-scripts` prints an install hint if one is missing).
 
 On a fresh checkout, generate the gitignored mocks before running package tests:
 
@@ -19,14 +22,19 @@ make generate
 
 ## The gate: `make check`
 
-Every PR must pass `make check` (generate + lint + shell-complexity + format-diff +
-the full race-enabled test suite):
+Every PR must pass `make check`, which runs two halves:
+
+- `make check-go` — the hermetic Go gate (generate + lint + shell-complexity +
+  format-diff + the full race-enabled test suite + a `GOOS=windows` cross-build);
+  100% `go.mod`-pinned. **The pre-commit hook runs this.**
+- `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer on
+  `install.ps1`, and the Pester unit tests, each at a version pinned in the `Makefile`.
 
 ```bash
 make check
 ```
 
-It enforces, among other things:
+`check-go` enforces, among other things:
 
 - **100% statement coverage** of core (non-`*_shell.go`) code;
 - the whole suite under `-race -shuffle=on`;
@@ -35,7 +43,7 @@ It enforces, among other things:
 - strict linting (`.golangci.yaml`) and formatting.
 
 Add tests alongside any new code, or the coverage gate fails. Useful targets:
-`make lint`, `make test`, `make format`, `make generate`.
+`make check-go`, `make check-scripts`, `make lint`, `make test`, `make format`, `make generate`.
 
 ## Pull requests
 
@@ -45,8 +53,8 @@ Add tests alongside any new code, or the coverage gate fails. Useful targets:
   footer for breaking changes. Releases and the changelog are automated by
   release-please from these titles — **do not hand-edit `CHANGELOG.md`**.
 - PRs are **squash-merged** with linear history; keep them focused.
-- Required checks (`Lint & Test`, `Validate PR title`) must pass and review threads
-  must be resolved before merge.
+- Required checks (`Lint & Test`, `Validate PR title`, `Build & smoke-test macOS
+  packaging toolchain`) must pass and review threads must be resolved before merge.
 
 ## Reporting issues
 

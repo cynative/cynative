@@ -4,7 +4,7 @@ repos:
       - id: check
         name: check
         language: system
-        entry: make check
+        entry: make check-go
         always_run: true
         pass_filenames: false
         verbose: true
