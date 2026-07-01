@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/cynative/cynative/compare/v1.4.1...v1.5.0) (2026-07-01)
+
+
+### Features
+
+* **install:** add CYNATIVE_BASE_URL test seam to install.sh ([#61](https://github.com/cynative/cynative/issues/61)) ([097f0fe](https://github.com/cynative/cynative/commit/097f0fe5038ac593dd5d62a8ef3bc605fe827227))
+
+
+### Bug Fixes
+
+* **deps:** Bump the all-dependencies group with 3 updates ([#37](https://github.com/cynative/cynative/issues/37)) ([2665f14](https://github.com/cynative/cynative/commit/2665f14ca21d455e6180c81a819db607a3941f60))
+
 ## [1.4.1](https://github.com/cynative/cynative/compare/v1.4.0...v1.4.1) (2026-07-01)
 
 
