@@ -41,10 +41,7 @@ func TestNewHTTPRequestTool_Info(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 
-	info, err := tl.Info(context.Background())
-	if err != nil {
-		t.Fatalf("info: %v", err)
-	}
+	info := tl.Info()
 	if info.Name != "http_request" {
 		t.Errorf("name = %q", info.Name)
 	}
@@ -347,10 +344,7 @@ func TestNewHTTPRequestTool_RequiredFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	info, err := tl.Info(context.Background())
-	if err != nil {
-		t.Fatalf("info: %v", err)
-	}
+	info := tl.Info()
 
 	// Top level: only method, url, auth_provider are required.
 	assertRequiredSet(t, "<root>", info.Params.Required, []string{"method", "url", "auth_provider"})

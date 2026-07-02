@@ -35,8 +35,8 @@ type echoTool struct {
 	err error
 }
 
-func (echoTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "http_request", Desc: "echo", Params: nil}, nil
+func (echoTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request", Desc: "echo", Params: nil}
 }
 
 func (e echoTool) Run(_ context.Context, args string) (string, error) {
@@ -269,8 +269,8 @@ func TestCodeExec_ScriptFailure_ReturnsOutputAndMarksFailed(t *testing.T) {
 // on the context but returns the response body with no Go error.
 type markFailTool struct{}
 
-func (markFailTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "http_request", Desc: "", Params: nil}, nil
+func (markFailTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request", Desc: "", Params: nil}
 }
 
 func (markFailTool) Run(ctx context.Context, _ string) (string, error) {
@@ -309,8 +309,8 @@ func TestCodeExec_InnerMarkedFailure_RecordsErrorAndPropagates(t *testing.T) {
 // markProgressTool simulates an inner http_request that gets a sub-4xx response.
 type markProgressTool struct{}
 
-func (markProgressTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "http_request", Desc: "", Params: nil}, nil
+func (markProgressTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request", Desc: "", Params: nil}
 }
 
 func (markProgressTool) Run(ctx context.Context, _ string) (string, error) {

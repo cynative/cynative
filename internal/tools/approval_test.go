@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,27 +11,19 @@ import (
 	"github.com/cynative/cynative/internal/tools"
 )
 
-// errFakeInfo is returned by fakeTool.Info when infoErr is set.
-var errFakeInfo = errors.New("info boom")
-
 // fakeTool is a configurable schema.InvokableTool used to drive every branch of
 // the approval decorator and to observe whether the inner tool ran.
 type fakeTool struct {
-	name    string
-	ret     string
-	infoErr error
+	name string
+	ret  string
 
 	ran     bool
 	gotArgs string
 }
 
-// Info reports the configured name, or infoErr when set.
-func (f *fakeTool) Info(context.Context) (*schema.ToolInfo, error) {
-	if f.infoErr != nil {
-		return nil, f.infoErr
-	}
-
-	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}, nil
+// Info reports the configured name.
+func (f *fakeTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}
 }
 
 // Run records that it ran and the arguments it received.
@@ -46,8 +37,8 @@ func (f *fakeTool) Run(_ context.Context, argumentsInJSON string) (string, error
 // countingTool counts how many times it ran; safe for concurrent Run.
 type countingTool struct{ calls *atomic.Int64 }
 
-func (countingTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "code_execution", Desc: "", Params: nil}, nil
+func (countingTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "code_execution", Desc: "", Params: nil}
 }
 
 func (c countingTool) Run(context.Context, string) (string, error) {
@@ -59,7 +50,7 @@ func (c countingTool) Run(context.Context, string) (string, error) {
 func TestApprovalToolApproveRunsInner(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "echo", ret: "echoed", infoErr: nil, ran: false, gotArgs: ""}
+	inner := &fakeTool{name: "echo", ret: "echoed", ran: false, gotArgs: ""}
 
 	var gotName, gotArgs, gotStyle string
 
@@ -96,7 +87,7 @@ func TestApprovalToolApproveRunsInner(t *testing.T) {
 func TestApprovalToolDenyReturnsDeniedMessage(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "echo", ret: "echoed", infoErr: nil, ran: false, gotArgs: ""}
+	inner := &fakeTool{name: "echo", ret: "echoed", ran: false, gotArgs: ""}
 	at := tools.NewApprovalTool(inner, func(string, string, string, bool) tools.Decision { return tools.Deny }, "dark")
 
 	out, err := at.Run(context.Background(), "{}")
@@ -113,35 +104,17 @@ func TestApprovalToolDenyReturnsDeniedMessage(t *testing.T) {
 	}
 }
 
-func TestApprovalToolInfoError(t *testing.T) {
-	t.Parallel()
-
-	inner := &fakeTool{name: "x", ret: "", infoErr: errFakeInfo, ran: false, gotArgs: ""}
-	at := tools.NewApprovalTool(inner, func(string, string, string, bool) tools.Decision {
-		return tools.ApproveOnce
-	}, "dark")
-
-	_, err := at.Run(context.Background(), "{}")
-	if !errors.Is(err, errFakeInfo) {
-		t.Errorf("err=%v want %v", err, errFakeInfo)
-	}
-
-	if inner.ran {
-		t.Error("inner ran despite Info error")
-	}
-}
-
 func TestApprovalToolInfoDelegates(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "echo", ret: "", infoErr: nil, ran: false, gotArgs: ""}
+	inner := &fakeTool{name: "echo", ret: "", ran: false, gotArgs: ""}
 	at := tools.NewApprovalTool(inner, func(string, string, string, bool) tools.Decision {
 		return tools.ApproveOnce
 	}, "dark")
 
-	info, err := at.Info(context.Background())
-	if err != nil || info.Name != "echo" {
-		t.Errorf("info=%+v err=%v", info, err)
+	info := at.Info()
+	if info.Name != "echo" {
+		t.Errorf("info=%+v", info)
 	}
 }
 
@@ -161,7 +134,7 @@ func TestApprovalTool_RecordsDecisionOnContext(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			inner := &fakeTool{name: "http_request", ret: "ok", infoErr: nil, ran: false, gotArgs: ""}
+			inner := &fakeTool{name: "http_request", ret: "ok", ran: false, gotArgs: ""}
 			at := tools.NewApprovalTool(inner, func(string, string, string, bool) tools.Decision {
 				return tc.decision
 			}, "notty")
@@ -183,7 +156,7 @@ func TestApprovalTool_RecordsDecisionOnContext(t *testing.T) {
 func TestApprovalTool_SessionGrant_RecordsProvenance(t *testing.T) {
 	t.Parallel()
 
-	inner := &fakeTool{name: "code_execution", ret: "ok", infoErr: nil, ran: false, gotArgs: ""}
+	inner := &fakeTool{name: "code_execution", ret: "ok", ran: false, gotArgs: ""}
 	at := tools.NewApprovalTool(inner, func(string, string, string, bool) tools.Decision {
 		return tools.ApproveSession
 	}, "notty")
@@ -209,7 +182,7 @@ func TestApprovalTool_GrantIsPerToolInstance(t *testing.T) {
 	t.Parallel()
 
 	mk := func(name string, seen *[]bool) schema.InvokableTool {
-		inner := &fakeTool{name: name, ret: "ok", infoErr: nil, ran: false, gotArgs: ""}
+		inner := &fakeTool{name: name, ret: "ok", ran: false, gotArgs: ""}
 
 		return tools.NewApprovalTool(inner, func(_, _, _ string, granted bool) tools.Decision {
 			*seen = append(*seen, granted)

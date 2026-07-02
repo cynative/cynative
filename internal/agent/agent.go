@@ -128,7 +128,7 @@ type Agent struct {
 // New builds the agent: it assembles the system prompt, registers the host
 // orchestration tools (write_todos, task, and verify_findings) alongside the
 // approval-wrapped I/O tools, and binds the tool schemas the model will see.
-func New(_ context.Context, cfg Config, opts ...Option) (*Agent, error) {
+func New(_ context.Context, cfg Config, opts ...Option) *Agent {
 	a := &Agent{ //nolint:exhaustruct // tools/history/sessionID set below or per Run
 		model:                  cfg.Model,
 		renderer:               cfg.Renderer,
@@ -156,11 +156,7 @@ func New(_ context.Context, cfg Config, opts ...Option) (*Agent, error) {
 	all = append(all, cfg.Tools...)
 	all = append(all, newWriteTodosTool(a), newTaskTool(a), newVerifyFindingsTool(a))
 
-	ts, err := buildToolset(all)
-	if err != nil {
-		return nil, err
-	}
-	a.tools = ts
+	a.tools = buildToolset(all)
 
 	for _, o := range opts {
 		o(a)
@@ -168,25 +164,22 @@ func New(_ context.Context, cfg Config, opts ...Option) (*Agent, error) {
 
 	a.sessionID = a.newID()
 
-	return a, nil
+	return a
 }
 
 // buildToolset indexes tools by name and collects their schemas.
-func buildToolset(ts []schema.InvokableTool) (toolset, error) {
+func buildToolset(ts []schema.InvokableTool) toolset {
 	out := toolset{
 		tools: make(map[string]schema.InvokableTool, len(ts)),
 		infos: make([]*schema.ToolInfo, 0, len(ts)),
 	}
 	for _, t := range ts {
-		info, err := t.Info(context.Background())
-		if err != nil {
-			return toolset{}, fmt.Errorf("agent: read tool info: %w", err)
-		}
+		info := t.Info()
 		out.tools[info.Name] = t
 		out.infos = append(out.infos, info)
 	}
 
-	return out, nil
+	return out
 }
 
 // Run executes one research turn: it seeds the working transcript from the Q&A

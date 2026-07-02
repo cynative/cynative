@@ -21,7 +21,7 @@ func welcomeAgent(t *testing.T, model schema.ChatModel) (*Agent, *metrics.Accumu
 	cfg.Model = model
 	cfg.Connectors = map[string]ConnectorMeta{"eks": {Identity: "cluster/prod", Posture: "view"}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 	a.renderer = echoRenderer
 	acc := metrics.NewAccumulator("p", "m")
 	a.metrics = acc
@@ -137,20 +137,14 @@ func TestConfigWelcomeTimeout_SetsField(t *testing.T) {
 
 	// Positive duration: field must be set.
 	cfg.WelcomeTimeout = 5 * time.Millisecond
-	a, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	a := New(context.Background(), cfg)
 	if a.welcomeTimeoutD != 5*time.Millisecond {
 		t.Errorf("welcomeTimeoutD = %v, want 5ms", a.welcomeTimeoutD)
 	}
 
 	// Zero duration: field stays zero (the const default is used).
 	cfg.WelcomeTimeout = 0
-	a2, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	a2 := New(context.Background(), cfg)
 	if a2.welcomeTimeoutD != 0 {
 		t.Errorf("zero duration must leave welcomeTimeoutD zero, got %v", a2.welcomeTimeoutD)
 	}

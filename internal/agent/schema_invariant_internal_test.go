@@ -18,10 +18,7 @@ func TestBoundToolSchemas_ContainNoSecretShapedContent(t *testing.T) {
 
 	// A zero Config suffices: verify_findings is always bound and New reads only Cfg
 	// here, so the other Config fields can stay zero.
-	a, err := New(context.Background(), Config{}) //nolint:exhaustruct // only Cfg matters; defaults zero.
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	a := New(context.Background(), Config{}) //nolint:exhaustruct // only Cfg matters; defaults zero.
 
 	r := redact.New()
 	for _, info := range a.tools.infos {

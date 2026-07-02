@@ -52,8 +52,8 @@ func newTaskTool(a *Agent) *taskTool {
 }
 
 // Info returns the tool's static schema.
-func (t *taskTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *taskTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run satisfies schema.InvokableTool; dispatch never calls it (runScoped is

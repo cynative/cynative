@@ -1,25 +1,10 @@
 package agent
 
 import (
-	"context"
 	"io"
-	"testing"
 
 	"github.com/cynative/cynative/internal/schema"
 )
-
-// newAgent builds an Agent via New, failing the test on a construction error, so
-// callers keep no outer err in scope (avoiding shadowing of Run's error).
-func newAgent(t *testing.T, cfg Config) *Agent {
-	t.Helper()
-
-	a, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-
-	return a
-}
 
 // withSystemPrompt overrides the assembled system prompt; a test-only Option
 // proving New applies its options after construction.
@@ -32,7 +17,7 @@ func withSystemPrompt(s string) Option {
 func newTestAgent(model schema.ChatModel, byName map[string]schema.InvokableTool) *Agent {
 	infos := make([]*schema.ToolInfo, 0, len(byName))
 	for _, t := range byName {
-		info, _ := t.Info(context.Background())
+		info := t.Info()
 		infos = append(infos, info)
 	}
 

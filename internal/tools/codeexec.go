@@ -110,10 +110,7 @@ func newCodeExecutionToolWithOpts(
 		opt(o)
 	}
 
-	funcs, descs, err := buildToolFuncs(inner, sink, o.newID)
-	if err != nil {
-		return nil, err
-	}
+	funcs, descs := buildToolFuncs(inner, sink, o.newID)
 
 	params, err := o.codeArgsSchema()
 	if err != nil {
@@ -136,8 +133,8 @@ func newCodeExecutionToolWithOpts(
 }
 
 // Info returns the tool's schema.
-func (t *codeExecutionTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *codeExecutionTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run runs the script. Execution failures are returned as the tool result (not a
@@ -185,16 +182,12 @@ func buildToolFuncs(
 	inner []schema.InvokableTool,
 	sink audit.Sink,
 	newID func() string,
-) (map[string]sandbox.ToolFunc, []toolDesc, error) {
-	ctx := context.Background()
+) (map[string]sandbox.ToolFunc, []toolDesc) {
 	funcs := make(map[string]sandbox.ToolFunc, len(inner))
 	descs := make([]toolDesc, 0, len(inner))
 
 	for _, it := range inner {
-		info, err := it.Info(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("tools: read inner tool info: %w", err)
-		}
+		info := it.Info()
 
 		if info.Name == codeExecutionName {
 			continue
@@ -204,7 +197,7 @@ func buildToolFuncs(
 		descs = append(descs, toolDesc{name: info.Name, desc: info.Desc, params: info.Params})
 	}
 
-	return funcs, descs, nil
+	return funcs, descs
 }
 
 // innerResultDecision returns the audit decision to stamp on an inner result

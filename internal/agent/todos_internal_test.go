@@ -15,10 +15,7 @@ func TestNewWriteTodosTool_Info(t *testing.T) {
 
 	tool := newWriteTodosTool(newTestAgent(&scriptedModel{}, map[string]schema.InvokableTool{}))
 
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
+	info := tool.Info()
 	if info.Name != "write_todos" {
 		t.Errorf("name = %q, want write_todos", info.Name)
 	}

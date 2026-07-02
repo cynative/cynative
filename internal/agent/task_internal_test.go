@@ -20,10 +20,7 @@ func TestNewTaskTool_Info(t *testing.T) {
 
 	tool := newTaskTool(newTestAgent(&scriptedModel{}, map[string]schema.InvokableTool{}))
 
-	info, err := tool.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
+	info := tool.Info()
 	if info.Name != "task" {
 		t.Errorf("name = %q, want task", info.Name)
 	}

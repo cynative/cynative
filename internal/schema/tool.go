@@ -14,12 +14,12 @@ type ToolInfo struct {
 	Params *jsonschema.Schema
 }
 
-// InvokableTool is a host capability the model can invoke. Run receives the
-// model's raw JSON argument string and returns the result string; an execution
-// failure is returned as the result (not a Go error) so the loop can hand it to
-// the model.
+// InvokableTool is a host capability the model can invoke. Info returns the
+// tool's static schema. Run receives the model's raw JSON argument string and
+// returns the result string; an execution failure is returned as the result
+// (not a Go error) so the loop can hand it to the model.
 type InvokableTool interface {
-	Info(ctx context.Context) (*ToolInfo, error)
+	Info() *ToolInfo
 	Run(ctx context.Context, argumentsInJSON string) (string, error)
 }
 

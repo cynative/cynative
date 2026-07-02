@@ -86,8 +86,8 @@ type echoTool struct {
 
 var _ schema.InvokableTool = (*echoTool)(nil)
 
-func (*echoTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "echo", Desc: "echo tool", Params: nil}, nil
+func (*echoTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "echo", Desc: "echo tool", Params: nil}
 }
 
 func (t *echoTool) Run(context.Context, string) (string, error) {
@@ -103,25 +103,12 @@ type errTool struct{}
 
 var _ schema.InvokableTool = (*errTool)(nil)
 
-func (*errTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "boom", Desc: "boom tool", Params: nil}, nil
+func (*errTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "boom", Desc: "boom tool", Params: nil}
 }
 
 func (*errTool) Run(context.Context, string) (string, error) {
 	return "", errors.New("tool boom")
-}
-
-// infoErrTool fails on Info, exercising the buildToolset error path.
-type infoErrTool struct{}
-
-var _ schema.InvokableTool = (*infoErrTool)(nil)
-
-func (*infoErrTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return nil, errors.New("info boom")
-}
-
-func (*infoErrTool) Run(context.Context, string) (string, error) {
-	return "", nil
 }
 
 // toolCall builds an assistant message carrying a single tool call.
@@ -331,10 +318,7 @@ func TestNew_Success(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Model = &scriptedModel{}
 
-	a, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	a := New(context.Background(), cfg)
 	if a.maxIter != 5 || a.maxSubagentIter != 3 {
 		t.Errorf("budgets = (%d,%d), want (5,3)", a.maxIter, a.maxSubagentIter)
 	}
@@ -353,25 +337,9 @@ func TestNew_AppliesOptions(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Model = &scriptedModel{}
 
-	a, err := New(context.Background(), cfg, withSystemPrompt("OVERRIDDEN"))
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	a := New(context.Background(), cfg, withSystemPrompt("OVERRIDDEN"))
 	if a.systemPrompt != "OVERRIDDEN" {
 		t.Errorf("systemPrompt = %q, want option-applied value", a.systemPrompt)
-	}
-}
-
-func TestNew_ToolInfoError(t *testing.T) {
-	t.Parallel()
-
-	cfg := baseConfig()
-	cfg.Model = &scriptedModel{}
-	cfg.Tools = []schema.InvokableTool{&infoErrTool{}}
-
-	_, err := New(context.Background(), cfg)
-	if err == nil || !strings.Contains(err.Error(), "read tool info") {
-		t.Fatalf("expected tool-info error, got: %v", err)
 	}
 }
 
@@ -381,7 +349,7 @@ func TestNew_RegistersOrchestrationToolsUnwrapped(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Model = &scriptedModel{}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	// The concrete types prove New registers them bare: surfaced, not gated.
 	if _, ok := a.tools.tools["write_todos"].(*writeTodosTool); !ok {
@@ -398,7 +366,7 @@ func TestNew_RegistersVerifierAlways(t *testing.T) {
 	cfg := baseConfig() // No panel size to set: verification is unconditional.
 	cfg.Model = &scriptedModel{}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 	if _, ok := a.tools.tools["verify_findings"].(*verifyFindingsTool); !ok {
 		t.Errorf("verify_findings registered as %T, want *verifyFindingsTool", a.tools.tools["verify_findings"])
 	}
@@ -413,7 +381,7 @@ func TestRun_RecordsQAHistory(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Model = &scriptedModel{msgs: []*schema.Message{schema.AssistantMessage("the answer", nil)}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "the question", &buf); err != nil {
@@ -444,7 +412,7 @@ func TestRun_SeedsSystemThenHistoryThenQuestion(t *testing.T) {
 	cfg.Model = model
 	cfg.Providers = []auth.Provider{}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	if err := a.Run(context.Background(), "q1", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -472,7 +440,7 @@ func TestRun_SecondTurnReplaysHistory(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Model = model
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	if err := a.Run(context.Background(), "q1", io.Discard); err != nil {
 		t.Fatalf("Run #1: %v", err)
@@ -502,7 +470,7 @@ func TestRun_IterationLimitNotice(t *testing.T) {
 	cfg.Model = &scriptedModel{msgs: []*schema.Message{toolCall("c1", "echo", "{}")}}
 	cfg.Tools = []schema.InvokableTool{&echoTool{ran: nil}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "q", &buf); err != nil {
@@ -523,7 +491,7 @@ func TestRun_PropagatesModelError(t *testing.T) {
 	cfg := baseConfig()
 	cfg.Model = &errModel{}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	if err := a.Run(context.Background(), "q", io.Discard); err == nil {
 		t.Fatal("expected error from Run")
@@ -844,7 +812,7 @@ func TestRun_CountersAccumulateAcrossTurns(t *testing.T) {
 	cfg.Model = model
 	cfg.Metrics = metrics.NewAccumulator("p", "m")
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	if err := a.Run(context.Background(), "q1", io.Discard); err != nil {
 		t.Fatalf("Run #1: %v", err)
@@ -882,7 +850,7 @@ func TestRun_ClosesTurnForActiveTime(t *testing.T) {
 	cfg.Model = model
 	cfg.Metrics = metrics.NewAccumulator("p", "m", metrics.WithClock(advancing))
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 	if err := a.Run(context.Background(), "q1", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -927,7 +895,7 @@ func TestRun_BudgetHaltsTurnWithNotice(t *testing.T) {
 	cfg.Metrics = acc
 	cfg.Tools = []schema.InvokableTool{&echoTool{ran: nil}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "q", &buf); err != nil {
@@ -979,7 +947,7 @@ func TestRun_BudgetHaltsOnOverBudgetFinalAnswer(t *testing.T) {
 	cfg.Model = model
 	cfg.Metrics = acc
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "q", &buf); err != nil {
@@ -1041,7 +1009,7 @@ func TestRun_BudgetHaltsBeforeRemainingToolCalls(t *testing.T) {
 	cfg.Metrics = acc
 	cfg.Tools = []schema.InvokableTool{&echoTool{ran: &ran}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 	a.maxSubagentIter = 3
 
 	var buf bytes.Buffer
@@ -1111,7 +1079,7 @@ func TestAgent_Run_BracketsInterrupterTurn(t *testing.T) {
 	cfg.Interrupter = fi
 	cfg.Metrics = metrics.NewAccumulator("p", "m")
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	if err := a.Run(context.Background(), "q", io.Discard); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1154,7 +1122,7 @@ func TestRun_InterruptAtTopOfLoop(t *testing.T) {
 	cfg.Model = &scriptedModel{msgs: []*schema.Message{schema.AssistantMessage("should not appear", nil)}}
 	cfg.Interrupter = fi
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1189,7 +1157,7 @@ func TestRun_InterruptAfterGenerate(t *testing.T) {
 	cfg.Tools = []schema.InvokableTool{&echoTool{ran: &ran}}
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1220,7 +1188,7 @@ func TestRun_InterruptDuringGenerateWinsOverModelError(t *testing.T) {
 	cfg.Model = &errModel{} // Generate always errors.
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1248,7 +1216,7 @@ func TestRun_InterruptDuringFinalAnswerRenderDenies(t *testing.T) {
 	cfg.Model = &scriptedModel{msgs: []*schema.Message{schema.AssistantMessage("the final answer", nil)}}
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1282,7 +1250,7 @@ func TestRun_InterruptPostDispatch(t *testing.T) {
 	cfg.Tools = []schema.InvokableTool{&echoTool{ran: &ran}}
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1323,7 +1291,7 @@ func TestRun_InvokeIOGuard(t *testing.T) {
 	cfg.Tools = []schema.InvokableTool{&echoTool{ran: &ran}}
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1341,8 +1309,8 @@ type ctxWaitTool struct{ canceled *bool }
 
 var _ schema.InvokableTool = ctxWaitTool{}
 
-func (ctxWaitTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "waiter", Desc: "", Params: nil}, nil
+func (ctxWaitTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "waiter", Desc: "", Params: nil}
 }
 
 func (w ctxWaitTool) Run(ctx context.Context, _ string) (string, error) {
@@ -1407,7 +1375,7 @@ func TestRun_CancelsHungModelCallOnInterrupt(t *testing.T) {
 	cfg.Model = ctxWaitModel{}
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "q", &buf)
@@ -1427,8 +1395,8 @@ type failingTool struct{ name string }
 
 var _ schema.InvokableTool = (*failingTool)(nil)
 
-func (f *failingTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}, nil
+func (f *failingTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}
 }
 
 func (f *failingTool) Run(ctx context.Context, _ string) (string, error) {
@@ -1442,8 +1410,8 @@ type succeedingTool struct{ name string }
 
 var _ schema.InvokableTool = (*succeedingTool)(nil)
 
-func (s *succeedingTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: s.name, Desc: "", Params: nil}, nil
+func (s *succeedingTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: s.name, Desc: "", Params: nil}
 }
 
 func (s *succeedingTool) Run(context.Context, string) (string, error) {
@@ -1481,7 +1449,7 @@ func TestRun_HaltsAfterNConsecutiveFailures(t *testing.T) {
 	cfg.Cfg.MaxConsecutiveFailures = 3
 	cfg.Tools = []schema.InvokableTool{&failingTool{name: "fail_tool"}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "scan", &buf); err != nil {
@@ -1522,7 +1490,7 @@ func TestRun_SuccessResetsFailureStreak(t *testing.T) {
 		&succeedingTool{name: "good_tool"},
 	}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "scan", &buf); err != nil {
@@ -1553,7 +1521,7 @@ func TestRun_MaxConsecutiveFailuresZeroDisables(t *testing.T) {
 	cfg.Cfg.MaxIterations = 2 // exhaust after 2 iterations.
 	cfg.Tools = []schema.InvokableTool{&failingTool{name: "fail_tool"}}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "scan", &buf); err != nil {
@@ -1593,7 +1561,7 @@ func TestRun_DenialCountsAsFailure(t *testing.T) {
 	cfg.DeniedToolResult = denyMsg
 	cfg.Tools = []schema.InvokableTool{denyingTool}
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	if err := a.Run(context.Background(), "scan", &buf); err != nil {
@@ -1656,7 +1624,7 @@ func TestRun_FailureSummaryInterruptPropagates(t *testing.T) {
 	cfg.Tools = []schema.InvokableTool{&failingTool{name: "fail_tool"}}
 	cfg.Interrupter = ci
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
 	err := a.Run(context.Background(), "scan", &buf)
@@ -1694,8 +1662,8 @@ func TestCreditedFailures(t *testing.T) {
 // script whose n inner http_request calls each returned >=400.
 type multiFailTool struct{ n int }
 
-func (multiFailTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "multifail", Desc: "", Params: nil}, nil
+func (multiFailTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "multifail", Desc: "", Params: nil}
 }
 
 func (m multiFailTool) Run(ctx context.Context, _ string) (string, error) {
@@ -1731,8 +1699,8 @@ func TestDispatch_CountsEachInnerFailure(t *testing.T) {
 // fan-out that got some 4xx responses and some useful 2xx ones.
 type mixedOutcomeTool struct{}
 
-func (mixedOutcomeTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "mixed", Desc: "", Params: nil}, nil
+func (mixedOutcomeTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "mixed", Desc: "", Params: nil}
 }
 
 func (mixedOutcomeTool) Run(ctx context.Context, _ string) (string, error) {
@@ -1771,10 +1739,7 @@ func TestNew_WiresAbout(t *testing.T) {
 	cfg.Model = &scriptedModel{}
 	cfg.About = "PRODUCT BLURB"
 
-	a, err := New(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	a := New(context.Background(), cfg)
 	if !strings.Contains(a.systemPrompt, "About cynative:") || !strings.Contains(a.systemPrompt, "PRODUCT BLURB") {
 		t.Errorf("New did not weave Config.About into the system prompt: %q", a.systemPrompt)
 	}
@@ -1792,7 +1757,7 @@ func TestNew_WiresOnFirstResponse(t *testing.T) {
 	cfg.Model = &scriptedModel{}
 	cfg.OnFirstResponse = hook
 
-	a := newAgent(t, cfg)
+	a := New(context.Background(), cfg)
 
 	// The field must be set to the same func value (pointer equality).
 	if a.onFirstResponse == nil {

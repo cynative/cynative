@@ -824,10 +824,7 @@ func TestVerifyFindings_Info(t *testing.T) {
 	t.Parallel()
 
 	a := newVerifierAgent(batchModel{verdict: verdictConfirmed})
-	info, err := newVerifyFindingsTool(a).Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info: %v", err)
-	}
+	info := newVerifyFindingsTool(a).Info()
 	if info.Name != "verify_findings" || info.Params == nil {
 		t.Errorf("info = %+v, want named tool with params schema", info)
 	}

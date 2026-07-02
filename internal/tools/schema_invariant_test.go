@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -29,10 +28,7 @@ func TestToolSchemas_ContainNoSecretShapedContent(t *testing.T) {
 
 	r := redact.New()
 	for _, tool := range []schema.InvokableTool{httpTool, codeTool} {
-		info, infoErr := tool.Info(context.Background())
-		if infoErr != nil {
-			t.Fatalf("Info: %v", infoErr)
-		}
+		info := tool.Info()
 
 		rendered := info.Desc
 		if info.Params != nil {

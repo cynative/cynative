@@ -84,8 +84,8 @@ func NewHTTPRequestTool(providers []auth.Provider, opts ...httpRequestOption) (s
 }
 
 // Info returns the tool's schema.
-func (t *httpRequestTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *httpRequestTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run executes the HTTP request described by argumentsInJSON. Execution failures

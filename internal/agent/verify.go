@@ -235,8 +235,8 @@ func newVerifyFindingsTool(a *Agent) *verifyFindingsTool {
 }
 
 // Info returns the tool's static schema.
-func (t *verifyFindingsTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *verifyFindingsTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run satisfies schema.InvokableTool; dispatch never calls it (runScoped is
