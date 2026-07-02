@@ -225,11 +225,13 @@ const verifierSystemPrompt = "You are an adversarial reviewer of cloud-security 
 
 // newVerifyFindingsTool builds the verify_findings tool bound to a.
 func newVerifyFindingsTool(a *Agent) *verifyFindingsTool {
-	params, _ := schema.ReflectParams[verifyFindingsArgs]()
-
 	return &verifyFindingsTool{
-		agent:   a,
-		info:    &schema.ToolInfo{Name: "verify_findings", Desc: verifyFindingsDesc, Params: params},
+		agent: a,
+		info: &schema.ToolInfo{
+			Name:   "verify_findings",
+			Desc:   verifyFindingsDesc,
+			Params: schema.ReflectParams[verifyFindingsArgs](),
+		},
 		timeout: passTimeout,
 	}
 }

@@ -43,11 +43,9 @@ const subagentDelegationGuidance = "Sub-agents cannot themselves delegate with t
 
 // newTaskTool builds the task tool bound to a.
 func newTaskTool(a *Agent) *taskTool {
-	params, _ := schema.ReflectParams[taskArgs]()
-
 	return &taskTool{
 		agent: a,
-		info:  &schema.ToolInfo{Name: "task", Desc: taskDesc, Params: params},
+		info:  &schema.ToolInfo{Name: "task", Desc: taskDesc, Params: schema.ReflectParams[taskArgs]()},
 	}
 }
 

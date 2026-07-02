@@ -36,11 +36,13 @@ const writeTodosDesc = "Record or update your investigation plan as a todo list 
 
 // newWriteTodosTool builds the write_todos tool bound to a.
 func newWriteTodosTool(a *Agent) *writeTodosTool {
-	params, _ := schema.ReflectParams[writeTodosArgs]()
-
 	return &writeTodosTool{
 		agent: a,
-		info:  &schema.ToolInfo{Name: "write_todos", Desc: writeTodosDesc, Params: params},
+		info: &schema.ToolInfo{
+			Name:   "write_todos",
+			Desc:   writeTodosDesc,
+			Params: schema.ReflectParams[writeTodosArgs](),
+		},
 	}
 }
 

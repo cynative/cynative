@@ -431,12 +431,9 @@ func TestSchemaToToolParameters_NilSchema(t *testing.T) {
 func TestSchemaToolsToParams_BuildsFunctionTool(t *testing.T) {
 	t.Parallel()
 
-	s, err := schema.ReflectParams[struct {
+	s := schema.ReflectParams[struct {
 		URL string `json:"url" jsonschema:"description=the url,required"`
 	}]()
-	if err != nil {
-		t.Fatalf("ReflectParams: %v", err)
-	}
 
 	infos := []*schema.ToolInfo{{
 		Name:   "http_request",

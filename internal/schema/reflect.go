@@ -11,14 +11,13 @@ import "github.com/invopop/jsonschema"
 //   - Anonymous:true omits the auto-generated $id.
 //
 // Descriptions are read from `jsonschema_description:"..."` struct tags; required
-// fields are derived from json tags (an omitempty field is optional). It returns
-// an error to satisfy the builder seam, though invopop's Reflect never fails.
-func ReflectParams[T any]() (*jsonschema.Schema, error) {
+// fields are derived from json tags (an omitempty field is optional).
+func ReflectParams[T any]() *jsonschema.Schema {
 	r := jsonschema.Reflector{
 		Anonymous:                 true,
 		AllowAdditionalProperties: false,
 		DoNotReference:            true,
 	}
 
-	return r.Reflect(*new(T)), nil
+	return r.Reflect(*new(T))
 }

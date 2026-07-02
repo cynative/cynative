@@ -204,9 +204,7 @@ func testDeps() *deps {
 		newChatModel: func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
 			return &fakeChatModel{}, nil //nolint:exhaustruct // benign default; tests override per case
 		},
-		newHTTPRequestTool: func(providers []auth.Provider) (schema.InvokableTool, error) {
-			return tools.NewHTTPRequestTool(providers)
-		},
+		newHTTPRequestTool:   tools.NewHTTPRequestTool,
 		newCodeExecutionTool: tools.NewCodeExecutionTool,
 		newAuditSink: func(config.Config) (audit.Sink, func() error, error) {
 			return nil, func() error { return nil }, nil
@@ -450,24 +448,6 @@ func TestRunResearch_VerboseFlag(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "Verbose") {
 		t.Errorf("expected 'Verbose' in output, got: %q", buf.String())
-	}
-}
-
-func TestRunResearch_HTTPToolError(t *testing.T) {
-	t.Parallel()
-
-	d := testDeps()
-	d.newHTTPRequestTool = func([]auth.Provider) (schema.InvokableTool, error) {
-		return nil, errors.New("schema boom")
-	}
-
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
-	if err == nil {
-		t.Fatal("expected error from http_request tool build")
-	}
-
-	if !strings.Contains(err.Error(), "build http_request tool") {
-		t.Errorf("expected 'build http_request tool' in error, got: %v", err)
 	}
 }
 

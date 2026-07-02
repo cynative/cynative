@@ -17,10 +17,7 @@ import (
 func TestToolSchemas_ContainNoSecretShapedContent(t *testing.T) {
 	t.Parallel()
 
-	httpTool, err := tools.NewHTTPRequestTool(nil)
-	if err != nil {
-		t.Fatalf("NewHTTPRequestTool: %v", err)
-	}
+	httpTool := tools.NewHTTPRequestTool(nil)
 	codeTool, err := tools.NewCodeExecutionTool([]schema.InvokableTool{httpTool}, nil, 1, nil)
 	if err != nil {
 		t.Fatalf("NewCodeExecutionTool: %v", err)

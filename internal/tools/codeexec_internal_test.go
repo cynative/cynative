@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/invopop/jsonschema"
-
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/sandbox"
 	"github.com/cynative/cynative/internal/schema"
@@ -31,7 +29,7 @@ type fakeInnerTool struct {
 }
 
 func (f *fakeInnerTool) Info() *schema.ToolInfo {
-	params, _ := schema.ReflectParams[probeArgs]()
+	params := schema.ReflectParams[probeArgs]()
 
 	return &schema.ToolInfo{
 		Name:   f.name,
@@ -148,20 +146,6 @@ func TestNewCodeExecutionTool_SelfExclusion(t *testing.T) {
 	info := tl.Info()
 	if strings.Contains(info.Desc, codeExecutionName+"(args)") {
 		t.Errorf("code_execution should not be exposed inside itself: %s", info.Desc)
-	}
-}
-
-func TestNewCodeExecutionTool_SchemaError(t *testing.T) {
-	t.Parallel()
-
-	_, err := NewCodeExecutionToolWithOpts(
-		nil,
-		nil,
-		sandbox.DefaultMaxConcurrency,
-		WithCodeArgsSchema(func() (*jsonschema.Schema, error) { return nil, errors.New("schema boom") }),
-	)
-	if err == nil {
-		t.Fatal("expected schema error")
 	}
 }
 
@@ -327,7 +311,7 @@ func TestSchemaJSON_Nil(t *testing.T) {
 func TestSchemaJSON_MarshalError(t *testing.T) {
 	t.Parallel()
 
-	params, _ := schema.ReflectParams[probeArgs]()
+	params := schema.ReflectParams[probeArgs]()
 
 	errMarshal := func(any) ([]byte, error) { return nil, errors.New("boom") }
 

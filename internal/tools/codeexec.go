@@ -55,9 +55,8 @@ type toolDesc struct {
 
 // codeExecOptions holds the configurable seams for NewCodeExecutionTool.
 type codeExecOptions struct {
-	codeArgsSchema schemaBuilderFunc
-	newSandbox     func(map[string]sandbox.ToolFunc, io.Writer, int) (codeRunner, error)
-	newID          func() string
+	newSandbox func(map[string]sandbox.ToolFunc, io.Writer, int) (codeRunner, error)
+	newID      func() string
 }
 
 // codeExecOption is a functional option for NewCodeExecutionTool.
@@ -95,9 +94,6 @@ func newCodeExecutionToolWithOpts(
 	opts ...codeExecOption,
 ) (schema.InvokableTool, error) {
 	o := &codeExecOptions{
-		codeArgsSchema: func() (*jsonschema.Schema, error) {
-			return schema.ReflectParams[codeArgs]()
-		},
 		newSandbox: func(funcs map[string]sandbox.ToolFunc, w io.Writer, mc int) (codeRunner, error) {
 			// RedactPreservingLocation (not Redact): sandbox tool results are HTTP
 			// responses whose signed Location URL must survive for redirect-following.
@@ -112,11 +108,6 @@ func newCodeExecutionToolWithOpts(
 
 	funcs, descs := buildToolFuncs(inner, sink, o.newID)
 
-	params, err := o.codeArgsSchema()
-	if err != nil {
-		return nil, fmt.Errorf("tools: build code_execution schema: %w", err)
-	}
-
 	sb, err := o.newSandbox(funcs, verbose, maxConcurrency)
 	if err != nil {
 		return nil, fmt.Errorf("tools: build sandbox: %w", err)
@@ -126,7 +117,7 @@ func newCodeExecutionToolWithOpts(
 		info: &schema.ToolInfo{
 			Name:   codeExecutionName,
 			Desc:   codeDescription(descs, json.Marshal),
-			Params: params,
+			Params: schema.ReflectParams[codeArgs](),
 		},
 		sandbox: sb,
 	}, nil
