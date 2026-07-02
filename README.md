@@ -37,7 +37,7 @@ export ANTHROPIC_API_KEY=...
 ```
 <!-- END quickstart-example -->
 
-Then give it any research task, it picks up the credentials already in your shell:
+Then give it any research task - it picks up the credentials already in your shell:
 
 ```bash
 cynative -p "which IAM roles can escalate to admin?" 
@@ -98,7 +98,7 @@ scoop install cynative
 
 **Install-script options:** pin a version with `CYNATIVE_VERSION=v1.0.0`; change the target directory with `CYNATIVE_INSTALL_DIR` (default `~/.local/bin`, no `sudo`). The script checks the GitHub release attestation when `gh` is installed (advisory by default); set `CYNATIVE_REQUIRE_ATTESTATION=1` to make a failed check fatal. For a high-integrity install, fetch the script from an immutable tag instead of `main`.
 
-**macOS (manual):** download `cynative_Darwin_arm64.pkg` (Apple Silicon) or `cynative_Darwin_x86_64.pkg` (Intel) from the [releases page](https://github.com/cynative/cynative/releases) and install with `sudo installer -pkg <file> -target /` (or double-click). These are signed, notarized and **stapled** — no first-run Gatekeeper prompt. The raw `cynative_Darwin_*.tar.gz` archives remain for scripting/CI; a quarantined tarball binary's first GUI launch needs internet for the online notarization check (terminal/`install.sh`/Homebrew use is unaffected).
+**macOS (manual):** download `cynative_Darwin_arm64.pkg` (Apple Silicon) or `cynative_Darwin_x86_64.pkg` (Intel) from the [releases page](https://github.com/cynative/cynative/releases) and install with `sudo installer -pkg <file> -target /` (or double-click). These are signed, notarized and **stapled** - no first-run Gatekeeper prompt. The raw `cynative_Darwin_*.tar.gz` archives remain for scripting/CI; a quarantined tarball binary's first GUI launch needs internet for the online notarization check (terminal/`install.sh`/Homebrew use is unaffected).
 
 **Linux / Windows (manual):** download a prebuilt binary and `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put the binary on your `PATH`. Single static binary, no dependencies.
 </details>
@@ -145,7 +145,7 @@ export CYNATIVE_LLM_OLLAMA_URL=http://localhost:11434
 <details>
 <summary><strong>Advanced YAML</strong></summary>
 
-For multi-key load balancing, custom retry behaviour, proxy configuration,
+For multi-key load balancing, custom retry behavior, proxy configuration,
 or any other Bifrost feature, write a YAML file:
 
 ```yaml
@@ -169,7 +169,7 @@ configuration reference.
 
 ## How to run
 
-`cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. cat main.tf | cynative -p "review this Terraform for misconfigurations")
+`cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
 
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 
@@ -192,14 +192,14 @@ Cynative prints a short operational footer (timing, token usage) to **stderr** -
 | `max_consecutive_failures`<br>`CYNATIVE_MAX_CONSECUTIVE_FAILURES` | 5 | Consecutive no-progress tool calls before a halt-and-summarize (0 disables). |
 | `sandbox_max_concurrency`<br>`CYNATIVE_SANDBOX_MAX_CONCURRENCY` | 16 | Max concurrent in-sandbox tool calls. |
 
-Finding verification (`verify_findings` tool) makes extra model calls, budget for them on any run that produces findings.
+Finding verification (`verify_findings` tool) makes extra model calls - budget for them on any run that produces findings.
 </details>
 
 ## Connectors
 
 On top of the credentials in your shell, Cynative enforces read-only at three layers:
 - **Network** - every request host is pinned to its mapped service and region
-  and the resolved IP is verified before connect, your agent can reach
+  and the resolved IP is verified before connecting - your agent can reach
   your infrastructure and nothing else.
 - **Action gate** - every operation is resolved to its required IAM actions,
   derived from the providers' own API definitions, then authorized against a
