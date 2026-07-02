@@ -30,8 +30,8 @@ const (
 // reference. It accepts the three IAM role-name forms and rejects anything else
 // (ErrInvalidRoleRef). Identifier charset is left to the IAM API: a structurally
 // valid but nonexistent role fails closed at fetch time (ErrRoleFetchFailed).
-// This is the single source of truth for role-reference shape; internal/config
-// mirrors it and TestGCPRoleValidationParity pins the two together.
+// This is the single source of truth for role-reference shape;
+// internal/config's validateGCPRole delegates to it.
 func ParseRoleReference(role string) (RoleRefKind, error) {
 	parts := strings.Split(role, "/")
 	switch {
