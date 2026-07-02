@@ -1,7 +1,6 @@
 # OpenCode Zen
 
 **Bifrost provider id:** `opencode-zen`
-**Cynative chat-loop support:** ✅ supported
 
 Zen is the pay-as-you-go OpenCode gateway at `https://opencode.ai/zen` (the
 OpenAI-compatible `/v1/chat/completions` path is appended automatically). Bifrost

@@ -1,7 +1,6 @@
 # OpenRouter
 
 **Bifrost provider id:** `openrouter`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

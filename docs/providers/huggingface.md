@@ -1,7 +1,6 @@
 # Hugging Face Inference
 
 **Bifrost provider id:** `huggingface`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

@@ -1,7 +1,6 @@
 # SGLang
 
 **Bifrost provider id:** `sgl`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

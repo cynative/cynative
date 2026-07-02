@@ -1,7 +1,6 @@
 # OpenCode Go
 
 **Bifrost provider id:** `opencode-go`
-**Cynative chat-loop support:** ✅ supported
 
 Go is the subscription OpenCode gateway at `https://opencode.ai/zen/go` (the
 OpenAI-compatible `/v1/chat/completions` path is appended automatically). It

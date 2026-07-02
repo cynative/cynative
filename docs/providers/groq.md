@@ -1,7 +1,6 @@
 # Groq
 
 **Bifrost provider id:** `groq`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

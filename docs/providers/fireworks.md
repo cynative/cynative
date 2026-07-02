@@ -1,7 +1,6 @@
 # Fireworks AI
 
 **Bifrost provider id:** `fireworks`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

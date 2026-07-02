@@ -1,7 +1,6 @@
 # Cohere
 
 **Bifrost provider id:** `cohere`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

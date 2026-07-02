@@ -7,18 +7,17 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
-// ValidateProvider returns ErrUnknownProvider when entry.Provider is not one of
-// the providers Bifrost supports (AllBifrostProviders). An unknown provider must
-// be caught here: Bifrost cannot prepare it, and its chat request then blocks
-// forever rather than returning an error, deadlocking the agent. The check is
-// against the canonical catalog, so it stays correct as Bifrost's provider set
-// evolves. A nil entry is treated as nothing to validate.
+// ValidateProvider returns ErrUnknownProvider when entry.Provider is not one
+// of the chat-capable providers cynative can drive (ChatProviders). Bifrost
+// errors cleanly on the first chat request against an unsupported provider;
+// rejecting here moves that failure to config-load time, where the operator
+// sees it before a run starts. A nil entry is treated as nothing to validate.
 func ValidateProvider(entry *ProviderEntry) error {
 	if entry == nil {
 		return nil
 	}
 
-	if slices.Contains(AllBifrostProviders, schemas.ModelProvider(entry.Provider)) {
+	if slices.Contains(ChatProviders(), schemas.ModelProvider(entry.Provider)) {
 		return nil
 	}
 
@@ -28,54 +27,50 @@ func ValidateProvider(entry *ProviderEntry) error {
 	)
 }
 
-// AllBifrostProviders enumerates every ModelProvider that Bifrost currently
-// exposes. It is the single source of truth tying the canonical-env fallback
-// table and the docs/providers/ tree together. When Bifrost adds, removes,
-// or renames a provider, this list is updated and the package-level
-// completeness test fails until the canonical-env row and the
-// docs/providers/<name>.md are added too.
-var AllBifrostProviders = []schemas.ModelProvider{ //nolint:gochecknoglobals // canonical provider catalog
-	schemas.OpenAI,
-	schemas.Azure,
-	schemas.Anthropic,
-	schemas.Bedrock,
-	schemas.Cohere,
-	schemas.Vertex,
-	schemas.Mistral,
-	schemas.Ollama,
-	schemas.OpencodeGo,
-	schemas.OpencodeZen,
-	schemas.Groq,
-	schemas.SGL,
-	schemas.Parasail,
-	schemas.Perplexity,
-	schemas.Cerebras,
-	schemas.Gemini,
-	schemas.OpenRouter,
-	schemas.Elevenlabs,
-	schemas.HuggingFace,
-	schemas.Nebius,
-	schemas.XAI,
-	schemas.Replicate,
-	schemas.VLLM,
-	schemas.Runway,
-	schemas.Runware,
-	schemas.Fireworks,
+// nonChatProviders are the Bifrost providers whose ChatCompletion
+// implementation hard-returns an unsupported-operation error. Cynative's
+// backend drives only chat, so selecting one could never work; they are
+// rejected at config load. Chat capability cannot be verified mechanically:
+// re-verify this triage against each provider's ChatCompletion body in the
+// Bifrost sources on every bump. A mis-triaged non-chat provider degrades to
+// Bifrost's clear runtime error rather than load-time rejection.
+//
+//nolint:gochecknoglobals,exhaustive // static exclusion set; deliberately partial, lists only the non-chat providers
+var nonChatProviders = map[schemas.ModelProvider]bool{
+	schemas.Elevenlabs: true,
+	schemas.Runway:     true,
+	schemas.Runware:    true,
 }
 
-// CanonicalEnvKeyLookup maps each Bifrost provider to the conventional
-// environment variable cynative reads when neither llm.api_key nor llm.keys
-// were configured. An empty string means "this provider has no canonical
-// single-env fallback" (Bedrock uses the AWS credential chain; Vertex needs
-// structured project/region config in llm.vertex.* and gets credentials via
-// the Google ADC chain; Ollama/VLLM/SGL authenticate via the local endpoint
-// URL; Elevenlabs/Runway/Runware aren't chat-capable). The "ok bool" returned by
-// CanonicalEnvKey distinguishes
+// ChatProviders returns every provider cynative can select: Bifrost's
+// canonical schemas.StandardProviders minus the non-chat exclusions. Deriving
+// the catalog keeps it current across Bifrost bumps; the package tests pin
+// the exclusion triple and tie each chat provider to a CanonicalEnvKeyLookup
+// row and a docs/providers/<name>.md guide.
+func ChatProviders() []schemas.ModelProvider {
+	providers := make([]schemas.ModelProvider, 0, len(schemas.StandardProviders))
+	for _, p := range schemas.StandardProviders {
+		if !nonChatProviders[p] {
+			providers = append(providers, p)
+		}
+	}
+	return providers
+}
+
+// CanonicalEnvKeyLookup maps each chat-capable Bifrost provider to the
+// conventional environment variable cynative reads when neither llm.api_key
+// nor llm.keys were configured. An empty string means "this provider has no
+// canonical single-env fallback" (Bedrock uses the AWS credential chain;
+// Vertex needs structured project/region config in llm.vertex.* and gets
+// credentials via the Google ADC chain; Ollama/VLLM/SGL authenticate via the
+// local endpoint URL). The "ok bool" returned by CanonicalEnvKey distinguishes
 // "provider not configured here" from "configured, but no env fallback".
 //
-// Every entry in AllBifrostProviders MUST appear here; the
-// TestCanonicalEnvKey_CoversAllBifrostProviders test enforces this.
-var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{ //nolint:gochecknoglobals // lookup table
+// The key set MUST stay set-equal to ChatProviders(); the
+// TestCanonicalEnvKeyLookup_MatchesChatProviders test enforces this.
+//
+//nolint:gochecknoglobals,exhaustive // lookup table; covers exactly ChatProviders(), not every Bifrost provider
+var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.OpenAI:      "OPENAI_API_KEY",
 	schemas.Anthropic:   "ANTHROPIC_API_KEY",
 	schemas.Azure:       "AZURE_OPENAI_API_KEY",
@@ -99,9 +94,6 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{ //nolint:gocheckno
 	schemas.Ollama:      "",
 	schemas.VLLM:        "",
 	schemas.SGL:         "",
-	schemas.Elevenlabs:  "",
-	schemas.Runway:      "",
-	schemas.Runware:     "",
 }
 
 // CanonicalEnvKey reports the conventional environment variable for the given

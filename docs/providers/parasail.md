@@ -1,7 +1,6 @@
 # Parasail
 
 **Bifrost provider id:** `parasail`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

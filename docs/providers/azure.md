@@ -1,7 +1,6 @@
 # Azure OpenAI
 
 **Bifrost provider id:** `azure`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

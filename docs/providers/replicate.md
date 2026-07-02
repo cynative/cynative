@@ -1,7 +1,6 @@
 # Replicate
 
 **Bifrost provider id:** `replicate`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

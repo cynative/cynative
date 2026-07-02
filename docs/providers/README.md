@@ -1,6 +1,6 @@
 # LLM provider guides
 
-Cynative talks to LLMs through the embedded [Bifrost](https://github.com/maximhq/bifrost) SDK. Bifrost supports the providers listed below; pick the one you want to use and follow its guide for the env vars and YAML shape.
+Cynative talks to LLMs through the embedded [Bifrost](https://github.com/maximhq/bifrost) SDK and supports Bifrost's chat-capable providers, listed below. Pick the one you want to use and follow its guide for the env vars and YAML shape.
 
 > The "Bifrost … provider source" links in these guides point to Bifrost's `main` branch; Cynative embeds the exact version pinned in [`go.mod`](../../go.mod) (`github.com/maximhq/bifrost/core`), so check there if you need the precise version a field or behavior shipped in.
 
@@ -17,34 +17,31 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 
 ## Provider catalog
 
-| Provider id    | Chat-loop support | Canonical env var                | Guide |
-|----------------|-------------------|----------------------------------|-------|
-| `openai`       | ✅ supported       | `OPENAI_API_KEY`                | [openai.md](openai.md) |
-| `anthropic`    | ✅ supported       | `ANTHROPIC_API_KEY`             | [anthropic.md](anthropic.md) |
-| `azure`        | ✅ supported       | `AZURE_OPENAI_API_KEY`          | [azure.md](azure.md) |
-| `bedrock`      | ✅ supported       | (AWS credential chain)          | [bedrock.md](bedrock.md) |
-| `vertex`       | ✅ supported       | (none — needs project_id + region) | [vertex.md](vertex.md) |
-| `gemini`       | ✅ supported       | `GEMINI_API_KEY`                | [gemini.md](gemini.md) |
-| `cohere`       | ✅ supported       | `COHERE_API_KEY`                | [cohere.md](cohere.md) |
-| `mistral`      | ✅ supported       | `MISTRAL_API_KEY`               | [mistral.md](mistral.md) |
-| `groq`         | ✅ supported       | `GROQ_API_KEY`                  | [groq.md](groq.md) |
-| `perplexity`   | ✅ supported       | `PERPLEXITY_API_KEY`            | [perplexity.md](perplexity.md) |
-| `cerebras`     | ✅ supported       | `CEREBRAS_API_KEY`              | [cerebras.md](cerebras.md) |
-| `openrouter`   | ✅ supported       | `OPENROUTER_API_KEY`            | [openrouter.md](openrouter.md) |
-| `xai`          | ✅ supported       | `XAI_API_KEY`                   | [xai.md](xai.md) |
-| `huggingface`  | ✅ supported       | `HUGGINGFACE_API_KEY`           | [huggingface.md](huggingface.md) |
-| `nebius`       | ✅ supported       | `NEBIUS_API_KEY`                | [nebius.md](nebius.md) |
-| `parasail`     | ✅ supported       | `PARASAIL_API_KEY`              | [parasail.md](parasail.md) |
-| `fireworks`    | ✅ supported       | `FIREWORKS_API_KEY`             | [fireworks.md](fireworks.md) |
-| `replicate`    | ✅ supported       | `REPLICATE_API_TOKEN`           | [replicate.md](replicate.md) |
-| `opencode-go`  | ✅ supported       | `OPENCODE_API_KEY`              | [opencode-go.md](opencode-go.md) |
-| `opencode-zen` | ✅ supported       | `OPENCODE_API_KEY`              | [opencode-zen.md](opencode-zen.md) |
-| `ollama`       | ✅ supported       | (none — local endpoint)         | [ollama.md](ollama.md) |
-| `vllm`         | ✅ supported       | (none — local endpoint)         | [vllm.md](vllm.md) |
-| `sgl`          | ✅ supported       | (none — local endpoint)         | [sgl.md](sgl.md) |
-| `elevenlabs`   | ❌ not chat-capable | n/a                            | [elevenlabs.md](elevenlabs.md) |
-| `runway`       | ❌ not chat-capable | n/a                            | [runway.md](runway.md) |
-| `runware`      | ❌ not chat-capable | n/a                            | [runware.md](runware.md) |
+| Provider id    | Canonical env var                  | Guide |
+|----------------|------------------------------------|-------|
+| `openai`       | `OPENAI_API_KEY`                   | [openai.md](openai.md) |
+| `anthropic`    | `ANTHROPIC_API_KEY`                | [anthropic.md](anthropic.md) |
+| `azure`        | `AZURE_OPENAI_API_KEY`             | [azure.md](azure.md) |
+| `bedrock`      | (AWS credential chain)             | [bedrock.md](bedrock.md) |
+| `vertex`       | (none — needs project_id + region) | [vertex.md](vertex.md) |
+| `gemini`       | `GEMINI_API_KEY`                   | [gemini.md](gemini.md) |
+| `cohere`       | `COHERE_API_KEY`                   | [cohere.md](cohere.md) |
+| `mistral`      | `MISTRAL_API_KEY`                  | [mistral.md](mistral.md) |
+| `groq`         | `GROQ_API_KEY`                     | [groq.md](groq.md) |
+| `perplexity`   | `PERPLEXITY_API_KEY`               | [perplexity.md](perplexity.md) |
+| `cerebras`     | `CEREBRAS_API_KEY`                 | [cerebras.md](cerebras.md) |
+| `openrouter`   | `OPENROUTER_API_KEY`               | [openrouter.md](openrouter.md) |
+| `xai`          | `XAI_API_KEY`                      | [xai.md](xai.md) |
+| `huggingface`  | `HUGGINGFACE_API_KEY`              | [huggingface.md](huggingface.md) |
+| `nebius`       | `NEBIUS_API_KEY`                   | [nebius.md](nebius.md) |
+| `parasail`     | `PARASAIL_API_KEY`                 | [parasail.md](parasail.md) |
+| `fireworks`    | `FIREWORKS_API_KEY`                | [fireworks.md](fireworks.md) |
+| `replicate`    | `REPLICATE_API_TOKEN`              | [replicate.md](replicate.md) |
+| `opencode-go`  | `OPENCODE_API_KEY`                 | [opencode-go.md](opencode-go.md) |
+| `opencode-zen` | `OPENCODE_API_KEY`                 | [opencode-zen.md](opencode-zen.md) |
+| `ollama`       | (none — local endpoint)            | [ollama.md](ollama.md) |
+| `vllm`         | (none — local endpoint)            | [vllm.md](vllm.md) |
+| `sgl`          | (none — local endpoint)            | [sgl.md](sgl.md) |
 
 ## Shared YAML reference
 

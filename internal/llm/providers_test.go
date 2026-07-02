@@ -11,42 +11,55 @@ import (
 	"github.com/cynative/cynative/internal/llm"
 )
 
-func TestAllBifrostProviders_NonEmpty(t *testing.T) {
+// TestCanonicalEnvKeyLookup_MatchesChatProviders pins the env-fallback table
+// to the derived chat catalog by set equality: a Bifrost bump that adds a
+// provider fails here until a row (and doc) is added or the provider is
+// triaged into the non-chat exclusions, and a removed or renamed provider
+// leaves a stale row that fails the same way.
+func TestCanonicalEnvKeyLookup_MatchesChatProviders(t *testing.T) {
 	t.Parallel()
 
-	if len(llm.AllBifrostProviders) == 0 {
-		t.Fatal("AllBifrostProviders is empty")
+	got := make([]schemas.ModelProvider, 0, len(llm.CanonicalEnvKeyLookup))
+	for p := range llm.CanonicalEnvKeyLookup {
+		got = append(got, p)
 	}
-}
-
-func TestAllBifrostProviders_NoDuplicates(t *testing.T) {
-	t.Parallel()
-
-	seen := make(map[schemas.ModelProvider]bool, len(llm.AllBifrostProviders))
-	for _, p := range llm.AllBifrostProviders {
-		if seen[p] {
-			t.Errorf("duplicate entry: %s", p)
-		}
-		seen[p] = true
-	}
-}
-
-// TestAllBifrostProviders_MatchesBifrostSchemas pins the cynative-side catalog
-// to schemas.StandardProviders — Bifrost's own enumeration of every built-in
-// provider. If Bifrost adds, removes, or renames a provider in that slice,
-// this test fails until AllBifrostProviders is updated. Asserting against
-// the upstream slice (rather than a hand-maintained want list) catches
-// silent drift when new constants land upstream.
-func TestAllBifrostProviders_MatchesBifrostSchemas(t *testing.T) {
-	t.Parallel()
-
-	got := slices.Clone(llm.AllBifrostProviders)
-	want := slices.Clone(schemas.StandardProviders)
+	want := llm.ChatProviders()
 	slices.Sort(got)
 	slices.Sort(want)
 
 	if !slices.Equal(got, want) {
-		t.Errorf("AllBifrostProviders drift from schemas.StandardProviders:\n got: %v\nwant: %v", got, want)
+		t.Errorf("CanonicalEnvKeyLookup keys drift from ChatProviders():\n got: %v\nwant: %v", got, want)
+	}
+}
+
+// TestChatProviders_ExcludedTriple hardcodes the non-chat exclusions:
+// StandardProviders minus ChatProviders() must be exactly
+// {elevenlabs, runway, runware}, and each must be rejected at config
+// validation. An exclusion silently added, dropped, or no longer present
+// upstream fails here until re-triaged against the Bifrost sources.
+func TestChatProviders_ExcludedTriple(t *testing.T) {
+	t.Parallel()
+
+	chat := llm.ChatProviders()
+	var got []schemas.ModelProvider
+	for _, p := range schemas.StandardProviders {
+		if !slices.Contains(chat, p) {
+			got = append(got, p)
+		}
+	}
+	want := []schemas.ModelProvider{schemas.Elevenlabs, schemas.Runway, schemas.Runware}
+	slices.Sort(got)
+	slices.Sort(want)
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("excluded providers drift:\n got: %v\nwant: %v", got, want)
+	}
+
+	for _, p := range want {
+		entry := &llm.ProviderEntry{Provider: string(p)} //nolint:exhaustruct // only Provider matters here
+		if err := llm.ValidateProvider(entry); !errors.Is(err, llm.ErrUnknownProvider) {
+			t.Errorf("ValidateProvider(%q) = %v, want ErrUnknownProvider", p, err)
+		}
 	}
 }
 
@@ -81,8 +94,6 @@ func TestCanonicalEnvKey_HappyPath(t *testing.T) {
 		{schemas.Ollama, "", false},
 		{schemas.VLLM, "", false},
 		{schemas.SGL, "", false},
-		{schemas.Elevenlabs, "", false},
-		{schemas.Runway, "", false},
 	}
 
 	for _, c := range cases {
@@ -109,20 +120,10 @@ func TestCanonicalEnvKey_UnknownProvider(t *testing.T) {
 	}
 }
 
-func TestCanonicalEnvKey_CoversAllBifrostProviders(t *testing.T) {
-	t.Parallel()
-
-	for _, p := range llm.AllBifrostProviders {
-		if _, ok := llm.CanonicalEnvKeyLookup[p]; !ok {
-			t.Errorf("provider %q is in AllBifrostProviders but missing from CanonicalEnvKeyLookup", p)
-		}
-	}
-}
-
 func TestValidateProvider_KnownProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, p := range llm.AllBifrostProviders {
+	for _, p := range llm.ChatProviders() {
 		entry := &llm.ProviderEntry{Provider: string(p)} //nolint:exhaustruct // only Provider matters here
 		if err := llm.ValidateProvider(entry); err != nil {
 			t.Errorf("ValidateProvider(%q) = %v, want nil", p, err)

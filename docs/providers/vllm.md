@@ -1,7 +1,6 @@
 # vLLM
 
 **Bifrost provider id:** `vllm`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

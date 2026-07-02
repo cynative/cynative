@@ -1,7 +1,6 @@
 # Mistral
 
 **Bifrost provider id:** `mistral`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

@@ -1,7 +1,6 @@
 # Perplexity
 
 **Bifrost provider id:** `perplexity`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

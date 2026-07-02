@@ -1,7 +1,6 @@
 # Google Gemini (AI Studio)
 
 **Bifrost provider id:** `gemini`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

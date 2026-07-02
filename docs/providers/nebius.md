@@ -1,7 +1,6 @@
 # Nebius AI Studio
 
 **Bifrost provider id:** `nebius`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

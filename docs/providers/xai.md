@@ -1,7 +1,6 @@
 # xAI (Grok)
 
 **Bifrost provider id:** `xai`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

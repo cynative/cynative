@@ -1,7 +1,6 @@
 # Anthropic
 
 **Bifrost provider id:** `anthropic`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

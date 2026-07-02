@@ -1,7 +1,6 @@
 # Google Vertex AI
 
 **Bifrost provider id:** `vertex`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

@@ -1,7 +1,6 @@
 # Amazon Bedrock
 
 **Bifrost provider id:** `bedrock`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

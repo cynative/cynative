@@ -1,7 +1,6 @@
 # Ollama
 
 **Bifrost provider id:** `ollama`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

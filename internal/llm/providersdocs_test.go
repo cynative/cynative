@@ -22,15 +22,15 @@ func docsProvidersDir(t *testing.T) string {
 	return filepath.Join(root, "docs", "providers")
 }
 
-func TestEveryBifrostProviderHasADocFile(t *testing.T) {
+func TestEveryChatProviderHasADocFile(t *testing.T) {
 	t.Parallel()
 
 	dir := docsProvidersDir(t)
 
-	for _, p := range llm.AllBifrostProviders {
+	for _, p := range llm.ChatProviders() {
 		path := filepath.Join(dir, string(p)+".md")
 		if _, err := os.Stat(path); err != nil {
-			t.Errorf("provider %q is in AllBifrostProviders but %s does not exist (err: %v)",
+			t.Errorf("provider %q is in ChatProviders() but %s does not exist (err: %v)",
 				p, filepath.Join("docs/providers", string(p)+".md"), err)
 		}
 	}

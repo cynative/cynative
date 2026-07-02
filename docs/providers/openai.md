@@ -1,7 +1,6 @@
 # OpenAI
 
 **Bifrost provider id:** `openai`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 

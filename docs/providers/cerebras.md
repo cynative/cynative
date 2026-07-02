@@ -1,7 +1,6 @@
 # Cerebras
 
 **Bifrost provider id:** `cerebras`
-**Cynative chat-loop support:** ✅ supported
 
 ## Quick start
 
