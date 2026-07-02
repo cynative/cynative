@@ -43,7 +43,7 @@ Then give it any research task - it picks up the credentials already in your she
 cynative -p "which IAM roles can escalate to admin?" 
 cynative -p "high-risk cloud permissions, trace each to the PR where it was granted"
 cynative -p "cloud credentials leaked in source code and their current blast radius"
-cynative "live cloud resources with no IaC trace - shadow infra" # starts an interactive session
+cynative "live cloud resources absent from IaC - drift" # starts an interactive session
 ```
 
 ## What makes it special
