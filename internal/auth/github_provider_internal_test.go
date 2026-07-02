@@ -26,9 +26,11 @@ func testGithubProvider(
 	t *testing.T, exp exposure.Exposure, fetch func(context.Context) ([]byte, error),
 ) (*githubProvider, *bytes.Buffer) {
 	t.Helper()
-	src := githubhardening.NewTableSource(
+	src := cache.NewTableCache(
 		cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: func() time.Time { return time.Unix(1, 0) }},
 		fetch,
+		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
+		githubhardening.UnmarshalTable, githubhardening.AdmitTable,
 	)
 	p := newGithubProvider("tok", exp, src)
 	buf := &bytes.Buffer{}
