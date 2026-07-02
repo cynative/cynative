@@ -44,7 +44,7 @@ func TestWriteTodosTool_RunSuccess(t *testing.T) {
 	a.renderer = echoRenderer
 
 	tool := newWriteTodosTool(a)
-	rs := &runState{depth: 0, out: &buf, todos: nil}
+	rs := &runState{depth: 0, out: &buf}
 
 	const args = `{"todos":[{"content":"enumerate buckets","status":"in_progress"},` +
 		`{"content":"check policy","status":"pending"}]}`
@@ -55,9 +55,6 @@ func TestWriteTodosTool_RunSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "Recorded 2 todo(s)") {
 		t.Errorf("out = %q, want recorded count", out)
-	}
-	if len(rs.todos) != 2 {
-		t.Fatalf("run todos length = %d, want 2", len(rs.todos))
 	}
 	// renderTodos was called against the run's output writer.
 	if !strings.Contains(buf.String(), "enumerate buckets") {
@@ -71,7 +68,7 @@ func TestWriteTodosTool_RunParseFail(t *testing.T) {
 	var buf bytes.Buffer
 	a := newTestAgent(&scriptedModel{}, map[string]schema.InvokableTool{})
 	tool := newWriteTodosTool(a)
-	rs := &runState{depth: 0, out: &buf, todos: nil}
+	rs := &runState{depth: 0, out: &buf}
 
 	out, err := tool.runScoped(context.Background(), rs, `not json at all`)
 	if err != nil {
@@ -79,9 +76,6 @@ func TestWriteTodosTool_RunParseFail(t *testing.T) {
 	}
 	if !strings.Contains(out, "Could not parse todos") {
 		t.Errorf("out = %q, want parse-failure message", out)
-	}
-	if rs.todos != nil {
-		t.Errorf("run todos = %v, want unchanged (nil)", rs.todos)
 	}
 }
 
@@ -168,7 +162,7 @@ func TestWriteTodos_SubRunDoesNotTouchParentState(t *testing.T) {
 	t.Parallel()
 
 	// A write_todos call inside a task sub-run renders to the sub-run's writer
-	// (the verbose writer) and leaves the parent run's plan and output untouched.
+	// (the verbose writer) and leaves the parent run's output untouched.
 	model := &scriptedModel{msgs: []*schema.Message{
 		toolCall("c1", "write_todos", `{"todos":[{"content":"sub step","status":"pending"}]}`),
 		schema.AssistantMessage("sub done", nil),
@@ -184,16 +178,13 @@ func TestWriteTodos_SubRunDoesNotTouchParentState(t *testing.T) {
 	a.tools.tools["write_todos"] = todosTool
 
 	var parentOut bytes.Buffer
-	parent := &runState{depth: 0, out: &parentOut, todos: nil}
+	parent := &runState{depth: 0, out: &parentOut}
 
 	taskT := newTaskTool(a)
 	if _, err := taskT.runScoped(context.Background(), parent, `{"description":"sub job"}`); err != nil {
 		t.Fatalf("runScoped: %v", err)
 	}
 
-	if parent.todos != nil {
-		t.Errorf("parent todos = %v, want untouched nil", parent.todos)
-	}
 	if strings.Contains(parentOut.String(), "sub step") {
 		t.Errorf("parent output %q contains the sub-run checklist", parentOut.String())
 	}

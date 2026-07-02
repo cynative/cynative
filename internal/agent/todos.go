@@ -55,16 +55,15 @@ func (t *writeTodosTool) Run(context.Context, string) (string, error) {
 	return orchestrationOutsideLoop, nil
 }
 
-// runScoped parses the (possibly double-encoded) todo list, stores it on the
-// owning run's state, renders it to that run's output, and acknowledges. A
-// parse failure comes back as a result string so the model can retry.
+// runScoped parses the (possibly double-encoded) todo list, renders it to the
+// owning run's output, and acknowledges. A parse failure comes back as a
+// result string so the model can retry.
 func (t *writeTodosTool) runScoped(_ context.Context, rs *runState, argumentsInJSON string) (string, error) {
 	todos, ok := parseTodos(argumentsInJSON)
 	if !ok {
 		return "Could not parse todos; pass {\"todos\":[{\"content\":...,\"status\":...}]}.", nil
 	}
 
-	rs.todos = todos
 	t.agent.renderTodos(todos, rs.out)
 
 	return fmt.Sprintf("Recorded %d todo(s).", len(todos)), nil

@@ -2,16 +2,19 @@ package llm
 
 import (
 	"fmt"
-	"reflect"
-	"slices"
-	"strings"
 
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
-// keyConfigRequired lists the providers whose Bifrost implementation
-// dereferences key.<X>KeyConfig WITHOUT a nil guard, so a key that omits that
-// config panics at request time instead of returning a clean error. Verified
+// ValidateKeyConfigs returns ErrKeyConfigRequired when entry's provider needs a
+// per-key config but a configured key lacks it. It runs on the materialized
+// entry.Keys, so it covers both the synthesized key (api_key / canonical env /
+// hoisted config) and an explicit keys[]. Presence is sufficient: a nil config
+// panics inside Bifrost, while a present-but-empty config yields Bifrost's own
+// ConfigurationError.
+//
+// Exactly two providers form the closed required set — their Bifrost
+// implementation dereferences key.<X>KeyConfig WITHOUT a nil guard. Verified
 // against github.com/maximhq/bifrost/core@v1.5.10:
 //   - azure:  providers/azure/azure.go:249   key.AzureKeyConfig.Endpoint.GetValue()
 //   - vertex: providers/vertex/vertex.go:519  key.VertexKeyConfig.ProjectID.GetValue()
@@ -19,49 +22,37 @@ import (
 // The other KeyConfig-bearing providers are intentionally absent: Replicate
 // nil-checks (replicate.go:96); Bedrock's config is optional (AWS credential
 // chain / bare API-key Value); Ollama/VLLM/SGL accept the endpoint URL via
-// NetworkConfig.BaseURL. Requiredness is provider behavior, not type
-// information, so it is the one fact reflection cannot supply; this set is
-// pinned to real schemas.Key fields by TestKeyConfigRequired_FieldsExist.
-var keyConfigRequired = []schemas.ModelProvider{ //nolint:gochecknoglobals // lookup table
-	schemas.Azure,
-	schemas.Vertex,
-}
-
-// ValidateKeyConfigs returns ErrKeyConfigRequired when entry's provider needs a
-// per-key config (keyConfigRequired) but a configured key lacks it. It runs on
-// the materialized entry.Keys, so it covers both the synthesized key (api_key /
-// canonical env / hoisted config) and an explicit keys[]. Presence is
-// sufficient: a nil config panics inside Bifrost, while a present-but-empty
-// config yields Bifrost's own ConfigurationError.
-//
-// The provider→field mapping is reflective: a schemas.Key field named
-// "<X>KeyConfig" belongs to provider lower(X). Adding a provider to
-// keyConfigRequired is the only change needed to protect it.
+// NetworkConfig.BaseURL. The fields are checked directly (no reflection), so
+// an upstream rename of AzureKeyConfig/VertexKeyConfig fails at compile time.
 func ValidateKeyConfigs(entry *ProviderEntry) error {
 	if entry == nil {
 		return nil
 	}
 
 	provider := schemas.ModelProvider(entry.Provider)
-	for field := range reflect.TypeFor[schemas.Key]().Fields() {
-		name, isKeyConfig := strings.CutSuffix(field.Name, "KeyConfig")
-		if !isKeyConfig || !strings.EqualFold(name, string(provider)) {
-			continue
-		}
-		if !slices.Contains(keyConfigRequired, provider) {
-			return nil // provider has a config field, but it is optional
-		}
-		if len(entry.Keys) == 0 {
+	if provider == schemas.Azure {
+		return requireKeyConfigs(entry.Keys, provider, func(k schemas.Key) bool { return k.AzureKeyConfig != nil })
+	}
+	if provider == schemas.Vertex {
+		return requireKeyConfigs(entry.Keys, provider, func(k schemas.Key) bool { return k.VertexKeyConfig != nil })
+	}
+	return nil // every other provider's per-key config is optional or absent.
+}
+
+// requireKeyConfigs returns keyConfigError unless every configured key carries
+// the provider's required config (zero keys also fail).
+func requireKeyConfigs(
+	keys []schemas.Key, provider schemas.ModelProvider, present func(schemas.Key) bool,
+) error {
+	if len(keys) == 0 {
+		return keyConfigError(provider)
+	}
+	for i := range keys {
+		if !present(keys[i]) {
 			return keyConfigError(provider)
 		}
-		for i := range entry.Keys {
-			if reflect.ValueOf(entry.Keys[i]).FieldByIndex(field.Index).IsNil() {
-				return keyConfigError(provider)
-			}
-		}
-		return nil
 	}
-	return nil // provider has no per-key config field (most providers)
+	return nil
 }
 
 // keyConfigError builds the ErrKeyConfigRequired error for a provider that needs

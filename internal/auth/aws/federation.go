@@ -95,9 +95,6 @@ func decodeAssumedRole(parsed arn.ARN) CredScopeDecision {
 
 // stsAPI is the subset of *sts.Client we depend on. Mocked in tests.
 type stsAPI interface {
-	GetCallerIdentity(
-		ctx context.Context, in *sts.GetCallerIdentityInput, opts ...func(*sts.Options),
-	) (*sts.GetCallerIdentityOutput, error)
 	AssumeRole(
 		ctx context.Context, in *sts.AssumeRoleInput, opts ...func(*sts.Options),
 	) (*sts.AssumeRoleOutput, error)
@@ -127,7 +124,8 @@ const sessionDuration = int32(3600) // 1 hour cap (AssumeRole self-chain limit).
 
 // Retrieve implements aws.CredentialsProvider. In CredScopeAssumeRole mode it
 // attempts to vend scoped credentials and, on a definitive AccessDenied,
-// permanently degrades to unscoped base credentials (logging once). In
+// permanently degrades to unscoped base credentials (logging once); transient
+// throttling/freshness errors propagate unchanged (no degrade on a blip). In
 // CredScopeDisabled mode it returns the base credentials unchanged. A prior
 // degrade routes straight to CredScopeDisabled.
 func (p *ScopedProvider) Retrieve(ctx context.Context) (aws.Credentials, error) {
@@ -138,40 +136,28 @@ func (p *ScopedProvider) Retrieve(ctx context.Context) (aws.Credentials, error) 
 
 	switch mode {
 	case CredScopeAssumeRole:
-		return p.scopeOrDegrade(ctx, p.assumeRole, reasonAssumeRoleUnavailable)
+		creds, err := p.assumeRole(ctx)
+		if err == nil {
+			return creds, nil
+		}
+		if !isAccessDenied(err) {
+			return aws.Credentials{}, err
+		}
+		p.degraded.Store(true)
+		p.degradeOnce.Do(func() {
+			if p.ErrOut != nil {
+				fmt.Fprintf(p.ErrOut,
+					"⚠️ aws_hardening: cred_scope degraded to disabled (reason=%s: %s) — "+
+						"requests now run with full base AWS credentials, no longer scoped to %s\n",
+					reasonAssumeRoleUnavailable,
+					cloudauth.ShortenError(err, cloudauth.DefaultMaxErrorLen), p.PolicyARN)
+			}
+		})
+		return p.Base.Retrieve(ctx)
 	case CredScopeDisabled:
 		return p.Base.Retrieve(ctx)
 	}
 	return aws.Credentials{}, fmt.Errorf("ScopedProvider: unknown CredScopeMode %v", mode)
-}
-
-// scopeOrDegrade runs one credential-scoping attempt (assumeRole). On success it
-// returns the scoped creds. On a definitive AccessDenied it permanently degrades
-// this provider to CredScopeDisabled (logging once and falling back to base
-// creds). Transient/throttling/freshness errors propagate unchanged (no degrade
-// on a blip).
-func (p *ScopedProvider) scopeOrDegrade(
-	ctx context.Context,
-	attempt func(context.Context) (aws.Credentials, error),
-	reason string,
-) (aws.Credentials, error) {
-	creds, err := attempt(ctx)
-	if err == nil {
-		return creds, nil
-	}
-	if !isAccessDenied(err) {
-		return aws.Credentials{}, err
-	}
-	p.degraded.Store(true)
-	p.degradeOnce.Do(func() {
-		if p.ErrOut != nil {
-			fmt.Fprintf(p.ErrOut,
-				"⚠️ aws_hardening: cred_scope degraded to disabled (reason=%s: %s) — "+
-					"requests now run with full base AWS credentials, no longer scoped to %s\n",
-				reason, cloudauth.ShortenError(err, cloudauth.DefaultMaxErrorLen), p.PolicyARN)
-		}
-	})
-	return p.Base.Retrieve(ctx)
 }
 
 // isAccessDenied reports whether err is a definitive AWS authorization denial

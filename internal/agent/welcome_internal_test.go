@@ -127,17 +127,17 @@ func TestWelcome_TimedOut_ReturnsSentinel(t *testing.T) {
 	}
 }
 
-// TestWithWelcomeTimeout_SetsField verifies that WithWelcomeTimeout correctly
-// sets the agent's welcomeTimeoutD when given a positive duration, and is a
-// no-op for zero and negative values.
-func TestWithWelcomeTimeout_SetsField(t *testing.T) {
+// TestConfigWelcomeTimeout_SetsField verifies that Config.WelcomeTimeout is
+// wired onto the agent by New (zero stays zero, so the const default applies).
+func TestConfigWelcomeTimeout_SetsField(t *testing.T) {
 	t.Parallel()
 
 	cfg := baseConfig()
 	cfg.Model = &scriptedModel{msgs: []*schema.Message{schema.AssistantMessage("hi", nil)}}
 
 	// Positive duration: field must be set.
-	a, err := New(context.Background(), cfg, WithWelcomeTimeout(5*time.Millisecond))
+	cfg.WelcomeTimeout = 5 * time.Millisecond
+	a, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -145,12 +145,13 @@ func TestWithWelcomeTimeout_SetsField(t *testing.T) {
 		t.Errorf("welcomeTimeoutD = %v, want 5ms", a.welcomeTimeoutD)
 	}
 
-	// Zero duration: field must NOT be changed (remains zero, the const is used).
-	a2, err := New(context.Background(), cfg, WithWelcomeTimeout(0))
+	// Zero duration: field stays zero (the const default is used).
+	cfg.WelcomeTimeout = 0
+	a2, err := New(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	if a2.welcomeTimeoutD != 0 {
-		t.Errorf("zero duration must not set welcomeTimeoutD, got %v", a2.welcomeTimeoutD)
+		t.Errorf("zero duration must leave welcomeTimeoutD zero, got %v", a2.welcomeTimeoutD)
 	}
 }

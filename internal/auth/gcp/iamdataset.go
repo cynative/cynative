@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
-	"net/http"
 	"path/filepath"
 	"slices"
 
@@ -140,13 +138,4 @@ func (r *IAMDatasetRegistry) Lookup(ctx context.Context, methodID string) []stri
 		return nil
 	}
 	return data.Lookup(methodID)
-}
-
-// readDatasetBody validates the response status and reads the body, wrapping a
-// non-200 in ErrIAMDatasetUnavailable. The caller still closes resp.Body.
-func readDatasetBody(resp *http.Response) ([]byte, error) {
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%w: fetch: status %d", ErrIAMDatasetUnavailable, resp.StatusCode)
-	}
-	return io.ReadAll(resp.Body)
 }

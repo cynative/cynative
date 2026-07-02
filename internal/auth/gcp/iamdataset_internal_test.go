@@ -3,11 +3,8 @@ package gcp
 import (
 	"context"
 	"errors"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -289,36 +286,4 @@ func TestIAMDatasetRegistry_metaWriteFailureStillReturnsParsed(t *testing.T) {
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {
 		t.Errorf("Lookup = %v, want parsed despite meta write failure", got)
 	}
-}
-
-func TestReadDatasetBody(t *testing.T) {
-	t.Parallel()
-	t.Run("200 returns body", func(t *testing.T) {
-		t.Parallel()
-		resp := &http.Response{ //nolint:exhaustruct // synthetic response.
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("hello")),
-		}
-		body, err := readDatasetBody(resp)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(body) != "hello" {
-			t.Errorf("body = %q want hello", body)
-		}
-	})
-	t.Run("non-200 wraps sentinel", func(t *testing.T) {
-		t.Parallel()
-		resp := &http.Response{ //nolint:exhaustruct // synthetic response.
-			StatusCode: http.StatusNotFound,
-			Body:       io.NopCloser(strings.NewReader("")),
-		}
-		_, err := readDatasetBody(resp)
-		if !errors.Is(err, ErrIAMDatasetUnavailable) {
-			t.Errorf("err = %v want ErrIAMDatasetUnavailable", err)
-		}
-		if !strings.Contains(err.Error(), "fetch: status 404") {
-			t.Errorf("err = %q want 'fetch: status 404'", err)
-		}
-	})
 }

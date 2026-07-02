@@ -327,9 +327,9 @@ func TestIntegration_SubagentIODenied(t *testing.T) {
 	if len(results) != 1 || !strings.Contains(results[0].Content, tools.DeniedMessage) {
 		t.Fatalf("sub-run tool result = %+v, want DeniedMessage", results)
 	}
-	// The denial rides the original call ID as an ordinary (non-error) result.
-	if results[0].ToolCallID != "c2" || results[0].IsError {
-		t.Errorf("tool result = %+v, want ToolCallID c2 and IsError false", results[0])
+	// The denial rides the original call ID as an ordinary result.
+	if results[0].ToolCallID != "c2" {
+		t.Errorf("tool result = %+v, want ToolCallID c2", results[0])
 	}
 	if !strings.Contains(out, "parent final") {
 		t.Errorf("rendered output = %q, want parent final", out)

@@ -30,17 +30,45 @@ lint: generate
 format: generate
 	go tool golangci-lint fmt --diff
 
+# The one coverage-exempt test-support package: reusable fake auth.Provider
+# implementations imported only from _test.go files, never part of the shipped
+# binary. Anchored to the full module path so the exemption fails closed: if the
+# module path ever changes, authtest rows become gated again (loud failure)
+# instead of the exemption silently widening.
+AUTHTEST_PKG := github.com/cynative/cynative/internal/auth/authtest
+
 test: generate
 	CGO_ENABLED=1 go test -race -shuffle=on ./... -coverprofile=coverage.out -covermode=atomic
 	@# Exact, per-package gate: fail on any uncovered statement (count 0) EXCEPT
-	@# files in the imperative shell (*_shell.go), which are integration-tested.
-	@uncovered=$$(awk 'NR>1 && $$NF==0 { split($$1, loc, ":"); if (loc[1] !~ /_shell\.go$$/) { split(loc[2], pos, "."); print loc[1] ":" pos[1] } }' coverage.out); \
+	@# files in the imperative shell (*_shell.go), which are integration-tested,
+	@# and the test-support package $(AUTHTEST_PKG), which never ships (the import
+	@# guard below keeps that a mechanical property, not a convention).
+	@uncovered=$$(awk 'NR>1 && $$NF==0 { split($$1, loc, ":"); if (loc[1] !~ /_shell\.go$$/ && index(loc[1], "$(AUTHTEST_PKG)/") != 1) { split(loc[2], pos, "."); print loc[1] ":" pos[1] } }' coverage.out); \
 	if [ -n "$$uncovered" ]; then \
 		echo "FAIL: core coverage below 100%, uncovered statements:"; \
 		echo "$$uncovered"; \
 		exit 1; \
 	fi
 	@echo "OK: 100% core coverage"
+	@# Import guard for the exemption above: only _test.go files may import the
+	@# coverage-exempt package ({{.Imports}} excludes test imports), so real logic
+	@# parked there can mechanically never reach a shipped binary. {{.Imports}}
+	@# only sees files the active build context selects, so the check runs once
+	@# per goreleaser-shipped platform (GOOS x GOARCH at CGO_ENABLED=0, matching
+	@# .goreleaser.yaml; a host-only check would miss an importer hidden behind a
+	@# windows/arm64/!cgo build tag), and fails closed if go list errors.
+	@for goos in linux windows darwin; do \
+		for goarch in amd64 arm64; do \
+			imports=$$(CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./...) || { echo "FAIL: GOOS=$$goos GOARCH=$$goarch go list errored, import guard could not run"; exit 1; }; \
+			offenders=$$(printf '%s\n' "$$imports" | grep -E " $(AUTHTEST_PKG)(/| |$$)"); \
+			if [ -n "$$offenders" ]; then \
+				echo "FAIL: coverage-exempt $(AUTHTEST_PKG) is imported by non-test code (GOOS=$$goos GOARCH=$$goarch):"; \
+				echo "$$offenders"; \
+				exit 1; \
+			fi; \
+		done; \
+	done; \
+	echo "OK: no non-test importer of $(AUTHTEST_PKG) (all shipped GOOS/GOARCH, CGO_ENABLED=0)"
 
 # windows-build: the release ships a Windows binary + installer; keep the cross-build
 # green. Pure hermetic `go build`, so it lives in check-go (pre-commit catches breaks).

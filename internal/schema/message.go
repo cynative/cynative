@@ -45,11 +45,9 @@ type ToolCallBlock struct {
 }
 
 // ToolResultBlock is the host's reply to a ToolCallBlock, keyed by ToolCallID.
-// IsError marks a failed call so the model can self-correct.
 type ToolResultBlock struct {
 	ToolCallID string
 	Content    string
-	IsError    bool
 }
 
 func (TextBlock) isBlock()       {}
@@ -84,7 +82,7 @@ func AssistantMessage(text string, calls []ToolCallBlock) *Message {
 func ToolMessage(content, toolCallID string) *Message {
 	return &Message{
 		Role:    Tool,
-		Content: []Block{ToolResultBlock{ToolCallID: toolCallID, Content: content, IsError: false}},
+		Content: []Block{ToolResultBlock{ToolCallID: toolCallID, Content: content}},
 	}
 }
 

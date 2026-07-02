@@ -52,9 +52,6 @@ type toolset struct {
 type runState struct {
 	depth int       // Sub-agent nesting depth; 0 = top-level. Immutable after creation.
 	out   io.Writer // This run's rendering target.
-	// todos is this run's plan, written by write_todos. Write-only from the loop's
-	// perspective — rendered when written, never read back into the loop.
-	todos []todo
 	// runID correlates every record of one turn (main run + its task sub-runs).
 	runID string
 	// consecutiveFailures counts no-progress tool calls in this run; reset on any
@@ -64,7 +61,7 @@ type runState struct {
 
 // runScopedTool is implemented by the in-package orchestration tools that need
 // the current run's state. dispatch prefers runScoped over Run, so these tools
-// never observe a foreign run's depth, plan, or output writer.
+// never observe a foreign run's depth or output writer.
 type runScopedTool interface {
 	schema.InvokableTool
 	runScoped(ctx context.Context, rs *runState, argumentsInJSON string) (string, error)
@@ -159,7 +156,7 @@ func (a *Agent) dispatchAndTrack(
 	if derr != nil {
 		return turn, "", fmt.Errorf("agent: %w", derr)
 	}
-	// Tool errors ride in the result text; the Bifrost layer does not set/use IsError today.
+	// Tool errors ride in the result text, never as a Go error.
 	turn = append(turn, schema.ToolMessage(result, tc.ID))
 
 	// Credit every failed attempt (a batched code_execution can carry several), so a

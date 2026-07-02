@@ -100,7 +100,7 @@ func (t *taskTool) runScoped(ctx context.Context, rs *runState, argumentsInJSON 
 
 	// The sub-run gets its own state: elevated depth (immutable), the verbose
 	// writer as its output, and a fresh plan.
-	sub := &runState{depth: rs.depth + 1, out: t.agent.verboseWriter(), todos: nil, runID: rs.runID}
+	sub := &runState{depth: rs.depth + 1, out: t.agent.verboseWriter(), runID: rs.runID}
 
 	t.agent.renderTaskStart(args.Description, rs.out)
 	answer, err := t.agent.run(ctx, sub, seed, t.agent.maxSubagentIter)

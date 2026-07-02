@@ -86,6 +86,11 @@ type Config struct {
 	// adds no per-run *Agent mutable state; nil is a safe no-op. Idempotency across
 	// turns is the caller's concern (the CLI uses a once-guard).
 	OnFirstResponse func()
+	// WelcomeTimeout overrides the default welcome generate timeout; zero and
+	// negative values use the constant default. Intended for tests that need a
+	// short timeout to drive the [ErrWelcomeTimedOut] sentinel; production
+	// callers leave it zero.
+	WelcomeTimeout time.Duration
 }
 
 // Option configures an Agent at construction time (test-only; see export_test.go).
@@ -138,6 +143,7 @@ func New(_ context.Context, cfg Config, opts ...Option) (*Agent, error) {
 		newID:                  uuid.NewString,
 		interrupter:            cfg.Interrupter,
 		maxConsecutiveFailures: cfg.Cfg.MaxConsecutiveFailures,
+		welcomeTimeoutD:        cfg.WelcomeTimeout,
 		onFirstResponse:        cfg.OnFirstResponse,
 	}
 
@@ -163,18 +169,6 @@ func New(_ context.Context, cfg Config, opts ...Option) (*Agent, error) {
 	a.sessionID = a.newID()
 
 	return a, nil
-}
-
-// WithWelcomeTimeout overrides the default welcome generate timeout for the
-// agent built by [New]. Zero and negative values are silently ignored (the
-// welcome constant is used). Intended for tests that need a short timeout to
-// drive the [ErrWelcomeTimedOut] sentinel; production callers should omit it.
-func WithWelcomeTimeout(d time.Duration) Option {
-	return func(a *Agent) {
-		if d > 0 {
-			a.welcomeTimeoutD = d
-		}
-	}
 }
 
 // buildToolset indexes tools by name and collects their schemas.
@@ -206,7 +200,7 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 	a.beginTurn()
 	defer a.endTurn()
 
-	rs := &runState{depth: 0, out: w, todos: nil, runID: a.newID()}
+	rs := &runState{depth: 0, out: w, runID: a.newID()}
 
 	seed := make([]*schema.Message, 0, len(a.history)+seedExtra)
 	seed = append(seed, schema.SystemMessage(a.systemPrompt))

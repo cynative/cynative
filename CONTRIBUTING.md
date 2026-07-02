@@ -38,7 +38,9 @@ make check
 
 `check-go` enforces, among other things:
 
-- **100% statement coverage** of core (non-`*_shell.go`) code;
+- **100% statement coverage** of core code (everything except `*_shell.go` files
+  and the test-support package `internal/auth/authtest`, which an import guard
+  keeps out of the shipped binary);
 - the whole suite under `-race -shuffle=on`;
 - **cyclomatic and cognitive complexity ≤ 6** on `*_shell.go` files (push branchy
   logic into covered core; never raise the budget);

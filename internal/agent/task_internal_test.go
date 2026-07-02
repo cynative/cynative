@@ -12,7 +12,7 @@ import (
 
 // rootState returns a fresh top-level runState writing to w.
 func rootState(w io.Writer) *runState {
-	return &runState{depth: 0, out: w, todos: nil}
+	return &runState{depth: 0, out: w}
 }
 
 func TestNewTaskTool_Info(t *testing.T) {
@@ -137,7 +137,7 @@ func TestTaskTool_RunDepthGuardRefuses(t *testing.T) {
 
 	tool := newTaskTool(a)
 
-	rs := &runState{depth: maxTaskDepth, out: io.Discard, todos: nil} // Simulate being inside a sub-run.
+	rs := &runState{depth: maxTaskDepth, out: io.Discard} // Simulate being inside a sub-run.
 	out, err := tool.runScoped(context.Background(), rs, `{"description":"go deeper"}`)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -278,7 +278,7 @@ func TestTaskTool_RunNoBracketOnRefusedCalls(t *testing.T) {
 		t.Fatalf("Run bad args: %v", err)
 	}
 
-	atDepth := &runState{depth: maxTaskDepth, out: &buf, todos: nil}
+	atDepth := &runState{depth: maxTaskDepth, out: &buf}
 	if _, err := tool.runScoped(context.Background(), atDepth, `{"description":"go deeper"}`); err != nil {
 		t.Fatalf("Run at depth: %v", err)
 	}

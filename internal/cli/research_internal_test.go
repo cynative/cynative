@@ -1992,9 +1992,9 @@ func TestRunResearch_WelcomeTimedOut_Proceeds(t *testing.T) {
 		// (loop turn). The welcome timeout (1 ms) fires before the block resolves.
 		return &seqBlockThenAnswerModel{answer: "here are your repos"}, nil
 	}
-	// Inject a very short welcome timeout via the production WithWelcomeTimeout option.
+	// Inject a very short welcome timeout via the Config.WelcomeTimeout field.
 	d.newAgent = func(ctx context.Context, cfg agent.Config, opts ...agent.Option) (*agent.Agent, error) {
-		opts = append(opts, agent.WithWelcomeTimeout(1*time.Millisecond))
+		cfg.WelcomeTimeout = 1 * time.Millisecond
 
 		return agent.New(ctx, cfg, opts...)
 	}

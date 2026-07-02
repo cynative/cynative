@@ -137,7 +137,7 @@ func TestRun_NoToolCallReturnsFinalAnswer(t *testing.T) {
 	model := &scriptedModel{msgs: []*schema.Message{schema.AssistantMessage("done", nil)}}
 	a := newTestAgent(model, map[string]schema.InvokableTool{})
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestRun_DispatchesToolThenAnswers(t *testing.T) {
 	}}
 	a := newTestAgent(model, map[string]schema.InvokableTool{"echo": &echoTool{ran: &ran}})
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestRun_IterationGuardExhausts(t *testing.T) {
 	}}
 	a := newTestAgent(model, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 2)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestRun_ZeroIterations(t *testing.T) {
 	model := &scriptedModel{msgs: nil}
 	a := newTestAgent(model, map[string]schema.InvokableTool{})
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 0)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestRun_UnknownToolRecovers(t *testing.T) {
 	}}
 	a := newTestAgent(model, map[string]schema.InvokableTool{})
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestRun_ModelGenerateErrorPropagates(t *testing.T) {
 
 	a := newTestAgent(&errModel{}, map[string]schema.InvokableTool{})
 
-	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 	if err == nil || !strings.Contains(err.Error(), "model generate") {
 		t.Fatalf("expected wrapped generate error, got: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestRun_ToolRunErrorRecovers(t *testing.T) {
 	}}
 	a := newTestAgent(model, map[string]schema.InvokableTool{"boom": &errTool{}})
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestDispatch_UnknownTool(t *testing.T) {
 
 	a := newTestAgent(&scriptedModel{}, map[string]schema.InvokableTool{})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil}
+	rs := &runState{depth: 0, out: io.Discard}
 	out, _, derr := a.dispatch(context.Background(), rs, schema.ToolCallBlock{ID: "x", Name: "ghost", Arguments: "{}"})
 	if derr != nil {
 		t.Fatalf("dispatch: %v", derr)
@@ -278,7 +278,7 @@ func TestDispatch_ToolError(t *testing.T) {
 
 	a := newTestAgent(&scriptedModel{}, map[string]schema.InvokableTool{"boom": &errTool{}})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil}
+	rs := &runState{depth: 0, out: io.Discard}
 	out, _, derr := a.dispatch(context.Background(), rs, schema.ToolCallBlock{ID: "x", Name: "boom", Arguments: "{}"})
 	if derr != nil {
 		t.Fatalf("dispatch: %v", derr)
@@ -293,7 +293,7 @@ func TestDispatch_Success(t *testing.T) {
 
 	a := newTestAgent(&scriptedModel{}, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil}
+	rs := &runState{depth: 0, out: io.Discard}
 	out, _, derr := a.dispatch(context.Background(), rs, schema.ToolCallBlock{ID: "x", Name: "echo", Arguments: "{}"})
 	if derr != nil {
 		t.Fatalf("dispatch: %v", derr)
@@ -692,7 +692,7 @@ func TestRun_RecordsRoundTripsAndToolCalls(t *testing.T) {
 	a.metrics = metrics.NewAccumulator("p", "m")
 	a.metrics.StartTurn() // run() is the inner loop; only the public Run() calls StartTurn.
 
-	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5); err != nil {
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -716,7 +716,7 @@ func TestRun_RecordsResponses(t *testing.T) {
 	a.metrics = metrics.NewAccumulator("p", "m")
 	a.metrics.StartTurn()
 
-	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5); err != nil {
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
@@ -730,7 +730,7 @@ func TestRun_RecordsResponses(t *testing.T) {
 	aErr.metrics = metrics.NewAccumulator("p", "m")
 	aErr.metrics.StartTurn()
 
-	_, _ = aErr.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	_, _ = aErr.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 
 	if got := aErr.metrics.Snapshot().Responses; got != 0 {
 		t.Errorf("failed Generate must not increment Responses, got %d", got)
@@ -815,7 +815,7 @@ func TestRun_ConcurrentRunsShareNoMutableState(t *testing.T) {
 	errs := make([]error, runs)
 	for i := range runs {
 		wg.Go(func() {
-			rs := &runState{depth: 0, out: io.Discard, todos: nil}
+			rs := &runState{depth: 0, out: io.Discard}
 			seed := []*schema.Message{schema.SystemMessage("SYS"), schema.UserMessage("question")}
 			answers[i], errs[i] = a.run(context.Background(), rs, seed, 5)
 		})
@@ -1368,7 +1368,6 @@ func TestInvokeIO_CancelsRunningToolOnInterrupt(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   io.Discard,
-		todos: nil,
 		runID: "r",
 	}
 
@@ -1716,7 +1715,6 @@ func TestDispatch_CountsEachInnerFailure(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   io.Discard,
-		todos: nil,
 		runID: "r",
 	}
 
@@ -1754,7 +1752,6 @@ func TestDispatch_MixedOutcomeCreditsZero(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   io.Discard,
-		todos: nil,
 		runID: "r",
 	}
 
@@ -1817,7 +1814,7 @@ func TestRun_FiresOnFirstResponseAtDepthZeroBeforeRender(t *testing.T) {
 	a.renderer = func(*schema.Message, string, io.Writer) { order = append(order, "render") }
 	a.onFirstResponse = func() { order = append(order, "hook") }
 
-	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5); err != nil {
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(order) != 2 || order[0] != "hook" || order[1] != "render" {
@@ -1836,7 +1833,7 @@ func TestRun_FiresOnFirstResponseOncePerRun(t *testing.T) {
 	a := newTestAgent(model, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
 	a.onFirstResponse = func() { calls++ }
 
-	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5); err != nil {
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if calls != 1 {
@@ -1852,7 +1849,7 @@ func TestRun_DoesNotFireOnFirstResponseAtDepthGtZero(t *testing.T) {
 	a := newTestAgent(model, map[string]schema.InvokableTool{})
 	a.onFirstResponse = func() { calls++ }
 
-	if _, err := a.run(context.Background(), &runState{depth: 1, out: io.Discard, todos: nil}, nil, 5); err != nil {
+	if _, err := a.run(context.Background(), &runState{depth: 1, out: io.Discard}, nil, 5); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if calls != 0 {
@@ -1866,7 +1863,7 @@ func TestRun_NilOnFirstResponseIsSafe(t *testing.T) {
 	model := &scriptedModel{msgs: []*schema.Message{schema.AssistantMessage("done", nil)}}
 	a := newTestAgent(model, map[string]schema.InvokableTool{}) // onFirstResponse is nil.
 
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard, todos: nil}, nil, 5)
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

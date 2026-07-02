@@ -81,7 +81,6 @@ func (m *RedactingChatModel) redactMessage(msg *schema.Message) *schema.Message 
 			blocks[i] = schema.ToolResultBlock{
 				ToolCallID: b.ToolCallID,
 				Content:    m.redactor.RedactPreservingLocation(b.Content),
-				IsError:    b.IsError,
 			}
 		default:
 			// ToolCallBlock today (see doc comment); a future content-bearing

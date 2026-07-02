@@ -12,7 +12,7 @@ func TestBlockTypes_ImplementBlock(t *testing.T) {
 	blocks := []schema.Block{
 		schema.TextBlock{Text: "hello"},
 		schema.ToolCallBlock{ID: "c1", Name: "echo", Arguments: "{}"},
-		schema.ToolResultBlock{ToolCallID: "c1", Content: "ok", IsError: false},
+		schema.ToolResultBlock{ToolCallID: "c1", Content: "ok"},
 	}
 
 	// Verify the blocks round-trip through the interface.
@@ -22,10 +22,9 @@ func TestBlockTypes_ImplementBlock(t *testing.T) {
 	if tc, ok := blocks[1].(schema.ToolCallBlock); !ok || tc.ID != "c1" || tc.Name != "echo" || tc.Arguments != "{}" {
 		t.Errorf("blocks[1] = %#v, want ToolCallBlock{ID: \"c1\", Name: \"echo\", Arguments: \"{}\"}", blocks[1])
 	}
-	if tr, ok := blocks[2].(schema.ToolResultBlock); !ok || tr.ToolCallID != "c1" || tr.Content != "ok" ||
-		tr.IsError {
+	if tr, ok := blocks[2].(schema.ToolResultBlock); !ok || tr.ToolCallID != "c1" || tr.Content != "ok" {
 		t.Errorf(
-			"blocks[2] = %#v, want ToolResultBlock{ToolCallID: \"c1\", Content: \"ok\", IsError: false}",
+			"blocks[2] = %#v, want ToolResultBlock{ToolCallID: \"c1\", Content: \"ok\"}",
 			blocks[2],
 		)
 	}

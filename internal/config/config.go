@@ -20,6 +20,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
+	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
 	"github.com/cynative/cynative/internal/llm"
 )
 
@@ -48,33 +49,18 @@ type GCPConfig struct {
 }
 
 // validateGCPRole checks connectors.gcp.role is a predefined or custom role
-// reference. Empty is left to the `required` struct tag. Kept inline (not an
-// internal/auth/gcp import) so production config takes no gcp dependency; it
-// mirrors gcp.ParseRoleReference and TestGCPRoleValidationParity pins the two.
+// reference, delegating to the authoritative gcp.ParseRoleReference. Empty is
+// left to the `required` struct tag.
 func validateGCPRole(role string) error {
 	if role == "" {
 		return nil // the `required` tag reports the empty case.
 	}
-	const (
-		predefinedParts = 2
-		customParts     = 4
-		rolesSegment    = "roles"
-	)
-	parts := strings.Split(role, "/")
-	switch {
-	case len(parts) == predefinedParts && parts[0] == rolesSegment && parts[1] != "":
-		return nil
-	case len(parts) == customParts &&
-		parts[0] == "projects" && parts[1] != "" && parts[2] == rolesSegment && parts[3] != "":
-		return nil
-	case len(parts) == customParts &&
-		parts[0] == "organizations" && parts[1] != "" && parts[2] == rolesSegment && parts[3] != "":
-		return nil
-	default:
+	if _, err := gcphardening.ParseRoleReference(role); err != nil {
 		return fmt.Errorf(
 			"connectors.gcp.role must be a predefined role (roles/<id>) or a custom role "+
 				"(projects/<p>/roles/<r> or organizations/<o>/roles/<r>), got %q", role)
 	}
+	return nil
 }
 
 // AzureConfig holds Azure-specific hardening configuration. RoleDefinition

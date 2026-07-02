@@ -270,7 +270,7 @@ func TestCatalogShellRejectsCrossCloudCache(t *testing.T) {
 	// Pre-write a fresh but WRONG-cloud cache at the gov-scoped path.
 	stale, err := json.Marshal(azurehardening.CatalogData{
 		Clouds: map[string]azurehardening.CloudEndpoints{
-			"AzureCloud": {ResourceManager: "management.azure.com", Suffixes: map[string]string{"x": "y"}},
+			"AzureCloud": {ResourceManager: "management.azure.com"},
 		},
 		Providers: map[string]azurehardening.ProviderOps{},
 	})
