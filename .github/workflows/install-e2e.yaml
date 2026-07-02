@@ -1,0 +1,57 @@
+name: Install e2e
+
+# Runs on EVERY pull request (no paths filter) so this job's status check is
+# always reported. A paths-filtered/skipped workflow leaves a *required* status
+# check stuck pending and blocks unrelated PRs from merging - so to gate ONLY
+# release-please PRs, the job must always report: the heavy build+install runs
+# only for release-please PRs (or a manual dispatch); every other PR passes
+# trivially. Mirrors .github/workflows/pkg-tools.yaml.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install-e2e:
+    name: Linux install e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # fetch-depth: 0 gets full history + tags so goreleaser can derive the
+      # snapshot version from the latest release tag.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Detect release-please PR
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          relevant=false
+          # Manual dispatch is an intentional run on any branch.
+          [ "${EVENT}" = "workflow_dispatch" ] && relevant=true
+          # release-please's branch name is deterministic and present from PR
+          # creation (verified on PRs #31/#29) - the primary, reliable signal.
+          [ "${HEAD_REF}" = "release-please--branches--main" ] && relevant=true
+          # The autorelease label is a secondary fallback (it can lag creation).
+          case ",${LABELS}," in *",autorelease: pending,"*) relevant=true ;; esac
+          echo "relevant=${relevant}" >> "${GITHUB_OUTPUT}"
+          if [ "${relevant}" = "true" ]; then
+            echo "Release-please PR or manual dispatch - running the install e2e."
+          else
+            echo "Not a release-please PR - skipping the heavy e2e (check passes trivially)."
+          fi
+      - name: Report tested head SHA
+        if: steps.detect.outputs.relevant == 'true'
+        run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        if: steps.detect.outputs.relevant == 'true'
+        with:
+          go-version-file: go.mod
+      - name: Build snapshot and run the install e2e
+        if: steps.detect.outputs.relevant == 'true'
+        run: make install-e2e
