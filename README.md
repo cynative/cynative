@@ -54,18 +54,18 @@ cynative "live cloud resources with no IaC trace - shadow infra" # starts an int
 - **🧪 Sandbox**: Generates and runs code to research at scale
 - **✅ Evidence-backed**: Cross-checks and verifies every finding
 
-## Why not just use a coding agent and a read-only MCP?
+## Can't a coding agent with MCPs do this?
 
-A coding agent with MCPs answers one API call at a time, with your ambient credentials. Cynative runs code to fan a question out across your whole stack - and enforces read-only in depth:
-| | Coding agent + MCP | Cynative |
+| | Coding agent + MCPs | Cynative |
 |---|---|---|
-| Research throughput | One action per tool call | Writes sandboxed code - loops, filters and fans out API calls concurrently |
-| Findings | Unverified model output | Verifier cross-checks every finding against live evidence before it's reported |
-| Read-only classification | Is this operation classified as a read? | Does a security-audit policy allow the required IAM actions? `secretsmanager:GetSecretValue` is an IAM *Read* action - a classifier allows it, `SecurityAudit` blocks it |
-| Credentials for cloud calls | Your ambient creds, unchanged | STS session scoped (AWS assumed-role) - IAM enforces the boundary too |
-| Network reach | Anywhere | Every host pinned to its mapped service and region, IP verified before connect |
-| Default posture | Read-only mode usually opt-in | On by default, fails closed on anything classified as a write |
-| Audit trail | — | Fail-closed JSONL audit log of every tool call |
+| Throughput | One action per call | Writes sandboxed code that fans out calls concurrently - fewer tokens, faster answers |
+| Findings | Unverified output | Verifier cross-checks every finding against live evidence |
+| Read-only | Opt-in read filter | On by default, fails closed - required IAM actions checked against a security-audit policy. `secretsmanager:GetSecretValue` is an IAM *Read*: a filter allows it, `SecurityAudit` blocks it |
+| Credentials | Ambient, unchanged | STS session scoped to read-only - AWS enforces the boundary too |
+| Blast radius | Your shell, any network | Research code runs in a sandbox with no host access, network pinned to your mapped services |
+| Secrets | Sent to the model as-is | Redacted from tool output before it's sent to the model |
+| Supply chain | Third-party MCPs and skills running with your creds | One open-source binary, connectors built in |
+| Audit trail | Scattered session logs, best effort | Fail-closed JSONL log of every tool call - if it can't record, it aborts |
 
 ## How to install
 
@@ -194,8 +194,6 @@ Cynative prints a short operational footer (timing, token usage) to **stderr** -
 
 Finding verification (`verify_findings` tool) makes extra model calls, budget for them on any run that produces findings.
 </details>
-
-
 
 ## Connectors
 
