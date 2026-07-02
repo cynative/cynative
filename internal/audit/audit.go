@@ -88,24 +88,6 @@ type Logger struct {
 // Option configures a Logger at construction.
 type Option func(*Logger)
 
-// WithClock injects a deterministic clock (test seam); nil is ignored.
-func WithClock(c func() time.Time) Option {
-	return func(l *Logger) {
-		if c != nil {
-			l.clock = c
-		}
-	}
-}
-
-// WithRedactor injects a redactor (test seam); nil is ignored.
-func WithRedactor(r redactor) Option {
-	return func(l *Logger) {
-		if r != nil {
-			l.redactor = r
-		}
-	}
-}
-
 // WithActor sets the actor identity stamped on every record (e.g. provider/model).
 func WithActor(a string) Option {
 	return func(l *Logger) { l.actor = a }
