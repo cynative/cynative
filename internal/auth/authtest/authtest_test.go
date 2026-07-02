@@ -21,7 +21,7 @@ func TestProviders_AuthorizesAddr(t *testing.T) {
 
 	doubles := map[string]addrAuthorizer{
 		"loopback": &authtest.LoopbackProvider{},
-		"eks":      authtest.NewEKSCert(),
+		"eks":      authtest.NewEKSCert(""),
 		"gke":      authtest.NewGKECert(""),
 		"aks":      authtest.NewAKSCert("", "", ""),
 	}
@@ -212,7 +212,7 @@ func TestCertProvider_Constructors(t *testing.T) {
 		wantName string
 		wantDesc string
 	}{
-		{"eks", authtest.NewEKSCert(), "eks", "Test EKS"},
+		{"eks", authtest.NewEKSCert(""), "eks", "Test EKS"},
 		{"gke", authtest.NewGKECert(""), "gke", "Test GKE"},
 		{"aks", authtest.NewAKSCert("", "", ""), "aks", "Test AKS"},
 		{"failing", authtest.NewFailingCert(), "ca-fail", "CA cert always fails"},
@@ -245,7 +245,7 @@ func TestCertProvider_InjectAuth(t *testing.T) {
 	t.Run("eks bearer injected", func(t *testing.T) {
 		t.Parallel()
 
-		p := authtest.NewEKSCert()
+		p := authtest.NewEKSCert("")
 		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com", nil)
 
 		if err := p.InjectAuth(req, nil); err != nil {
@@ -367,53 +367,20 @@ func TestCertProvider_CACertData_Static(t *testing.T) {
 	})
 }
 
-// TestCertProvider_CACertData_EKSExtract verifies the eks_auth JSON-extract path.
-func TestCertProvider_CACertData_EKSExtract(t *testing.T) {
+// TestCertProvider_CACertData_EKSStatic verifies the EKS double returns its
+// constructor-supplied static CA, like the GKE double.
+func TestCertProvider_CACertData_EKSStatic(t *testing.T) {
 	t.Parallel()
 
-	t.Run("success", func(t *testing.T) {
-		t.Parallel()
+	p := authtest.NewEKSCert("dGVzdC1jYQ==")
+	got, err := p.CACertData(context.Background(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-		p := authtest.NewEKSCert()
-		rawArgs := json.RawMessage(`{"eks_auth":{"cluster_ca_cert_data":"dGVzdC1jYQ=="}}`)
-
-		got, err := p.CACertData(context.Background(), rawArgs)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if got != "dGVzdC1jYQ==" {
-			t.Errorf("CACertData = %q, want %q", got, "dGVzdC1jYQ==")
-		}
-	})
-
-	t.Run("nil eks_auth", func(t *testing.T) {
-		t.Parallel()
-
-		p := authtest.NewEKSCert()
-		got, err := p.CACertData(context.Background(), json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if got != "" {
-			t.Errorf("expected empty, got: %q", got)
-		}
-	})
-
-	t.Run("bad JSON", func(t *testing.T) {
-		t.Parallel()
-
-		p := authtest.NewEKSCert()
-		got, err := p.CACertData(context.Background(), json.RawMessage(`{bad}`))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		if got != "" {
-			t.Errorf("expected empty, got: %q", got)
-		}
-	})
+	if got != "dGVzdC1jYQ==" {
+		t.Errorf("CACertData = %q, want %q", got, "dGVzdC1jYQ==")
+	}
 }
 
 // TestCertProvider_ClientCertData verifies the cert+key round-trip and empty cases.
@@ -455,7 +422,7 @@ func TestCertProvider_ClientCertData(t *testing.T) {
 	t.Run("eks returns empty", func(t *testing.T) {
 		t.Parallel()
 
-		p := authtest.NewEKSCert()
+		p := authtest.NewEKSCert("")
 		gotCert, gotKey, err := p.ClientCertData(context.Background(), nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -473,7 +440,7 @@ func TestCertProvider_AuthorizesAddr(t *testing.T) {
 	t.Parallel()
 
 	providers := []*authtest.CertProvider{
-		authtest.NewEKSCert(),
+		authtest.NewEKSCert(""),
 		authtest.NewGKECert(""),
 		authtest.NewAKSCert("", "", ""),
 		authtest.NewFailingCert(),

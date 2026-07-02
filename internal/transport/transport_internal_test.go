@@ -704,11 +704,10 @@ func TestExecute_CACert(t *testing.T) {
 	}
 
 	// Should succeed with valid CA cert.
-	providers := []auth.Provider{authtest.NewEKSCert()}
+	providers := []auth.Provider{authtest.NewEKSCert(caBase64)}
 	argsValid := makeArgs(t, map[string]any{
 		"url":           srv.URL + "/",
 		"auth_provider": "eks",
-		"eks_auth":      map[string]any{"cluster_ca_cert_data": caBase64},
 	})
 
 	result, _, err := NewClient().Execute(context.Background(), argsValid, providers)
@@ -724,11 +723,10 @@ func TestExecute_CACert(t *testing.T) {
 func TestExecute_CACert_BadEncoding(t *testing.T) {
 	t.Parallel()
 
-	providers := []auth.Provider{authtest.NewEKSCert()}
+	providers := []auth.Provider{authtest.NewEKSCert("invalid-base64!")}
 	args := makeArgs(t, map[string]any{
 		"url":           "https://localhost/",
 		"auth_provider": "eks",
-		"eks_auth":      map[string]any{"cluster_ca_cert_data": "invalid-base64!"},
 	})
 
 	_, _, err := NewClient().Execute(context.Background(), args, providers)
@@ -745,11 +743,10 @@ func TestExecute_CACert_BadPEM(t *testing.T) {
 	t.Parallel()
 
 	caBase64 := base64.StdEncoding.EncodeToString([]byte("not-a-pem"))
-	providers := []auth.Provider{authtest.NewEKSCert()}
+	providers := []auth.Provider{authtest.NewEKSCert(caBase64)}
 	args := makeArgs(t, map[string]any{
 		"url":           "https://localhost/",
 		"auth_provider": "eks",
-		"eks_auth":      map[string]any{"cluster_ca_cert_data": caBase64},
 	})
 
 	_, _, err := NewClient().Execute(context.Background(), args, providers)
@@ -827,11 +824,10 @@ func TestExecute_CACert_NonHTTPTransportFallback(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	caBase64 := tlsCertBase64(t, srv)
-	providers := []auth.Provider{authtest.NewEKSCert()}
+	providers := []auth.Provider{authtest.NewEKSCert(caBase64)}
 	args := makeArgs(t, map[string]any{
 		"url":           srv.URL + "/",
 		"auth_provider": "eks",
-		"eks_auth":      map[string]any{"cluster_ca_cert_data": caBase64},
 	})
 
 	result, _, err := NewClient().Execute(context.Background(), args, providers)
@@ -1222,11 +1218,10 @@ func TestExecute_CACert_ClosesIdleConnection(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	caBase64 := tlsCertBase64(t, srv)
-	providers := []auth.Provider{authtest.NewEKSCert()}
+	providers := []auth.Provider{authtest.NewEKSCert(caBase64)}
 	args := makeArgs(t, map[string]any{
 		"url":           srv.URL + "/",
 		"auth_provider": "eks",
-		"eks_auth":      map[string]any{"cluster_ca_cert_data": caBase64},
 	})
 
 	if _, _, err := NewClient().Execute(context.Background(), args, providers); err != nil {

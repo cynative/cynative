@@ -67,30 +67,27 @@ func (p *LoopbackProvider) AuthorizesAddr(
 
 // CertProvider is a single configurable auth.Provider double covering every
 // CA-cert / client-cert test scenario the EKS/GKE/AKS/failing doubles provided.
-// CACert supplies a static base64-PEM CA; ExtractEKSCACert instead reads it from
-// the request's eks_auth.cluster_ca_cert_data; CACertErr forces a CACertData
+// CACert supplies a static base64-PEM CA; CACertErr forces a CACertData
 // failure. Bearer is injected unless mTLS client certs are present. It implements
 // auth.Provider, auth.CACertProvider, auth.ClientCertProvider, and
 // auth.AddrAuthorizer.
 type CertProvider struct {
-	ProviderName     string // returned from Name().
-	Desc             string // returned from Description().
-	Bearer           string // bearer token; suppressed when ClientCert+ClientKey are set.
-	CACert           string // static base64-PEM CA (ignored when ExtractEKSCACert is true).
-	ExtractEKSCACert bool   // when true, CACertData reads eks_auth.cluster_ca_cert_data.
-	CACertErr        error  // when non-nil, CACertData returns this error.
-	ClientCert       string // base64-PEM client cert for mTLS.
-	ClientKey        string // base64-PEM client key for mTLS.
+	ProviderName string // returned from Name().
+	Desc         string // returned from Description().
+	Bearer       string // bearer token; suppressed when ClientCert+ClientKey are set.
+	CACert       string // static base64-PEM CA.
+	CACertErr    error  // when non-nil, CACertData returns this error.
+	ClientCert   string // base64-PEM client cert for mTLS.
+	ClientKey    string // base64-PEM client key for mTLS.
 }
 
-// NewEKSCert builds the EKS double: Name "eks", JSON-extracting CACertData, and a
-// static bearer token.
-func NewEKSCert() *CertProvider {
+// NewEKSCert builds the EKS double: Name "eks", a static CA, and a bearer token.
+func NewEKSCert(caCert string) *CertProvider {
 	return &CertProvider{ //nolint:gosec // test double – fake bearer token, not a real credential.
-		ProviderName:     "eks",
-		Desc:             "Test EKS",
-		Bearer:           "k8s-aws-v1.test",
-		ExtractEKSCACert: true,
+		ProviderName: "eks",
+		Desc:         "Test EKS",
+		Bearer:       "k8s-aws-v1.test",
+		CACert:       caCert,
 	}
 }
 
@@ -141,28 +138,13 @@ func (p *CertProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMes
 	return true, nil
 }
 
-// CACertData returns CACertErr when set, the eks_auth-extracted CA when
-// ExtractEKSCACert is set, otherwise the static CACert value.
-func (p *CertProvider) CACertData(_ context.Context, rawArgs json.RawMessage) (string, error) {
+// CACertData returns CACertErr when set, otherwise the static CACert value.
+func (p *CertProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
 	if p.CACertErr != nil {
 		return "", p.CACertErr
 	}
 
-	if !p.ExtractEKSCACert {
-		return p.CACert, nil
-	}
-
-	var parsed struct {
-		EKSAuth *struct {
-			CACert string `json:"cluster_ca_cert_data"`
-		} `json:"eks_auth"`
-	}
-
-	if err := json.Unmarshal(rawArgs, &parsed); err != nil || parsed.EKSAuth == nil {
-		return "", nil //nolint:nilerr // test double – swallow parse errors
-	}
-
-	return parsed.EKSAuth.CACert, nil
+	return p.CACert, nil
 }
 
 // ClientCertData returns the configured client cert and key (empty for non-mTLS).
