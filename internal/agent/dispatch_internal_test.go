@@ -34,15 +34,15 @@ type stubTool struct {
 	err  error
 }
 
-func (s stubTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: s.name, Desc: "", Params: nil}, nil
+func (s stubTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: s.name, Desc: "", Params: nil}
 }
 func (s stubTool) Run(context.Context, string) (string, error) { return s.out, s.err }
 
 func auditAgent(sink audit.Sink, tools map[string]schema.InvokableTool) *Agent {
 	infos := make([]*schema.ToolInfo, 0, len(tools))
 	for _, tl := range tools {
-		info, _ := tl.Info(context.Background())
+		info := tl.Info()
 		infos = append(infos, info)
 	}
 
@@ -187,8 +187,8 @@ type funcTool struct {
 	run  func(context.Context, string) (string, error)
 }
 
-func (f funcTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}, nil
+func (f funcTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}
 }
 func (f funcTool) Run(ctx context.Context, args string) (string, error) { return f.run(ctx, args) }
 
@@ -207,7 +207,7 @@ func approvalFn(inner schema.InvokableTool, approve bool) schema.InvokableTool {
 }
 
 func mustName(t schema.InvokableTool) string {
-	info, _ := t.Info(context.Background())
+	info := t.Info()
 
 	return info.Name
 }
@@ -219,8 +219,8 @@ type fakeScoped struct {
 	err  error
 }
 
-func (f fakeScoped) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}, nil
+func (f fakeScoped) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: f.name, Desc: "", Params: nil}
 }
 func (fakeScoped) Run(context.Context, string) (string, error) { return "", nil }
 func (f fakeScoped) runScoped(context.Context, *runState, string) (string, error) {

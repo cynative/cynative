@@ -12,10 +12,7 @@ import (
 func TestNew_MintsSessionIDViaInjectedGenerator(t *testing.T) {
 	t.Parallel()
 
-	a, err := New(context.Background(), config0Cfg(), WithNewID(seqIDs("S1", "ignored")))
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	a := New(context.Background(), config0Cfg(), WithNewID(seqIDs("S1", "ignored")))
 	if a.sessionID != "S1" {
 		t.Errorf("sessionID: got %q want S1", a.sessionID)
 	}

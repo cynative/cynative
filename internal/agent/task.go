@@ -43,17 +43,15 @@ const subagentDelegationGuidance = "Sub-agents cannot themselves delegate with t
 
 // newTaskTool builds the task tool bound to a.
 func newTaskTool(a *Agent) *taskTool {
-	params, _ := schema.ReflectParams[taskArgs]()
-
 	return &taskTool{
 		agent: a,
-		info:  &schema.ToolInfo{Name: "task", Desc: taskDesc, Params: params},
+		info:  &schema.ToolInfo{Name: "task", Desc: taskDesc, Params: schema.ReflectParams[taskArgs]()},
 	}
 }
 
 // Info returns the tool's static schema.
-func (t *taskTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *taskTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run satisfies schema.InvokableTool; dispatch never calls it (runScoped is

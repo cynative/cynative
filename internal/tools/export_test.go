@@ -10,23 +10,11 @@ import (
 	"github.com/cynative/cynative/internal/schema"
 )
 
-// Seam rule: construction-time seams (read once while building, e.g. schema
-// builder, sandbox factory) are injected as functional options.
-
-// WithHTTPSchemaBuilder returns a functional option that replaces the
-// http_request parameter-schema builder. Used in tests to force the error path.
-func WithHTTPSchemaBuilder(fn schemaBuilderFunc) httpRequestOption {
-	return func(o *httpRequestOptions) { o.schemaBuilder = fn }
-}
-
-// WithHTTPMarshalJSON returns a functional option that replaces the JSON
-// marshaller used by StructuredRun. Used in tests to force the marshal error path.
-func WithHTTPMarshalJSON(fn marshalFunc) httpRequestOption {
-	return func(o *httpRequestOptions) { o.marshalJSON = fn }
-}
+// Seam rule: construction-time seams (read once while building, e.g. the
+// sandbox factory) are injected as functional options.
 
 // NewCodeExecutionToolWithOpts exposes the variadic-options constructor for
-// package-internal tests that need to inject seams (schema builder, sandbox factory).
+// package-internal tests that need to inject seams (sandbox factory, ID func).
 // It forwards a nil sink so all 10 existing callers compile unchanged.
 func NewCodeExecutionToolWithOpts(
 	inner []schema.InvokableTool,
@@ -58,11 +46,6 @@ type RunnerFunc func(ctx context.Context, code string, timeout time.Duration) (s
 // Run satisfies codeRunner.
 func (f RunnerFunc) Run(ctx context.Context, code string, timeout time.Duration) (string, error) {
 	return f(ctx, code, timeout)
-}
-
-// WithCodeArgsSchema injects a replacement schema builder for codeArgs.
-func WithCodeArgsSchema(fn schemaBuilderFunc) codeExecOption {
-	return func(o *codeExecOptions) { o.codeArgsSchema = fn }
 }
 
 // WithCodeSandboxFactory injects a replacement sandbox factory.

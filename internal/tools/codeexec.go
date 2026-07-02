@@ -55,9 +55,8 @@ type toolDesc struct {
 
 // codeExecOptions holds the configurable seams for NewCodeExecutionTool.
 type codeExecOptions struct {
-	codeArgsSchema schemaBuilderFunc
-	newSandbox     func(map[string]sandbox.ToolFunc, io.Writer, int) (codeRunner, error)
-	newID          func() string
+	newSandbox func(map[string]sandbox.ToolFunc, io.Writer, int) (codeRunner, error)
+	newID      func() string
 }
 
 // codeExecOption is a functional option for NewCodeExecutionTool.
@@ -95,9 +94,6 @@ func newCodeExecutionToolWithOpts(
 	opts ...codeExecOption,
 ) (schema.InvokableTool, error) {
 	o := &codeExecOptions{
-		codeArgsSchema: func() (*jsonschema.Schema, error) {
-			return schema.ReflectParams[codeArgs]()
-		},
 		newSandbox: func(funcs map[string]sandbox.ToolFunc, w io.Writer, mc int) (codeRunner, error) {
 			// RedactPreservingLocation (not Redact): sandbox tool results are HTTP
 			// responses whose signed Location URL must survive for redirect-following.
@@ -110,15 +106,7 @@ func newCodeExecutionToolWithOpts(
 		opt(o)
 	}
 
-	funcs, descs, err := buildToolFuncs(inner, sink, o.newID)
-	if err != nil {
-		return nil, err
-	}
-
-	params, err := o.codeArgsSchema()
-	if err != nil {
-		return nil, fmt.Errorf("tools: build code_execution schema: %w", err)
-	}
+	funcs, descs := buildToolFuncs(inner, sink, o.newID)
 
 	sb, err := o.newSandbox(funcs, verbose, maxConcurrency)
 	if err != nil {
@@ -129,15 +117,15 @@ func newCodeExecutionToolWithOpts(
 		info: &schema.ToolInfo{
 			Name:   codeExecutionName,
 			Desc:   codeDescription(descs, json.Marshal),
-			Params: params,
+			Params: schema.ReflectParams[codeArgs](),
 		},
 		sandbox: sb,
 	}, nil
 }
 
 // Info returns the tool's schema.
-func (t *codeExecutionTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *codeExecutionTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run runs the script. Execution failures are returned as the tool result (not a
@@ -185,16 +173,12 @@ func buildToolFuncs(
 	inner []schema.InvokableTool,
 	sink audit.Sink,
 	newID func() string,
-) (map[string]sandbox.ToolFunc, []toolDesc, error) {
-	ctx := context.Background()
+) (map[string]sandbox.ToolFunc, []toolDesc) {
 	funcs := make(map[string]sandbox.ToolFunc, len(inner))
 	descs := make([]toolDesc, 0, len(inner))
 
 	for _, it := range inner {
-		info, err := it.Info(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("tools: read inner tool info: %w", err)
-		}
+		info := it.Info()
 
 		if info.Name == codeExecutionName {
 			continue
@@ -204,7 +188,7 @@ func buildToolFuncs(
 		descs = append(descs, toolDesc{name: info.Name, desc: info.Desc, params: info.Params})
 	}
 
-	return funcs, descs, nil
+	return funcs, descs
 }
 
 // innerResultDecision returns the audit decision to stamp on an inner result

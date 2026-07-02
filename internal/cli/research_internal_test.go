@@ -204,9 +204,7 @@ func testDeps() *deps {
 		newChatModel: func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
 			return &fakeChatModel{}, nil //nolint:exhaustruct // benign default; tests override per case
 		},
-		newHTTPRequestTool: func(providers []auth.Provider) (schema.InvokableTool, error) {
-			return tools.NewHTTPRequestTool(providers)
-		},
+		newHTTPRequestTool:   tools.NewHTTPRequestTool,
 		newCodeExecutionTool: tools.NewCodeExecutionTool,
 		newAuditSink: func(config.Config) (audit.Sink, func() error, error) {
 			return nil, func() error { return nil }, nil
@@ -453,24 +451,6 @@ func TestRunResearch_VerboseFlag(t *testing.T) {
 	}
 }
 
-func TestRunResearch_HTTPToolError(t *testing.T) {
-	t.Parallel()
-
-	d := testDeps()
-	d.newHTTPRequestTool = func([]auth.Provider) (schema.InvokableTool, error) {
-		return nil, errors.New("schema boom")
-	}
-
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
-	if err == nil {
-		t.Fatal("expected error from http_request tool build")
-	}
-
-	if !strings.Contains(err.Error(), "build http_request tool") {
-		t.Errorf("expected 'build http_request tool' in error, got: %v", err)
-	}
-}
-
 func TestIsExitCommand(t *testing.T) {
 	t.Parallel()
 
@@ -692,7 +672,7 @@ func TestInteractiveLoop_ContextCancelled(t *testing.T) {
 func newTestAgent(t *testing.T, m schema.ChatModel) *agent.Agent {
 	t.Helper()
 
-	a, err := agent.New(context.Background(), agent.Config{
+	a := agent.New(context.Background(), agent.Config{
 		Model:         m,
 		Cfg:           validCfg(),
 		Tools:         nil,
@@ -700,9 +680,6 @@ func newTestAgent(t *testing.T, m schema.ChatModel) *agent.Agent {
 		Renderer:      (&fakeUI{}).RenderMessage, //nolint:exhaustruct // no-op renderer
 		VerboseWriter: nil,
 	})
-	if err != nil {
-		t.Fatalf("agent.New: %v", err)
-	}
 
 	return a
 }
@@ -718,29 +695,6 @@ func TestNewChatModel(t *testing.T) {
 	}
 
 	t.Cleanup(cm.Shutdown)
-}
-
-func TestRunResearch_AgentInitError(t *testing.T) {
-	t.Parallel()
-
-	d := testDeps()
-	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
-		return &fakeChatModel{ //nolint:exhaustruct // only the success path is needed here
-			responses: []*schema.Message{assistantMsg("x")},
-		}, nil
-	}
-	d.newAgent = func(context.Context, agent.Config, ...agent.Option) (*agent.Agent, error) {
-		return nil, errors.New("agent boom")
-	}
-
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
-	if err == nil {
-		t.Fatal("expected error from agent init")
-	}
-
-	if !strings.Contains(err.Error(), "initialize agent") {
-		t.Errorf("expected 'initialize agent' in error, got: %v", err)
-	}
 }
 
 func TestRunResearch_CodeToolError(t *testing.T) {
@@ -1198,7 +1152,7 @@ func TestInteractiveLoop_CancelledWithActivity_RendersSessionFooter(t *testing.T
 func newTestAgentWithMetrics(t *testing.T, m schema.ChatModel, acc *metrics.Accumulator) *agent.Agent {
 	t.Helper()
 
-	a, err := agent.New(context.Background(), agent.Config{
+	a := agent.New(context.Background(), agent.Config{
 		Model:         m,
 		Cfg:           validCfg(),
 		Tools:         nil,
@@ -1207,9 +1161,6 @@ func newTestAgentWithMetrics(t *testing.T, m schema.ChatModel, acc *metrics.Accu
 		VerboseWriter: nil,
 		Metrics:       acc,
 	})
-	if err != nil {
-		t.Fatalf("agent.New: %v", err)
-	}
 
 	return a
 }
@@ -1367,7 +1318,7 @@ func (trippedInterrupter) EndTurn()          {}
 func newInterruptedAgent(t *testing.T) *agent.Agent {
 	t.Helper()
 
-	a, err := agent.New(context.Background(), agent.Config{
+	a := agent.New(context.Background(), agent.Config{
 		Model:         &fakeChatModel{}, //nolint:exhaustruct // model never called
 		Cfg:           validCfg(),
 		Tools:         nil,
@@ -1376,9 +1327,6 @@ func newInterruptedAgent(t *testing.T) *agent.Agent {
 		VerboseWriter: nil,
 		Interrupter:   trippedInterrupter{},
 	})
-	if err != nil {
-		t.Fatalf("agent.New: %v", err)
-	}
 
 	return a
 }
@@ -1484,7 +1432,7 @@ func TestRunResearch_PassesInterrupterToAgent(t *testing.T) {
 
 	d := testDeps()
 	d.interrupter = &interrupt.State{}
-	d.newAgent = func(_ context.Context, cfg agent.Config, _ ...agent.Option) (*agent.Agent, error) {
+	d.newAgent = func(_ context.Context, cfg agent.Config, _ ...agent.Option) *agent.Agent {
 		gotCfg = cfg
 
 		return agent.New(context.Background(), cfg)
@@ -1535,7 +1483,7 @@ func TestRunResearch_PassesAboutToAgent(t *testing.T) {
 
 	var gotCfg agent.Config
 	d := testDeps()
-	d.newAgent = func(_ context.Context, cfg agent.Config, _ ...agent.Option) (*agent.Agent, error) {
+	d.newAgent = func(_ context.Context, cfg agent.Config, _ ...agent.Option) *agent.Agent {
 		gotCfg = cfg
 
 		return agent.New(context.Background(), cfg)
@@ -1993,7 +1941,7 @@ func TestRunResearch_WelcomeTimedOut_Proceeds(t *testing.T) {
 		return &seqBlockThenAnswerModel{answer: "here are your repos"}, nil
 	}
 	// Inject a very short welcome timeout via the Config.WelcomeTimeout field.
-	d.newAgent = func(ctx context.Context, cfg agent.Config, opts ...agent.Option) (*agent.Agent, error) {
+	d.newAgent = func(ctx context.Context, cfg agent.Config, opts ...agent.Option) *agent.Agent {
 		cfg.WelcomeTimeout = 1 * time.Millisecond
 
 		return agent.New(ctx, cfg, opts...)

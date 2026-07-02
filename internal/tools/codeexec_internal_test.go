@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/invopop/jsonschema"
-
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/sandbox"
 	"github.com/cynative/cynative/internal/schema"
@@ -25,27 +23,19 @@ type probeArgs struct {
 
 // fakeInnerTool is a stand-in InvokableTool.
 type fakeInnerTool struct {
-	name    string
-	desc    string
-	infoErr error
-	runOut  string
+	name   string
+	desc   string
+	runOut string
 }
 
-func (f *fakeInnerTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	if f.infoErr != nil {
-		return nil, f.infoErr
-	}
-
-	params, err := schema.ReflectParams[probeArgs]()
-	if err != nil {
-		return nil, err
-	}
+func (f *fakeInnerTool) Info() *schema.ToolInfo {
+	params := schema.ReflectParams[probeArgs]()
 
 	return &schema.ToolInfo{
 		Name:   f.name,
 		Desc:   f.desc,
 		Params: params,
-	}, nil
+	}
 }
 
 func (f *fakeInnerTool) Run(_ context.Context, _ string) (string, error) {
@@ -56,8 +46,8 @@ func (f *fakeInnerTool) Run(_ context.Context, _ string) (string, error) {
 // invokerToToolFunc should prefer StructuredRun over Run.
 type structuredFake struct{}
 
-func (structuredFake) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "fake"}, nil //nolint:exhaustruct // minimal
+func (structuredFake) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "fake"} //nolint:exhaustruct // minimal
 }
 
 func (structuredFake) Run(_ context.Context, _ string) (string, error) {
@@ -104,10 +94,7 @@ func TestNewCodeExecutionTool_Info(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 
-	info, err := tl.Info(context.Background())
-	if err != nil {
-		t.Fatalf("info: %v", err)
-	}
+	info := tl.Info()
 
 	if info.Name != codeExecutionName {
 		t.Errorf("name = %q", info.Name)
@@ -156,46 +143,9 @@ func TestNewCodeExecutionTool_SelfExclusion(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 
-	info, _ := tl.Info(context.Background())
+	info := tl.Info()
 	if strings.Contains(info.Desc, codeExecutionName+"(args)") {
 		t.Errorf("code_execution should not be exposed inside itself: %s", info.Desc)
-	}
-}
-
-func TestNewCodeExecutionTool_InfoError(t *testing.T) {
-	t.Parallel()
-
-	mock := &codeRunnerMock{ //nolint:exhaustruct // only RunFunc matters
-		RunFunc: func(_ context.Context, _ string, _ time.Duration) (string, error) { return "", nil },
-	}
-
-	//nolint:exhaustruct // only infoErr matters
-	inner := []schema.InvokableTool{&fakeInnerTool{infoErr: errors.New("boom")}}
-
-	_, err := NewCodeExecutionToolWithOpts(
-		inner,
-		nil,
-		sandbox.DefaultMaxConcurrency,
-		WithCodeSandboxFactory(func(_ map[string]sandbox.ToolFunc, _ io.Writer, _ int) (codeRunner, error) {
-			return mock, nil
-		}),
-	)
-	if err == nil {
-		t.Fatal("expected inner Info error")
-	}
-}
-
-func TestNewCodeExecutionTool_SchemaError(t *testing.T) {
-	t.Parallel()
-
-	_, err := NewCodeExecutionToolWithOpts(
-		nil,
-		nil,
-		sandbox.DefaultMaxConcurrency,
-		WithCodeArgsSchema(func() (*jsonschema.Schema, error) { return nil, errors.New("schema boom") }),
-	)
-	if err == nil {
-		t.Fatal("expected schema error")
 	}
 }
 
@@ -361,7 +311,7 @@ func TestSchemaJSON_Nil(t *testing.T) {
 func TestSchemaJSON_MarshalError(t *testing.T) {
 	t.Parallel()
 
-	params, _ := schema.ReflectParams[probeArgs]()
+	params := schema.ReflectParams[probeArgs]()
 
 	errMarshal := func(any) ([]byte, error) { return nil, errors.New("boom") }
 
@@ -425,8 +375,8 @@ func TestNewCodeExecutionTool_ThreadsMaxConcurrency(t *testing.T) {
 // secretTool returns a github-token-shaped value the production redactor catches.
 type secretTool struct{}
 
-func (secretTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "leak", Desc: "returns a secret", Params: nil}, nil
+func (secretTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "leak", Desc: "returns a secret", Params: nil}
 }
 
 func (secretTool) Run(context.Context, string) (string, error) {
@@ -501,10 +451,7 @@ func TestNewCodeExecutionTool_OptionalTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	info, err := tl.Info(context.Background())
-	if err != nil {
-		t.Fatalf("info: %v", err)
-	}
+	info := tl.Info()
 
 	// Only `code` is required; `timeout_seconds` has a runtime default and must be optional.
 	if got := info.Params.Required; len(got) != 1 || got[0] != "code" {

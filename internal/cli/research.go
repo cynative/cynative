@@ -146,10 +146,10 @@ type deps struct {
 	run                  func(ctx context.Context, task string, cfg config.Config, flags researchFlags) error
 	getProviders         getProvidersFunc
 	newChatModel         func(ctx context.Context, cfg config.Config, recordUsage func(schema.Usage)) (chatModel, error)
-	newHTTPRequestTool   func(providers []auth.Provider) (schema.InvokableTool, error)
+	newHTTPRequestTool   func(providers []auth.Provider) schema.InvokableTool
 	newCodeExecutionTool func(primitives []schema.InvokableTool, verbose io.Writer, maxConcurrency int, sink audit.Sink) (schema.InvokableTool, error)
 	newAuditSink         func(cfg config.Config) (audit.Sink, func() error, error)
-	newAgent             func(ctx context.Context, cfg agent.Config, opts ...agent.Option) (*agent.Agent, error)
+	newAgent             func(ctx context.Context, cfg agent.Config, opts ...agent.Option) *agent.Agent
 	ui                   researchUI
 	out                  io.Writer
 	errOut               io.Writer
@@ -271,7 +271,7 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 		"gke": cfg.Connectors.GKE.ClusterRole,
 		"aks": cfg.Connectors.AKS.ClusterRole,
 	}
-	a, err := d.newAgent(ctx, agent.Config{
+	a := d.newAgent(ctx, agent.Config{
 		Model:            llm.NewRedactingChatModel(cm, redact.New()),
 		Cfg:              cfg,
 		Tools:            toolSet,
@@ -286,9 +286,6 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 		Interrupter:      d.interrupter,
 		OnFirstResponse:  d.showLLMOnce(cfg, &llmShown),
 	})
-	if err != nil {
-		return fmt.Errorf("initialize agent: %w", err)
-	}
 
 	// Detect the terminal background once, before runInitialPhase / the interactive
 	// loop start any turn's keystroke watcher — so the OSC 11/DA1 probe reply cannot
@@ -530,13 +527,8 @@ func (d *deps) buildToolSet(
 	verboseWriter io.Writer,
 	sink audit.Sink,
 ) ([]schema.InvokableTool, error) {
-	httpTool, err := d.newHTTPRequestTool(providers)
-	if err != nil {
-		return nil, fmt.Errorf("build http_request tool: %w", err)
-	}
-
 	// Primitives are exposed (raw) inside the sandbox; the code tool wraps them.
-	primitives := []schema.InvokableTool{httpTool}
+	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers)}
 
 	codeTool, err := d.newCodeExecutionTool(primitives, verboseWriter, cfg.SandboxMaxConcurrency, sink)
 	if err != nil {

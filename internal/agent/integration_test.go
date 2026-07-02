@@ -84,8 +84,8 @@ type echoInnerTool struct {
 
 var _ schema.InvokableTool = (*echoInnerTool)(nil)
 
-func (*echoInnerTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "echo", Desc: "echo", Params: nil}, nil
+func (*echoInnerTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "echo", Desc: "echo", Params: nil}
 }
 
 func (t *echoInnerTool) Run(context.Context, string) (string, error) {
@@ -150,7 +150,7 @@ func runWithModel(
 	ctx := context.Background()
 	echo := tools.NewApprovalTool(&echoInnerTool{ran: ran}, prompter.prompt, "notty")
 
-	a, err := agent.New(ctx, agent.Config{ //nolint:exhaustruct // VerboseWriter/Metrics omitted
+	a := agent.New(ctx, agent.Config{ //nolint:exhaustruct // VerboseWriter/Metrics omitted
 		Model: model,
 		Cfg: config.Config{ //nolint:exhaustruct // only loop/render knobs matter
 			MaxIterations:         10,
@@ -161,9 +161,6 @@ func runWithModel(
 		Providers: nil,
 		Renderer:  capturingRenderer,
 	})
-	if err != nil {
-		t.Fatalf("agent.New: %v", err)
-	}
 
 	var buf bytes.Buffer
 	runErr := a.Run(ctx, "do it", &buf)
@@ -351,7 +348,7 @@ func runWithVerifier(
 	var ran bool
 	echo := tools.NewApprovalTool(&echoInnerTool{ran: &ran}, prompter.prompt, "notty")
 
-	a, err := agent.New(ctx, agent.Config{ //nolint:exhaustruct // VerboseWriter/Metrics omitted
+	a := agent.New(ctx, agent.Config{ //nolint:exhaustruct // VerboseWriter/Metrics omitted
 		Model: model,
 		Cfg: config.Config{ //nolint:exhaustruct // only loop/render knobs matter
 			MaxIterations:         10,
@@ -362,9 +359,6 @@ func runWithVerifier(
 		Providers: nil,
 		Renderer:  capturingRenderer,
 	})
-	if err != nil {
-		t.Fatalf("agent.New: %v", err)
-	}
 
 	var buf bytes.Buffer
 	runErr := a.Run(ctx, "audit it", &buf)

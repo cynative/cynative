@@ -13,8 +13,8 @@ import (
 // fakeIOTool is a plain (non-runScoped) tool whose Run returns fixed content.
 type fakeIOTool struct{ out string }
 
-func (f fakeIOTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "http_request"}, nil
+func (f fakeIOTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request"}
 }
 func (f fakeIOTool) Run(context.Context, string) (string, error) { return f.out, nil }
 
@@ -24,8 +24,8 @@ type errScopedTool struct{}
 
 var _ runScopedTool = errScopedTool{}
 
-func (errScopedTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "write_todos"}, nil
+func (errScopedTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "write_todos"}
 }
 
 func (errScopedTool) Run(context.Context, string) (string, error) {
@@ -103,8 +103,8 @@ func TestDispatch_OrchestrationError(t *testing.T) {
 // fakeDenyTool is a plain (non-runScoped) tool that returns a fixed denial string.
 type fakeDenyTool struct{ msg string }
 
-func (f fakeDenyTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return &schema.ToolInfo{Name: "http_request"}, nil
+func (f fakeDenyTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request"}
 }
 func (f fakeDenyTool) Run(context.Context, string) (string, error) { return f.msg, nil }
 

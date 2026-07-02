@@ -39,6 +39,7 @@ type Prompter func(name, arguments, style string, alreadyGranted bool) Decision
 // later call to this tool is auto-approved (still displayed, never paused).
 type approvalTool struct {
 	inner    schema.InvokableTool
+	name     string
 	prompter Prompter
 	style    string
 	granted  atomic.Bool
@@ -49,24 +50,19 @@ var _ schema.InvokableTool = (*approvalTool)(nil)
 // NewApprovalTool wraps inner so each Run is gated by prompter. style is the
 // render style passed through to the prompter for formatting.
 func NewApprovalTool(inner schema.InvokableTool, prompter Prompter, style string) schema.InvokableTool {
-	return &approvalTool{inner: inner, prompter: prompter, style: style}
+	return &approvalTool{inner: inner, name: inner.Info().Name, prompter: prompter, style: style}
 }
 
 // Info delegates to the inner tool so the model sees the real schema.
-func (a *approvalTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	return a.inner.Info(ctx)
+func (a *approvalTool) Info() *schema.ToolInfo {
+	return a.inner.Info()
 }
 
 // Run prompts for approval (or honors a standing session grant), records the
 // decision on the context for the audit log, then runs or denies the inner tool.
 func (a *approvalTool) Run(ctx context.Context, argumentsInJSON string) (string, error) {
-	info, err := a.inner.Info(ctx)
-	if err != nil {
-		return "", err
-	}
-
 	granted := a.granted.Load()
-	d := a.prompter(info.Name, argumentsInJSON, a.style, granted)
+	d := a.prompter(a.name, argumentsInJSON, a.style, granted)
 	if d == ApproveSession {
 		a.granted.Store(true)
 	}

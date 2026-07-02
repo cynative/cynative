@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/invopop/jsonschema"
-
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/schema"
@@ -27,65 +25,32 @@ const httpRequestDescription = "Make a generic HTTP request. Redirects are NOT f
 // statusFloor is the lowest HTTP status treated as a failed request outcome.
 const statusFloor = 400
 
-// schemaBuilderFunc is the type of a function that builds a *jsonschema.Schema.
-type schemaBuilderFunc func() (*jsonschema.Schema, error)
-
-// marshalFunc is the type of a function that marshals a value to JSON bytes.
-type marshalFunc func(any) ([]byte, error)
-
-// httpRequestOptions holds the configurable seams for NewHTTPRequestTool.
-type httpRequestOptions struct {
-	schemaBuilder schemaBuilderFunc
-	marshalJSON   marshalFunc
-}
-
-// httpRequestOption is a functional option for NewHTTPRequestTool.
-type httpRequestOption func(*httpRequestOptions)
-
 // httpRequestTool is the schema tool that executes HTTP requests via transport.
 // It forwards the model's raw JSON arguments to the transport Client unchanged
 // so the auth layer receives the exact bytes it expects.
 type httpRequestTool struct {
-	info        *schema.ToolInfo
-	providers   []auth.Provider
-	marshalJSON marshalFunc
-	client      *transport.Client
+	info      *schema.ToolInfo
+	providers []auth.Provider
+	client    *transport.Client
 }
 
 // NewHTTPRequestTool builds the http_request tool, capturing the auth providers
 // for use during execution.
-func NewHTTPRequestTool(providers []auth.Provider, opts ...httpRequestOption) (schema.InvokableTool, error) {
-	o := &httpRequestOptions{
-		schemaBuilder: func() (*jsonschema.Schema, error) {
-			return schema.ReflectParams[transport.RequestArgs]()
-		},
-		marshalJSON: json.Marshal,
-	}
-
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	params, err := o.schemaBuilder()
-	if err != nil {
-		return nil, fmt.Errorf("tools: build http_request schema: %w", err)
-	}
-
+func NewHTTPRequestTool(providers []auth.Provider) schema.InvokableTool {
 	return &httpRequestTool{
 		info: &schema.ToolInfo{
 			Name:   "http_request",
 			Desc:   httpRequestDescription,
-			Params: params,
+			Params: schema.ReflectParams[transport.RequestArgs](),
 		},
-		providers:   providers,
-		marshalJSON: o.marshalJSON,
-		client:      transport.NewClient(),
-	}, nil
+		providers: providers,
+		client:    transport.NewClient(),
+	}
 }
 
 // Info returns the tool's schema.
-func (t *httpRequestTool) Info(_ context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *httpRequestTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run executes the HTTP request described by argumentsInJSON. Execution failures
@@ -132,10 +97,9 @@ func (t *httpRequestTool) StructuredRun(ctx context.Context, argumentsInJSON str
 		audit.MarkProgress(ctx)
 	}
 
-	b, err := t.marshalJSON(resp)
-	if err != nil {
-		return "", fmt.Errorf("tools: marshal structured response: %w", err)
-	}
+	// transport.Response is a fixed plain-data struct (ints, strings, bools, a
+	// string-keyed header map), so json.Marshal cannot fail on it.
+	b, _ := json.Marshal(resp)
 
 	return string(b), nil
 }

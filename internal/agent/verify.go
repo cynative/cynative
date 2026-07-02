@@ -225,18 +225,20 @@ const verifierSystemPrompt = "You are an adversarial reviewer of cloud-security 
 
 // newVerifyFindingsTool builds the verify_findings tool bound to a.
 func newVerifyFindingsTool(a *Agent) *verifyFindingsTool {
-	params, _ := schema.ReflectParams[verifyFindingsArgs]()
-
 	return &verifyFindingsTool{
-		agent:   a,
-		info:    &schema.ToolInfo{Name: "verify_findings", Desc: verifyFindingsDesc, Params: params},
+		agent: a,
+		info: &schema.ToolInfo{
+			Name:   "verify_findings",
+			Desc:   verifyFindingsDesc,
+			Params: schema.ReflectParams[verifyFindingsArgs](),
+		},
 		timeout: passTimeout,
 	}
 }
 
 // Info returns the tool's static schema.
-func (t *verifyFindingsTool) Info(context.Context) (*schema.ToolInfo, error) {
-	return t.info, nil
+func (t *verifyFindingsTool) Info() *schema.ToolInfo {
+	return t.info
 }
 
 // Run satisfies schema.InvokableTool; dispatch never calls it (runScoped is

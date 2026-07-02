@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +12,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/invopop/jsonschema"
 
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/auth"
@@ -36,15 +33,9 @@ func tlsCertBase64(t *testing.T, srv *httptest.Server) string {
 func TestNewHTTPRequestTool_Info(t *testing.T) {
 	t.Parallel()
 
-	tl, err := tools.NewHTTPRequestTool(nil)
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
+	tl := tools.NewHTTPRequestTool(nil)
 
-	info, err := tl.Info(context.Background())
-	if err != nil {
-		t.Fatalf("info: %v", err)
-	}
+	info := tl.Info()
 	if info.Name != "http_request" {
 		t.Errorf("name = %q", info.Name)
 	}
@@ -68,19 +59,6 @@ func TestNewHTTPRequestTool_Info(t *testing.T) {
 	}
 }
 
-func TestNewHTTPRequestTool_SchemaError(t *testing.T) {
-	t.Parallel()
-
-	_, err := tools.NewHTTPRequestTool(nil,
-		tools.WithHTTPSchemaBuilder(func() (*jsonschema.Schema, error) {
-			return nil, errors.New("schema build failed")
-		}),
-	)
-	if err == nil {
-		t.Fatal("expected error when schema generation fails")
-	}
-}
-
 func TestHTTPRequestTool_InvokableRun_Success(t *testing.T) {
 	t.Parallel()
 
@@ -92,7 +70,7 @@ func TestHTTPRequestTool_InvokableRun_Success(t *testing.T) {
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
 
-	tl, _ := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers)
 	args, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL, "auth_provider": "loopback"})
 
 	out, err := tl.Run(context.Background(), string(args))
@@ -107,7 +85,7 @@ func TestHTTPRequestTool_InvokableRun_Success(t *testing.T) {
 func TestHTTPRequestTool_InvokableRun_BadJSON(t *testing.T) {
 	t.Parallel()
 
-	tl, _ := tools.NewHTTPRequestTool(nil)
+	tl := tools.NewHTTPRequestTool(nil)
 
 	out, err := tl.Run(context.Background(), "not-json")
 	if err != nil {
@@ -130,10 +108,7 @@ func TestHTTPRequestTool_StructuredRun(t *testing.T) {
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
 
-	tl, err := tools.NewHTTPRequestTool(providers)
-	if err != nil {
-		t.Fatalf("NewHTTPRequestTool: %v", err)
-	}
+	tl := tools.NewHTTPRequestTool(providers)
 
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
@@ -160,10 +135,7 @@ func TestHTTPRequestTool_StructuredRun(t *testing.T) {
 func TestHTTPRequestTool_StructuredRun_TransportError(t *testing.T) {
 	t.Parallel()
 
-	tl, err := tools.NewHTTPRequestTool(nil)
-	if err != nil {
-		t.Fatalf("NewHTTPRequestTool: %v", err)
-	}
+	tl := tools.NewHTTPRequestTool(nil)
 
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
@@ -171,45 +143,9 @@ func TestHTTPRequestTool_StructuredRun_TransportError(t *testing.T) {
 	}
 
 	// Bad JSON arguments cause transport.ExecuteStructured to return an error.
-	_, err = sr.StructuredRun(context.Background(), "not-json")
+	_, err := sr.StructuredRun(context.Background(), "not-json")
 	if err == nil {
 		t.Fatal("expected error for bad JSON arguments")
-	}
-}
-
-func TestHTTPRequestTool_StructuredRun_MarshalError(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(srv.Close)
-
-	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-
-	tl, err := tools.NewHTTPRequestTool(providers,
-		tools.WithHTTPMarshalJSON(func(any) ([]byte, error) {
-			return nil, errors.New("marshal failed")
-		}),
-	)
-	if err != nil {
-		t.Fatalf("NewHTTPRequestTool: %v", err)
-	}
-
-	sr, ok := tl.(schema.StructuredRunner)
-	if !ok {
-		t.Fatalf("http_request does not implement StructuredRunner")
-	}
-
-	_, err = sr.StructuredRun(
-		context.Background(),
-		fmt.Sprintf(`{"method":"GET","url":%q,"auth_provider":"loopback"}`, srv.URL),
-	)
-	if err == nil {
-		t.Fatal("expected error when marshalJSON fails")
-	}
-	if !strings.Contains(err.Error(), "marshal structured response") {
-		t.Errorf("error message = %q, want to contain %q", err.Error(), "marshal structured response")
 	}
 }
 
@@ -222,7 +158,7 @@ func TestHTTPRequestTool_Run_MarksFailedOnServerError(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl, _ := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers)
 	args, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL, "auth_provider": "loopback"})
 
 	ctx, fail := audit.WithFailure(context.Background())
@@ -243,7 +179,7 @@ func TestHTTPRequestTool_Run_DoesNotMarkFailedOn2xx(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl, _ := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers)
 	args, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL, "auth_provider": "loopback"})
 
 	ctx, fail := audit.WithFailure(context.Background())
@@ -267,7 +203,7 @@ func TestHTTPRequestTool_StructuredRun_MarksFailedOnServerError(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl, _ := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers)
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
 		t.Fatalf("http_request does not implement StructuredRunner")
@@ -292,7 +228,7 @@ func TestHTTPRequestTool_StructuredRun_DoesNotMarkFailedOn2xx(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl, _ := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers)
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
 		t.Fatalf("http_request does not implement StructuredRunner")
@@ -311,10 +247,7 @@ func TestHTTPRequestTool_StructuredRun_DoesNotMarkFailedOn2xx(t *testing.T) {
 func TestHTTPRequestTool_StructuredRun_MarksFailedOnTransportError(t *testing.T) {
 	t.Parallel()
 
-	tl, err := tools.NewHTTPRequestTool(nil)
-	if err != nil {
-		t.Fatalf("NewHTTPRequestTool: %v", err)
-	}
+	tl := tools.NewHTTPRequestTool(nil)
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
 		t.Fatalf("http_request does not implement StructuredRunner")
@@ -343,14 +276,8 @@ func assertRequiredSet(t *testing.T, where string, got, want []string) {
 func TestNewHTTPRequestTool_RequiredFields(t *testing.T) {
 	t.Parallel()
 
-	tl, err := tools.NewHTTPRequestTool(nil)
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	info, err := tl.Info(context.Background())
-	if err != nil {
-		t.Fatalf("info: %v", err)
-	}
+	tl := tools.NewHTTPRequestTool(nil)
+	info := tl.Info()
 
 	// Top level: only method, url, auth_provider are required.
 	assertRequiredSet(t, "<root>", info.Params.Required, []string{"method", "url", "auth_provider"})

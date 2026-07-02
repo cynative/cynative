@@ -17,10 +17,7 @@ type reflectArgs struct {
 func TestReflectParams_Shape(t *testing.T) {
 	t.Parallel()
 
-	s, err := schema.ReflectParams[reflectArgs]()
-	if err != nil {
-		t.Fatalf("ReflectParams: %v", err)
-	}
+	s := schema.ReflectParams[reflectArgs]()
 	if s.Type != "object" {
 		t.Errorf("type = %q, want object", s.Type)
 	}

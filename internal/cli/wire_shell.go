@@ -115,9 +115,7 @@ func newDeps() *deps {
 				llm.WithUsageRecorder(recordUsage),
 			)
 		},
-		newHTTPRequestTool: func(providers []auth.Provider) (schema.InvokableTool, error) {
-			return tools.NewHTTPRequestTool(providers)
-		},
+		newHTTPRequestTool:   tools.NewHTTPRequestTool,
 		newCodeExecutionTool: tools.NewCodeExecutionTool,
 		newAuditSink: func(cfg config.Config) (audit.Sink, func() error, error) {
 			if !cfg.Audit.Enabled {
