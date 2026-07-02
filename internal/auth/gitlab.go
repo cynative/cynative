@@ -16,6 +16,7 @@ import (
 
 	"github.com/cynative/cynative/internal/auth/exposure"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+	"github.com/cynative/cynative/internal/cache"
 
 	"golang.org/x/oauth2"
 )
@@ -158,7 +159,7 @@ type gitlabProvider struct {
 	allowPrivateNetwork bool
 	caData              string // base64 PEM; "" = system roots.
 	exposure            exposure.Exposure
-	tables              *gitlabclass.TableSource
+	tables              *cache.TTLCache[gitlabclass.Table]
 	resolver            addrResolver
 }
 
