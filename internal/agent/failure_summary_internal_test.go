@@ -47,7 +47,6 @@ func TestFailureSummary_RendersAndReturnsModelText(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -73,7 +72,6 @@ func TestFailureSummary_BlankCompletionFallsBack(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -97,7 +95,6 @@ func TestFailureSummary_GenerateErrorFallsBack(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -116,7 +113,6 @@ func TestFailureSummary_InterruptPreCheck(t *testing.T) {
 	rs := &runState{                                //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -144,7 +140,6 @@ func TestFailureSummary_InterruptPostGenerate(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -166,7 +161,6 @@ func TestFailureSummary_InterruptDuringSummaryRenderDenies(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -189,7 +183,6 @@ func TestFailureSummary_CanceledContextPropagates(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -220,7 +213,6 @@ func TestFailureSummary_BudgetCrossReturnsSentinel(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -297,7 +289,6 @@ func TestFailureSummary_CompletesPendingToolCallsBeforeGenerate(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 
@@ -348,7 +339,6 @@ func TestFailureSummary_CancelsHungSummaryOnInterrupt(t *testing.T) {
 	rs := &runState{ //nolint:exhaustruct // consecutiveFailures zero-init is correct.
 		depth: 0,
 		out:   &bytes.Buffer{},
-		todos: nil,
 		runID: "r",
 	}
 

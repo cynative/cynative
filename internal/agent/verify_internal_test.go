@@ -764,7 +764,7 @@ func TestVerifyFindings_Guards(t *testing.T) {
 		args string
 		want string
 	}{
-		"sub-agent caller": {&runState{depth: 1, out: io.Discard, todos: nil}, oneFinding, "main agent"},
+		"sub-agent caller": {&runState{depth: 1, out: io.Discard}, oneFinding, "main agent"},
 		"empty findings":   {rootState(io.Discard), `{"findings":[]}`, "non-empty 'findings'"},
 		"bad json":         {rootState(io.Discard), `@@@`, "non-empty 'findings'"},
 		"empty claim": {

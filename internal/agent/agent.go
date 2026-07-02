@@ -206,7 +206,7 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 	a.beginTurn()
 	defer a.endTurn()
 
-	rs := &runState{depth: 0, out: w, todos: nil, runID: a.newID()}
+	rs := &runState{depth: 0, out: w, runID: a.newID()}
 
 	seed := make([]*schema.Message, 0, len(a.history)+seedExtra)
 	seed = append(seed, schema.SystemMessage(a.systemPrompt))

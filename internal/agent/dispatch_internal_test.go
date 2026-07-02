@@ -69,7 +69,7 @@ func TestDispatch_ApprovedIO_WritesAttemptAndResult(t *testing.T) {
 	approvalStub := approvalFn(stubTool{name: "http_request", out: "BODY", err: nil}, true)
 	a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": approvalStub})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	ret, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{"u":1}`))
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -99,7 +99,7 @@ func TestDispatch_DeniedIO_LabelsDenied(t *testing.T) {
 	approvalStub := approvalFn(stubTool{name: "http_request", out: "DENIED", err: nil}, false)
 	a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": approvalStub})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	ret, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`))
 	if err != nil {
 		t.Fatalf("dispatch: %v", err)
@@ -127,7 +127,7 @@ func TestDispatch_AttemptWriteFails_AbortsBeforeExec(t *testing.T) {
 	}}
 	a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": tool})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	_, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`))
 	if err == nil {
 		t.Fatal("expected fail-closed error")
@@ -146,7 +146,7 @@ func TestDispatch_FatalFromTool_Aborts(t *testing.T) {
 	}}
 	a := auditAgent(sink, map[string]schema.InvokableTool{"code_execution": tool})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	_, _, err := a.dispatch(context.Background(), rs, dispatchTC("code_execution", `{}`))
 	if !errors.Is(err, audit.ErrLog) {
 		t.Fatalf("want ErrLog abort, got %v", err)
@@ -162,7 +162,7 @@ func TestDispatch_ResultWriteFails_Aborts(t *testing.T) {
 	a := auditAgent(sink, map[string]schema.InvokableTool{
 		"http_request": approvalFn(stubTool{name: "http_request", out: "B", err: nil}, true),
 	})
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	_, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`))
 	if err == nil {
 		t.Fatal("expected fail-closed error on result-write failure")
@@ -175,7 +175,7 @@ func TestDispatch_NilSink_NoOp(t *testing.T) {
 	a := auditAgent(nil, map[string]schema.InvokableTool{
 		"http_request": approvalFn(stubTool{name: "http_request", out: "B", err: nil}, true),
 	})
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	if _, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`)); err != nil {
 		t.Fatalf("nil sink should be a no-op: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestDispatch_IOFailure_LabelsErrorOutcome(t *testing.T) {
 	}}
 	a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": approvalFn(inner, true)})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	if _, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestDispatch_ScopedFatal_Aborts(t *testing.T) {
 		"task": fakeScoped{name: "task", out: "", err: audit.ErrLog},
 	})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	_, _, err := a.dispatch(context.Background(), rs, dispatchTC("task", `{}`))
 	if !errors.Is(err, audit.ErrLog) {
 		t.Fatalf("sub-agent ErrLog should abort the parent run, got %v", err)
@@ -272,7 +272,7 @@ func TestDispatch_OrchestrationRedactsArgs(t *testing.T) {
 		"write_todos": fakeScoped{name: "write_todos", out: "ok", err: nil},
 	})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	if _, _, err := a.dispatch(context.Background(), rs, dispatchTC("write_todos", `{"todos":[]}`)); err != nil {
 		t.Fatalf("dispatch: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestDispatch_SessionGrant_PersistsAndLabelsApprovedSession(t *testing.T) {
 	gated := tools.NewApprovalTool(stubTool{name: "http_request", out: "BODY", err: nil}, prompter, "notty")
 	a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": gated})
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	for range 2 {
 		if _, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`)); err != nil {
 			t.Fatalf("dispatch: %v", err)
@@ -365,7 +365,7 @@ func TestRun_AbortsWhenAuditAttemptFails(t *testing.T) {
 	a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": tool})
 	a.model = model
 
-	rs := &runState{depth: 0, out: io.Discard, todos: nil, runID: "R"}
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
 	_, err := a.run(context.Background(), rs, []*schema.Message{schema.UserMessage("q")}, 3)
 	if !errors.Is(err, audit.ErrLog) {
 		t.Fatalf("run should abort fail-closed with ErrLog, got %v", err)
