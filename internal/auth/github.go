@@ -12,6 +12,7 @@ import (
 
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/cache"
 )
 
 const githubProviderName = "github"
@@ -27,7 +28,7 @@ const githubDownloadHostsNote = " Also authorizes the GitHub download hosts code
 type githubProvider struct {
 	token    string
 	exposure exposure.Exposure
-	tables   *githubhardening.TableSource
+	tables   *cache.TTLCache[githubhardening.Table]
 	errOut   io.Writer
 }
 
@@ -40,7 +41,7 @@ var (
 // newGithubProvider constructs the provider with a resolved exposure ceiling and
 // a table source. errOut is injected by the shell.
 func newGithubProvider(
-	token string, exp exposure.Exposure, tables *githubhardening.TableSource,
+	token string, exp exposure.Exposure, tables *cache.TTLCache[githubhardening.Table],
 ) *githubProvider {
 	return &githubProvider{
 		token:    token,

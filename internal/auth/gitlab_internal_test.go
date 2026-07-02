@@ -59,15 +59,19 @@ paths:
 // okGitLabFetch returns the fixture spec as the table source bytes.
 func okGitLabFetch(context.Context) ([]byte, error) { return []byte(gitlabFixtureOpenAPI), nil }
 
-// errGitLabFetch always errors, so the TableSource resolves to nil (fail-closed).
+// errGitLabFetch always errors, so the table cache resolves to nil (fail-closed).
 func errGitLabFetch(context.Context) ([]byte, error) { return nil, errors.New("fetch failed") }
 
-// newTestGitLabSource builds a TableSource over fetch with a temp cache dir.
-func newTestGitLabSource(t *testing.T, fetch func(context.Context) ([]byte, error)) *gitlabclass.TableSource {
+// newTestGitLabSource builds a table cache over fetch with a temp cache dir.
+func newTestGitLabSource(
+	t *testing.T, fetch func(context.Context) ([]byte, error),
+) *cache.TTLCache[gitlabclass.Table] {
 	t.Helper()
-	return gitlabclass.NewTableSource(
+	return cache.NewTableCache(
 		cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: func() time.Time { return time.Unix(1, 0) }},
 		fetch,
+		gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
+		gitlabclass.UnmarshalTable, gitlabclass.AdmitTable,
 	)
 }
 
