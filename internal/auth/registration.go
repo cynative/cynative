@@ -15,6 +15,7 @@ import (
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+	"github.com/cynative/cynative/internal/cache"
 )
 
 // registrationDeps carries every external I/O seam used to register the cloud /
@@ -389,7 +390,10 @@ func (d *registrationDeps) githubOutcome(
 
 	exposure := githubhardening.BuildExposure(ghCfg.Permissions)
 	posture, warn := githubPosture(exposure, ghCfg.Permissions)
-	gh := newGithubProvider(token, exposure, githubhardening.NewTableSource(ghCfg.Config, newGithubOpenAPIFetcher()))
+	tables := cache.NewTableCache(ghCfg.Config, newGithubOpenAPIFetcher(),
+		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
+		githubhardening.UnmarshalTable, githubhardening.AdmitTable)
+	gh := newGithubProvider(token, exposure, tables)
 	gh.errOut = os.Stderr
 
 	return connectorOutcome{
