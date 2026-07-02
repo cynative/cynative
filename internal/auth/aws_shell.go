@@ -35,8 +35,8 @@ func validateAWSPolicy(ctx context.Context, cfg aws.Config, policyARN string) er
 // I/O deferred to first use. The provider's doLazyResolve closure captures
 // pre-built dependency clients (cheap, no I/O) and triggers LazyResolve on
 // the first InjectAuth / AuthorizeAction. Credential scoping was resolved
-// eagerly at registration (resolveScopeAWS); the pre-built scoped chain is
-// passed in and threaded straight through to LazyResolve via LazyDeps.Credentials.
+// eagerly at registration (resolveScopeAWS); the pre-built scoped chain
+// becomes the provider's request-signing credentials at construction.
 func buildHardenedAWSProvider(
 	cfg aws.Config, hardeningCfg AWSHardeningConfig, scoped aws.CredentialsProvider,
 ) *awsProvider {
@@ -68,20 +68,22 @@ func buildHardenedAWSProvider(
 		Archive:         archive,
 		ServiceRef:      serviceRefReg,
 		IAMDataset:      iamDatasetReg,
-		Credentials:     scoped,
 		PolicyCacheSize: policyCacheSize,
 	}
+
+	// The IAM client above captured the base credentials, so policy simulation
+	// keeps running unscoped; only request signing uses the scoped chain.
+	cfg.Credentials = scoped
 
 	// Build the provider with a nil closure first, then assign one that
 	// captures p so it can populate the provider's fields on first call.
 	p := newAWSProvider(cfg, nil)
 	p.doLazyResolve = func(ctx context.Context) error {
-		res, err := awshardening.LazyResolve(ctx, deps)
+		actionProvider, err := awshardening.LazyResolve(ctx, deps)
 		if err != nil {
 			return err
 		}
-		p.cfg.Credentials = res.Credentials
-		p.actionProvider = res.ActionProvider
+		p.actionProvider = actionProvider
 		return nil
 	}
 	return p

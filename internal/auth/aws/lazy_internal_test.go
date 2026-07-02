@@ -21,7 +21,7 @@ type iamFullAPIMock struct {
 	simulateAPIMock
 }
 
-func newTestLazyDeps(t *testing.T, iamMock iamFullAPI, creds aws.CredentialsProvider) LazyDeps {
+func newTestLazyDeps(t *testing.T, iamMock iamFullAPI) LazyDeps {
 	t.Helper()
 	return LazyDeps{
 		PolicyARN:       lazyTestPolicyARN,
@@ -29,7 +29,6 @@ func newTestLazyDeps(t *testing.T, iamMock iamFullAPI, creds aws.CredentialsProv
 		Archive:         &fakeArchive{models: nil, err: ErrUnsupportedService}, // not called during construction.
 		ServiceRef:      &fakeSRGetter{model: nil},
 		IAMDataset:      &fakeDSLookuper{actions: nil, gotSDK: nil},
-		Credentials:     creds,
 		PolicyCacheSize: 16,
 	}
 }
@@ -39,17 +38,13 @@ func TestLazyResolve_succeeds(t *testing.T) {
 	iamMock := &iamFullAPIMock{ //nolint:exhaustruct // simulateAPIMock not needed here
 		iamAPIMock: *newIAMMockWithPolicy(t, lazyTestPolicyARN),
 	}
-	want := aws.NewCredentialsCache(&fakeBaseProvider{})
 
-	res, err := LazyResolve(t.Context(), newTestLazyDeps(t, iamMock, want))
+	actionProvider, err := LazyResolve(t.Context(), newTestLazyDeps(t, iamMock))
 	if err != nil {
 		t.Fatalf("LazyResolve: %v", err)
 	}
-	if res.ActionProvider == nil {
-		t.Error("ActionProvider nil")
-	}
-	if res.Credentials != want {
-		t.Error("Credentials not passed through unchanged")
+	if actionProvider == nil {
+		t.Error("action provider nil")
 	}
 }
 
@@ -66,7 +61,7 @@ func TestLazyResolve_PolicyError_returnsNotReady(t *testing.T) {
 		},
 	}
 
-	_, err := LazyResolve(t.Context(), newTestLazyDeps(t, iamMock, &fakeBaseProvider{}))
+	_, err := LazyResolve(t.Context(), newTestLazyDeps(t, iamMock))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -75,33 +70,6 @@ func TestLazyResolve_PolicyError_returnsNotReady(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Errorf("error does not wrap injected cause: %v", err)
-	}
-}
-
-func TestLazyResolve_passesThroughPrebuiltCredentials(t *testing.T) {
-	t.Parallel()
-	iamMock := &iamFullAPIMock{
-		iamAPIMock: *newIAMMockWithPolicy(t, lazyTestPolicyARN),
-	} //nolint:exhaustruct // simulateAPIMock not needed here.
-	want := aws.NewCredentialsCache(&fakeBaseProvider{creds: aws.Credentials{AccessKeyID: "scopedAK"}})
-	deps := LazyDeps{ //nolint:exhaustruct // set the fields LazyResolve reads.
-		PolicyARN:       lazyTestPolicyARN,
-		IAM:             iamMock,
-		Archive:         &fakeArchive{models: nil, err: ErrUnsupportedService},
-		ServiceRef:      &fakeSRGetter{model: nil},
-		IAMDataset:      &fakeDSLookuper{actions: nil, gotSDK: nil},
-		Credentials:     want,
-		PolicyCacheSize: 16,
-	}
-	res, err := LazyResolve(t.Context(), deps)
-	if err != nil {
-		t.Fatalf("LazyResolve: %v", err)
-	}
-	if res.Credentials != want {
-		t.Errorf("Credentials not passed through unchanged")
-	}
-	if res.ActionProvider == nil {
-		t.Errorf("ActionProvider nil")
 	}
 }
 
