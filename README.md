@@ -1,4 +1,4 @@
-# Cynative - Deep research agent for your cloud, code and runtime
+# Cynative - deep research agent for your infrastructure
 
 [![CI](https://github.com/cynative/cynative/actions/workflows/ci.yaml/badge.svg)](https://github.com/cynative/cynative/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/cynative/cynative)](https://github.com/cynative/cynative/releases/latest)
