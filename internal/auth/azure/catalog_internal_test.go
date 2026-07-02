@@ -16,18 +16,9 @@ import (
 func fakeCatalogData() CatalogData {
 	return CatalogData{
 		Clouds: map[string]CloudEndpoints{
-			"AzureCloud": {
-				ResourceManager: "management.azure.com",
-				Suffixes:        map[string]string{"storage": "core.windows.net", "keyVaultDns": "vault.azure.net"},
-			},
-			"AzureUSGovernment": {
-				ResourceManager: "management.usgovcloudapi.net",
-				Suffixes:        map[string]string{"storage": "core.usgovcloudapi.net"},
-			},
-			"AzureChinaCloud": {
-				ResourceManager: "management.chinacloudapi.cn",
-				Suffixes:        map[string]string{"storage": "core.chinacloudapi.cn"},
-			},
+			"AzureCloud":        {ResourceManager: "management.azure.com"},
+			"AzureUSGovernment": {ResourceManager: "management.usgovcloudapi.net"},
+			"AzureChinaCloud":   {ResourceManager: "management.chinacloudapi.cn"},
 		},
 		Providers: map[string]ProviderOps{
 			"Microsoft.Compute": {

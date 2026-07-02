@@ -29,8 +29,7 @@ type ProviderOps struct {
 
 // CloudEndpoints is the trimmed /metadata/endpoints document for one cloud.
 type CloudEndpoints struct {
-	ResourceManager string            `json:"resourceManager"` // control-plane host (no scheme/path after parse).
-	Suffixes        map[string]string `json:"suffixes"`
+	ResourceManager string `json:"resourceManager"` // control-plane host (no scheme/path after parse).
 }
 
 // CatalogData is the parsed per-cloud endpoint catalog + per-namespace
@@ -142,19 +141,18 @@ func parseCloudEndpoints(
 		)
 	}
 	var raw struct {
-		ResourceManager string            `json:"resourceManager"`
-		Suffixes        map[string]string `json:"suffixes"`
+		ResourceManager string `json:"resourceManager"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return CloudEndpoints{}, fmt.Errorf("%w: parse /metadata/endpoints: %w", ErrCatalogUnavailable, err)
 	}
-	if raw.ResourceManager == "" || raw.Suffixes == nil {
+	if raw.ResourceManager == "" {
 		return CloudEndpoints{}, fmt.Errorf(
-			"%w: /metadata/endpoints missing resourceManager/suffixes",
+			"%w: /metadata/endpoints missing resourceManager",
 			ErrCatalogUnavailable,
 		)
 	}
-	return CloudEndpoints{ResourceManager: cloudauth.HostOf(raw.ResourceManager), Suffixes: raw.Suffixes}, nil
+	return CloudEndpoints{ResourceManager: cloudauth.HostOf(raw.ResourceManager)}, nil
 }
 
 // ResolveCloud confirms p.Host equals some cloud's resourceManager and fills
