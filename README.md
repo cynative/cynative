@@ -8,12 +8,12 @@
 **Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
 
 ```bash
-cynative "leaked cloud credentials and their current blast radius"
+cynative "what in my cloud is publicly exposed that shouldn't be?"
 ```
 
 It writes and runs code in an ephemeral sandbox, querying your APIs in parallel, so one question fans out across your whole stack. Every finding is cross-checked and traced back to its origin.
 
-Unlike coding agents and MCP servers, it's **read-only by construction**: every call is resolved and authorized *before* a credential is attached. Point it at production with confidence.
+Unlike coding agents and MCP servers, it's **read-only by construction**: every call is gated and authorized *before* a credential is attached - point it at production with confidence.
 <!-- END agent-about -->
 
 <p align="center">
@@ -24,7 +24,7 @@ Unlike coding agents and MCP servers, it's **read-only by construction**: every 
 
 ## Quickstart
 
-No cloud credentials needed to try it - just an LLM key:
+Install and set an LLM:
 
 ```bash
 brew install cynative/tap/cynative
@@ -33,17 +33,15 @@ export CYNATIVE_LLM_PROVIDER=anthropic
 export CYNATIVE_LLM_MODEL=claude-opus-4-8
 export ANTHROPIC_API_KEY=...
 
-cat main.tf | cynative -p "review this Terraform for misconfigurations"
 ```
 
-Then point it at your stack. It picks up the credentials already in your shell:
+Then give it any research task, it picks up the credentials already in your shell:
 
 ```bash
-cynative -p "attack paths that lead to cloud admin access"
+cynative -p "which IAM roles can escalate to admin?" 
 cynative -p "high-risk cloud permissions, trace each to the PR where it was granted"
-cynative -p "shadow infra — live cloud resources with no IaC trace"
-cynative -p "CI workflows that can assume privileged cloud roles"
-cynative     # starts an interactive session
+cynative -p "cloud credentials leaked in source code and their current blast radius"
+cynative "live cloud resources with no IaC trace - shadow infra" # starts an interactive session
 ```
 
 ## What makes it special
@@ -56,10 +54,11 @@ cynative     # starts an interactive session
 
 ## Why not just use a coding agent and a read-only MCP?
 
-Cynative enforces read-only in depth:
-
+A coding agent with MCPs answers one API call at a time, with your ambient credentials. Cynative runs code to fan a question out across your whole stack - and enforces read-only in depth:
 | | Coding agent + MCP | Cynative |
 |---|---|---|
+| Research throughput | One action per tool call | Writes sandboxed code - loops, filters and fans out API calls concurrently |
+| Findings | Unverified model output | Verifier cross-checks every finding against live evidence before it's reported |
 | Read-only classification | Is this operation classified as a read? | Does a security-audit policy allow the required IAM actions? `secretsmanager:GetSecretValue` is an IAM *Read* action - a classifier allows it, `SecurityAudit` blocks it |
 | Credentials for cloud calls | Your ambient creds, unchanged | STS session scoped (AWS assumed-role) - IAM enforces the boundary too |
 | Network reach | Anywhere | Every host pinned to its mapped service and region, IP verified before connect |
@@ -168,15 +167,15 @@ configuration reference.
 
 ## How to run
 
-`cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes.
+`cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. cat main.tf | cynative -p "review this Terraform for misconfigurations")
+
+Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 
 **Approvals:** each tool call waits for a single keystroke: `y` runs it once, `a` clears every later call to *that tool* for the session (scripts still print before running), any other key denies. With no controlling terminal, use `--auto-approve`.
 
 **Stopping mid-task:** while a task is running, press **Esc** or **Ctrl-C** once to gracefully stop it (the agent finishes any already-running call, then stops and prints `⏸ Stopped`). When the agent hits repeated tool errors or rejections it stops automatically, summarizes what it is blocked on, and asks for the missing information.
 
-Cynative prints a short operational footer (timing, token usage) to **stderr** - redirecting stdout (`cynative -p "..." > out.txt`) keeps the captured answer clean. `--version` Prints version, commit, build date, Go version, and platform.
-
-**Always provide the least-privileged, read-only credential needed**: Cynative reaches AWS, GCP, Azure, EKS/GKE/AKS, self-managed Kubernetes, GitHub and GitLab using the credentials already in your shell - it keeps no separate credential store.
+Cynative prints a short operational footer (timing, token usage) to **stderr** - redirecting stdout (`cynative -p "..." > out.txt`) keeps the captured answer clean. `--version` prints version, commit, build date, Go version, and platform.
 
 <details>
 <summary><strong>Resource &amp; cost controls for unattended runs</strong></summary>
