@@ -26,6 +26,7 @@ Unlike coding agents and MCP servers, it's **read-only by construction**: every 
 
 Install and set an LLM:
 
+<!-- BEGIN quickstart-example -->
 ```bash
 brew install cynative/tap/cynative
 
@@ -34,6 +35,7 @@ export CYNATIVE_LLM_MODEL=claude-opus-4-8
 export ANTHROPIC_API_KEY=...
 
 ```
+<!-- END quickstart-example -->
 
 Then give it any research task, it picks up the credentials already in your shell:
 
