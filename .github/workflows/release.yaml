@@ -161,6 +161,28 @@ jobs:
           set -o pipefail
           go tool goreleaser release --clean 2>&1 | tee /tmp/goreleaser.log
 
+      # Assert the release binary is version-stamped, not "dev". The Go linker
+      # silently ignores an unknown -X symbol path, so a typo'd, renamed, or
+      # template-drifted stamp path would ship a binary that prints "dev" with no
+      # build error. Executing the built artifact (rather than re-reading config)
+      # catches all three permanently. Runs pre-publish, so a failure aborts the
+      # release with the draft intact instead of publishing a mis-stamped binary.
+      - name: Assert release binary is version-stamped
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        env:
+          TAG: ${{ steps.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          out="$(dist/*_linux_amd64*/cynative --version)"
+          echo "${out}"
+          # Exact match on the first line, not a prefix: a prefix would also accept a
+          # mis-stamp like "cynative 1.2.30" or "cynative 1.2.3-dev" for tag v1.2.3.
+          if [ "${out%%$'\n'*}" != "cynative ${TAG#v}" ]; then
+            echo "::error::--version first line is not exactly 'cynative ${TAG#v}'"
+            exit 1
+          fi
+          echo "release binary version-stamped OK"
+
       - name: Build, sign, notarize & staple macOS pkgs
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         timeout-minutes: 20

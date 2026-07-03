@@ -11,9 +11,9 @@ builds:
   - main: ./cmd/cynative
     ldflags:
       - -s -w
-      - -X github.com/cynative/cynative/internal/version.version={{.Version}}
-      - -X github.com/cynative/cynative/internal/version.commit={{.FullCommit}}
-      - -X github.com/cynative/cynative/internal/version.date={{.Date}}
+      - -X github.com/cynative/cynative/internal/cli.version={{.Version}}
+      - -X github.com/cynative/cynative/internal/cli.commit={{.ShortCommit}}
+      - -X github.com/cynative/cynative/internal/cli.date={{.Date}}
     env:
       - CGO_ENABLED=0
     goos:
