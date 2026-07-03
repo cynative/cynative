@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,9 +35,10 @@ func TestParseCredentialHelperOutput(t *testing.T) {
 			credOK, "pat", false,
 		},
 		{
-			"job-token success no expiry",
+			// A CI job token cannot authenticate over Bearer, so it is rejected.
+			"job-token is incompatible",
 			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"job-token","token":"jt"}}`,
-			credOK, "jt", false,
+			credIncompatible, "", false,
 		},
 		{
 			"oauth2 missing expiry is incompatible",
@@ -116,7 +118,7 @@ func TestGlabHelperEnv(t *testing.T) {
 		"GITLAB_TOKEN=leak", "OPENAI_API_KEY=leak", "AWS_SECRET_ACCESS_KEY=leak",
 		"DBUS_SESSION_BUS_ADDRESS=unix:x", "GITLAB_HOST=stale", "MALFORMED_NO_EQUALS",
 	}
-	got := glabHelperEnv(parent, "gitlab.com")
+	got := glabHelperEnv(parent, "gitlab.com", "")
 	has := func(kv string) bool { return slices.Contains(got, kv) }
 	for _, keep := range []string{"HOME=/home/u", "PATH=/usr/bin", "XDG_RUNTIME_DIR=/run/u", "DBUS_SESSION_BUS_ADDRESS=unix:x"} {
 		if !has(keep) {
@@ -133,42 +135,54 @@ func TestGlabHelperEnv(t *testing.T) {
 			t.Errorf("missing injected %q", want)
 		}
 	}
+	// No api_host -> no GITLAB_API_HOST; a set api_host -> GITLAB_API_HOST injected.
+	if slices.ContainsFunc(got, func(kv string) bool { return strings.HasPrefix(kv, "GITLAB_API_HOST=") }) {
+		t.Error("GITLAB_API_HOST set with no api_host")
+	}
+	withAPI := glabHelperEnv(parent, "login.example.com", "api.example.com")
+	if !slices.Contains(withAPI, "GITLAB_API_HOST=api.example.com") {
+		t.Errorf("missing GITLAB_API_HOST for split-host: %v", withAPI)
+	}
 }
 
 func TestGlabLoginHost(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		configHost, apiHost, wantHost string
-		wantOK                        bool
+		configHost, apiHost, want string
 	}{
-		{"", "", "gitlab.com", true},
-		{"gitlab.example.com", "", "gitlab.example.com", true},
-		{"gitlab.example.com:8443", "", "gitlab.example.com", true},
-		{"", "gitlab.private.com", "", false},           // api_host-only default: no glab path (leak guard).
-		{"gitlab.com", "gitlab.private.com", "", false}, // explicit public host + api override: leak guard.
-		{"gitlab.example.com", "api.example.com", "gitlab.example.com", true},
+		{"", "", "gitlab.com"},
+		{"gitlab.example.com", "", "gitlab.example.com"},
+		{"gitlab.example.com:8443", "", "gitlab.example.com"},
+		// api_host-only (login host at the public default): use the api_host, never the
+		// un-configured gitlab.com default (which would leak the public token).
+		{"", "gitlab.private.com", "gitlab.private.com"},
+		{"gitlab.com", "gitlab.private.com", "gitlab.private.com"},
+		// explicit self-managed login host wins even paired with an api_host.
+		{"gitlab.example.com", "api.example.com", "gitlab.example.com"},
 	}
 	for _, tc := range tests {
-		gotHost, gotOK := glabLoginHost(tc.configHost, tc.apiHost)
-		if gotHost != tc.wantHost || gotOK != tc.wantOK {
-			t.Errorf("glabLoginHost(%q,%q) = (%q,%v), want (%q,%v)",
-				tc.configHost, tc.apiHost, gotHost, gotOK, tc.wantHost, tc.wantOK)
+		if got := glabLoginHost(tc.configHost, tc.apiHost); got != tc.want {
+			t.Errorf("glabLoginHost(%q,%q) = %q, want %q", tc.configHost, tc.apiHost, got, tc.want)
 		}
 	}
 }
 
 func TestValidateInstanceURL(t *testing.T) {
 	t.Parallel()
-	if err := validateInstanceURL("https://gitlab.com", "gitlab.com"); err != nil {
+	if err := validateInstanceURL("https://gitlab.com", "gitlab.com", ""); err != nil {
 		t.Errorf("match: unexpected err %v", err)
 	}
-	if err := validateInstanceURL("https://GITLAB.com:443", "gitlab.com"); err != nil {
+	if err := validateInstanceURL("https://GITLAB.com:443", "gitlab.com", ""); err != nil {
 		t.Errorf("case/port-insensitive match: unexpected err %v", err)
 	}
-	if err := validateInstanceURL("https://evil.com", "gitlab.com"); err == nil {
+	// Split login/API host: glab reports the api host; accept it.
+	if err := validateInstanceURL("https://api.example.com", "login.example.com", "api.example.com"); err != nil {
+		t.Errorf("split-host api match: unexpected err %v", err)
+	}
+	if err := validateInstanceURL("https://evil.com", "gitlab.com", "api.example.com"); err == nil {
 		t.Error("mismatch: want error")
 	}
-	if err := validateInstanceURL("://junk", "gitlab.com"); err == nil {
+	if err := validateInstanceURL("://junk", "gitlab.com", ""); err == nil {
 		t.Error("unparseable: want error")
 	}
 }
@@ -280,21 +294,21 @@ func TestTokenFromHelper(t *testing.T) {
 	t.Parallel()
 	id := func(s string) string { return s }
 	ok := `{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"abc","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
-	tok, err := tokenFromHelper("gitlab.com", []byte(ok), nil, id)
+	tok, err := tokenFromHelper("gitlab.com", "", []byte(ok), nil, id)
 	if err != nil || tok.AccessToken != "abc" {
 		t.Fatalf("got (%v,%v), want abc", tok, err)
 	}
-	_, errAuth := tokenFromHelper("gitlab.com", []byte(`{"type":"error","message":"x"}`), nil, id)
+	_, errAuth := tokenFromHelper("gitlab.com", "", []byte(`{"type":"error","message":"x"}`), nil, id)
 	if !errors.Is(errAuth, errGitLabHelperUnavailable) {
 		t.Fatalf("error JSON: err = %v, want errGitLabHelperUnavailable", errAuth)
 	}
 	mismatch := `{"type":"success","instance_url":"https://evil.com","token":{"type":"oauth2","token":"x","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
-	_, errMismatch := tokenFromHelper("gitlab.com", []byte(mismatch), nil, id)
+	_, errMismatch := tokenFromHelper("gitlab.com", "", []byte(mismatch), nil, id)
 	if !errors.Is(errMismatch, errGitLabInstanceMismatch) {
 		t.Fatalf("mismatch: err = %v", errMismatch)
 	}
 	// A non-zero exit fails closed even if stdout looks like valid success JSON.
-	_, errExec := tokenFromHelper("gitlab.com", []byte(ok), context.DeadlineExceeded, id)
+	_, errExec := tokenFromHelper("gitlab.com", "", []byte(ok), context.DeadlineExceeded, id)
 	if !errors.Is(errExec, errGitLabHelperUnavailable) {
 		t.Fatalf("exec error: err = %v, want errGitLabHelperUnavailable", errExec)
 	}
@@ -342,7 +356,7 @@ func TestDecideGlab(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			cred, err := decideGlab("gitlab.com", "/usr/bin/glab", tc.lookPathOK, tc.configExists,
+			cred, err := decideGlab("gitlab.com", "", "/usr/bin/glab", tc.lookPathOK, tc.configExists,
 				[]byte(tc.stdout), nil, tc.execErr, id)
 			switch {
 			case tc.wantErr != nil:

@@ -58,7 +58,7 @@ func stubDeps() *registrationDeps {
 		homeDir:        "/home/u",
 		tokenForHost:   func(context.Context) (string, bool, error) { return "tok", true, nil },
 		validateGithub: func(context.Context, string) (string, error) { return "@octocat", nil },
-		discoverGitLab: func(string, bool) (glabCredential, error) {
+		discoverGitLab: func(string, string) (glabCredential, error) {
 			return glabCredential{AccessToken: "glpat-x"}, nil //nolint:exhaustruct // env PAT.
 		},
 		buildGitLab: func(GitLabHardeningConfig, string, glabCredential) (*gitlabProvider, error) {
@@ -704,7 +704,7 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 	t.Run("absent token → empty outcome (quiet)", func(t *testing.T) {
 		t.Parallel()
 		d := stubDeps()
-		d.discoverGitLab = func(string, bool) (glabCredential, error) {
+		d.discoverGitLab = func(string, string) (glabCredential, error) {
 			return glabCredential{}, nil //nolint:exhaustruct // absent.
 		}
 		got := d.gitlabOutcome(context.Background(), GitLabHardeningConfig{}, false) //nolint:exhaustruct // zero cfg.
@@ -717,7 +717,7 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 	// token (non-transient) all yield a loud, visible, unavailable skip.
 	loudCases := map[string]func(*registrationDeps){
 		"discovery error": func(d *registrationDeps) {
-			d.discoverGitLab = func(string, bool) (glabCredential, error) {
+			d.discoverGitLab = func(string, string) (glabCredential, error) {
 				return glabCredential{}, errors.New("parse glab config") //nolint:exhaustruct // err.
 			}
 		},

@@ -76,24 +76,22 @@ func glabConfigExists() bool {
 // placeholders) before it can enter an error surfaced to logs or the model.
 func glabRedact(s string) string { return redact.New().Redact(s) }
 
-// discoverGitLabCred resolves the credential: an env token (exec-free static), else,
-// when the glab path applies, the glab binary via credential-helper. Loud-vs-quiet is
-// decided by decideGlab against an [os.Stat] config-presence signal.
-func discoverGitLabCred(loginHost string, loginOK bool) (glabCredential, error) {
+// discoverGitLabCred resolves the credential: an env token (exec-free static), else the
+// glab binary via credential-helper for the login host (GITLAB_HOST) and configured
+// apiHost (GITLAB_API_HOST). Loud-vs-quiet is decided by decideGlab against an [os.Stat]
+// config-presence signal.
+func discoverGitLabCred(loginHost, apiHost string) (glabCredential, error) {
 	if envTok := gitlabEnvToken(os.LookupEnv); envTok != "" {
 		return glabCredential{AccessToken: envTok}, nil //nolint:exhaustruct // env PAT.
-	}
-	if !loginOK {
-		return glabCredential{}, nil //nolint:exhaustruct // api_host-only: quiet.
 	}
 	configExists := glabConfigExists()
 	glabPath, lookErr := lookGlab()
 	if lookErr != nil {
-		return decideGlab(loginHost, "", false, configExists, nil, nil, nil, glabRedact)
+		return decideGlab(loginHost, apiHost, "", false, configExists, nil, nil, nil, glabRedact)
 	}
-	env := glabHelperEnv(os.Environ(), loginHost)
+	env := glabHelperEnv(os.Environ(), loginHost, apiHost)
 	stdout, stderr, execErr := runGlab(context.Background(), glabPath, glabHelperArgs(), env)
-	return decideGlab(loginHost, glabPath, true, configExists, stdout, stderr, execErr, glabRedact)
+	return decideGlab(loginHost, apiHost, glabPath, true, configExists, stdout, stderr, execErr, glabRedact)
 }
 
 // newTokenSource builds the credential source: a static source for an env/PAT token,
@@ -113,8 +111,8 @@ func newTokenSource(_ *gitlabProvider, cred glabCredential) oauth2.TokenSource {
 // bootstrap operation, mirroring how the other connectors delegate to their vendor CLIs.
 func glabFetch(cred glabCredential) func() (*oauth2.Token, error) {
 	return func() (*oauth2.Token, error) {
-		env := glabHelperEnv(os.Environ(), cred.Host)
+		env := glabHelperEnv(os.Environ(), cred.Host, cred.APIHost)
 		stdout, _, execErr := runGlab(context.Background(), cred.GlabPath, glabHelperArgs(), env)
-		return tokenFromHelper(cred.Host, stdout, execErr, glabRedact)
+		return tokenFromHelper(cred.Host, cred.APIHost, stdout, execErr, glabRedact)
 	}
 }
