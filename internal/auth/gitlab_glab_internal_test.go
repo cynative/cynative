@@ -160,3 +160,18 @@ func TestGlabHelperArgs(t *testing.T) {
 		t.Fatalf("glabHelperArgs() = %v", got)
 	}
 }
+
+func TestCapWriter(t *testing.T) {
+	t.Parallel()
+	w := &capWriter{max: 4} //nolint:exhaustruct // buf grows.
+	n, err := w.Write([]byte("abcdefgh"))
+	if err != nil || n != 8 {
+		t.Fatalf("Write = (%d,%v), want (8,nil) so the pipe drains", n, err)
+	}
+	if string(w.Bytes()) != "abcd" {
+		t.Fatalf("Bytes = %q, want capped %q", w.Bytes(), "abcd")
+	}
+	if _, _ = w.Write([]byte("ij")); string(w.Bytes()) != "abcd" {
+		t.Fatalf("Bytes = %q, want still %q after cap", w.Bytes(), "abcd")
+	}
+}

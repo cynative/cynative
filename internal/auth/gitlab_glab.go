@@ -144,3 +144,24 @@ func validateInstanceURL(instanceURL, loginHost string) error {
 func glabHelperArgs() []string {
 	return []string{"auth", "credential-helper"}
 }
+
+// capWriter accumulates up to max bytes and silently discards the rest, always
+// reporting a full consume so a child process's pipe never blocks on a full buffer
+// (the reader drains to EOF, letting cmd.Wait return cleanly).
+type capWriter struct {
+	max int
+	buf []byte
+}
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	if room := w.max - len(w.buf); room > 0 {
+		take := p
+		if len(take) > room {
+			take = take[:room]
+		}
+		w.buf = append(w.buf, take...)
+	}
+	return len(p), nil
+}
+
+func (w *capWriter) Bytes() []byte { return w.buf }
