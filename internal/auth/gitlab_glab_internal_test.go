@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -75,5 +76,87 @@ func TestParseCredentialHelperOutput_NeverEchoesToken(t *testing.T) {
 	}
 	if got.message != "" {
 		t.Fatalf("message = %q, want empty (no stdout echo)", got.message)
+	}
+}
+
+func TestParseCredentialHelperOutput_RedactsErrorMessage(t *testing.T) {
+	t.Parallel()
+	got := parseCredentialHelperOutput(
+		[]byte(`{"type":"error","message":"boom"}`),
+		func(string) string { return "[REDACTED]" },
+	)
+	if got.kind != credNotAuthenticated || got.message != "[REDACTED]" {
+		t.Fatalf("got kind=%v message=%q, want credNotAuthenticated + redacted", got.kind, got.message)
+	}
+}
+
+func TestGlabHelperEnv(t *testing.T) {
+	t.Parallel()
+	parent := []string{
+		"HOME=/home/u", "PATH=/usr/bin", "XDG_RUNTIME_DIR=/run/u",
+		"GITLAB_TOKEN=leak", "OPENAI_API_KEY=leak", "AWS_SECRET_ACCESS_KEY=leak",
+		"DBUS_SESSION_BUS_ADDRESS=unix:x", "GITLAB_HOST=stale", "MALFORMED_NO_EQUALS",
+	}
+	got := glabHelperEnv(parent, "gitlab.com")
+	has := func(kv string) bool { return slices.Contains(got, kv) }
+	for _, keep := range []string{"HOME=/home/u", "PATH=/usr/bin", "XDG_RUNTIME_DIR=/run/u", "DBUS_SESSION_BUS_ADDRESS=unix:x"} {
+		if !has(keep) {
+			t.Errorf("dropped allowlisted %q", keep)
+		}
+	}
+	for _, drop := range []string{"GITLAB_TOKEN=leak", "OPENAI_API_KEY=leak", "AWS_SECRET_ACCESS_KEY=leak", "GITLAB_HOST=stale"} {
+		if has(drop) {
+			t.Errorf("leaked non-allowlisted %q", drop)
+		}
+	}
+	for _, want := range []string{"GITLAB_HOST=gitlab.com", "GLAB_CHECK_UPDATE=false", "GLAB_SEND_TELEMETRY=false"} {
+		if !has(want) {
+			t.Errorf("missing injected %q", want)
+		}
+	}
+}
+
+func TestGlabLoginHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		configHost, apiHost, wantHost string
+		wantOK                        bool
+	}{
+		{"", "", "gitlab.com", true},
+		{"gitlab.example.com", "", "gitlab.example.com", true},
+		{"gitlab.example.com:8443", "", "gitlab.example.com", true},
+		{"", "gitlab.private.com", "", false},          // api_host-only default: no glab path (leak guard).
+		{"gitlab.com", "gitlab.private.com", "", false}, // explicit public host + api override: leak guard.
+		{"gitlab.example.com", "api.example.com", "gitlab.example.com", true},
+	}
+	for _, tc := range tests {
+		gotHost, gotOK := glabLoginHost(tc.configHost, tc.apiHost)
+		if gotHost != tc.wantHost || gotOK != tc.wantOK {
+			t.Errorf("glabLoginHost(%q,%q) = (%q,%v), want (%q,%v)",
+				tc.configHost, tc.apiHost, gotHost, gotOK, tc.wantHost, tc.wantOK)
+		}
+	}
+}
+
+func TestValidateInstanceURL(t *testing.T) {
+	t.Parallel()
+	if err := validateInstanceURL("https://gitlab.com", "gitlab.com"); err != nil {
+		t.Errorf("match: unexpected err %v", err)
+	}
+	if err := validateInstanceURL("https://GITLAB.com:443", "gitlab.com"); err != nil {
+		t.Errorf("case/port-insensitive match: unexpected err %v", err)
+	}
+	if err := validateInstanceURL("https://evil.com", "gitlab.com"); err == nil {
+		t.Error("mismatch: want error")
+	}
+	if err := validateInstanceURL("://junk", "gitlab.com"); err == nil {
+		t.Error("unparseable: want error")
+	}
+}
+
+func TestGlabHelperArgs(t *testing.T) {
+	t.Parallel()
+	if got := glabHelperArgs(); len(got) != 2 || got[0] != "auth" || got[1] != "credential-helper" {
+		t.Fatalf("glabHelperArgs() = %v", got)
 	}
 }
