@@ -49,13 +49,8 @@ func parseCredentialHelperOutput(stdout []byte, redact func(string) string) help
 	}
 	switch raw.Type {
 	case "success":
-		if raw.Token.Token == "" {
-			return helperResult{kind: credIncompatible} //nolint:exhaustruct // malformed.
-		}
-		// An oauth2 credential must carry a real expiry; a zero expiry is only valid
-		// for a positively non-expiring type (PAT/job), so refresh logic can trust it.
-		if raw.Token.Type == "oauth2" && raw.Token.ExpiryTimestamp.IsZero() {
-			return helperResult{kind: credIncompatible} //nolint:exhaustruct // malformed oauth2.
+		if raw.Token.Token == "" || !glabTokenTypeOK(raw.Token.Type, raw.Token.ExpiryTimestamp.IsZero()) {
+			return helperResult{kind: credIncompatible} //nolint:exhaustruct // malformed or unknown type.
 		}
 		return helperResult{
 			kind: credOK,
@@ -69,6 +64,22 @@ func parseCredentialHelperOutput(stdout []byte, redact func(string) string) help
 		return helperResult{kind: credNotAuthenticated, message: redact(raw.Message)} //nolint:exhaustruct // no token.
 	default:
 		return helperResult{kind: credIncompatible} //nolint:exhaustruct // unknown type.
+	}
+}
+
+// glabTokenTypeOK reports whether glab's credential token type is one cynative accepts
+// as a Bearer credential. glab emits "oauth2" (refreshable, must carry a real expiry so
+// the caching source knows when to re-fetch), "pat", and "job-token" (both non-expiring,
+// cached for the session). Any other type is rejected, so an unexpected future glab type
+// is not silently attached as a bearer token.
+func glabTokenTypeOK(tokenType string, expiryZero bool) bool {
+	switch tokenType {
+	case "oauth2":
+		return !expiryZero
+	case "pat", "job-token":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -110,11 +121,15 @@ func glabHelperEnv(parent []string, loginHost string) []string {
 }
 
 // glabLoginHost returns the port-stripped login host to pass as GITLAB_HOST, and
-// whether the glab path applies. glab keys its credential store by the login host, so
-// an api_host override whose only login host is the un-configured public default
-// returns ok=false: querying gitlab.com and using that token against a private
-// api_host would leak the public token. An explicit login host (self-managed) always
-// applies, even paired with an api_host (intended same-instance split).
+// whether the glab path applies. glab keys its credential store by the bare hostname
+// (one credential per host, no port) and does not port-normalize GITLAB_HOST, so the
+// port MUST be stripped or glab reports "not authenticated". Because glab holds at most
+// one credential per hostname, there is no cross-port token to confuse; the eager
+// GET /user validation additionally confirms the token against the configured host:port
+// at registration. An api_host override whose only login host is the un-configured
+// public default returns ok=false: querying gitlab.com and using that token against a
+// private api_host would leak the public token. An explicit login host (self-managed)
+// always applies, even paired with an api_host (intended same-instance split).
 func glabLoginHost(configHost, apiHost string) (string, bool) {
 	host := resolveGitLabHost(configHost)
 	if apiHost != "" && stripHostPort(host) == defaultGitLabHost {
@@ -253,7 +268,15 @@ func glabHardExpired(tok *oauth2.Token, now time.Time) bool {
 // tokenFromHelper parses one refresh-time helper invocation into a token, validating
 // the instance. Any non-success outcome (error JSON or incompatible) is a dead session
 // at refresh time and surfaces as errGitLabHelperUnavailable. Never echoes stdout.
-func tokenFromHelper(loginHost string, stdout []byte, redact func(string) string) (*oauth2.Token, error) {
+func tokenFromHelper(
+	loginHost string,
+	stdout []byte,
+	execErr error,
+	redact func(string) string,
+) (*oauth2.Token, error) {
+	if execErr != nil {
+		return nil, errGitLabHelperUnavailable // non-zero exit: untrustworthy, fail closed.
+	}
 	res := parseCredentialHelperOutput(stdout, redact)
 	if res.kind != credOK {
 		return nil, errGitLabHelperUnavailable
@@ -313,6 +336,12 @@ func decideGlab(
 	if !lookPathOK {
 		return loudIfConfig(configExists, errGlabMissingWithConfig)
 	}
+	// glab exits 0 for BOTH success and its own "not authenticated" error JSON, so a
+	// non-zero exit (a crash, a timeout kill, or an unknown-command from a too-old glab)
+	// means the output is untrustworthy: fail closed before parsing it for success.
+	if execErr != nil {
+		return loudIfConfig(configExists, fmt.Errorf("%w: %s", errGlabExecFailed, redact(string(stderr))))
+	}
 	res := parseCredentialHelperOutput(stdout, redact)
 	if res.kind == credOK {
 		if err := validateInstanceURL(res.instanceURL, loginHost); err != nil {
@@ -326,10 +355,7 @@ func decideGlab(
 	if res.kind == credNotAuthenticated {
 		return loudIfConfig(configExists, errGlabSessionUnusable)
 	}
-	// credIncompatible: glab too old for the subcommand, or the exec itself failed.
-	if execErr != nil {
-		return loudIfConfig(configExists, fmt.Errorf("%w: %s", errGlabExecFailed, redact(string(stderr))))
-	}
+	// credIncompatible with a clean exit: glab printed help text (too old) or malformed JSON.
 	return loudIfConfig(configExists, errGlabTooOld)
 }
 

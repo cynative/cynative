@@ -106,11 +106,15 @@ func newTokenSource(_ *gitlabProvider, cred glabCredential) oauth2.TokenSource {
 }
 
 // glabFetch returns the refresh closure: exec the pinned glab binary and parse the
-// result into a token, validating the instance.
+// result into a token, validating the instance. glab performs its own OAuth-refresh
+// network I/O here (to the configured instance, using the user's own glab config), so
+// this refresh path is outside cynative's request-time transport guards (dial guard /
+// CA / no-redirect / no-proxy) by design - it is a trusted, non-model-directed
+// bootstrap operation, mirroring how the other connectors delegate to their vendor CLIs.
 func glabFetch(cred glabCredential) func() (*oauth2.Token, error) {
 	return func() (*oauth2.Token, error) {
 		env := glabHelperEnv(os.Environ(), cred.Host)
-		stdout, _, _ := runGlab(context.Background(), cred.GlabPath, glabHelperArgs(), env)
-		return tokenFromHelper(cred.Host, stdout, glabRedact)
+		stdout, _, execErr := runGlab(context.Background(), cred.GlabPath, glabHelperArgs(), env)
+		return tokenFromHelper(cred.Host, stdout, execErr, glabRedact)
 	}
 }

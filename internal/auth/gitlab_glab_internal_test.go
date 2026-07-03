@@ -30,13 +30,25 @@ func TestParseCredentialHelperOutput(t *testing.T) {
 		},
 		{
 			"pat success no expiry",
-			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"access_token","token":"pat"}}`,
+			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"pat","token":"pat"}}`,
 			credOK, "pat", false,
+		},
+		{
+			"job-token success no expiry",
+			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"job-token","token":"jt"}}`,
+			credOK, "jt", false,
 		},
 		{
 			"oauth2 missing expiry is incompatible",
 			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"abc"}}`,
 			credIncompatible, "", false,
+		},
+		{
+			"unknown token type is incompatible",
+			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"personal_access_token","token":"x"}}`,
+			credIncompatible,
+			"",
+			false,
 		},
 		{
 			"error not authenticated",
@@ -268,18 +280,23 @@ func TestTokenFromHelper(t *testing.T) {
 	t.Parallel()
 	id := func(s string) string { return s }
 	ok := `{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"abc","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
-	tok, err := tokenFromHelper("gitlab.com", []byte(ok), id)
+	tok, err := tokenFromHelper("gitlab.com", []byte(ok), nil, id)
 	if err != nil || tok.AccessToken != "abc" {
 		t.Fatalf("got (%v,%v), want abc", tok, err)
 	}
-	_, errAuth := tokenFromHelper("gitlab.com", []byte(`{"type":"error","message":"x"}`), id)
+	_, errAuth := tokenFromHelper("gitlab.com", []byte(`{"type":"error","message":"x"}`), nil, id)
 	if !errors.Is(errAuth, errGitLabHelperUnavailable) {
 		t.Fatalf("error JSON: err = %v, want errGitLabHelperUnavailable", errAuth)
 	}
 	mismatch := `{"type":"success","instance_url":"https://evil.com","token":{"type":"oauth2","token":"x","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
-	_, errMismatch := tokenFromHelper("gitlab.com", []byte(mismatch), id)
+	_, errMismatch := tokenFromHelper("gitlab.com", []byte(mismatch), nil, id)
 	if !errors.Is(errMismatch, errGitLabInstanceMismatch) {
 		t.Fatalf("mismatch: err = %v", errMismatch)
+	}
+	// A non-zero exit fails closed even if stdout looks like valid success JSON.
+	_, errExec := tokenFromHelper("gitlab.com", []byte(ok), context.DeadlineExceeded, id)
+	if !errors.Is(errExec, errGitLabHelperUnavailable) {
+		t.Fatalf("exec error: err = %v, want errGitLabHelperUnavailable", errExec)
 	}
 }
 
