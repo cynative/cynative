@@ -3,11 +3,8 @@ package transport
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -381,12 +378,12 @@ func dialGuard(
 	}
 }
 
-// configureTransport always installs a per-request [*http.Transport] (a clone of
-// [http.DefaultTransport] — never the shared default) whose dialer runs the
+// configureTransport always installs a per-request [*http.Transport] built fresh
+// from scratch (never the shared [http.DefaultTransport]) whose dialer runs the
 // dial-time IP guard, even when no CA / client cert is supplied. When the active
-// provider supplies a CA and/or client cert, the TLS material is layered onto the
-// same clone. It returns a cleanup function that must be deferred by the caller
-// to release idle connections.
+// provider supplies a CA and/or client cert, the TLS material is set on that same
+// transport. It returns a cleanup function that must be deferred by the caller to
+// release idle connections.
 func (c *Client) configureTransport(
 	ctx context.Context,
 	client *http.Client,
@@ -439,78 +436,23 @@ func (c *Client) configureTransport(
 	return tr.CloseIdleConnections, nil
 }
 
-// tlsTransport returns an [*http.Transport] configured to trust both the system
-// root CAs and the given custom CA certificate, and additionally injects a client
-// certificate and key if provided. The data parameters must be base64-encoded PEM.
-//
-// Starting from the system pool ensures that endpoints using publicly-trusted
-// certificates (e.g. GKE DNS endpoints) continue to work, while the appended
-// custom CA allows connections to private endpoints (e.g. EKS/GKE cluster IPs
-// with self-signed CAs).
+// tlsTransport installs on base a TLS config built by [auth.BuildTLSConfig]:
+// system roots (via the injected systemCertPool seam) plus the given custom CA,
+// and optionally a client certificate/key pair for mTLS. The data parameters
+// must be base64-encoded PEM. configureTransport, the only caller, always passes
+// a fresh base with no TLSClientConfig, so the built config is set wholesale.
 func (c *Client) tlsTransport(
 	base *http.Transport,
 	caData, clientCertData, clientKeyData, serverName string,
 ) (*http.Transport, error) {
-	pool, sysErr := c.systemCertPool()
-	if sysErr != nil {
-		pool = x509.NewCertPool()
-	}
-
-	if caData != "" {
-		rawCA, err := base64.StdEncoding.DecodeString(caData)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode CA certificate: %w", err)
-		}
-
-		if !pool.AppendCertsFromPEM(rawCA) {
-			return nil, errors.New("failed to parse CA certificate")
-		}
-	}
-
-	certs, err := parseClientCert(clientCertData, clientKeyData)
+	tlsCfg, err := auth.BuildTLSConfig(c.systemCertPool, caData, clientCertData, clientKeyData, serverName)
 	if err != nil {
 		return nil, err
 	}
 
-	t := base.Clone()
-	if t.TLSClientConfig == nil {
-		t.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	}
-	t.TLSClientConfig.RootCAs = pool
-	if len(certs) > 0 {
-		t.TLSClientConfig.Certificates = certs
-	}
-	if serverName != "" {
-		t.TLSClientConfig.ServerName = serverName
-	}
+	base.TLSClientConfig = tlsCfg
 
-	return t, nil
-}
-
-// parseClientCert decodes a base64-encoded PEM client certificate/key pair into
-// a [tls.Certificate] slice for mTLS. It returns nil (no client cert) when
-// either input is empty, and an error when decoding or pairing fails.
-func parseClientCert(clientCertData, clientKeyData string) ([]tls.Certificate, error) {
-	if clientCertData == "" || clientKeyData == "" {
-		return nil, nil
-	}
-
-	rawCert, err := base64.StdEncoding.DecodeString(clientCertData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode client certificate: %w", err)
-	}
-
-	rawKey, err := base64.StdEncoding.DecodeString(clientKeyData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode client key: %w", err)
-	}
-
-	cert, err := tls.X509KeyPair(rawCert, rawKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse client certificate key pair: %w", err)
-	}
-
-	return []tls.Certificate{cert}, nil
+	return base, nil
 }
 
 // FormatResponse redacts, dumps, and truncates an HTTP response. The body is

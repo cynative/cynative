@@ -94,9 +94,9 @@ func TestClusterHTTPClient_PropagatesBuildError(t *testing.T) {
 	t.Parallel()
 
 	// pinnedHTTPClient is shell (gate-exempt); this guards that it hands its
-	// args to buildClusterTLSConfig and passes the helper's error through.
+	// args to BuildTLSConfig and passes the helper's error through.
 	_, err := pinnedHTTPClient("not-base64-!!", "", "", "", nil)
-	if err == nil || !strings.Contains(err.Error(), "k8s_hardening: decode cluster CA:") {
+	if err == nil || !strings.Contains(err.Error(), "failed to decode CA certificate") {
 		t.Fatalf("want decode cluster CA error, got %v", err)
 	}
 }

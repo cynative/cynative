@@ -1,55 +1,8 @@
 package auth
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/base64"
-	"errors"
-	"fmt"
 	"net/http"
 )
-
-// buildClusterTLSConfig assembles the cluster TLS config from base64-PEM material:
-// it appends caData to pool, optionally loads a base64-PEM client cert+key for
-// mTLS, and sets ServerName when non-empty. Pure; the system-root pool load and
-// the HTTP transport/client build stay in the shell (pinnedHTTPClient).
-func buildClusterTLSConfig(
-	pool *x509.CertPool, caData, clientCert, clientKey, serverName string,
-) (*tls.Config, error) {
-	if caData != "" {
-		rawCA, decErr := base64.StdEncoding.DecodeString(caData)
-		if decErr != nil {
-			return nil, fmt.Errorf("k8s_hardening: decode cluster CA: %w", decErr)
-		}
-		if !pool.AppendCertsFromPEM(rawCA) {
-			return nil, errors.New("k8s_hardening: parse cluster CA")
-		}
-	}
-
-	tlsCfg := &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12} //nolint:exhaustruct // defaults are fine.
-
-	if serverName != "" {
-		tlsCfg.ServerName = serverName
-	}
-
-	if clientCert != "" && clientKey != "" {
-		rawCert, certErr := base64.StdEncoding.DecodeString(clientCert)
-		if certErr != nil {
-			return nil, fmt.Errorf("k8s_hardening: decode client cert: %w", certErr)
-		}
-		rawKey, keyErr := base64.StdEncoding.DecodeString(clientKey)
-		if keyErr != nil {
-			return nil, fmt.Errorf("k8s_hardening: decode client key: %w", keyErr)
-		}
-		pair, pairErr := tls.X509KeyPair(rawCert, rawKey)
-		if pairErr != nil {
-			return nil, fmt.Errorf("k8s_hardening: client key pair: %w", pairErr)
-		}
-		tlsCfg.Certificates = []tls.Certificate{pair}
-	}
-
-	return tlsCfg, nil
-}
 
 // clusterConn is the pure, assembled description of how to reach a cluster's API
 // server for the bootstrap view fetch: the endpoint URL and the base64-PEM TLS
