@@ -175,10 +175,13 @@ jobs:
           set -euo pipefail
           out="$(dist/*_linux_amd64*/cynative --version)"
           echo "${out}"
-          case "${out}" in
-            "cynative ${TAG#v}"*) echo "release binary version-stamped OK" ;;
-            *) echo "::error::--version output not stamped with ${TAG#v}"; exit 1 ;;
-          esac
+          # Exact match on the first line, not a prefix: a prefix would also accept a
+          # mis-stamp like "cynative 1.2.30" or "cynative 1.2.3-dev" for tag v1.2.3.
+          if [ "${out%%$'\n'*}" != "cynative ${TAG#v}" ]; then
+            echo "::error::--version first line is not exactly 'cynative ${TAG#v}'"
+            exit 1
+          fi
+          echo "release binary version-stamped OK"
 
       - name: Build, sign, notarize & staple macOS pkgs
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
