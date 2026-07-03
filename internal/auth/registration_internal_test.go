@@ -58,7 +58,7 @@ func stubDeps() *registrationDeps {
 		homeDir:        "/home/u",
 		tokenForHost:   func(context.Context) (string, bool, error) { return "tok", true, nil },
 		validateGithub: func(context.Context, string) (string, error) { return "@octocat", nil },
-		discoverGitLab: func([]string) (glabCredential, error) {
+		discoverGitLab: func(string, bool) (glabCredential, error) {
 			return glabCredential{AccessToken: "glpat-x"}, nil //nolint:exhaustruct // env PAT.
 		},
 		buildGitLab: func(GitLabHardeningConfig, string, glabCredential) (*gitlabProvider, error) {
@@ -677,15 +677,14 @@ func TestGitlabOutcome(t *testing.T) {
 		}
 	})
 
-	// An expired/dead OAuth session arrives as errGitLabRefreshDead from the token
-	// source through validateGitLab → the existing wrapper renders a loud,
-	// unavailable skip whose Reason carries both the wrapper text and the precise
-	// errGitLabRefreshDead operator steer.
-	t.Run("dead OAuth session → loud skip with precise reason", func(t *testing.T) {
+	// An expired/dead glab session arrives as errGitLabHelperUnavailable from the token
+	// source through validateGitLab → the existing wrapper renders a loud, unavailable
+	// skip whose Reason carries both the wrapper text and the precise operator steer.
+	t.Run("dead glab session → loud skip with precise reason", func(t *testing.T) {
 		t.Parallel()
 		d := stubDeps()
 		d.validateGitLab = func(context.Context, *gitlabProvider) (string, error) {
-			return "", fmt.Errorf("gitlab: resolve access token: %w", errGitLabRefreshDead)
+			return "", fmt.Errorf("gitlab: resolve access token: %w", errGitLabHelperUnavailable)
 		}
 		got := d.gitlabOutcome(context.Background(), GitLabHardeningConfig{}, false) //nolint:exhaustruct // zero cfg.
 		if len(got.providers) != 0 || len(got.visible) != 1 || !got.visible[0] || got.statuses[0].Available {
@@ -694,7 +693,7 @@ func TestGitlabOutcome(t *testing.T) {
 		reason := got.statuses[0].Reason
 		if !strings.Contains(reason, "token validation failed") ||
 			!strings.Contains(reason, "run `glab auth login`") {
-			t.Fatalf("reason %q must carry wrapper text + the errGitLabRefreshDead steer", reason)
+			t.Fatalf("reason %q must carry wrapper text + the operator steer", reason)
 		}
 	})
 }
@@ -705,7 +704,7 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 	t.Run("absent token → empty outcome (quiet)", func(t *testing.T) {
 		t.Parallel()
 		d := stubDeps()
-		d.discoverGitLab = func([]string) (glabCredential, error) {
+		d.discoverGitLab = func(string, bool) (glabCredential, error) {
 			return glabCredential{}, nil //nolint:exhaustruct // absent.
 		}
 		got := d.gitlabOutcome(context.Background(), GitLabHardeningConfig{}, false) //nolint:exhaustruct // zero cfg.
@@ -718,7 +717,7 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 	// token (non-transient) all yield a loud, visible, unavailable skip.
 	loudCases := map[string]func(*registrationDeps){
 		"discovery error": func(d *registrationDeps) {
-			d.discoverGitLab = func([]string) (glabCredential, error) {
+			d.discoverGitLab = func(string, bool) (glabCredential, error) {
 				return glabCredential{}, errors.New("parse glab config") //nolint:exhaustruct // err.
 			}
 		},

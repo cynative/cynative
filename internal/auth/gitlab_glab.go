@@ -95,17 +95,18 @@ func glabHelperEnv(parent []string, loginHost string) []string {
 	for _, k := range glabEnvAllowlist {
 		keep[k] = true
 	}
-	out := make([]string, 0, len(glabEnvAllowlist)+3)
+	injected := []string{
+		"GITLAB_HOST=" + loginHost,
+		"GLAB_CHECK_UPDATE=false",
+		"GLAB_SEND_TELEMETRY=false",
+	}
+	out := make([]string, 0, len(glabEnvAllowlist)+len(injected))
 	for _, kv := range parent {
 		if name, _, ok := strings.Cut(kv, "="); ok && keep[name] {
 			out = append(out, kv)
 		}
 	}
-	return append(out,
-		"GITLAB_HOST="+loginHost,
-		"GLAB_CHECK_UPDATE=false",
-		"GLAB_SEND_TELEMETRY=false",
-	)
+	return append(out, injected...)
 }
 
 // glabLoginHost returns the port-stripped login host to pass as GITLAB_HOST, and
@@ -261,4 +262,82 @@ func tokenFromHelper(loginHost string, stdout []byte, redact func(string) string
 		return nil, err
 	}
 	return res.token, nil
+}
+
+// glabCredential is the credential discovered from the environment or via glab. For an
+// env/PAT token, Host/Expiry/GlabPath are empty and IsOAuth2 is false. For a glab
+// credential, Host is the login host, GlabPath is the resolved glab binary (for
+// re-exec), Expiry seeds the caching source, and IsOAuth2 is true. AccessToken == ""
+// means none found.
+type glabCredential struct {
+	Host        string
+	AccessToken string
+	Expiry      time.Time
+	IsOAuth2    bool
+	GlabPath    string
+}
+
+// seedToken converts a discovered credential into the initial cached token, or nil.
+func seedToken(cred glabCredential) *oauth2.Token {
+	if cred.AccessToken == "" {
+		return nil
+	}
+	return &oauth2.Token{AccessToken: cred.AccessToken, Expiry: cred.Expiry} //nolint:exhaustruct // access+expiry.
+}
+
+// Discovery-time steer sentinels. All are LOUD-skip reasons gated on config presence.
+var (
+	errGlabMissingWithConfig = errors.New(
+		"gitlab: glab not installed but a glab config exists - install glab or set GITLAB_TOKEN")
+	errGlabTooOld = errors.New(
+		"gitlab: installed glab is too old for the credential-helper (need v1.85.0+) - upgrade glab or set GITLAB_TOKEN",
+	)
+	errGlabSessionUnusable = errors.New(
+		"gitlab: glab session is not usable - run `glab auth login` or set GITLAB_TOKEN")
+	errGlabExecFailed = errors.New(
+		"gitlab: glab credential-helper failed - set GITLAB_TOKEN for unattended use")
+)
+
+// decideGlab classifies a discovery-time helper attempt into a usable credential, a
+// quiet empty credential (ambient skip), or a loud sentinel error. Loudness is gated on
+// configExists (the user demonstrably uses glab). glabPath is stamped onto a usable
+// credential so the source can re-exec the same binary. stderr is redacted before it
+// can enter errGlabExecFailed.
+func decideGlab(
+	loginHost, glabPath string,
+	lookPathOK, configExists bool,
+	stdout, stderr []byte,
+	execErr error,
+	redact func(string) string,
+) (glabCredential, error) {
+	if !lookPathOK {
+		return loudIfConfig(configExists, errGlabMissingWithConfig)
+	}
+	res := parseCredentialHelperOutput(stdout, redact)
+	if res.kind == credOK {
+		if err := validateInstanceURL(res.instanceURL, loginHost); err != nil {
+			return glabCredential{}, err //nolint:exhaustruct // loud mismatch.
+		}
+		return glabCredential{ //nolint:exhaustruct // no refresh token held.
+			Host: loginHost, AccessToken: res.token.AccessToken,
+			Expiry: res.token.Expiry, IsOAuth2: true, GlabPath: glabPath,
+		}, nil
+	}
+	if res.kind == credNotAuthenticated {
+		return loudIfConfig(configExists, errGlabSessionUnusable)
+	}
+	// credIncompatible: glab too old for the subcommand, or the exec itself failed.
+	if execErr != nil {
+		return loudIfConfig(configExists, fmt.Errorf("%w: %s", errGlabExecFailed, redact(string(stderr))))
+	}
+	return loudIfConfig(configExists, errGlabTooOld)
+}
+
+// loudIfConfig returns the loud sentinel when a glab config exists, else a quiet empty
+// credential (ambient skip).
+func loudIfConfig(configExists bool, loud error) (glabCredential, error) {
+	if configExists {
+		return glabCredential{}, loud //nolint:exhaustruct // loud skip.
+	}
+	return glabCredential{}, nil //nolint:exhaustruct // quiet ambient skip.
 }

@@ -35,7 +35,7 @@ type registrationDeps struct {
 	tokenForHost   func(ctx context.Context) (token string, present bool, err error)
 	validateGithub func(ctx context.Context, token string) (login string, err error)
 
-	discoverGitLab func(hosts []string) (cred glabCredential, err error)
+	discoverGitLab func(loginHost string, loginOK bool) (cred glabCredential, err error)
 	buildGitLab    func(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error)
 	validateGitLab func(ctx context.Context, p *gitlabProvider) (username string, err error)
 
@@ -415,7 +415,8 @@ func (d *registrationDeps) gitlabOutcome(
 	host := resolveGitLabHost(glCfg.Host)
 	served := servedHostOf(host, glCfg.APIHost)
 
-	cred, err := d.discoverGitLab(gitlabTokenHosts(glCfg.Host, glCfg.APIHost, served))
+	loginHost, loginOK := glabLoginHost(glCfg.Host, glCfg.APIHost)
+	cred, err := d.discoverGitLab(loginHost, loginOK)
 	if err != nil {
 		return skipOutcome(gitlabProviderName, true, verbose, emitAlways,
 			fmt.Sprintf("gitlab_hardening: skipped (token resolution failed): %v", err))

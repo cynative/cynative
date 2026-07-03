@@ -61,9 +61,8 @@ func gitlabEnvToken(lookup func(string) (string, bool)) string {
 // whose ConfigHome equals [os.UserConfigDir] on macOS (~/Library/Application
 // Support), Linux ($XDG_CONFIG_HOME or ~/.config), and Windows (%AppData%). That
 // macOS/Windows default is the candidate cynative previously missed; on Linux it
-// overlaps the legacy ~/.config entry harmlessly (firstReadableConfig takes the
-// first readable). The shell reads the first that exists. Pure: callers do the
-// env/home/file I/O.
+// overlaps the legacy ~/.config entry harmlessly. The shell (glabConfigExists) stats
+// the first that exists as a presence signal. Pure: callers do the env/home/file I/O.
 func glabConfigPaths(glabConfigDir, xdgConfigHome, userConfigDir, homeDir string) []string {
 	if glabConfigDir != "" {
 		return []string{filepath.Join(glabConfigDir, "config.yml")}
@@ -81,33 +80,6 @@ func glabConfigPaths(glabConfigDir, xdgConfigHome, userConfigDir, homeDir string
 	}
 
 	return paths
-}
-
-// gitlabTokenHosts returns the ordered, port-stripped, de-duplicated hostnames to
-// look up a glab token under: the configured host (glab keys hosts[] by the login
-// host), then the served host (where requests go). When api_host overrides the
-// endpoint AND the configured host is still the default public host, that default
-// is dropped as a candidate — so an api_host-only config (host left at the
-// gitlab.com default) never falls back to the gitlab.com token, while an explicit
-// login host paired with a separate api_host still resolves its login-host key.
-func gitlabTokenHosts(configHost, apiHost, servedHost string) []string {
-	candidates := []string{configHost, servedHost}
-	if apiHost != "" && configHost == defaultGitLabHost {
-		candidates = candidates[1:] // drop the un-configured default public host.
-	}
-
-	var hosts []string
-	seen := make(map[string]bool)
-	for _, h := range candidates {
-		h = stripHostPort(h)
-		if h == "" || seen[h] {
-			continue
-		}
-		seen[h] = true
-		hosts = append(hosts, h)
-	}
-
-	return hosts
 }
 
 // parseGitLabUser returns the authenticating user's username from a GET
@@ -152,8 +124,7 @@ const gitlabProviderName = "gitlab"
 // layer. Implements Provider, ActionAuthorizer, AddrAuthorizer, and
 // CACertProvider.
 type gitlabProvider struct {
-	tokenSource         oauth2.TokenSource           // static for PAT/env; refreshing glabOAuthSource for glab OAuth.
-	httpClientFactory   func() (*http.Client, error) // nil → buildProbeClient (production); set in tests.
+	tokenSource         oauth2.TokenSource // static for env/PAT; caching glab-helper source for a glab credential.
 	host                string
 	apiHost             string
 	allowPrivateNetwork bool
@@ -256,8 +227,8 @@ func (p *gitlabProvider) Description() string {
 		"GitLab projects, issues, merge requests, and other resources.", p.servedHost())
 }
 
-// InjectAuth resolves the current access token (refreshing a glab OAuth token
-// in-process if needed) and sets Authorization: Bearer. Bearer authenticates
+// InjectAuth resolves the current access token (via glab's credential-helper for a
+// glab OAuth credential) and sets Authorization: Bearer. Bearer authenticates
 // PAT/project/group AND OAuth tokens. A token-resolution failure fails closed:
 // the token is never attached.
 func (p *gitlabProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
@@ -271,10 +242,10 @@ func (p *gitlabProvider) InjectAuth(req *http.Request, _ json.RawMessage) error 
 }
 
 // currentToken resolves the current access token through the token source. Shared
-// by InjectAuth, the eager /user validation, and the lazy scope probe so all
-// carry a freshly-refreshed token. A genuinely dead OAuth session surfaces here as
-// errGitLabRefreshDead (write-back failures do NOT surface here — the source warns
-// and returns the live token).
+// by InjectAuth, the eager /user validation, and the lazy scope probe so all carry a
+// freshly-resolved token. A genuinely dead glab session surfaces here as
+// errGitLabHelperUnavailable (a transient helper failure does NOT surface here - the
+// source adopts a still-valid cached token).
 func (p *gitlabProvider) currentToken() (string, error) {
 	tok, err := p.tokenSource.Token()
 	if err != nil {

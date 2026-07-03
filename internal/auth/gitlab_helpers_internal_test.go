@@ -74,51 +74,6 @@ func TestGlabConfigPaths(t *testing.T) {
 	}
 }
 
-func TestGitlabTokenHosts(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name       string
-		configHost string
-		apiHost    string
-		servedHost string
-		want       []string
-	}{
-		{"plain gitlab.com", "gitlab.com", "", "gitlab.com", []string{"gitlab.com"}},
-		// api_host-only (host defaulted to gitlab.com): the default must be dropped
-		// so the gitlab.com token is never sent to the self-managed api_host.
-		{
-			"api_host only drops default",
-			"gitlab.com", "gitlab.internal", "gitlab.internal",
-			[]string{"gitlab.internal"},
-		},
-		{"explicit host dedup", "gitlab.example.com", "", "gitlab.example.com", []string{"gitlab.example.com"}},
-		{
-			"explicit host with served port",
-			"gitlab.example.com", "gitlab.example.com:3443", "gitlab.example.com:3443",
-			[]string{"gitlab.example.com"},
-		},
-		{
-			"explicit login + api host kept",
-			"login.example.com", "api.example.com", "api.example.com",
-			[]string{"login.example.com", "api.example.com"},
-		},
-		{
-			"config host port stripped",
-			"gitlab.example.com:3443", "", "gitlab.example.com:3443",
-			[]string{"gitlab.example.com"},
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			if got := gitlabTokenHosts(c.configHost, c.apiHost, c.servedHost); !slices.Equal(got, c.want) {
-				t.Fatalf("gitlabTokenHosts(%q,%q,%q) = %v, want %v", c.configHost, c.apiHost, c.servedHost, got, c.want)
-			}
-		})
-	}
-}
-
 func TestParseGitLabUser(t *testing.T) {
 	t.Parallel()
 

@@ -15,19 +15,6 @@ import (
 // maxIntrospectBytes caps the eager /user validation response read.
 const maxIntrospectBytes = 1 << 20 // 1 MiB.
 
-// readGlabConfigWithPath returns the (path, bytes) of the first READABLE glab
-// config.yml in glab's search order, or ("", nil) when none is readable. The path
-// is threaded onto the credential so re-reads, the write-probe, and write-back all
-// target the exact file the bytes came from (not a path that merely exists but is
-// unreadable). Shell I/O.
-func readGlabConfigWithPath() (string, []byte) {
-	glabDir, _ := os.LookupEnv("GLAB_CONFIG_DIR")
-	xdg, _ := os.LookupEnv("XDG_CONFIG_HOME")
-	userCfg, _ := os.UserConfigDir() // "" on error → candidate skipped.
-
-	return firstReadableConfig(glabConfigPaths(glabDir, xdg, userCfg, homeDirOrEmpty()), os.ReadFile)
-}
-
 // readCACertBase64 reads a PEM CA file and returns it base64-encoded, or
 // ("", nil) when path is empty. A configured-but-unreadable path is an error.
 func readCACertBase64(path string) (string, error) {
@@ -46,15 +33,15 @@ func readCACertBase64(path string) (string, error) {
 // buildGitLabProvider constructs the gitlabProvider for an already-discovered
 // (non-empty) credential. It returns (nil, error) when a configured ca_cert is
 // unreadable — which gitlabOutcome surfaces as a visible unavailable status — and
-// (provider, nil) otherwise. The token source is static for a PAT/env credential
-// and a refreshing glabOAuthSource for a glab OAuth credential (newTokenSource).
+// (provider, nil) otherwise. The token source is static for an env/PAT credential and
+// a caching glab-helper source for a glab OAuth credential (newTokenSource).
 func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
 	caData, err := readCACertBase64(cfg.CACertPath)
 	if err != nil {
 		return nil, err
 	}
 
-	p := &gitlabProvider{ //nolint:exhaustruct // httpClientFactory left nil (defaulted at use).
+	p := &gitlabProvider{ //nolint:exhaustruct // tokenSource set below.
 		host: host, apiHost: cfg.APIHost,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		caData:              caData, resolver: defaultResolveAddrs,
@@ -93,7 +80,7 @@ func buildProbeClient(p *gitlabProvider) (*http.Client, error) {
 // OAuth token) and returns the authenticating username for the inventory identity.
 // It builds its own pinned probe client; the caller bounds ctx. Shell I/O.
 func validateGitLabToken(ctx context.Context, p *gitlabProvider) (string, error) {
-	accessToken, err := p.currentToken() // triggers the first refresh + write-back for a stale OAuth token.
+	accessToken, err := p.currentToken() // triggers the first credential-helper resolution for a glab OAuth cred.
 	if err != nil {
 		return "", err
 	}
@@ -145,21 +132,4 @@ func gitlabProbeBody(
 	}
 
 	return body, nil
-}
-
-// refreshClient returns the pinned HTTP client for the OAuth refresh POST: the
-// injected factory in tests, else buildProbeClient (dial-guard + CA + no-redirect)
-// with a concrete refresh timeout (the source binds a background ctx, so the
-// timeout is the only per-refresh bound).
-func refreshClient(p *gitlabProvider) (*http.Client, error) {
-	if p.httpClientFactory != nil {
-		return p.httpClientFactory()
-	}
-	hc, err := buildProbeClient(p)
-	if err != nil {
-		return nil, err
-	}
-	hc.Timeout = refreshTimeout
-
-	return hc, nil
 }

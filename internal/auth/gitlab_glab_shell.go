@@ -7,6 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/oauth2"
+
+	"github.com/cynative/cynative/internal/redact"
 )
 
 // glab exec bounds. The timeout covers a network refresh; WaitDelay bounds the
@@ -44,7 +48,7 @@ func runGlab(ctx context.Context, glabPath string, args, env []string) ([]byte, 
 	cmd.Env = env
 	cmd.Dir = os.TempDir()
 	cmd.WaitDelay = glabWaitDelay
-	out := &capWriter{max: glabStdoutCap}   //nolint:exhaustruct // buf grows.
+	out := &capWriter{max: glabStdoutCap}    //nolint:exhaustruct // buf grows.
 	errOut := &capWriter{max: glabStderrCap} //nolint:exhaustruct // buf grows.
 	cmd.Stdout = out
 	cmd.Stderr = errOut
@@ -66,4 +70,47 @@ func glabConfigExists() bool {
 		}
 	}
 	return false
+}
+
+// glabRedact redacts a string through the response redactor (secret-shaped content ->
+// placeholders) before it can enter an error surfaced to logs or the model.
+func glabRedact(s string) string { return redact.New().Redact(s) }
+
+// discoverGitLabCred resolves the credential: an env token (exec-free static), else,
+// when the glab path applies, the glab binary via credential-helper. Loud-vs-quiet is
+// decided by decideGlab against an [os.Stat] config-presence signal.
+func discoverGitLabCred(loginHost string, loginOK bool) (glabCredential, error) {
+	if envTok := gitlabEnvToken(os.LookupEnv); envTok != "" {
+		return glabCredential{AccessToken: envTok}, nil //nolint:exhaustruct // env PAT.
+	}
+	if !loginOK {
+		return glabCredential{}, nil //nolint:exhaustruct // api_host-only: quiet.
+	}
+	configExists := glabConfigExists()
+	glabPath, lookErr := lookGlab()
+	if lookErr != nil {
+		return decideGlab(loginHost, "", false, configExists, nil, nil, nil, glabRedact)
+	}
+	env := glabHelperEnv(os.Environ(), loginHost)
+	stdout, stderr, execErr := runGlab(context.Background(), glabPath, glabHelperArgs(), env)
+	return decideGlab(loginHost, glabPath, true, configExists, stdout, stderr, execErr, glabRedact)
+}
+
+// newTokenSource builds the credential source: a static source for an env/PAT token,
+// else a caching glab-helper-backed source seeded with the discovered token.
+func newTokenSource(_ *gitlabProvider, cred glabCredential) oauth2.TokenSource {
+	if !cred.IsOAuth2 {
+		return oauth2.StaticTokenSource(&oauth2.Token{AccessToken: cred.AccessToken}) //nolint:exhaustruct // access.
+	}
+	return newGlabHelperSource(glabFetch(cred), time.Now, seedToken(cred))
+}
+
+// glabFetch returns the refresh closure: exec the pinned glab binary and parse the
+// result into a token, validating the instance.
+func glabFetch(cred glabCredential) func() (*oauth2.Token, error) {
+	return func() (*oauth2.Token, error) {
+		env := glabHelperEnv(os.Environ(), cred.Host)
+		stdout, _, _ := runGlab(context.Background(), cred.GlabPath, glabHelperArgs(), env)
+		return tokenFromHelper(cred.Host, stdout, glabRedact)
+	}
 }

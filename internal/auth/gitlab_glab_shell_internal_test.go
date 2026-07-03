@@ -24,6 +24,7 @@ func writeFakeGlab(t *testing.T, body string) string {
 }
 
 func TestRunGlab_CapturesStdout(t *testing.T) {
+	t.Parallel()
 	script := writeFakeGlab(t, "#!/bin/sh\nprintf '%s' '{\"type\":\"success\"}'\n")
 	stdout, _, err := runGlab(context.Background(), script, glabHelperArgs(), []string{"PATH=/usr/bin"})
 	if err != nil {
@@ -35,6 +36,7 @@ func TestRunGlab_CapturesStdout(t *testing.T) {
 }
 
 func TestRunGlab_StdoutCapped(t *testing.T) {
+	t.Parallel()
 	// Emit far more than the cap; runGlab must not hang and must truncate.
 	script := writeFakeGlab(t, "#!/bin/sh\nyes X | head -c 200000\n")
 	stdout, _, _ := runGlab(context.Background(), script, nil, []string{"PATH=/usr/bin"})
@@ -44,6 +46,7 @@ func TestRunGlab_StdoutCapped(t *testing.T) {
 }
 
 func TestRunGlab_NonZeroExitReturnsError(t *testing.T) {
+	t.Parallel()
 	script := writeFakeGlab(t, "#!/bin/sh\nexit 1\n")
 	_, _, err := runGlab(context.Background(), script, nil, []string{"PATH=/usr/bin"})
 	if err == nil {

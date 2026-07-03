@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -23,7 +24,9 @@ func TestParseCredentialHelperOutput(t *testing.T) {
 		{
 			"oauth2 success",
 			`{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"abc","expiry_timestamp":"` + exp + `"}}`,
-			credOK, "abc", true,
+			credOK,
+			"abc",
+			true,
 		},
 		{
 			"pat success no expiry",
@@ -129,7 +132,7 @@ func TestGlabLoginHost(t *testing.T) {
 		{"", "", "gitlab.com", true},
 		{"gitlab.example.com", "", "gitlab.example.com", true},
 		{"gitlab.example.com:8443", "", "gitlab.example.com", true},
-		{"", "gitlab.private.com", "", false},          // api_host-only default: no glab path (leak guard).
+		{"", "gitlab.private.com", "", false},           // api_host-only default: no glab path (leak guard).
 		{"gitlab.com", "gitlab.private.com", "", false}, // explicit public host + api override: leak guard.
 		{"gitlab.example.com", "api.example.com", "gitlab.example.com", true},
 	}
@@ -203,7 +206,8 @@ func TestGlabHelperSource(t *testing.T) {
 		t.Parallel()
 		calls := 0
 		s := newGlabHelperSource(
-			func() (*oauth2.Token, error) { calls++; return nil, nil },
+			// Never called (PAT cached forever); returns an error to satisfy nilnil.
+			func() (*oauth2.Token, error) { calls++; return nil, errGitLabHelperUnavailable },
 			func() time.Time { return base.Add(1000 * time.Hour) }, mk("pat", time.Time{}))
 		tok, _ := s.Token()
 		if tok.AccessToken != "pat" || calls != 0 {
@@ -268,11 +272,75 @@ func TestTokenFromHelper(t *testing.T) {
 	if err != nil || tok.AccessToken != "abc" {
 		t.Fatalf("got (%v,%v), want abc", tok, err)
 	}
-	if _, err := tokenFromHelper("gitlab.com", []byte(`{"type":"error","message":"x"}`), id); !errors.Is(err, errGitLabHelperUnavailable) {
-		t.Fatalf("error JSON: err = %v, want errGitLabHelperUnavailable", err)
+	_, errAuth := tokenFromHelper("gitlab.com", []byte(`{"type":"error","message":"x"}`), id)
+	if !errors.Is(errAuth, errGitLabHelperUnavailable) {
+		t.Fatalf("error JSON: err = %v, want errGitLabHelperUnavailable", errAuth)
 	}
 	mismatch := `{"type":"success","instance_url":"https://evil.com","token":{"type":"oauth2","token":"x","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
-	if _, err := tokenFromHelper("gitlab.com", []byte(mismatch), id); !errors.Is(err, errGitLabInstanceMismatch) {
-		t.Fatalf("mismatch: err = %v", err)
+	_, errMismatch := tokenFromHelper("gitlab.com", []byte(mismatch), id)
+	if !errors.Is(errMismatch, errGitLabInstanceMismatch) {
+		t.Fatalf("mismatch: err = %v", errMismatch)
+	}
+}
+
+func TestSeedToken(t *testing.T) {
+	t.Parallel()
+	if seedToken(glabCredential{}) != nil { //nolint:exhaustruct // absent.
+		t.Fatal("empty credential must seed nil")
+	}
+	exp := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	tok := seedToken(glabCredential{AccessToken: "abc", Expiry: exp}) //nolint:exhaustruct // access+expiry.
+	if tok == nil || tok.AccessToken != "abc" || !tok.Expiry.Equal(exp) {
+		t.Fatalf("seedToken = %+v, want abc @ %v", tok, exp)
+	}
+}
+
+func TestDecideGlab(t *testing.T) {
+	t.Parallel()
+	id := func(s string) string { return s }
+	ok := `{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"abc","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
+	notauth := `{"type":"error","message":"glab is not authenticated. Use glab auth login to authenticate"}`
+	badinstance := `{"type":"success","instance_url":"https://evil.com","token":{"type":"oauth2","token":"x","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
+
+	tests := []struct {
+		name         string
+		lookPathOK   bool
+		configExists bool
+		stdout       string
+		execErr      error
+		wantErr      error
+		wantTok      string
+		wantQuiet    bool
+	}{
+		{"no glab, config exists", false, true, "", nil, errGlabMissingWithConfig, "", false},
+		{"no glab, no config", false, false, "", nil, nil, "", true},
+		{"success", true, true, ok, nil, nil, "abc", false},
+		{"instance mismatch", true, true, badinstance, nil, errGitLabInstanceMismatch, "", false},
+		{"not authenticated, config exists", true, true, notauth, nil, errGlabSessionUnusable, "", false},
+		{"not authenticated, no config", true, false, notauth, nil, nil, "", true},
+		{"too old, config exists", true, true, "help text", nil, errGlabTooOld, "", false},
+		{"too old, no config", true, false, "help text", nil, nil, "", true},
+		{"exec failed, config exists", true, true, "", context.DeadlineExceeded, errGlabExecFailed, "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cred, err := decideGlab("gitlab.com", "/usr/bin/glab", tc.lookPathOK, tc.configExists,
+				[]byte(tc.stdout), nil, tc.execErr, id)
+			switch {
+			case tc.wantErr != nil:
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+			case tc.wantQuiet:
+				if err != nil || cred.AccessToken != "" {
+					t.Fatalf("want quiet empty-cred, got (%+v,%v)", cred, err)
+				}
+			default:
+				if err != nil || cred.AccessToken != tc.wantTok || !cred.IsOAuth2 || cred.GlabPath != "/usr/bin/glab" {
+					t.Fatalf("want usable cred %q, got (%+v,%v)", tc.wantTok, cred, err)
+				}
+			}
+		})
 	}
 }
