@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -165,3 +166,85 @@ func (w *capWriter) Write(p []byte) (int, error) {
 }
 
 func (w *capWriter) Bytes() []byte { return w.buf }
+
+// Token-source tuning. glabRefreshSkew re-fetches slightly before hard expiry (matches
+// the connector's historical 60s skew). glabFailCooldown bounds re-exec storms when the
+// helper is failing.
+const (
+	glabRefreshSkew  = 60 * time.Second
+	glabFailCooldown = 30 * time.Second
+)
+
+// errGitLabHelperUnavailable is the terminal "no usable glab token right now" error;
+// its message steers the operator to re-auth or set a PAT.
+var errGitLabHelperUnavailable = errors.New(
+	"gitlab: glab credential unavailable - run `glab auth login`, or set GITLAB_TOKEN to a PAT for unattended use")
+
+// glabHelperSource is the caching oauth2.TokenSource backing a glab credential. It
+// returns the cached token while valid, re-fetches via the injected helper near expiry,
+// tolerates a transient helper failure by adopting a still-valid cached token
+// (adopt-on-failure), and suppresses re-exec storms with a failure cooldown. A zero
+// Expiry means non-expiring (PAT) and is cached for the session. Token() is
+// mutex-serialized and safe for concurrent use.
+type glabHelperSource struct {
+	fetch func() (*oauth2.Token, error)
+	now   func() time.Time
+
+	mu       sync.Mutex
+	cached   *oauth2.Token
+	lastFail time.Time
+}
+
+var _ oauth2.TokenSource = (*glabHelperSource)(nil)
+
+// newGlabHelperSource wires a caching helper source seeded with the discovered token.
+func newGlabHelperSource(
+	fetch func() (*oauth2.Token, error), now func() time.Time, seed *oauth2.Token,
+) *glabHelperSource {
+	return &glabHelperSource{fetch: fetch, now: now, cached: seed} //nolint:exhaustruct // mu/lastFail zero.
+}
+
+// Token returns the current access token, re-fetching via the helper only when the
+// cached token is near expiry and no failure cooldown is active.
+func (s *glabHelperSource) Token() (*oauth2.Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	if s.cached != nil && !glabNeedsRefresh(s.cached, now) {
+		return s.cached, nil
+	}
+	if !s.lastFail.IsZero() && now.Before(s.lastFail.Add(glabFailCooldown)) {
+		return s.cachedIfUsable(now)
+	}
+
+	tok, err := s.fetch()
+	if err != nil {
+		s.lastFail = now
+		return s.cachedIfUsable(now)
+	}
+	s.cached = tok
+	s.lastFail = time.Time{}
+	return tok, nil
+}
+
+// cachedIfUsable returns the cached token when it is not hard-expired, else the
+// terminal steer error.
+func (s *glabHelperSource) cachedIfUsable(now time.Time) (*oauth2.Token, error) {
+	if s.cached != nil && !glabHardExpired(s.cached, now) {
+		return s.cached, nil
+	}
+	return nil, errGitLabHelperUnavailable
+}
+
+// glabNeedsRefresh reports whether tok is within the refresh skew of a real expiry. A
+// zero Expiry is non-expiring and never needs refresh.
+func glabNeedsRefresh(tok *oauth2.Token, now time.Time) bool {
+	return !tok.Expiry.IsZero() && now.Add(glabRefreshSkew).After(tok.Expiry)
+}
+
+// glabHardExpired reports whether tok is at or past its real expiry. A zero Expiry is
+// non-expiring and never hard-expired.
+func glabHardExpired(tok *oauth2.Token, now time.Time) bool {
+	return !tok.Expiry.IsZero() && !now.Before(tok.Expiry)
+}

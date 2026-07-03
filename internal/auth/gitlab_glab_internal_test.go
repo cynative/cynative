@@ -3,6 +3,9 @@ package auth
 import (
 	"slices"
 	"testing"
+	"time"
+
+	"golang.org/x/oauth2"
 )
 
 func TestParseCredentialHelperOutput(t *testing.T) {
@@ -174,4 +177,84 @@ func TestCapWriter(t *testing.T) {
 	if _, _ = w.Write([]byte("ij")); string(w.Bytes()) != "abcd" {
 		t.Fatalf("Bytes = %q, want still %q after cap", w.Bytes(), "abcd")
 	}
+}
+
+func TestGlabHelperSource(t *testing.T) {
+	t.Parallel()
+	base := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
+	mk := func(access string, exp time.Time) *oauth2.Token {
+		return &oauth2.Token{AccessToken: access, Expiry: exp} //nolint:exhaustruct // access+expiry.
+	}
+
+	t.Run("valid cache skips fetch", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		s := newGlabHelperSource(
+			func() (*oauth2.Token, error) { calls++; return mk("new", base.Add(time.Hour)), nil },
+			func() time.Time { return base }, mk("seed", base.Add(time.Hour)))
+		tok, err := s.Token()
+		if err != nil || tok.AccessToken != "seed" || calls != 0 {
+			t.Fatalf("got (%v,%v) calls=%d, want seed with no fetch", tok, err, calls)
+		}
+	})
+
+	t.Run("zero-expiry PAT cached forever", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		s := newGlabHelperSource(
+			func() (*oauth2.Token, error) { calls++; return nil, nil },
+			func() time.Time { return base.Add(1000 * time.Hour) }, mk("pat", time.Time{}))
+		tok, _ := s.Token()
+		if tok.AccessToken != "pat" || calls != 0 {
+			t.Fatalf("PAT re-fetched: calls=%d", calls)
+		}
+	})
+
+	t.Run("expired token triggers fetch", func(t *testing.T) {
+		t.Parallel()
+		s := newGlabHelperSource(
+			func() (*oauth2.Token, error) { return mk("fresh", base.Add(2*time.Hour)), nil },
+			func() time.Time { return base.Add(time.Hour) }, mk("stale", base.Add(30*time.Minute)))
+		tok, err := s.Token()
+		if err != nil || tok.AccessToken != "fresh" {
+			t.Fatalf("got (%v,%v), want fresh", tok, err)
+		}
+	})
+
+	t.Run("adopt-on-failure returns still-valid seed", func(t *testing.T) {
+		t.Parallel()
+		// now within refresh skew of the seed expiry forces a fetch; fetch fails; seed
+		// still not hard-expired, so it is adopted.
+		s := newGlabHelperSource(
+			func() (*oauth2.Token, error) { return nil, errGitLabHelperUnavailable },
+			func() time.Time { return base.Add(time.Hour) }, mk("seed", base.Add(time.Hour+30*time.Second)))
+		tok, err := s.Token()
+		if err != nil || tok.AccessToken != "seed" {
+			t.Fatalf("got (%v,%v), want seed adopted on transient failure", tok, err)
+		}
+	})
+
+	t.Run("hard-expired plus fetch failure fails closed", func(t *testing.T) {
+		t.Parallel()
+		s := newGlabHelperSource(
+			func() (*oauth2.Token, error) { return nil, errGitLabHelperUnavailable },
+			func() time.Time { return base.Add(2 * time.Hour) }, mk("dead", base.Add(time.Hour)))
+		if _, err := s.Token(); err == nil {
+			t.Fatal("want error when cached is hard-expired and fetch fails")
+		}
+	})
+
+	t.Run("failure cooldown suppresses re-exec", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		now := base.Add(2 * time.Hour) // seed hard-expired.
+		s := newGlabHelperSource(
+			func() (*oauth2.Token, error) { calls++; return nil, errGitLabHelperUnavailable },
+			func() time.Time { return now }, mk("dead", base.Add(time.Hour)))
+		_, _ = s.Token() // first call: fetch (calls=1), records lastFail.
+		_, _ = s.Token() // second call within cooldown: no new fetch.
+		if calls != 1 {
+			t.Fatalf("calls=%d, want 1 (cooldown suppresses the second exec)", calls)
+		}
+	})
 }
