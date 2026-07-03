@@ -248,3 +248,17 @@ func glabNeedsRefresh(tok *oauth2.Token, now time.Time) bool {
 func glabHardExpired(tok *oauth2.Token, now time.Time) bool {
 	return !tok.Expiry.IsZero() && !now.Before(tok.Expiry)
 }
+
+// tokenFromHelper parses one refresh-time helper invocation into a token, validating
+// the instance. Any non-success outcome (error JSON or incompatible) is a dead session
+// at refresh time and surfaces as errGitLabHelperUnavailable. Never echoes stdout.
+func tokenFromHelper(loginHost string, stdout []byte, redact func(string) string) (*oauth2.Token, error) {
+	res := parseCredentialHelperOutput(stdout, redact)
+	if res.kind != credOK {
+		return nil, errGitLabHelperUnavailable
+	}
+	if err := validateInstanceURL(res.instanceURL, loginHost); err != nil {
+		return nil, err
+	}
+	return res.token, nil
+}

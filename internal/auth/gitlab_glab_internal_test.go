@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -257,4 +258,21 @@ func TestGlabHelperSource(t *testing.T) {
 			t.Fatalf("calls=%d, want 1 (cooldown suppresses the second exec)", calls)
 		}
 	})
+}
+
+func TestTokenFromHelper(t *testing.T) {
+	t.Parallel()
+	id := func(s string) string { return s }
+	ok := `{"type":"success","instance_url":"https://gitlab.com","token":{"type":"oauth2","token":"abc","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
+	tok, err := tokenFromHelper("gitlab.com", []byte(ok), id)
+	if err != nil || tok.AccessToken != "abc" {
+		t.Fatalf("got (%v,%v), want abc", tok, err)
+	}
+	if _, err := tokenFromHelper("gitlab.com", []byte(`{"type":"error","message":"x"}`), id); !errors.Is(err, errGitLabHelperUnavailable) {
+		t.Fatalf("error JSON: err = %v, want errGitLabHelperUnavailable", err)
+	}
+	mismatch := `{"type":"success","instance_url":"https://evil.com","token":{"type":"oauth2","token":"x","expiry_timestamp":"2026-07-03T12:00:00Z"}}`
+	if _, err := tokenFromHelper("gitlab.com", []byte(mismatch), id); !errors.Is(err, errGitLabInstanceMismatch) {
+		t.Fatalf("mismatch: err = %v", err)
+	}
 }
