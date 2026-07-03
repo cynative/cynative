@@ -37,16 +37,21 @@ func lookGlab() (string, error) {
 
 // runGlab executes the pinned glab binary with a fixed argv and curated env in a
 // neutral working directory, with a nil stdin (Go connects the null device), a
-// timeout, and a WaitDelay. Output is captured through bounded cap writers that drain
-// to EOF so the child's pipe closes and Wait returns. Returns captured stdout, stderr,
-// and any run error.
+// timeout, and a WaitDelay. GIT_CEILING_DIRECTORIES pins the cwd as a git-discovery
+// ceiling so glab cannot resolve a repo host from an ancestor when the temp dir happens
+// to sit inside a worktree (belt-and-suspenders; the explicit host env already pins the
+// instance and a mismatched instance_url fails closed). Output is captured through
+// bounded cap writers that drain to EOF so the child's pipe closes and Wait returns.
+// Returns captured stdout, stderr, and any run error.
 func runGlab(ctx context.Context, glabPath string, args, env []string) ([]byte, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, glabExecTimeout)
 	defer cancel()
 
+	dir := os.TempDir()
+	env = append(env, "GIT_CEILING_DIRECTORIES="+dir)
 	cmd := exec.CommandContext(ctx, glabPath, args...)
 	cmd.Env = env
-	cmd.Dir = os.TempDir()
+	cmd.Dir = dir
 	cmd.WaitDelay = glabWaitDelay
 	out := &capWriter{max: glabStdoutCap}    //nolint:exhaustruct // buf grows.
 	errOut := &capWriter{max: glabStderrCap} //nolint:exhaustruct // buf grows.

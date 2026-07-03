@@ -91,6 +91,7 @@ func glabTokenTypeOK(tokenType string, expiryZero bool) bool {
 // are what glab needs to locate its config (HOME/XDG/GLAB_CONFIG_DIR on unix,
 // APPDATA/LOCALAPPDATA/USERPROFILE on Windows), reach the OS keyring
 // (DBUS_SESSION_BUS_ADDRESS on Linux Secret Service), run (PATH, or Path on Windows),
+// resolve a self-managed OAuth client (GITLAB_CLIENT_ID, a non-secret public client id),
 // honor proxies, and trust custom CAs.
 //
 //nolint:gochecknoglobals // stateless allowlist.
@@ -98,6 +99,7 @@ var glabEnvAllowlist = []string{
 	"HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "GLAB_CONFIG_DIR",
 	"APPDATA", "LOCALAPPDATA", "USERPROFILE", // Windows: glab config lives under %AppData%.
 	"DBUS_SESSION_BUS_ADDRESS", "PATH", "Path", // Path is the Windows PATH casing.
+	"GITLAB_CLIENT_ID", // non-secret public OAuth client id for a self-managed refresh.
 	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 	"SSL_CERT_FILE", "SSL_CERT_DIR",
 }
