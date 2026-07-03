@@ -40,18 +40,18 @@ No YAML is required for the default read-only mode against gitlab.com.
 
 Cynative resolves a token for the configured host (default `gitlab.com`) in this order:
 
-1. **Token environment variable** — `GITLAB_TOKEN`, then `GITLAB_ACCESS_TOKEN`, then `OAUTH_TOKEN` (glab's precedence order); the first non-empty one is used and takes precedence over any stored glab config token.
-2. **glab config** — reads `~/.config/glab-cli/config.yml` (or the path set by `GLAB_CONFIG_DIR` or `XDG_CONFIG_HOME`; on macOS, also `~/Library/Application Support/glab-cli/config.yml`, which is where `glab auth login` writes on macOS), extracting `hosts[<host>].token`. The lookup tries the explicitly-configured `host` (glab keys `hosts[]` by the login host) and the **served host** (`api_host` when set, otherwise `host`), each port-stripped to the bare hostname. The empty default host is omitted, so a config that sets only `api_host` never falls back to the `gitlab.com` token — while an explicit `host` paired with a separate `api_host` still resolves the login-host-keyed token.
+1. **Token environment variable** — `GITLAB_TOKEN`, then `GITLAB_ACCESS_TOKEN`, then `OAUTH_TOKEN` (glab's precedence order); the first non-empty one is used, exec-free, and takes precedence over any glab credential.
+2. **glab (`glab auth credential-helper`)** — when no token env var is set, cynative delegates to the pinned `glab` binary, which reads `config.yml` or the OS keyring, refreshes an expired OAuth token, and prints the credential as JSON. cynative selects the instance by setting `GITLAB_HOST` to the configured **login host** and validates that glab returned that instance's token, so a config that sets only `api_host` (login host left at the public default) never obtains the `gitlab.com` token; an explicit self-managed `host` paired with a separate `api_host` uses the login-host credential against the api host. See [OAuth token handling](#oauth-token-handling).
 
-Cynative reads these variables to discover the GitLab token and config location:
+Cynative reads these variables to discover the GitLab token and locate glab's config:
 
-- `GITLAB_TOKEN` — first-precedence token; beats any stored glab config token.
+- `GITLAB_TOKEN` — first-precedence token; exec-free and beats any glab credential.
 - `GITLAB_ACCESS_TOKEN` — second-precedence token (glab precedence order).
 - `OAUTH_TOKEN` — third-precedence token (glab precedence order).
-- `GLAB_CONFIG_DIR` — exclusive override of glab's config directory used to discover `hosts[<host>].token`.
-- `XDG_CONFIG_HOME` — adds `$XDG_CONFIG_HOME/glab-cli/config.yml` as a fallback config location (when `GLAB_CONFIG_DIR` is unset). On macOS, `~/Library/Application Support/glab-cli/config.yml` (the OS-default config dir) is also tried automatically — this is where `glab auth login` writes on macOS.
+- `GLAB_CONFIG_DIR` — exclusive override of glab's config directory; used to detect whether a glab config is present, and passed through to the glab child.
+- `XDG_CONFIG_HOME` — adds `$XDG_CONFIG_HOME/glab-cli/config.yml` as a config location (when `GLAB_CONFIG_DIR` is unset). On macOS, `~/Library/Application Support/glab-cli/config.yml` (the OS-default config dir) is also detected — this is where `glab auth login` writes on macOS.
 
-If no token is found, the GitLab connector is silently not registered.
+If no token env var is set and glab has no usable credential, the connector is a quiet ambient skip. If a glab config exists but the `glab` binary is missing or too old for the credential-helper, the connector is skipped **loudly** with a steer to install/upgrade glab or set `GITLAB_TOKEN`.
 
 ### Registration and validation
 
@@ -63,30 +63,35 @@ When a token is discovered, Cynative **validates it live at startup** with a dia
 
 This matches the GitHub and Kubernetes connectors' validated-live registration.
 
-> **Keyring caveat:** glab users who authenticated with `--use-keyring` store their token in the OS keyring rather than in `config.yml`. Cynative reads only the config file; it does not access the keyring. Set `GITLAB_TOKEN` explicitly if you used `--use-keyring`.
+> **Keyring supported.** glab users who authenticated with `--use-keyring` store
+> their token in the OS keyring rather than in `config.yml`. Because cynative now
+> delegates to `glab auth credential-helper` (see below), keyring-stored tokens work
+> without any extra configuration.
 
-#### OAuth token auto-refresh
+#### OAuth token handling
 
-`glab auth login` on gitlab.com stores a 2-hour OAuth access token. Cynative
-refreshes it in-process (using the same `golang.org/x/oauth2` flow `glab` uses)
-when it is expired, and writes the rotated token back to glab's `config.yml`, so
-the connector works unattended without first running a `glab` command.
+For a glab credential, cynative delegates to `glab auth credential-helper` (the
+machine-readable interface glab ships since v1.85.0). glab reads `config.yml` or the
+OS keyring, refreshes an expired OAuth token within a grace window, persists the
+rotation through its own atomic writer, and prints the credential as JSON. cynative
+parses that JSON and caches the token until it nears expiry, then re-runs the helper.
 
-- **Plaintext config only.** If glab stores tokens in your OS keyring instead of
-  `config.yml`, cynative cannot read or refresh them — run any `glab` command to
-  refresh, or set `GITLAB_TOKEN` to a personal access token for unattended use.
-- **Self-managed:** refresh requires the per-host `client_id` glab stores in its
-  config (self-managed instances have no default OAuth client). Without it, an
-  expired OAuth token surfaces as unavailable with a steer to `glab auth login`
-  or `GITLAB_TOKEN`.
-- **Concurrency:** cynative writes glab's config with the same lock-free
-  last-writer-wins model `glab` itself uses; a concurrent `glab`/cynative write in
-  the sub-millisecond commit window can be overwritten. No torn file is possible,
-  and your token always ends valid.
+- **cynative never reads or writes glab's `config.yml`** and never holds the refresh
+  token — glab owns the token lifecycle. A personal access token stored by glab is
+  returned as-is and used for the session.
+- **Self-managed OAuth** works the same way: glab owns the per-host OAuth client, so
+  cynative needs no `client_id`.
+- **Requires the glab binary.** A `config.yml` with no working `glab` on `PATH` (or a
+  glab older than v1.85.0) is skipped **loudly** with a steer to upgrade glab or set
+  `GITLAB_TOKEN`. Set `GITLAB_TOKEN` for a fully exec-free path.
+- **Hardened exec.** The binary is resolved once by absolute path, run with a fixed
+  argv (never a shell), a curated child environment (cynative's own secrets are not
+  passed through), a neutral working directory, a bounded timeout, and stdout/stderr
+  size caps; the token is never echoed into any error.
 
 ### References
 
-- [GitLab CLI (glab)](https://docs.gitlab.com/cli/) — `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` (auth tokens), `GLAB_CONFIG_DIR` (config dir), `GITLAB_CLIENT_ID` (per-host OAuth client); `glab auth login` writes the token into `config.yml`.
+- [GitLab CLI (glab)](https://docs.gitlab.com/cli/) — `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` (auth tokens), `GLAB_CONFIG_DIR` (config dir); `glab auth login` stores the credential, and `glab auth credential-helper` (glab v1.85.0+) is the machine-readable interface cynative delegates to. cynative sets `GITLAB_HOST` for the child to pin the instance.
 - [GitLab personal access token scopes](https://docs.gitlab.com/user/profile/personal_access_tokens/) — `read_api` (least-privilege read), `api` (full), `read_repository`, `read_user`; the effective capability is the scope intersected with the permissions ceiling.
 
 ## Target selection
@@ -253,11 +258,11 @@ export CYNATIVE_CACHE_TTL=24h
 
 ## Limitations
 
-- **CI job tokens** (endpoint-restricted) are out of scope. Cynative authenticates via `Authorization: Bearer`, which accepts Personal Access Tokens (PATs), project/group access tokens, **and** OAuth tokens (including the OAuth token `glab auth login` stores by default). OAuth access tokens have a 2-hour lifetime, so a stale glab session may need a fresh `glab auth login`.
+- **CI job tokens** (endpoint-restricted) are out of scope. Cynative authenticates via `Authorization: Bearer`, which accepts Personal Access Tokens (PATs), project/group access tokens, **and** OAuth tokens (including the OAuth token `glab auth login` stores by default). OAuth access tokens have a 2-hour lifetime; `glab auth credential-helper` refreshes them on demand, so a long session keeps working.
 - **The category routing table needs egress to `gitlab.com`.** The classifier is backed by GitLab's first-party OpenAPI v3 spec, live-fetched anonymously and cached under `~/.cynative/cache/gitlab`. With no network **and** no local cache the connector fails closed (every classification-dependent request is denied). A self-managed version lag may over-deny renamed endpoints (the spec is fetched from gitlab.com `master` for both gitlab.com and self-managed instances) — fail-closed by design.
 - **Container Registry and Pages** use separate hosts and authentication paths not covered by this connector. The connector pins to the configured GitLab API host only.
 - **Subpath-mounted installations** (e.g. `https://example.com/gitlab/`) are not supported. Cynative assumes the API is at the host root (`/api/v4`).
-- **glab OS keyring users** must set `GITLAB_TOKEN` explicitly. Cynative reads only the glab `config.yml` file; it does not access the OS keyring.
+- **A glab credential requires the `glab` binary** (v1.85.0+, for `glab auth credential-helper`) on `PATH`. cynative delegates discovery and refresh to glab rather than parsing `config.yml` itself, so keyring-stored tokens work but a `config.yml` with no usable glab is skipped loudly. Set `GITLAB_TOKEN` for a fully exec-free path.
 - **`skip_tls_verify` is not supported.** TLS validation cannot be bypassed. Use `ca_cert` to supply a custom CA for self-managed instances with a private certificate authority.
 - **One instance per run.** Cynative registers at most one GitLab provider per session, bound to the configured `host`. Accessing multiple GitLab instances in the same session is not supported.
 - **No runtime credential downscoping.** GitLab has no server-side API to exchange a token for a reduced-scope credential. The token's scopes are fixed at issue time. The `permissions` ceiling narrows what cynative will attempt but never expands the token's own scopes — the effective capability is the intersection of the two. Pair a minimally-scoped token (e.g. `read_api` only) and a read-only service-account identity with the read-only `permissions` default for the strongest least-privilege posture.
