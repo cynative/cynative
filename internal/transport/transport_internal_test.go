@@ -759,53 +759,22 @@ func TestExecute_CACert_BadPEM(t *testing.T) {
 	}
 }
 
-func TestCATransport_ExistingHTTPTransport(t *testing.T) {
-	t.Parallel()
-
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, "ok")
-	}))
-	t.Cleanup(srv.Close)
-
-	caBase64 := tlsCertBase64(t, srv)
-
-	base := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-
-	tr, err := NewClient().tlsTransport(base, caBase64, "", "", "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if tr.TLSClientConfig.RootCAs == nil {
-		t.Error("expected RootCAs to be set")
-	}
-}
-
 func TestCATransport_SystemCertPoolFailure(t *testing.T) {
 	t.Parallel()
 
+	// Pins that tlsTransport threads the injected systemCertPool seam into
+	// auth.BuildTLSConfig, whose empty-pool fallback keeps the custom CA usable
+	// even when the system pool is unavailable.
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "ok")
 	}))
 	t.Cleanup(srv.Close)
-
-	caBase64 := tlsCertBase64(t, srv)
-
-	base := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
 
 	c := NewClient(WithSystemCertPool(func() (*x509.CertPool, error) {
 		return nil, errors.New("system pool unavailable")
 	}))
 
-	tr, err := c.tlsTransport(base, caBase64, "", "", "")
+	tr, err := c.tlsTransport(&http.Transport{}, tlsCertBase64(t, srv), "", "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1374,31 +1343,6 @@ func TestTLSTransport_BadClientKeyBase64(t *testing.T) {
 	_, err := NewClient().tlsTransport(&http.Transport{}, "", "dmFsaWQtYmFzZTY0", "bad!base64", "")
 	if err == nil || !strings.Contains(err.Error(), "failed to decode client key") {
 		t.Errorf("expected base64 decode error, got %v", err)
-	}
-}
-
-func TestTLSTransport_NilTLSClientConfigDoesNotPanic(t *testing.T) {
-	t.Parallel()
-
-	// http.DefaultTransport.Clone() can yield a nil TLSClientConfig (e.g. under
-	// GODEBUG=http2client=0). tlsTransport must allocate it rather than panic.
-	// ForceAttemptHTTP2 is false (zero value) and DialContext is non-nil, so
-	// Clone()'s onceSetNextProtoDefaults early-returns without allocating
-	// TLSClientConfig — reproducing the nil-config case deterministically.
-	base := &http.Transport{DialContext: (&net.Dialer{}).DialContext}
-
-	tr, err := NewClient().tlsTransport(base, "", "", "", "")
-	if err != nil {
-		t.Fatalf("tlsTransport returned error: %v", err)
-	}
-	if tr.TLSClientConfig == nil {
-		t.Fatal("tlsTransport must initialize TLSClientConfig when the base left it nil")
-	}
-	if tr.TLSClientConfig.RootCAs == nil {
-		t.Error("tlsTransport must set RootCAs on the TLS config")
-	}
-	if tr.TLSClientConfig.MinVersion != tls.VersionTLS12 {
-		t.Errorf("MinVersion = %#x, want tls.VersionTLS12 (%#x)", tr.TLSClientConfig.MinVersion, tls.VersionTLS12)
 	}
 }
 

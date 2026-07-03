@@ -17,19 +17,14 @@ const maxViewRoleBytes = 1 << 20 // 1 MiB.
 
 // pinnedHTTPClient builds an [http.Client] trusting the system roots plus caData
 // (base64 PEM), optionally presenting a client certificate (base64 PEM cert+key)
-// for mTLS clusters. It mirrors transport.tlsTransport but lives here because
-// auth must not import transport. control, when non-nil, is installed as the
-// [net.Dialer] ControlContext hook so the bootstrap fetch runs through the dial guard.
+// for mTLS clusters, via [BuildTLSConfig] (the same builder the transport
+// request path uses). control, when non-nil, is installed as the [net.Dialer]
+// ControlContext hook so the bootstrap fetch runs through the dial guard.
 func pinnedHTTPClient(
 	caData, clientCert, clientKey, serverName string,
 	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
 ) (*http.Client, error) {
-	pool, err := x509.SystemCertPool()
-	if err != nil {
-		pool = x509.NewCertPool()
-	}
-
-	tlsCfg, err := buildClusterTLSConfig(pool, caData, clientCert, clientKey, serverName)
+	tlsCfg, err := BuildTLSConfig(x509.SystemCertPool, caData, clientCert, clientKey, serverName)
 	if err != nil {
 		return nil, err
 	}

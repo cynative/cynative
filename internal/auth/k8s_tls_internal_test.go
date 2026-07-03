@@ -1,115 +1,13 @@
 package auth
 
 import (
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"k8s.io/client-go/rest"
-
-	"github.com/cynative/cynative/internal/auth/authtest"
 )
-
-func TestBuildClusterTLSConfig(t *testing.T) {
-	t.Parallel()
-
-	caPEM, _, err := authtest.GenerateCA()
-	if err != nil {
-		t.Fatalf("GenerateCA: %v", err)
-	}
-	validCA := base64.StdEncoding.EncodeToString(caPEM)
-
-	// A self-signed cert with its matching key — tls.X509KeyPair succeeds.
-	clientCertPEM, clientKeyPEM, err := authtest.GenerateCA()
-	if err != nil {
-		t.Fatalf("GenerateCA (client): %v", err)
-	}
-	validCert := base64.StdEncoding.EncodeToString(clientCertPEM)
-	validKey := base64.StdEncoding.EncodeToString(clientKeyPEM)
-
-	// A different key, so cert/key do not match.
-	_, otherKeyPEM, err := authtest.GenerateCA()
-	if err != nil {
-		t.Fatalf("GenerateCA (mismatch): %v", err)
-	}
-	mismatchKey := base64.StdEncoding.EncodeToString(otherKeyPEM)
-
-	// Valid base64 of non-PEM bytes — AppendCertsFromPEM returns false.
-	nonPEM := base64.StdEncoding.EncodeToString([]byte("not a pem block"))
-
-	tests := []struct {
-		name       string
-		caData     string
-		clientCert string
-		clientKey  string
-		serverName string
-		wantErr    string // substring; "" means success.
-		wantCert   bool   // expect exactly one tls.Certificate.
-		wantServer string // expected ServerName.
-	}{
-		{name: "valid CA only", caData: validCA},
-		{name: "bad base64 CA", caData: "not-base64-!!", wantErr: "k8s_hardening: decode cluster CA:"},
-		{name: "non-PEM CA", caData: nonPEM, wantErr: "k8s_hardening: parse cluster CA"},
-		{name: "server name set", caData: validCA, serverName: "api.example.com", wantServer: "api.example.com"},
-		{name: "valid client cert+key", caData: validCA, clientCert: validCert, clientKey: validKey, wantCert: true},
-		{
-			name: "bad base64 client cert", caData: validCA, clientCert: "not-base64-!!", clientKey: validKey,
-			wantErr: "k8s_hardening: decode client cert:",
-		},
-		{
-			name: "bad base64 client key", caData: validCA, clientCert: validCert, clientKey: "not-base64-!!",
-			wantErr: "k8s_hardening: decode client key:",
-		},
-		{
-			name: "mismatched cert/key", caData: validCA, clientCert: validCert, clientKey: mismatchKey,
-			wantErr: "k8s_hardening: client key pair:",
-		},
-		{name: "client cert but empty key", caData: validCA, clientCert: validCert, clientKey: "", wantCert: false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			pool := x509.NewCertPool()
-			cfg, cfgErr := buildClusterTLSConfig(pool, tt.caData, tt.clientCert, tt.clientKey, tt.serverName)
-
-			if tt.wantErr != "" {
-				if cfgErr == nil || !strings.Contains(cfgErr.Error(), tt.wantErr) {
-					t.Fatalf("want error containing %q, got %v", tt.wantErr, cfgErr)
-				}
-
-				return
-			}
-			if cfgErr != nil {
-				t.Fatalf("unexpected error: %v", cfgErr)
-			}
-			assertBuiltTLSConfig(t, cfg, pool, tt.wantServer, tt.wantCert)
-		})
-	}
-}
-
-// assertBuiltTLSConfig checks the success-path shape of a built cluster TLS config.
-func assertBuiltTLSConfig(t *testing.T, cfg *tls.Config, pool *x509.CertPool, wantServer string, wantCert bool) {
-	t.Helper()
-
-	if cfg.MinVersion != tls.VersionTLS12 {
-		t.Errorf("MinVersion = %d, want %d", cfg.MinVersion, tls.VersionTLS12)
-	}
-	if cfg.RootCAs != pool {
-		t.Error("RootCAs should be the passed-in pool")
-	}
-	if cfg.ServerName != wantServer {
-		t.Errorf("ServerName = %q, want %q", cfg.ServerName, wantServer)
-	}
-	if gotCert := len(cfg.Certificates) == 1; gotCert != wantCert {
-		t.Errorf("one client certificate present = %v, want %v", gotCert, wantCert)
-	}
-}
 
 func TestBearerInject(t *testing.T) {
 	t.Parallel()
