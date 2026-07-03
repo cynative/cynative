@@ -143,6 +143,11 @@ func TestGlabHelperEnv(t *testing.T) {
 	if !slices.Contains(withAPI, "GITLAB_API_HOST=api.example.com") {
 		t.Errorf("missing GITLAB_API_HOST for split-host: %v", withAPI)
 	}
+	// The served authority (including a non-443 port) is carried into GITLAB_API_HOST.
+	withPort := glabHelperEnv(parent, "self.com", "self.com:8443")
+	if !slices.Contains(withPort, "GITLAB_API_HOST=self.com:8443") {
+		t.Errorf("port not carried into GITLAB_API_HOST: %v", withPort)
+	}
 }
 
 func TestGlabLoginHost(t *testing.T) {

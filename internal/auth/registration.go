@@ -416,7 +416,9 @@ func (d *registrationDeps) gitlabOutcome(
 	served := servedHostOf(host, glCfg.APIHost)
 
 	loginHost := glabLoginHost(glCfg.Host, glCfg.APIHost)
-	cred, err := d.discoverGitLab(loginHost, glCfg.APIHost)
+	// Pass the served authority (api_host when set, else host, including any :port) as the
+	// glab API host so an expired OAuth token refreshes against the configured port/endpoint.
+	cred, err := d.discoverGitLab(loginHost, served)
 	if err != nil {
 		return skipOutcome(gitlabProviderName, true, verbose, emitAlways,
 			fmt.Sprintf("gitlab_hardening: skipped (token resolution failed): %v", err))

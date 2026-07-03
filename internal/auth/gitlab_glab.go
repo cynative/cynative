@@ -103,10 +103,11 @@ var glabEnvAllowlist = []string{
 }
 
 // glabHelperEnv curates the child env by allowlist and pins host selection. GITLAB_HOST
-// is set to the resolved login host (the credential key); GITLAB_API_HOST is set to the
-// configured api_host when present so glab's own OAuth refresh reaches the operator's API
-// endpoint in a split login/API-host setup; telemetry and update checks are disabled so
-// stderr stays clean and no background network call fires.
+// is set to the port-stripped login host (the credential key, which glab does not
+// port-normalize); GITLAB_API_HOST is set to the served API host authority (api_host when
+// set, else host, including any :port) so glab's own OAuth refresh reaches the operator's
+// exact API endpoint and port in a self-managed or split login/API-host setup; telemetry
+// and update checks are disabled so stderr stays clean and no background network call fires.
 func glabHelperEnv(parent []string, loginHost, apiHost string) []string {
 	keep := make(map[string]bool, len(glabEnvAllowlist))
 	for _, k := range glabEnvAllowlist {
@@ -304,9 +305,10 @@ func tokenFromHelper(
 
 // glabCredential is the credential discovered from the environment or via glab. For an
 // env/PAT token, Host/APIHost/Expiry/GlabPath are empty and IsOAuth2 is false. For a glab
-// credential, Host is the login host, APIHost is the configured api_host (for the refresh
-// env and instance validation), GlabPath is the resolved glab binary (for re-exec), Expiry
-// seeds the caching source, and IsOAuth2 is true. AccessToken == "" means none found.
+// credential, Host is the port-stripped login host, APIHost is the served API host
+// authority (may include a :port; for the refresh env and instance validation), GlabPath
+// is the resolved glab binary (for re-exec), Expiry seeds the caching source, and IsOAuth2
+// is true. AccessToken == "" means none found.
 type glabCredential struct {
 	Host        string
 	APIHost     string
@@ -329,7 +331,7 @@ var (
 	errGlabMissingWithConfig = errors.New(
 		"gitlab: glab not installed but a glab config exists - install glab or set GITLAB_TOKEN")
 	errGlabTooOld = errors.New(
-		"gitlab: installed glab is too old for the credential-helper (need v1.85.0+) - upgrade glab or set GITLAB_TOKEN",
+		"gitlab: installed glab is too old for the credential-helper (need v1.85.2+) - upgrade glab or set GITLAB_TOKEN",
 	)
 	errGlabSessionUnusable = errors.New(
 		"gitlab: glab session is not usable - run `glab auth login` or set GITLAB_TOKEN")

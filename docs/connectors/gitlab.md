@@ -71,19 +71,26 @@ This matches the GitHub and Kubernetes connectors' validated-live registration.
 #### OAuth token handling
 
 For a glab credential, cynative delegates to `glab auth credential-helper` (the
-machine-readable interface glab ships since v1.85.0). glab reads `config.yml` or the
-OS keyring, refreshes an expired OAuth token within a grace window, persists the
-rotation through its own atomic writer, and prints the credential as JSON. cynative
-parses that JSON and caches the token until it nears expiry, then re-runs the helper.
+machine-readable interface glab ships since v1.85.0; cynative runs it from a neutral
+directory, which needs the non-git-folder host fallback added in **v1.85.2**). glab
+reads `config.yml` or the OS keyring, refreshes an expired OAuth token within a grace
+window, persists the rotation through its own atomic writer, and prints the credential
+as JSON. cynative parses that JSON and caches the token until it nears expiry, then
+re-runs the helper.
 
 - **cynative never reads or writes glab's `config.yml`** and never holds the refresh
   token — glab owns the token lifecycle. A personal access token stored by glab is
   returned as-is and used for the session.
 - **Self-managed OAuth** works the same way: glab owns the per-host OAuth client, so
   cynative needs no `client_id`.
-- **Requires the glab binary.** A `config.yml` with no working `glab` on `PATH` (or a
-  glab older than v1.85.0) is skipped **loudly** with a steer to upgrade glab or set
-  `GITLAB_TOKEN`. Set `GITLAB_TOKEN` for a fully exec-free path.
+- **Requires glab v1.85.2+.** A `config.yml` with no working `glab` on `PATH` (or a glab
+  too old to resolve a host from a neutral directory) is skipped **loudly** with a steer
+  to upgrade glab or set `GITLAB_TOKEN`. Set `GITLAB_TOKEN` for a fully exec-free path.
+- **TLS trust is glab's.** glab performs its own OAuth-refresh TLS handshake using its
+  own trust (the trust it authenticated the instance under at `glab auth login`).
+  `connectors.gitlab.ca_cert` governs cynative's own request path, not glab's refresh, so
+  a private-CA self-managed instance must be trusted by glab as well (which it is, having
+  authenticated to it).
 - **Hardened exec.** The binary is resolved once by absolute path, run with a fixed
   argv (never a shell), a curated child environment (cynative's own secrets are not
   passed through), a neutral working directory, a bounded timeout, and stdout/stderr
@@ -91,7 +98,7 @@ parses that JSON and caches the token until it nears expiry, then re-runs the he
 
 ### References
 
-- [GitLab CLI (glab)](https://docs.gitlab.com/cli/) — `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` (auth tokens), `GLAB_CONFIG_DIR` (config dir); `glab auth login` stores the credential, and `glab auth credential-helper` (glab v1.85.0+) is the machine-readable interface cynative delegates to. cynative sets `GITLAB_HOST` for the child to pin the instance.
+- [GitLab CLI (glab)](https://docs.gitlab.com/cli/) — `GITLAB_TOKEN` / `GITLAB_ACCESS_TOKEN` / `OAUTH_TOKEN` (auth tokens), `GLAB_CONFIG_DIR` (config dir); `glab auth login` stores the credential, and `glab auth credential-helper` (glab v1.85.2+, run from a neutral directory) is the machine-readable interface cynative delegates to. cynative sets `GITLAB_HOST`/`GITLAB_API_HOST` for the child to pin the instance.
 - [GitLab personal access token scopes](https://docs.gitlab.com/user/profile/personal_access_tokens/) — `read_api` (least-privilege read), `api` (full), `read_repository`, `read_user`; the effective capability is the scope intersected with the permissions ceiling.
 
 ## Target selection
@@ -262,7 +269,7 @@ export CYNATIVE_CACHE_TTL=24h
 - **The category routing table needs egress to `gitlab.com`.** The classifier is backed by GitLab's first-party OpenAPI v3 spec, live-fetched anonymously and cached under `~/.cynative/cache/gitlab`. With no network **and** no local cache the connector fails closed (every classification-dependent request is denied). A self-managed version lag may over-deny renamed endpoints (the spec is fetched from gitlab.com `master` for both gitlab.com and self-managed instances) — fail-closed by design.
 - **Container Registry and Pages** use separate hosts and authentication paths not covered by this connector. The connector pins to the configured GitLab API host only.
 - **Subpath-mounted installations** (e.g. `https://example.com/gitlab/`) are not supported. Cynative assumes the API is at the host root (`/api/v4`).
-- **A glab credential requires the `glab` binary** (v1.85.0+, for `glab auth credential-helper`) on `PATH`. cynative delegates discovery and refresh to glab rather than parsing `config.yml` itself, so keyring-stored tokens work but a `config.yml` with no usable glab is skipped loudly. Set `GITLAB_TOKEN` for a fully exec-free path.
+- **A glab credential requires the `glab` binary** (v1.85.2+, for `glab auth credential-helper` run from a neutral directory) on `PATH`. cynative delegates discovery and refresh to glab rather than parsing `config.yml` itself, so keyring-stored tokens work but a `config.yml` with no usable glab is skipped loudly. Set `GITLAB_TOKEN` for a fully exec-free path.
 - **`skip_tls_verify` is not supported.** TLS validation cannot be bypassed. Use `ca_cert` to supply a custom CA for self-managed instances with a private certificate authority.
 - **One instance per run.** Cynative registers at most one GitLab provider per session, bound to the configured `host`. Accessing multiple GitLab instances in the same session is not supported.
 - **No runtime credential downscoping.** GitLab has no server-side API to exchange a token for a reduced-scope credential. The token's scopes are fixed at issue time. The `permissions` ceiling narrows what cynative will attempt but never expands the token's own scopes — the effective capability is the intersection of the two. Pair a minimally-scoped token (e.g. `read_api` only) and a read-only service-account identity with the read-only `permissions` default for the strongest least-privilege posture.
