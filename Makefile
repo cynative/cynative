@@ -1,5 +1,5 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
-	windows-build shellcheck pwsh-lint pwsh-test sh-test install-e2e
+	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -138,14 +138,21 @@ shell-complexity:
 print-%:
 	@echo '$($*)'
 
-# install-e2e: real-artifact install e2e for release confidence (issue #41).
-# Standalone (NOT part of `make check`): builds a real Linux archive via a
-# goreleaser snapshot, serves it from a loopback fixture server, runs the real
-# install.sh, verifies `cynative --version`, uninstalls, and proves a checksum
-# failure fails closed. Presence-checks python3 (fixture server) with an install
-# hint, mirroring the sh-test/shellcheck install-free pattern.
+# snapshot: build the release archives once via a goreleaser snapshot (no publish),
+# so the local install-e2e target and the CI install-e2e jobs share one definition of
+# the goreleaser flags (no drift between the Makefile and the workflow). --skip=before
+# skips `go mod tidy` to keep the build hermetic/offline.
+snapshot:
+	go tool goreleaser release --snapshot --clean --skip=before
+
+# install-e2e: real-artifact install e2e for release confidence (issue #41). Standalone
+# (NOT part of `make check`): builds the release archives via `snapshot`, serves the Linux
+# archive from a loopback fixture server, runs the real install.sh, verifies
+# `cynative --version`, uninstalls, and proves a checksum failure fails closed. The python3
+# presence check (fixture server) runs first so a missing tool fails before the build,
+# mirroring the sh-test/shellcheck install-free pattern.
 install-e2e:
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, needed by the install e2e loopback fixture server (test/install.e2e.test.sh)."; exit 1; }
-	go tool goreleaser release --snapshot --clean --skip=before
+	$(MAKE) snapshot
 	sh test/install.e2e.test.sh ./dist
 	@echo "OK: install-e2e (real archive install + version + uninstall + checksum-failure)"
