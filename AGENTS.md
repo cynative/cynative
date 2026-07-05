@@ -48,7 +48,11 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   `--skip=before` keeps it hermetic/offline). `make install-e2e`: standalone release-confidence
   check, not part of `make check`; builds the snapshot, then runs the real `install.sh` against
   a loopback fixture server (`test/install.e2e.test.sh`, needs `python3`), verifying install,
-  `--version`, uninstall, and the fail-closed checksum-mismatch path.
+  `--version`, uninstall, and the fail-closed checksum-mismatch path. `make llm-smoke`:
+  standalone live LLM smoke (not part of `make check`); runs the real `cynative -p` against a
+  real provider chosen via `CYNATIVE_LLM_*` env (nonce echo, no tools; `test/llm.smoke.test.sh`),
+  asserting the nonce on stdout and `0 tool calls` in the footer, and skips cleanly when no
+  provider is set. See `docs/e2e/live-llm-smoke.md`.
 
 Two linters shape every new test: `paralleltest` requires each test and subtest to call
 `t.Parallel()`, and `forbidigo` bans `os.Getenv`/`LookupEnv`/`Environ` and `t.Setenv` outside

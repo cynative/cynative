@@ -1,5 +1,5 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
-	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e
+	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -156,3 +156,10 @@ install-e2e:
 	$(MAKE) snapshot
 	sh test/install.e2e.test.sh ./dist
 	@echo "OK: install-e2e (real archive install + version + uninstall + checksum-failure)"
+
+# llm-smoke: live, no-tool LLM smoke test (cynative#38). Standalone (NOT part of
+# `make check`): runs the real `cynative -p` against a real provider selected via
+# CYNATIVE_LLM_* env and needs real credentials; skips cleanly when none are set.
+# See docs/e2e/live-llm-smoke.md.
+llm-smoke:
+	sh test/llm.smoke.test.sh
