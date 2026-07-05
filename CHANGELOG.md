@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.0](https://github.com/cynative/cynative/compare/v1.4.1...v1.5.0) (2026-07-05)
+
+
+### Features
+
+* **install:** add CYNATIVE_BASE_URL test seam to install.sh ([#61](https://github.com/cynative/cynative/issues/61)) ([097f0fe](https://github.com/cynative/cynative/commit/097f0fe5038ac593dd5d62a8ef3bc605fe827227))
+
+
+### Bug Fixes
+
+* **deps:** Bump charm.land/lipgloss/v2 in the all-dependencies group ([#86](https://github.com/cynative/cynative/issues/86)) ([e3003b7](https://github.com/cynative/cynative/commit/e3003b7bddfc6a75fabd9b1c6170bed8378c8361))
+* **deps:** bump sigstore/timestamp-authority to v2.1.2 ([#89](https://github.com/cynative/cynative/issues/89)) ([4ddf556](https://github.com/cynative/cynative/commit/4ddf556c87b61abecbdd8d7ed42777d82f8a1249))
+* **deps:** Bump the all-dependencies group with 3 updates ([#37](https://github.com/cynative/cynative/issues/37)) ([2665f14](https://github.com/cynative/cynative/commit/2665f14ca21d455e6180c81a819db607a3941f60))
+* **deps:** Bump the all-dependencies group with 5 updates ([#79](https://github.com/cynative/cynative/issues/79)) ([18883c5](https://github.com/cynative/cynative/commit/18883c5090937d7e969a0c865d76b720e75e1efe))
+
 ## [1.4.1](https://github.com/cynative/cynative/compare/v1.4.0...v1.4.1) (2026-07-01)
 
 
