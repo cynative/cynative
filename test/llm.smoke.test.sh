@@ -92,8 +92,9 @@ if ! grep -Fq "$nonce" "$workdir/out"; then
 	exit 1
 fi
 
-# Hard: no tool was called (footer on stderr).
-if ! grep -Fq '0 tool calls' "$workdir/err"; then
+# Hard: no tool was called (footer on stderr). Anchor the count on a non-digit
+# boundary so "0 tool calls" is not matched inside "10 tool calls" etc.
+if ! grep -Eq '(^|[^0-9])0 tool calls' "$workdir/err"; then
 	printf 'FAIL: expected "0 tool calls" in footer (a tool was called). stderr tail:\n' >&2
 	tail -n 20 "$workdir/err" >&2
 	exit 1
