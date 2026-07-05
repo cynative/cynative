@@ -23,12 +23,20 @@
 #                               the budget is checked after the response, so too
 #                               low a value discards the answer for a budget notice)
 #   SMOKE_REQUIRE_NO_CONNECTORS =1 hard-fails unless no connector registers
+#   SMOKE_REQUIRE_RUN          =1 hard-fails (instead of skipping) when provider/
+#                               model are unset, so a misconfigured CI job that
+#                               would silently skip is caught as a failure
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 
-# Skip cleanly when no provider is configured.
+# Skip cleanly when no provider is configured - unless SMOKE_REQUIRE_RUN=1, where
+# a missing provider/model is a failure (a CI job must never go green by skipping).
 if [ -z "${CYNATIVE_LLM_PROVIDER:-}" ] || [ -z "${CYNATIVE_LLM_MODEL:-}" ]; then
+	if [ "${SMOKE_REQUIRE_RUN:-}" = "1" ]; then
+		printf 'FAIL: CYNATIVE_LLM_PROVIDER/CYNATIVE_LLM_MODEL unset but SMOKE_REQUIRE_RUN=1\n' >&2
+		exit 1
+	fi
 	printf 'skip: llm.smoke (set CYNATIVE_LLM_PROVIDER + CYNATIVE_LLM_MODEL + creds to run)\n' >&2
 	exit 0
 fi
@@ -40,8 +48,7 @@ workdir=$(mktemp -d)
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT INT TERM
 
-# Build the binary (or accept a prebuilt one). Build BEFORE relocating HOME so
-# the Go build cache under the real HOME is reused.
+# Build the binary (or accept a prebuilt one).
 bin=${1:-}
 if [ -z "$bin" ]; then
 	bin="$workdir/cynative"
@@ -54,14 +61,20 @@ fi
 nonce="SMOKE-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 prompt="Reply with exactly this token and nothing else: $nonce"
 
-# Isolate HOME (relocates ~/.cynative config/cache/audit) and silence connector
-# discovery sources unrelated to any LLM provider (github/gitlab/kube tokens and
-# config-dir overrides are never LLM creds). Do NOT unset AWS/GCP/Azure creds:
-# the LLM provider may need them (e.g. Bedrock uses AWS creds, so the gcp/aws
-# connectors can still register on a cloud host - the 0-tool-calls assertion is
-# the real safety net, and SMOKE_REQUIRE_NO_CONNECTORS is opt-in).
-export HOME="$workdir"
-unset XDG_CONFIG_HOME GH_CONFIG_DIR GLAB_CONFIG_DIR KUBECONFIG \
+# Isolate cynative's OWN config/cache/audit without moving HOME, so the provider
+# SDKs can still find file-based credentials on a local run (~/.aws for Bedrock,
+# the gcloud ADC file for Vertex, ~/.azure for Azure). An empty --config makes
+# cynative ignore the caller's ~/.cynative/config.yaml, and cache/audit go to the
+# temp dir. Silence connector discovery sources unrelated to any LLM provider
+# (github/gitlab/kube tokens and config-dir overrides are never LLM creds). Do
+# NOT unset AWS/GCP/Azure creds: the LLM provider may need them (e.g. Bedrock uses
+# AWS creds), so the aws/gcp connectors can still register on a cloud host - the
+# 0-tool-calls assertion is the real safety net, and SMOKE_REQUIRE_NO_CONNECTORS
+# is opt-in (CI only, where the runner is clean).
+: > "$workdir/config.yaml"
+export CYNATIVE_CACHE_DIR="$workdir/cache"
+export CYNATIVE_AUDIT_PATH="$workdir/audit.log"
+unset GH_CONFIG_DIR GLAB_CONFIG_DIR KUBECONFIG \
 	GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
 
 printf '== RUN == %s/%s\n' "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
@@ -69,7 +82,7 @@ printf '== RUN == %s/%s\n' "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
 # before rc is captured, so wrap it (house pattern, test/install.e2e.test.sh).
 set +e
 CYNATIVE_MAX_ITERATIONS=1 CYNATIVE_MAX_TOTAL_TOKENS="${SMOKE_MAX_TOKENS:-16000}" \
-	timeout "${SMOKE_TIMEOUT:-60}" "$bin" -p "$prompt" --auto-approve \
+	timeout "${SMOKE_TIMEOUT:-60}" "$bin" --config "$workdir/config.yaml" -p "$prompt" --auto-approve \
 		>"$workdir/out" 2>"$workdir/err" </dev/null
 rc=$?
 set -e

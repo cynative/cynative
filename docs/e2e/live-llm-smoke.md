@@ -49,6 +49,7 @@ sh test/llm.smoke.test.sh /path/to/cynative
 | `SMOKE_TIMEOUT` | `60` | Wall-clock seconds for the run. |
 | `SMOKE_MAX_TOKENS` | `16000` | Token ceiling (a safety backstop, not a tight budget). One turn of a thinking model like `gemini-2.5-flash` spends a few thousand tokens, and the budget is checked after the response, so too low a value discards the answer for a budget notice. |
 | `SMOKE_REQUIRE_NO_CONNECTORS` | unset | When `1`, hard-fail unless no connector registers. CI sets this on its clean runner; leave it unset on a cloud host (see the caveat below). |
+| `SMOKE_REQUIRE_RUN` | unset | When `1`, a missing `CYNATIVE_LLM_PROVIDER`/`CYNATIVE_LLM_MODEL` is a hard failure instead of a skip. CI sets this so a misconfigured job (for example a renamed model variable) fails loudly rather than passing green without exercising the model. |
 
 ## What it asserts
 

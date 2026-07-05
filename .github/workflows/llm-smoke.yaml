@@ -82,6 +82,8 @@ jobs:
           CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
           CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
           SMOKE_REQUIRE_NO_CONNECTORS: "1"
+          # Missing/renamed provider vars must fail the job, never silently skip.
+          SMOKE_REQUIRE_RUN: "1"
           CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")" make llm-smoke
