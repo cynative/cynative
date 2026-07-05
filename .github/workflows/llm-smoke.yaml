@@ -8,7 +8,11 @@ name: Live LLM smoke
 # Federation; the credential step is gated to same-repo events so untrusted forks
 # never reach it. Not a required status check.
 on:
+  # Include `labeled` (on top of the opened/synchronize/reopened defaults) so the
+  # `autorelease: pending` fallback in the detect job actually fires when that
+  # label is added after the PR is created, which is the lag it exists to cover.
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
