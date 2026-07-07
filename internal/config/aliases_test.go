@@ -173,6 +173,7 @@ func TestLoad_CanonicalEnvFallback_AllProviders(t *testing.T) {
 		{"parasail", "PARASAIL_API_KEY", "parasail-l3.3-70b"},
 		{"fireworks", "FIREWORKS_API_KEY", "accounts/fireworks/models/llama-v3p3-70b-instruct"},
 		{"replicate", "REPLICATE_API_TOKEN", "meta/meta-llama-3.3-70b-instruct"},
+		{"deepseek", "DEEPSEEK_API_KEY", "deepseek-chat"},
 	}
 
 	for _, c := range cases {
@@ -227,6 +228,36 @@ func TestLoad_AzureKeyConfigAlias_FoldsIntoKey(t *testing.T) {
 	}
 	if cfg.LLM.Azure != nil {
 		t.Error("Azure alias should be cleared after materialize")
+	}
+}
+
+func TestLoad_BedrockMantleKeyConfigAlias_FoldsIntoKey(t *testing.T) {
+	t.Parallel()
+
+	// No api_key: like Bedrock, Mantle can run on the AWS credential chain,
+	// so the region config alone must trigger a synthesized key.
+	yaml := `llm:
+  provider: bedrock_mantle
+  model: anthropic.claude-opus-4-8
+  bedrock_mantle:
+    region: us-west-2
+`
+
+	cfg, err := config.NewLoader(envMap(nil)).Load(writeConfig(t, yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LLM.Keys) != 1 {
+		t.Fatalf("expected 1 key, got %d", len(cfg.LLM.Keys))
+	}
+	if cfg.LLM.Keys[0].BedrockMantleKeyConfig == nil {
+		t.Fatal("BedrockMantleKeyConfig was not folded into keys[0]")
+	}
+	if got := cfg.LLM.Keys[0].BedrockMantleKeyConfig.Region.Val; got != "us-west-2" {
+		t.Errorf("region: got %q", got)
+	}
+	if cfg.LLM.BedrockMantle != nil {
+		t.Error("BedrockMantle alias should be cleared after materialize")
 	}
 }
 

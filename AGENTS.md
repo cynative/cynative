@@ -140,7 +140,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   every Bifrost field (including `network_config` for proxy/timeout/retries/headers) is exposed
   without per-field translation, plus the cynative selectors (`provider`, `model`), the
   `api_key` top-level alias, and hoisted per-provider key-config aliases
-  (`azure`/`vertex`/`bedrock`/`vllm`/`ollama`/`sgl`/`replicate`). Invariants:
+  (`azure`/`vertex`/`bedrock`/`bedrock_mantle`/`vllm`/`ollama`/`sgl`/`replicate`). Invariants:
   - The provider catalog is **derived**: `ChatProviders()` is Bifrost's `StandardProviders`
     minus the hand-triaged `nonChatProviders` exclusions (providers whose Bifrost impl cannot
     chat, rejected by `config.ValidateLLM`). `CanonicalEnvKeyLookup` backs the single-env-var

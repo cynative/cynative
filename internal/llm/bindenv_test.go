@@ -22,6 +22,7 @@ func TestProviderEnvKeys_IncludesHoistedAndNested(t *testing.T) {
 		"llm.vertex.project_id",
 		"llm.vertex.region",
 		"llm.bedrock.region",
+		"llm.bedrock_mantle.region",
 		"llm.vllm.url",
 		"llm.vllm.model_name",
 		"llm.sgl.url",

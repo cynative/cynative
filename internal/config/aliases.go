@@ -68,7 +68,8 @@ func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.Secr
 // anyHoistedKeyConfig reports whether any hoisted per-provider key config is set.
 func anyHoistedKeyConfig(entry *llm.ProviderEntry) bool {
 	return entry.Azure != nil || entry.Vertex != nil || entry.Bedrock != nil ||
-		entry.VLLM != nil || entry.Ollama != nil || entry.SGL != nil || entry.Replicate != nil
+		entry.BedrockMantle != nil || entry.VLLM != nil || entry.Ollama != nil ||
+		entry.SGL != nil || entry.Replicate != nil
 }
 
 // applyHoistedKeyConfigs copies the hoisted key configs onto key. Absent ones
@@ -77,6 +78,7 @@ func applyHoistedKeyConfigs(entry *llm.ProviderEntry, key *schemas.Key) {
 	key.AzureKeyConfig = entry.Azure
 	key.VertexKeyConfig = entry.Vertex
 	key.BedrockKeyConfig = entry.Bedrock
+	key.BedrockMantleKeyConfig = entry.BedrockMantle
 	key.VLLMKeyConfig = entry.VLLM
 	key.OllamaKeyConfig = entry.Ollama
 	key.SGLKeyConfig = entry.SGL
@@ -88,6 +90,7 @@ func clearHoistedKeyConfigs(entry *llm.ProviderEntry) {
 	entry.Azure = nil
 	entry.Vertex = nil
 	entry.Bedrock = nil
+	entry.BedrockMantle = nil
 	entry.VLLM = nil
 	entry.Ollama = nil
 	entry.SGL = nil

@@ -23,6 +23,7 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `anthropic`    | `ANTHROPIC_API_KEY`                | [anthropic.md](anthropic.md) |
 | `azure`        | `AZURE_OPENAI_API_KEY`             | [azure.md](azure.md) |
 | `bedrock`      | (AWS credential chain)             | [bedrock.md](bedrock.md) |
+| `bedrock_mantle` | (AWS credential chain or `api_key`) | [bedrock_mantle.md](bedrock_mantle.md) |
 | `vertex`       | (none — needs project_id + region) | [vertex.md](vertex.md) |
 | `gemini`       | `GEMINI_API_KEY`                   | [gemini.md](gemini.md) |
 | `cohere`       | `COHERE_API_KEY`                   | [cohere.md](cohere.md) |
@@ -37,6 +38,7 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `parasail`     | `PARASAIL_API_KEY`                 | [parasail.md](parasail.md) |
 | `fireworks`    | `FIREWORKS_API_KEY`                | [fireworks.md](fireworks.md) |
 | `replicate`    | `REPLICATE_API_TOKEN`              | [replicate.md](replicate.md) |
+| `deepseek`     | `DEEPSEEK_API_KEY`                 | [deepseek.md](deepseek.md) |
 | `opencode-go`  | `OPENCODE_API_KEY`                 | [opencode-go.md](opencode-go.md) |
 | `opencode-zen` | `OPENCODE_API_KEY`                 | [opencode-zen.md](opencode-zen.md) |
 | `ollama`       | (none — local endpoint)            | [ollama.md](ollama.md) |
@@ -62,7 +64,7 @@ llm:
       x-custom: value
     insecure_skip_verify: false                    # optional
   openai_config: {...}             # top-level squashed provider config
-  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/vllm/ollama/sgl/replicate)
+  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/vllm/ollama/sgl/replicate)
   keys: [...]                      # advanced: multi-key load balancing
 ```
 
@@ -84,6 +86,7 @@ Provider-specific (nested) identity fields:
 - **Azure:** `CYNATIVE_LLM_AZURE_ENDPOINT`
 - **Vertex:** `CYNATIVE_LLM_VERTEX_PROJECT_ID`, `CYNATIVE_LLM_VERTEX_REGION`
 - **Bedrock:** `CYNATIVE_LLM_BEDROCK_REGION`
+- **Bedrock Mantle:** `CYNATIVE_LLM_BEDROCK_MANTLE_REGION`
 - **vLLM / SGL:** `CYNATIVE_LLM_VLLM_URL`, `CYNATIVE_LLM_VLLM_MODEL_NAME`, `CYNATIVE_LLM_SGL_URL`
 
 Any nested Bifrost field is reachable by upper-snake-casing its JSON path: `CYNATIVE_LLM_<PATH>` (e.g. `CYNATIVE_LLM_NETWORK_CONFIG_MAX_CONNS_PER_HOST`, `CYNATIVE_LLM_OPENAI_CONFIG_DISABLE_STORE`).

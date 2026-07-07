@@ -46,13 +46,14 @@ type ProviderEntry struct {
 	// json tags (so env names drop the "_key_config" noise, e.g.
 	// CYNATIVE_LLM_AZURE_ENDPOINT). materializeLLM folds whichever is set into
 	// the synthesized keys[0]; after materialize these are nil.
-	Azure     *schemas.AzureKeyConfig     `json:"azure,omitempty"`
-	Vertex    *schemas.VertexKeyConfig    `json:"vertex,omitempty"`
-	Bedrock   *schemas.BedrockKeyConfig   `json:"bedrock,omitempty"`
-	VLLM      *schemas.VLLMKeyConfig      `json:"vllm,omitempty"`
-	Ollama    *schemas.OllamaKeyConfig    `json:"ollama,omitempty"`
-	SGL       *schemas.SGLKeyConfig       `json:"sgl,omitempty"`
-	Replicate *schemas.ReplicateKeyConfig `json:"replicate,omitempty"`
+	Azure         *schemas.AzureKeyConfig         `json:"azure,omitempty"`
+	Vertex        *schemas.VertexKeyConfig        `json:"vertex,omitempty"`
+	Bedrock       *schemas.BedrockKeyConfig       `json:"bedrock,omitempty"`
+	BedrockMantle *schemas.BedrockMantleKeyConfig `json:"bedrock_mantle,omitempty"`
+	VLLM          *schemas.VLLMKeyConfig          `json:"vllm,omitempty"`
+	Ollama        *schemas.OllamaKeyConfig        `json:"ollama,omitempty"`
+	SGL           *schemas.SGLKeyConfig           `json:"sgl,omitempty"`
+	Replicate     *schemas.ReplicateKeyConfig     `json:"replicate,omitempty"`
 }
 
 // FileAccount implements schemas.Account by exposing a single configured

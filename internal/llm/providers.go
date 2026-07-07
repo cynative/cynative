@@ -60,7 +60,8 @@ func ChatProviders() []schemas.ModelProvider {
 // CanonicalEnvKeyLookup maps each chat-capable Bifrost provider to the
 // conventional environment variable cynative reads when neither llm.api_key
 // nor llm.keys were configured. An empty string means "this provider has no
-// canonical single-env fallback" (Bedrock uses the AWS credential chain;
+// canonical single-env fallback" (Bedrock and Bedrock Mantle use the AWS
+// credential chain, Mantle alternatively an explicit API key via llm.api_key;
 // Vertex needs structured project/region config in llm.vertex.* and gets
 // credentials via the Google ADC chain; Ollama/VLLM/SGL authenticate via the
 // local endpoint URL). The "ok bool" returned by CanonicalEnvKey distinguishes
@@ -71,29 +72,31 @@ func ChatProviders() []schemas.ModelProvider {
 //
 //nolint:gochecknoglobals,exhaustive // lookup table; covers exactly ChatProviders(), not every Bifrost provider
 var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
-	schemas.OpenAI:      "OPENAI_API_KEY",
-	schemas.Anthropic:   "ANTHROPIC_API_KEY",
-	schemas.Azure:       "AZURE_OPENAI_API_KEY",
-	schemas.Gemini:      "GEMINI_API_KEY",
-	schemas.Vertex:      "",
-	schemas.Cohere:      "COHERE_API_KEY",
-	schemas.Mistral:     "MISTRAL_API_KEY",
-	schemas.Groq:        "GROQ_API_KEY",
-	schemas.Perplexity:  "PERPLEXITY_API_KEY",
-	schemas.Cerebras:    "CEREBRAS_API_KEY",
-	schemas.OpenRouter:  "OPENROUTER_API_KEY",
-	schemas.XAI:         "XAI_API_KEY",
-	schemas.HuggingFace: "HUGGINGFACE_API_KEY",
-	schemas.Nebius:      "NEBIUS_API_KEY",
-	schemas.Parasail:    "PARASAIL_API_KEY",
-	schemas.Fireworks:   "FIREWORKS_API_KEY",
-	schemas.Replicate:   "REPLICATE_API_TOKEN",
-	schemas.OpencodeGo:  "OPENCODE_API_KEY",
-	schemas.OpencodeZen: "OPENCODE_API_KEY",
-	schemas.Bedrock:     "",
-	schemas.Ollama:      "",
-	schemas.VLLM:        "",
-	schemas.SGL:         "",
+	schemas.OpenAI:        "OPENAI_API_KEY",
+	schemas.Anthropic:     "ANTHROPIC_API_KEY",
+	schemas.Azure:         "AZURE_OPENAI_API_KEY",
+	schemas.Gemini:        "GEMINI_API_KEY",
+	schemas.Vertex:        "",
+	schemas.Cohere:        "COHERE_API_KEY",
+	schemas.Mistral:       "MISTRAL_API_KEY",
+	schemas.Groq:          "GROQ_API_KEY",
+	schemas.Perplexity:    "PERPLEXITY_API_KEY",
+	schemas.Cerebras:      "CEREBRAS_API_KEY",
+	schemas.OpenRouter:    "OPENROUTER_API_KEY",
+	schemas.XAI:           "XAI_API_KEY",
+	schemas.HuggingFace:   "HUGGINGFACE_API_KEY",
+	schemas.Nebius:        "NEBIUS_API_KEY",
+	schemas.Parasail:      "PARASAIL_API_KEY",
+	schemas.Fireworks:     "FIREWORKS_API_KEY",
+	schemas.Replicate:     "REPLICATE_API_TOKEN",
+	schemas.OpencodeGo:    "OPENCODE_API_KEY",
+	schemas.OpencodeZen:   "OPENCODE_API_KEY",
+	schemas.DeepSeek:      "DEEPSEEK_API_KEY",
+	schemas.Bedrock:       "",
+	schemas.BedrockMantle: "",
+	schemas.Ollama:        "",
+	schemas.VLLM:          "",
+	schemas.SGL:           "",
 }
 
 // CanonicalEnvKey reports the conventional environment variable for the given
