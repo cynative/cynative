@@ -1,5 +1,6 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
-	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke
+	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
+	connector-gcp-e2e
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -163,3 +164,10 @@ install-e2e:
 # See docs/e2e/live-llm-smoke.md.
 llm-smoke:
 	sh test/llm.smoke.test.sh
+
+# connector-gcp-e2e: live GCP connector end-to-end test (cynative#39). Standalone
+# (NOT part of `make check`): runs the real `cynative -p` against a real GCP fixture
+# project through the gcp connector and needs real credentials; skips cleanly when
+# GCP_E2E_* env is unset. See docs/e2e/live-gcp-connector.md.
+connector-gcp-e2e:
+	sh test/connector.gcp.e2e.test.sh
