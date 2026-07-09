@@ -267,27 +267,31 @@ read_phase() {
 		tail -n 20 "$workdir/read.err" >&2
 		return 1
 	fi
-	# Answer identifies the resource: the project number (fed out of band) is echoed.
-	if ! grep -Fiq "$GCP_E2E_EXPECT" "$workdir/read.out"; then
-		printf 'read: project number not found in answer (no real read?). stdout tail:\n' >&2
-		tail -n 20 "$workdir/read.out" >&2
-		return 1
-	fi
-	# The gcp connector registered and is available under the read-only role.
+	# Verify the environment before the answer: the gcp connector must have
+	# registered and be available under the read-only role. On failure dump the
+	# startup connector inventory and a stderr tail, so a registration skip is
+	# diagnosable here rather than surfacing later as a missing answer.
 	if ! grep -Eq 'gcp .*role=roles/viewer' "$workdir/read.err"; then
-		printf 'read: gcp connector not shown available under role=roles/viewer. inventory:\n' >&2
-		grep -i 'gcp' "$workdir/read.err" >&2 || true
+		printf 'read: gcp connector not shown available under role=roles/viewer. inventory + stderr tail:\n' >&2
+		grep -iE 'gcp|connector|hardening|no connectors detected' "$workdir/read.err" >&2 || true
+		tail -n 25 "$workdir/read.err" >&2
 		return 1
 	fi
 	if grep -Eq 'gcp .*gcp_hardening: skipped' "$workdir/read.err"; then
 		printf 'read: gcp connector was skipped at startup. inventory:\n' >&2
-		grep -i 'gcp' "$workdir/read.err" >&2 || true
+		grep -iE 'gcp|hardening' "$workdir/read.err" >&2 || true
 		return 1
 	fi
 	# A tool was actually called (opposite of the no-tool llm smoke).
 	if grep -Eq '(^|[^0-9])0 tool calls' "$workdir/read.err"; then
 		printf 'read: footer reports 0 tool calls (no read happened). stderr tail:\n' >&2
 		tail -n 20 "$workdir/read.err" >&2
+		return 1
+	fi
+	# Answer identifies the resource: the project number (fed out of band) is echoed.
+	if ! grep -Fiq "$GCP_E2E_EXPECT" "$workdir/read.out"; then
+		printf 'read: project number not found in answer (no real read?). stdout tail:\n' >&2
+		tail -n 20 "$workdir/read.out" >&2
 		return 1
 	fi
 	# The audit log shows a successful gcp GET to cloudresourcemanager for the project.
