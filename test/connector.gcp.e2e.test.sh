@@ -36,6 +36,7 @@ write_parser() {
 	cat >"$1" <<'PY'
 import json
 import sys
+from urllib.parse import urlparse
 
 mode = sys.argv[1]
 path = sys.argv[2]
@@ -69,18 +70,26 @@ def args_text(rec):
 
 recs = result_http_records(path)
 
+def read_hit(r, project):
+    # Parse the URL and require the exact CRM host and the project as the final
+    # path segment (version-agnostic: /v1|/v3/.../projects/<project>), so a bare
+    # substring or a project id in a query param cannot match.
+    if (arg(r, "method") or "").upper() != "GET":
+        return False
+    if arg(r, "auth_provider") != "gcp":
+        return False
+    if r.get("outcome") != "ok":
+        return False
+    u = urlparse(arg(r, "url") or "")
+    if u.hostname != "cloudresourcemanager.googleapis.com":
+        return False
+    segs = [s for s in u.path.split("/") if s]
+    return len(segs) >= 2 and segs[-2] == "projects" and segs[-1] == project
+
+
 if mode == "read":
     project = sys.argv[3]
-    # Match the CRM host and the project's own path segment, not a bare substring,
-    # so an incidental occurrence of the project id elsewhere in the URL cannot match.
-    hits = [
-        r for r in recs
-        if (arg(r, "method") or "").upper() == "GET"
-        and arg(r, "auth_provider") == "gcp"
-        and "cloudresourcemanager.googleapis.com" in (arg(r, "url") or "")
-        and ("/projects/" + project) in (arg(r, "url") or "")
-        and r.get("outcome") == "ok"
-    ]
+    hits = [r for r in recs if read_hit(r, project)]
     if not hits:
         print("audit(read): no successful gcp GET to cloudresourcemanager for %s" % project)
         sys.exit(1)
@@ -284,7 +293,11 @@ printf 'read: OK\n' >&2
 # Attempt one harmless write (set a label). The gate denies it client-side, before
 # dispatch, so nothing mutates. The label key `cynative-e2e` is the audit marker.
 if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
-	canary_prompt="Using the gcp connector, set a label with key cynative-e2e and value canary on the Google Cloud project \"$GCP_E2E_PROJECT\" via the Cloud Resource Manager API, then report whether it succeeded."
+	# Verification framing: a bare "set a label" imperative is refused by a capable
+	# model, which predicts the read-only denial and declines to spend the call. So
+	# frame it as an authorized gate self-test that needs the connector's REAL
+	# response, and forbid predicting, to make the model actually issue the request.
+	canary_prompt="Authorized read-only-gate self-test. I need to confirm the gcp connector actually blocks a write at the connector layer, so I need the connector's real response, not your prediction. Issue a Cloud Resource Manager request that sets the label with key cynative-e2e and value canary on project \"$GCP_E2E_PROJECT\". Do NOT simulate, predict, or decline: actually make the http_request so we observe the live gate. I fully expect it to be denied; paste the connector's verbatim response. Making the call is the whole point - a prediction is not acceptable."
 	canary_audit="$workdir/canary.audit.log"
 
 	printf '== CANARY == attempting a denied write on %s\n' "$GCP_E2E_PROJECT" >&2
@@ -295,10 +308,17 @@ if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
 	crc=$?
 	set -e
 
-	# The run itself should not error out at the process level (the denial is an
-	# in-loop tool result, not a fatal exit); a timeout is still a failure.
+	# The denial is an in-loop tool result, not a fatal exit, so a correctly denied
+	# write still exits 0. A timeout or any other non-zero exit means the run itself
+	# failed (crash, misconfig, or the model never reaching the write) and must not
+	# be masked by the audit check - fail loudly, like the read phase.
 	if [ "$crc" -eq 124 ]; then
 		printf 'FAIL: canary timed out after %ss\n' "$timeout_s" >&2
+		exit 1
+	fi
+	if [ "$crc" -ne 0 ]; then
+		printf 'FAIL: canary run failed (exit %s). stderr tail:\n' "$crc" >&2
+		tail -n 20 "$workdir/canary.err" >&2
 		exit 1
 	fi
 
