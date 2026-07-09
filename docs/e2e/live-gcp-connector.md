@@ -23,15 +23,20 @@ client-side action gate; the canary is the positive proof.
 
 ```bash
 export CYNATIVE_LLM_PROVIDER=vertex
-export CYNATIVE_LLM_MODEL=gemini-2.5-flash
+export CYNATIVE_LLM_MODEL=gemini-3.5-flash
 export CYNATIVE_LLM_VERTEX_PROJECT_ID=cynative-cli-ci
-export CYNATIVE_LLM_VERTEX_REGION=us-central1
+export CYNATIVE_LLM_VERTEX_REGION=global   # gemini-3.5-flash is a global-endpoint model
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/adc.json   # lights the gcp connector
 export GCP_E2E_PROJECT=cynative-cli-ci
 export GCP_E2E_EXPECT=<the project's numeric projectNumber>
 
 make connector-gcp-e2e
 ```
+
+The model must be capable enough to drive a multi-step tool flow (register the
+connector, read the project, attempt the write). `gemini-3.5-flash` is reliable;
+`gemini-2.5-flash` is not (it stalls on the iteration limit) and is not
+recommended here.
 
 With `GCP_E2E_PROJECT` (or the LLM provider) unset, `make connector-gcp-e2e`
 prints a `skip:` line and exits 0, so it is a safe no-op.
@@ -47,6 +52,7 @@ to verify the audit parser offline, with no credentials.
 | `GCP_E2E_TIMEOUT` | `120` | Wall-clock seconds per run (a tool-using run is slower than a no-tool turn). |
 | `GCP_E2E_MAX_TOKENS` | `32000` | Token backstop, not a tight budget. |
 | `GCP_E2E_CANARY` | `1` | `0` runs only the read phase, skipping the write-deny canary. |
+| `GCP_E2E_ATTEMPTS` | `2` | Attempts per phase before failing. Model runs are non-deterministic, so one retry absorbs a rare miss; a real failure fails every attempt. |
 | `GCP_E2E_REQUIRE_RUN` | unset | `1` hard-fails instead of skipping when required env is unset (CI sets this). |
 
 ## What it asserts
