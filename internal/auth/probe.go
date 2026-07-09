@@ -45,7 +45,6 @@ func isTransientProbeErr(err error) bool {
 	}
 
 	var httpErr interface{ HTTPStatusCode() int }
-	//nolint:modernize // errors.AsType[E error] requires E to implement error; this anonymous interface does not.
 	if errors.As(err, &httpErr) {
 		code := httpErr.HTTPStatusCode()
 
