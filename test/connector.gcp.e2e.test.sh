@@ -251,6 +251,10 @@ read_prompt="Use the gcp connector to look up the Google Cloud project \"$GCP_E2
 
 read_phase() {
 	printf '== READ == %s (%s/%s)\n' "$GCP_E2E_PROJECT" "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
+	# Truncate the audit log so a retry is evaluated against only this attempt's
+	# records (cynative opens the audit log append-only, so a stale record from a
+	# failed earlier attempt could otherwise satisfy this attempt's parser).
+	: > "$workdir/read.audit.log"
 	if CYNATIVE_AUDIT_PATH="$workdir/read.audit.log" \
 		timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$read_prompt" --auto-approve \
 		>"$workdir/read.out" 2>"$workdir/read.err" </dev/null; then rc=0; else rc=$?; fi
@@ -310,6 +314,10 @@ canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL
 
 canary_phase() {
 	printf '== CANARY == attempting a denied write on %s\n' "$GCP_E2E_PROJECT" >&2
+	# Truncate first so a retry sees only this attempt's records (see read_phase):
+	# a stale marked+denied record from a failed earlier attempt must not satisfy
+	# this attempt's parser.
+	: > "$workdir/canary.audit.log"
 	if CYNATIVE_AUDIT_PATH="$workdir/canary.audit.log" \
 		timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$canary_prompt" --auto-approve \
 		>"$workdir/canary.out" 2>"$workdir/canary.err" </dev/null; then crc=0; else crc=$?; fi
