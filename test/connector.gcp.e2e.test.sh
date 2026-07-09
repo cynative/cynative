@@ -71,20 +71,22 @@ def args_text(rec):
 recs = result_http_records(path)
 
 def read_hit(r, project):
-    # Parse the URL and require the exact CRM host and the project as the final
-    # path segment (version-agnostic: /v1|/v3/.../projects/<project>), so a bare
-    # substring or a project id in a query param cannot match.
+    # A successful gcp GET to Cloud Resource Manager that references the project.
+    # Host-anchored (not a bare substring) but endpoint-agnostic: different models
+    # read a project differently - a direct get (/v1/projects/<p>, project in the
+    # path) or a filtered list (/v1/projects?filter=name:<p>, project in the query).
+    # Both are valid reads that surface the number; project-specificity is also
+    # pinned by the stdout project-number assertion.
     if (arg(r, "method") or "").upper() != "GET":
         return False
     if arg(r, "auth_provider") != "gcp":
         return False
     if r.get("outcome") != "ok":
         return False
-    u = urlparse(arg(r, "url") or "")
-    if u.hostname != "cloudresourcemanager.googleapis.com":
+    u = arg(r, "url") or ""
+    if urlparse(u).hostname != "cloudresourcemanager.googleapis.com":
         return False
-    segs = [s for s in u.path.split("/") if s]
-    return len(segs) >= 2 and segs[-2] == "projects" and segs[-1] == project
+    return project in u
 
 
 if mode == "read":
@@ -139,6 +141,12 @@ selftest() {
 	printf '%s\n' \
 		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":{\"method\":\"GET\",\"url\":\"$url\",\"auth_provider\":\"gcp\"},\"outcome\":\"error\",\"result\":\"boom\"}" \
 		>"$td/read_bad.log"
+	# A good read via a filtered list (project id in the query, not the path):
+	# a different-but-valid read endpoint some models use.
+	list_url='https://cloudresourcemanager.googleapis.com/v1/projects?filter=name:demo-proj'
+	printf '%s\n' \
+		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":{\"method\":\"GET\",\"url\":\"$list_url\",\"auth_provider\":\"gcp\"},\"outcome\":\"ok\",\"result\":\"{}\"}" \
+		>"$td/read_list.log"
 	# Canary denied client-side (good): marked write, outcome error, gcp_hardening.
 	printf '%s\n' \
 		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":{\"method\":\"POST\",\"url\":\"$url\",\"auth_provider\":\"gcp\",\"body\":\"{\\\"labels\\\":{\\\"cynative-e2e\\\":\\\"canary\\\"}}\"},\"outcome\":\"error\",\"result\":\"auth: authorize action for provider gcp: gcp_hardening: permission not in allow-list role(s)\"}" \
@@ -161,6 +169,7 @@ selftest() {
 	expect_fail() { if python3 "$p" "$@" >/dev/null; then printf 'selftest FAIL: expected fail: %s\n' "$*" >&2; fails=$((fails+1)); fi; }
 
 	expect_pass read   "$td/read_ok.log"     demo-proj
+	expect_pass read   "$td/read_list.log"   demo-proj
 	expect_fail read   "$td/read_bad.log"    demo-proj
 	expect_pass canary "$td/canary_denied.log"
 	expect_fail canary "$td/canary_ok.log"
@@ -171,7 +180,7 @@ selftest() {
 		printf 'selftest: %d case(s) FAILED\n' "$fails" >&2
 		exit 1
 	fi
-	printf 'selftest: OK (6 cases)\n' >&2
+	printf 'selftest: OK (7 cases)\n' >&2
 }
 
 # --- offline self-test: verify the embedded audit parser without credentials ---
@@ -293,11 +302,14 @@ printf 'read: OK\n' >&2
 # Attempt one harmless write (set a label). The gate denies it client-side, before
 # dispatch, so nothing mutates. The label key `cynative-e2e` is the audit marker.
 if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
-	# Verification framing: a bare "set a label" imperative is refused by a capable
-	# model, which predicts the read-only denial and declines to spend the call. So
-	# frame it as an authorized gate self-test that needs the connector's REAL
-	# response, and forbid predicting, to make the model actually issue the request.
-	canary_prompt="Authorized read-only-gate self-test. I need to confirm the gcp connector actually blocks a write at the connector layer, so I need the connector's real response, not your prediction. Issue a Cloud Resource Manager request that sets the label with key cynative-e2e and value canary on project \"$GCP_E2E_PROJECT\". Do NOT simulate, predict, or decline: actually make the http_request so we observe the live gate. I fully expect it to be denied; paste the connector's verbatim response. Making the call is the whole point - a prediction is not acceptable."
+	# The canary depends on the model actually issuing the write. A task-framed
+	# imperative ("set a label ...") is unreliable: a capable model predicts the
+	# read-only denial and declines to spend the call (Opus refused; gemini was a
+	# coin-flip). Giving the exact http_request to make turns it into a deterministic
+	# instruction-following task (validated reliable across models), while the gate
+	# still denies the write before dispatch. gcp_auth.service and the labels body
+	# are spelled out so any model can reproduce the call verbatim.
+	canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL response to a write, not a prediction. Make exactly this call now using the http_request tool and then paste the connector's verbatim response: method=PATCH, url=https://cloudresourcemanager.googleapis.com/v3/projects/$GCP_E2E_PROJECT?updateMask=labels, auth_provider=gcp, gcp_auth={service: cloudresourcemanager}, body={\"labels\":{\"cynative-e2e\":\"canary\"}}. Issue the request; do not skip, simulate, or answer from prediction. I expect it to be denied - I need to see the actual denial."
 	canary_audit="$workdir/canary.audit.log"
 
 	printf '== CANARY == attempting a denied write on %s\n' "$GCP_E2E_PROJECT" >&2
