@@ -11,8 +11,7 @@
 #
 # NOT hermetic and NOT part of `make check`: it talks to a real provider and a
 # real GCP project and needs real credentials. Skips (exit 0) when required env is
-# unset, so `make connector-gcp-e2e` is a safe no-op. See
-# docs/e2e/live-gcp-connector.md.
+# unset, so `make connector-gcp-e2e` is a safe no-op.
 #
 # Usage: sh test/connector.gcp.e2e.test.sh [BINARY]
 #        sh test/connector.gcp.e2e.test.sh --selftest   (offline parser check)
