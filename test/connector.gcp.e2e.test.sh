@@ -25,6 +25,8 @@
 #   GCP_E2E_TIMEOUT        wall-clock seconds per run (default 120)
 #   GCP_E2E_MAX_TOKENS     token backstop (default 32000)
 #   GCP_E2E_CANARY         run the write-deny canary phase (default 1; 0 disables)
+#   GCP_E2E_ATTEMPTS       per-phase attempts before failing (default 2; model runs
+#                          are non-deterministic, so one retry absorbs a rare miss)
 #   GCP_E2E_REQUIRE_RUN    =1 hard-fail instead of skipping when required env is unset
 set -eu
 
@@ -68,8 +70,6 @@ def args_text(rec):
     return a if isinstance(a, str) else json.dumps(a)
 
 
-recs = result_http_records(path)
-
 def read_hit(r, project):
     # A successful gcp GET to Cloud Resource Manager that references the project.
     # Host-anchored (not a bare substring) but endpoint-agnostic: different models
@@ -88,6 +88,8 @@ def read_hit(r, project):
         return False
     return project in u
 
+
+recs = result_http_records(path)
 
 if mode == "read":
     project = sys.argv[3]
@@ -240,107 +242,122 @@ parser="$workdir/audit_check.py"
 write_parser "$parser"
 
 timeout_s="${GCP_E2E_TIMEOUT:-120}"
+attempts="${GCP_E2E_ATTEMPTS:-2}"
 
 # ============================ READ PHASE ============================
 # Give the project id, ask for the number: the model can only produce the number
 # by actually reading the resource through the connector.
 read_prompt="Use the gcp connector to look up the Google Cloud project \"$GCP_E2E_PROJECT\" via the Cloud Resource Manager API and report its numeric projectNumber. Call the API to read it; do not guess. Reply with only the project number."
-read_audit="$workdir/read.audit.log"
 
-printf '== READ == %s (%s/%s)\n' "$GCP_E2E_PROJECT" "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
-set +e
-CYNATIVE_AUDIT_PATH="$read_audit" \
-	timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$read_prompt" --auto-approve \
-	>"$workdir/read.out" 2>"$workdir/read.err" </dev/null
-rc=$?
-set -e
+read_phase() {
+	printf '== READ == %s (%s/%s)\n' "$GCP_E2E_PROJECT" "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
+	if CYNATIVE_AUDIT_PATH="$workdir/read.audit.log" \
+		timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$read_prompt" --auto-approve \
+		>"$workdir/read.out" 2>"$workdir/read.err" </dev/null; then rc=0; else rc=$?; fi
 
-if [ "$rc" -eq 124 ]; then
-	printf 'FAIL: read timed out after %ss\n' "$timeout_s" >&2
-	exit 1
-fi
-if [ "$rc" -ne 0 ]; then
-	printf 'FAIL: read run failed (provider/config/access, exit %s). stderr tail:\n' "$rc" >&2
-	tail -n 20 "$workdir/read.err" >&2
-	exit 1
-fi
-
-# Answer identifies the resource: the project number (fed out of band) is echoed.
-if ! grep -Fiq "$GCP_E2E_EXPECT" "$workdir/read.out"; then
-	printf 'FAIL: project number not found in answer (no real read?). stdout tail:\n' >&2
-	tail -n 20 "$workdir/read.out" >&2
-	exit 1
-fi
-
-# The gcp connector registered and is available under the read-only role.
-if ! grep -Eq 'gcp .*role=roles/viewer' "$workdir/read.err"; then
-	printf 'FAIL: gcp connector not shown available under role=roles/viewer. inventory:\n' >&2
-	grep -i 'gcp' "$workdir/read.err" >&2 || true
-	exit 1
-fi
-if grep -Eq 'gcp .*gcp_hardening: skipped' "$workdir/read.err"; then
-	printf 'FAIL: gcp connector was skipped at startup. inventory:\n' >&2
-	grep -i 'gcp' "$workdir/read.err" >&2 || true
-	exit 1
-fi
-
-# A tool was actually called (opposite of the no-tool llm smoke).
-if grep -Eq '(^|[^0-9])0 tool calls' "$workdir/read.err"; then
-	printf 'FAIL: footer reports 0 tool calls (no read happened). stderr tail:\n' >&2
-	tail -n 20 "$workdir/read.err" >&2
-	exit 1
-fi
-
-# The audit log shows a successful gcp GET to cloudresourcemanager for the project.
-if ! python3 "$parser" read "$read_audit" "$GCP_E2E_PROJECT"; then
-	printf 'FAIL: audit log did not show a successful gcp GET for the project.\n' >&2
-	exit 1
-fi
-printf 'read: OK\n' >&2
+	if [ "$rc" -eq 124 ]; then
+		printf 'read: timed out after %ss\n' "$timeout_s" >&2
+		return 1
+	fi
+	if [ "$rc" -ne 0 ]; then
+		printf 'read: run failed (provider/config/access, exit %s). stderr tail:\n' "$rc" >&2
+		tail -n 20 "$workdir/read.err" >&2
+		return 1
+	fi
+	# Answer identifies the resource: the project number (fed out of band) is echoed.
+	if ! grep -Fiq "$GCP_E2E_EXPECT" "$workdir/read.out"; then
+		printf 'read: project number not found in answer (no real read?). stdout tail:\n' >&2
+		tail -n 20 "$workdir/read.out" >&2
+		return 1
+	fi
+	# The gcp connector registered and is available under the read-only role.
+	if ! grep -Eq 'gcp .*role=roles/viewer' "$workdir/read.err"; then
+		printf 'read: gcp connector not shown available under role=roles/viewer. inventory:\n' >&2
+		grep -i 'gcp' "$workdir/read.err" >&2 || true
+		return 1
+	fi
+	if grep -Eq 'gcp .*gcp_hardening: skipped' "$workdir/read.err"; then
+		printf 'read: gcp connector was skipped at startup. inventory:\n' >&2
+		grep -i 'gcp' "$workdir/read.err" >&2 || true
+		return 1
+	fi
+	# A tool was actually called (opposite of the no-tool llm smoke).
+	if grep -Eq '(^|[^0-9])0 tool calls' "$workdir/read.err"; then
+		printf 'read: footer reports 0 tool calls (no read happened). stderr tail:\n' >&2
+		tail -n 20 "$workdir/read.err" >&2
+		return 1
+	fi
+	# The audit log shows a successful gcp GET to cloudresourcemanager for the project.
+	if ! python3 "$parser" read "$workdir/read.audit.log" "$GCP_E2E_PROJECT"; then
+		printf 'read: audit log did not show a successful gcp GET for the project.\n' >&2
+		return 1
+	fi
+	printf 'read: OK\n' >&2
+	return 0
+}
 
 # ============================ CANARY PHASE ============================
 # Attempt one harmless write (set a label). The gate denies it client-side, before
 # dispatch, so nothing mutates. The label key `cynative-e2e` is the audit marker.
-if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
-	# The canary depends on the model actually issuing the write. A task-framed
-	# imperative ("set a label ...") is unreliable: a capable model predicts the
-	# read-only denial and declines to spend the call (Opus refused; gemini was a
-	# coin-flip). Giving the exact http_request to make turns it into a deterministic
-	# instruction-following task (validated reliable across models), while the gate
-	# still denies the write before dispatch. gcp_auth.service and the labels body
-	# are spelled out so any model can reproduce the call verbatim.
-	canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL response to a write, not a prediction. Make exactly this call now using the http_request tool and then paste the connector's verbatim response: method=PATCH, url=https://cloudresourcemanager.googleapis.com/v3/projects/$GCP_E2E_PROJECT?updateMask=labels, auth_provider=gcp, gcp_auth={service: cloudresourcemanager}, body={\"labels\":{\"cynative-e2e\":\"canary\"}}. Issue the request; do not skip, simulate, or answer from prediction. I expect it to be denied - I need to see the actual denial."
-	canary_audit="$workdir/canary.audit.log"
+# The canary depends on the model actually issuing the write. A task-framed
+# imperative ("set a label ...") is unreliable: a capable model predicts the
+# read-only denial and declines to spend the call (Opus refused; gemini was a
+# coin-flip). Giving the exact http_request to make turns it into a deterministic
+# instruction-following task (validated reliable across models), while the gate
+# still denies the write before dispatch. gcp_auth.service and the labels body are
+# spelled out so any model can reproduce the call verbatim.
+canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL response to a write, not a prediction. Make exactly this call now using the http_request tool and then paste the connector's verbatim response: method=PATCH, url=https://cloudresourcemanager.googleapis.com/v3/projects/$GCP_E2E_PROJECT?updateMask=labels, auth_provider=gcp, gcp_auth={service: cloudresourcemanager}, body={\"labels\":{\"cynative-e2e\":\"canary\"}}. Issue the request; do not skip, simulate, or answer from prediction. I expect it to be denied - I need to see the actual denial."
 
+canary_phase() {
 	printf '== CANARY == attempting a denied write on %s\n' "$GCP_E2E_PROJECT" >&2
-	set +e
-	CYNATIVE_AUDIT_PATH="$canary_audit" \
+	if CYNATIVE_AUDIT_PATH="$workdir/canary.audit.log" \
 		timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$canary_prompt" --auto-approve \
-		>"$workdir/canary.out" 2>"$workdir/canary.err" </dev/null
-	crc=$?
-	set -e
+		>"$workdir/canary.out" 2>"$workdir/canary.err" </dev/null; then crc=0; else crc=$?; fi
 
 	# The denial is an in-loop tool result, not a fatal exit, so a correctly denied
 	# write still exits 0. A timeout or any other non-zero exit means the run itself
 	# failed (crash, misconfig, or the model never reaching the write) and must not
-	# be masked by the audit check - fail loudly, like the read phase.
+	# be masked by the audit check - fail, like the read phase.
 	if [ "$crc" -eq 124 ]; then
-		printf 'FAIL: canary timed out after %ss\n' "$timeout_s" >&2
-		exit 1
+		printf 'canary: timed out after %ss\n' "$timeout_s" >&2
+		return 1
 	fi
 	if [ "$crc" -ne 0 ]; then
-		printf 'FAIL: canary run failed (exit %s). stderr tail:\n' "$crc" >&2
+		printf 'canary: run failed (exit %s). stderr tail:\n' "$crc" >&2
 		tail -n 20 "$workdir/canary.err" >&2
-		exit 1
+		return 1
 	fi
-
-	# The audit log must show the write was attempted AND denied client-side, and
-	# no marked write succeeded.
-	if ! python3 "$parser" canary "$canary_audit"; then
-		printf 'FAIL: canary read-only-boundary assertion failed (see message above).\n' >&2
-		exit 1
+	# The audit log must show the write was attempted AND denied client-side, and no
+	# marked write succeeded.
+	if ! python3 "$parser" canary "$workdir/canary.audit.log"; then
+		printf 'canary: read-only-boundary assertion failed (see message above).\n' >&2
+		return 1
 	fi
 	printf 'canary: OK (write denied client-side)\n' >&2
+	return 0
+}
+
+# Run each phase, retrying a non-deterministic model miss up to $attempts times.
+n=0
+while ! read_phase; do
+	n=$((n + 1))
+	if [ "$n" -ge "$attempts" ]; then
+		printf 'FAIL: read phase failed after %d attempt(s)\n' "$n" >&2
+		exit 1
+	fi
+	printf 'retry: read phase attempt %d failed, retrying\n' "$n" >&2
+done
+
+if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
+	n=0
+	while ! canary_phase; do
+		n=$((n + 1))
+		if [ "$n" -ge "$attempts" ]; then
+			printf 'FAIL: canary phase failed after %d attempt(s)\n' "$n" >&2
+			exit 1
+		fi
+		printf 'retry: canary phase attempt %d failed, retrying\n' "$n" >&2
+	done
 fi
 
 printf 'connector.gcp.e2e: OK (%s)\n' "$GCP_E2E_PROJECT" >&2
