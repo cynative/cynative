@@ -1,6 +1,6 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	connector-gcp-e2e homebrew-smoke
+	connector-gcp-e2e homebrew-smoke install-script-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -87,11 +87,13 @@ shellcheck:
 	fi
 	@git ls-files -z '*.sh' | xargs -0 shellcheck && echo "OK: shellcheck ($(SHELLCHECK_VERSION))"
 
-# pwsh-lint: PSScriptAnalyzer on install.ps1 at the pinned module version. Presence-
-# check with a readable install hint first (install-free — never installs the module).
+# pwsh-lint: PSScriptAnalyzer on install.ps1 and the install-script smoke at the pinned
+# module version. Presence-check with a readable install hint first (install-free —
+# never installs the module). -Path binds a single string, so analyze per file and
+# aggregate; -EnableExit would end the session after the first file, so fail explicitly.
 pwsh-lint:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION)."; exit 1; }
-	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq "$(PSSCRIPTANALYZER_VERSION)")) { Write-Host "FAIL: PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION) not installed — run: Install-Module PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Scope CurrentUser"; exit 1 }; Import-Module -Name PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Force -ErrorAction Stop; Invoke-ScriptAnalyzer -Path install.ps1 -Settings test/PSScriptAnalyzerSettings.psd1 -EnableExit'
+	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq "$(PSSCRIPTANALYZER_VERSION)")) { Write-Host "FAIL: PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION) not installed — run: Install-Module PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Scope CurrentUser"; exit 1 }; Import-Module -Name PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Force -ErrorAction Stop; $$findings = @(); foreach ($$f in "install.ps1", "test/install-script.smoke.test.ps1") { $$findings += Invoke-ScriptAnalyzer -Path $$f -Settings test/PSScriptAnalyzerSettings.psd1 }; if ($$findings.Count -gt 0) { $$findings | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }'
 
 # pwsh-test: Pester unit tests at the pinned module version. Presence-check with a
 # readable install hint first (install-free — never installs the module).
@@ -180,3 +182,14 @@ connector-gcp-e2e:
 # The script header documents its env and knobs.
 homebrew-smoke:
 	sh test/homebrew.smoke.test.sh
+
+# install-script-smoke: post-release public install-script smoke (cynative#47).
+# Standalone (NOT part of `make check`): runs the documented
+# `curl .../install.sh | sh` path against the public release assets - installs the
+# expected release (SMOKE_VERSION, default: latest published), asserts
+# `cynative --version`, uninstalls via the documented paired path, and asserts it
+# is gone. Needs curl and network; no skip path. The Windows sibling
+# (test/install-script.smoke.test.ps1) runs in CI on windows-latest. The script
+# header documents its env and knobs.
+install-script-smoke:
+	sh test/install-script.smoke.test.sh
