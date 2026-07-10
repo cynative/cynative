@@ -7,6 +7,8 @@
 # public-channel drift: a stale tap, a broken formula, an uninstallable
 # tarball. NOT hermetic: talks to the public tap and GitHub releases, and
 # there is deliberately no skip path (no legitimate "not configured" state).
+# A local run leaves the cynative/tap tap installed; `brew untap cynative/tap`
+# removes it.
 #
 # Usage: sh test/homebrew.smoke.test.sh
 #
@@ -72,6 +74,10 @@ if [ "$first_line" != "cynative $version" ]; then
 fi
 
 brew uninstall --formula cynative || { printf 'FAIL: brew uninstall failed\n' >&2; exit 1; }
+# The shell may have hashed cynative's path when --version executed above, and
+# a child brew uninstall cannot clear the parent shell's cache; drop it so a
+# stale hash cannot report the deleted binary as still present.
+hash -r
 if brew list --formula cynative >/dev/null 2>&1; then
 	printf 'FAIL: cynative still listed by brew after uninstall\n' >&2
 	exit 1
