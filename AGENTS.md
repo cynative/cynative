@@ -62,7 +62,7 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   the documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports
   the expected release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts
   it is gone (`test/homebrew.smoke.test.sh`, needs brew; no skip path). See
-  docs/e2e/homebrew-smoke.md.
+  `docs/e2e/homebrew-smoke.md`.
 
 Two linters shape every new test: `paralleltest` requires each test and subtest to call
 `t.Parallel()`, and `forbidigo` bans `os.Getenv`/`LookupEnv`/`Environ` and `t.Setenv` outside
@@ -636,13 +636,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. `.goreleaser.yaml` handles binary builds for
-  release tags. The Release Pipeline gates publish on `scripts/release/audit-formula.sh`
-  (offline `brew audit --strict` of the rendered formula in a throwaway tap;
-  a failure leaves the draft intact) and, after the tap push, calls the
-  reusable `.github/workflows/homebrew-smoke.yaml` (also maintainer-
-  dispatchable), which waits for the tap to serve the new version and runs the
-  Homebrew install smoke on macOS and Linux; a red smoke with a green `release`
-  job means public-channel drift, nothing to roll back.
+  release tags. The Release Pipeline gates publish on `scripts/release/audit-formula.sh` (offline
+  `brew audit --strict` of the rendered formula in a throwaway tap; a failure leaves the draft
+  intact) and, after the tap push, calls the reusable `.github/workflows/homebrew-smoke.yaml`
+  (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
+  the Homebrew install smoke on macOS and Linux; a red smoke with a green `release` job means
+  public-channel drift, nothing to roll back.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and
   `third_party/xar`, plus `tools/rcodesign` (a Cargo stub that pins the `apple-codesign`

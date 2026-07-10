@@ -56,7 +56,7 @@ fi
 
 # Pollution guard: a preexisting binary would make every later assertion lie.
 if command -v cynative >/dev/null 2>&1; then
-	printf 'FAIL: cynative already on PATH (%s); refusing to smoke a polluted environment\n' "$(command -v cynative)" >&2
+	printf 'FAIL: cynative already on PATH (%s); refusing to smoke a polluted environment (a previous failed run may have left it behind: brew uninstall --formula cynative)\n' "$(command -v cynative)" >&2
 	exit 1
 fi
 

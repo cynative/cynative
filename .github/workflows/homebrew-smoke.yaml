@@ -29,22 +29,28 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
     steps:
-      # Dispatch resolves the latest published release; any other event is
-      # the call path, which must carry a non-empty tag (required: true is
-      # not enforced at runtime, and silently falling through to the latest
-      # release could green-light the wrong version).
+      # The tag input wins when present (the call path always passes it); a
+      # manual dispatch has no input and resolves the latest published
+      # release. Keying on input presence rather than the event name matters:
+      # a called workflow inherits the caller's event, so an event check
+      # would silently take the dispatch branch if the Release Pipeline ever
+      # gained a workflow_dispatch trigger. An empty tag on any other event
+      # fails fast (required: true is not enforced at runtime, and silently
+      # falling back to the latest release could green-light the wrong
+      # version).
       - name: Resolve expected version
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_INPUT: ${{ inputs.tag }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+          if [ -n "${TAG_INPUT}" ]; then
+            tag="${TAG_INPUT}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" \
               || { echo "::error::no published release to smoke"; exit 1; }
           else
-            tag="${TAG_INPUT}"
-            [ -n "${tag}" ] || { echo "::error::empty tag input on the workflow_call path"; exit 1; }
+            echo "::error::empty tag input on the workflow_call path"; exit 1
           fi
           echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
           echo "expecting cynative ${tag#v}"
@@ -64,7 +70,7 @@ jobs:
           last="no probe yet"
           for attempt in $(seq 1 20); do
             rm -rf /tmp/tap-probe
-            if git clone --quiet --depth 1 \
+            if timeout 25 git clone --quiet --depth 1 \
                 https://github.com/cynative/homebrew-tap /tmp/tap-probe 2>/tmp/poll-err; then
               if grep -Fq "version \"${VERSION}\"" /tmp/tap-probe/Formula/cynative.rb 2>/dev/null; then
                 echo "tap serves ${VERSION} (attempt ${attempt})"
@@ -75,7 +81,10 @@ jobs:
               last="$(tr -d '\n' < /tmp/poll-err)"
             fi
             echo "attempt ${attempt}/20: tap not serving ${VERSION} yet (${last})"
-            sleep 30
+            # No sleep after the final attempt: the step's own budget-exhaustion
+            # error must fire inside the job timeout (and the default shell is
+            # bash -e, so this must be an if, not a bare [ ] && chain).
+            if [ "${attempt}" -lt 20 ]; then sleep 30; fi
           done
           echo "::error::tap did not serve version ${VERSION} within 10 minutes; last: ${last}"
           exit 1

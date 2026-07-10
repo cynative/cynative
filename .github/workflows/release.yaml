@@ -24,7 +24,7 @@ jobs:
       tag_name: ${{ steps.release-please.outputs.tag_name }}
     # Bound the job: the concurrency group means a wedged run blocks later
     # releases for the default 360 minutes otherwise. The budget covers the
-    # capped long steps (goreleaser 35, pkg build/notarize 20, verify 5) plus
+    # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10, verify 5) plus
     # every short step with slack to spare, so the job limit can never fire
     # mid-step.
     timeout-minutes: 90
@@ -282,9 +282,11 @@ jobs:
       # untouched, so a broken formula can never strand a published release
       # behind a stale tap. Offline by necessity: draft assets are not
       # publicly downloadable, so --online checks are impossible pre-publish.
+      # The 10 minute budget covers brew audit's first-run bundler-gem
+      # bootstrap (rubocop and friends download on the cold runner).
       - name: Audit Homebrew formula
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
           VERSION: ${{ steps.release-please.outputs.tag_name }}
         run: scripts/release/audit-formula.sh "${VERSION#v}" /tmp/expected-assets.tsv
