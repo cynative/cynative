@@ -151,6 +151,18 @@ func TestValidateLLM(t *testing.T) {
 			llm.ProviderEntry{Provider: "openai", Model: "gpt-5.5"},
 			llm.ErrNoKeysForProvider,
 		}, //nolint:exhaustruct // partial entry by design
+		{
+			"negative max_retries",
+			llm.ProviderEntry{
+				ProviderConfig: schemas.ProviderConfig{
+					NetworkConfig: schemas.NetworkConfig{MaxRetries: -1},
+				},
+				Provider: "openai",
+				Model:    "gpt-5",
+				Keys:     []schemas.Key{{Value: schemas.SecretVar{Val: "k"}}},
+			},
+			llm.ErrInvalidMaxRetries,
+		}, //nolint:exhaustruct // partial entry by design
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -696,6 +708,61 @@ func TestLoad_FutureProofedBifrostFields_OpenAI(t *testing.T) {
 	}
 	if cfg.LLM.OpenAIConfig == nil || !cfg.LLM.OpenAIConfig.DisableStore {
 		t.Errorf("OpenAIConfig.DisableStore: got %+v", cfg.LLM.OpenAIConfig)
+	}
+}
+
+// TestLoad_LLMMaxRetriesDefault pins cynative's retry default for LLM calls: an
+// unset llm.network_config.max_retries loads as 3 (Bifrost's own default is 0,
+// which makes every transient 429/5xx fatal), while an explicit file or env
+// value (including 0 to disable retries) still wins via viper layering.
+func TestLoad_LLMMaxRetriesDefault(t *testing.T) {
+	t.Parallel()
+
+	withMaxRetries := func(n string) string {
+		return validYAML + "  network_config:\n    max_retries: " + n + "\n"
+	}
+
+	tests := []struct {
+		name string
+		yaml string
+		env  map[string]string
+		want int
+	}{
+		{name: "unset defaults to 3", yaml: validYAML, want: 3},
+		{name: "explicit file value wins", yaml: withMaxRetries("1"), want: 1},
+		{name: "explicit file zero disables retries", yaml: withMaxRetries("0"), want: 0},
+		{
+			name: "env var overrides default",
+			yaml: validYAML,
+			env:  map[string]string{"CYNATIVE_LLM_NETWORK_CONFIG_MAX_RETRIES": "5"},
+			want: 5,
+		},
+		{
+			name: "env var zero disables retries",
+			yaml: validYAML,
+			env:  map[string]string{"CYNATIVE_LLM_NETWORK_CONFIG_MAX_RETRIES": "0"},
+			want: 0,
+		},
+		{
+			name: "env var overrides explicit file value",
+			yaml: withMaxRetries("1"),
+			env:  map[string]string{"CYNATIVE_LLM_NETWORK_CONFIG_MAX_RETRIES": "5"},
+			want: 5,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := config.NewLoader(envMap(tc.env)).Load(writeConfig(t, tc.yaml))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := cfg.LLM.NetworkConfig.MaxRetries; got != tc.want {
+				t.Errorf("MaxRetries: got %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

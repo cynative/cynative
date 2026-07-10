@@ -166,6 +166,17 @@ func DefaultConfig() Config {
 	return cfg
 }
 
+// defaultLLMMaxRetries is cynative's retry budget for LLM calls, replacing
+// Bifrost's default of 0 retries, under which a single transient 429/5xx or
+// network error fails the turn (and a one-shot run outright). Bifrost retries
+// only retryable failures (HTTP 429/500/502/503/504, provider errors it
+// recognizes as rate limits, and transport errors) with exponential backoff
+// (its 500ms-initial/5s-max backoff defaults fill any unset backoff fields).
+// An explicit llm.network_config.max_retries in the file or env (including 0
+// to disable retries) wins over this default via viper layering; a negative
+// value is rejected by llm.ValidateNetworkConfig.
+const defaultLLMMaxRetries = 3
+
 // setDefaults registers default values into Viper so fields with `default`
 // struct tags take effect when neither the config file nor an env var sets
 // them. Top-level scalar fields are registered directly under their json key.
@@ -174,7 +185,9 @@ func DefaultConfig() Config {
 // default reaches viper under its full dotted key (e.g. connectors.aws.policy).
 //
 // The LLM block's env keys (provider, model, and every nested leaf) are
-// resolved separately by applyEnv in Load.
+// resolved separately by applyEnv in Load. It carries no `default` struct tags
+// (ProviderEntry embeds Bifrost's ProviderConfig, whose fields cynative cannot
+// tag), so its one cynative-owned default is registered by hand below.
 func setDefaults(v *viper.Viper) {
 	cfg := DefaultConfig()
 	val := reflect.ValueOf(cfg)
@@ -193,6 +206,8 @@ func setDefaults(v *viper.Viper) {
 		}
 		v.SetDefault(name, val.Field(i).Interface())
 	}
+
+	v.SetDefault("llm.network_config.max_retries", defaultLLMMaxRetries)
 }
 
 // registerStructDefaults walks the fields of a nested Config struct (e.g.
@@ -586,6 +601,10 @@ func ValidateLLM(entry *llm.ProviderEntry) error {
 	}
 
 	if err := llm.ValidateKeyPresence(entry); err != nil {
+		return err
+	}
+
+	if err := llm.ValidateNetworkConfig(entry); err != nil {
 		return err
 	}
 

@@ -59,7 +59,7 @@ llm:
   network_config:                  # any field on schemas.NetworkConfig
     base_url: https://...                          # optional
     default_request_timeout_in_seconds: 60         # optional; integer seconds
-    max_retries: 3                                 # optional
+    max_retries: 3                                 # optional; default 3 (0 disables retries)
     extra_headers:                                 # optional
       x-custom: value
     insecure_skip_verify: false                    # optional
@@ -118,3 +118,16 @@ underlying error comes from Bifrost and mentions
 Provider Name > Network Config" UI — that wording is Bifrost's (it even hard-codes
 "30 seconds" regardless of the effective timeout); cynative has no such UI, and
 the knob you want is `network_config.default_request_timeout_in_seconds` above.
+
+**Rate limits and transient errors.** LLM calls retry retryable failures (HTTP
+429/500/502/503/504, provider errors recognized as rate limits, and network
+errors) up to **3** times with exponential backoff (500ms initial, 5s max):
+cynative's default, replacing Bifrost's 0 retries, under which a single
+rate-limit blip fails the whole turn (and a `-p` run outright). Request
+timeouts are not retried. Override the count with
+`llm.network_config.max_retries` (an integer; `0` disables retries, negative
+is rejected) or the env var `CYNATIVE_LLM_NETWORK_CONFIG_MAX_RETRIES`, and
+tune the backoff with `network_config.retry_backoff_initial` /
+`retry_backoff_max` (durations, e.g. `500ms`). A run that still ends with
+"rate limited / out of quota (HTTP 429)" exhausted its retries: check the
+provider account's quota and billing, or retry later.

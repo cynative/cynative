@@ -507,7 +507,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (default `SecurityAudit`); `connectors.gcp.role` `roles/viewer` (accepts predefined or
   custom project/org roles); `connectors.azure.role_definition` `Reader` (required);
   `connectors.{eks,gke,aks,kubernetes}.cluster_role` `view` (validated as a safe URL path
-  segment, fail-closed on empty). Each knob has a matching `CYNATIVE_*` env var.
+  segment, fail-closed on empty); `llm.network_config.max_retries` 3 (the one llm-block
+  default, registered by hand since ProviderEntry embeds Bifrost's untaggable struct;
+  Bifrost retries 429/500/502/503/504, recognized rate-limit errors, and transport errors
+  with backoff; an explicit file/env value including 0 wins, and a negative value is
+  rejected by `llm.ValidateNetworkConfig`). Each knob has a matching `CYNATIVE_*` env var.
   `verify_findings` has no knob; it always runs.
 
 - **`internal/metrics`**: session-cumulative operational telemetry (token usage, model
