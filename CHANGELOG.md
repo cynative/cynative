@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.1](https://github.com/cynative/cynative/compare/v1.5.0...v1.5.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **deps:** Bump google.golang.org/api in the all-dependencies group ([#100](https://github.com/cynative/cynative/issues/100)) ([f34359f](https://github.com/cynative/cynative/commit/f34359fca72acf30ba32db954642e50af7f44113))
+* **deps:** Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#92](https://github.com/cynative/cynative/issues/92)) ([510e50b](https://github.com/cynative/cynative/commit/510e50b18969acc3238aaa6d1568490d6f5c5490))
+* **deps:** Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#94](https://github.com/cynative/cynative/issues/94)) ([e071b4d](https://github.com/cynative/cynative/commit/e071b4d9c0f4fb72007d4123a8543dc558f0e70a))
+* **deps:** Bump the all-dependencies group with 3 updates ([#93](https://github.com/cynative/cynative/issues/93)) ([0b6cb88](https://github.com/cynative/cynative/commit/0b6cb88fc2dcd2acdfb7387b3d3c5070561a1c99))
+* retry transient LLM provider errors by default ([#99](https://github.com/cynative/cynative/issues/99)) ([d076cd6](https://github.com/cynative/cynative/commit/d076cd6eaacaf018dc149a10041f014e26fe9368))
+
 ## [1.5.0](https://github.com/cynative/cynative/compare/v1.4.1...v1.5.0) (2026-07-05)
 
 
