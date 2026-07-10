@@ -72,12 +72,13 @@ func llmConfigStatus(cfg config.Config, err error) ui.LLMStatus {
 }
 
 // llmRuntimeStatus maps a first-interaction failure to a Tier-3 ✗ status. The
-// reason/hint are built ONLY from the GenerateError's StatusCode — NEVER the raw
-// provider/init message, which can echo a credential AND (for a chat-model-init
-// error) has not passed through RedactingChatModel. The message survives only in
-// err.Error() for -v / the turn-≥2 %v path, where it is redacted at the
-// RedactingChatModel boundary. Every first-interaction failure aborts regardless,
-// so the label is a generic, NON-per-provider bucket.
+// reason/hint are built ONLY from the GenerateError's StatusCode plus an
+// equality match on its machine Type, NEVER the raw provider/init message,
+// which can echo a credential AND (for a chat-model-init error) has not passed
+// through RedactingChatModel. The message survives only in err.Error() for
+// -v / the turn-≥2 %v path, where it is redacted at the RedactingChatModel
+// boundary. Every first-interaction failure aborts regardless, so the label is
+// a generic, NON-per-provider bucket.
 func llmRuntimeStatus(cfg config.Config, err error) ui.LLMStatus {
 	s := ui.LLMStatus{ //nolint:exhaustruct // Reason/Hint/NotConfigured/Example set per branch below.
 		State:    ui.ConnectorError,
@@ -88,6 +89,18 @@ func llmRuntimeStatus(cfg config.Config, err error) ui.LLMStatus {
 	status := 0
 	if ge, ok := errors.AsType[*llm.GenerateError](err); ok {
 		status = ge.StatusCode
+		// With retries enabled (max_retries defaults to 3), Bifrost collapses a
+		// permanent per-key 401/402/403 into a synthetic 502 once every
+		// configured key is dead, so the status code alone would render the
+		// generic "request failed" bucket for a plain bad key or billing
+		// failure. Restore the credential guidance from the machine Type.
+		if ge.CredentialsExhausted() {
+			s.Reason = "invalid credentials or billing"
+			s.Hint = "The provider rejected the credentials (HTTP 401/402/403). Check your API key / auth " +
+				"and the account's billing; behind a gateway, this can be the gateway's own upstream keys."
+
+			return s
+		}
 	}
 
 	switch status {

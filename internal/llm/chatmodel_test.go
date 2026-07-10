@@ -180,6 +180,86 @@ func TestBifrostChatModel_GenerateErrorNilCode(t *testing.T) {
 	}
 }
 
+// TestBifrostChatModel_GenerateErrorCredentialsExhausted verifies the exact
+// synthetic error Bifrost returns when retries mark every configured key dead
+// on a permanent 401/402/403 (a 502 carrying "upstream_credentials_exhausted"
+// in both the top-level and nested Type) surfaces with the machine type
+// captured and the CredentialsExhausted predicate true, so the CLI status can
+// restore the credential guidance the collapsed 502 would otherwise hide.
+func TestBifrostChatModel_GenerateErrorCredentialsExhausted(t *testing.T) {
+	t.Parallel()
+
+	status := http.StatusBadGateway
+	errType := "upstream_credentials_exhausted"
+	mock := &llm.BifrostBackendMock{ //nolint:exhaustruct // only needed funcs set
+		ChatCompletionRequestFunc: func(_ *bschemas.BifrostContext, _ *bschemas.BifrostChatRequest) (*bschemas.BifrostChatResponse, *bschemas.BifrostError) {
+			return nil, &bschemas.BifrostError{ //nolint:exhaustruct // the synthetic error's exact shape.
+				StatusCode: &status,
+				Type:       &errType,
+				Error: &bschemas.ErrorField{ //nolint:exhaustruct // no Code on the synthetic error.
+					Type:    &errType,
+					Message: "all configured keys returned permanent per-key errors (401/402/403)",
+				},
+			}
+		},
+		ShutdownFunc: func() {},
+	}
+
+	m, err := llm.NewBifrostChatModel(context.Background(), testAccount(), llm.WithBackend(mock))
+	if err != nil {
+		t.Fatalf("NewBifrostChatModel: %v", err)
+	}
+
+	_, err = m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+	var ge *llm.GenerateError
+	if !errors.As(err, &ge) {
+		t.Fatalf("errors.As failed: %v", err)
+	}
+	if ge.StatusCode != http.StatusBadGateway || ge.Type != errType {
+		t.Errorf("GenerateError fields lost: %#v", ge)
+	}
+	if !ge.CredentialsExhausted() {
+		t.Error("CredentialsExhausted() = false for Bifrost's synthetic credentials-exhausted error")
+	}
+}
+
+// TestBifrostChatModel_GenerateErrorTopLevelTypeFallback verifies that when
+// the nested Error.Type is absent, the top-level BifrostError.Type is captured
+// instead.
+func TestBifrostChatModel_GenerateErrorTopLevelTypeFallback(t *testing.T) {
+	t.Parallel()
+
+	errType := "some_top_level_type"
+	mock := &llm.BifrostBackendMock{ //nolint:exhaustruct // only needed funcs set
+		ChatCompletionRequestFunc: func(_ *bschemas.BifrostContext, _ *bschemas.BifrostChatRequest) (*bschemas.BifrostChatResponse, *bschemas.BifrostError) {
+			return nil, &bschemas.BifrostError{ //nolint:exhaustruct // only the fields under test.
+				Type: &errType,
+				Error: &bschemas.ErrorField{ //nolint:exhaustruct // nested Type is nil.
+					Message: "upstream failure",
+				},
+			}
+		},
+		ShutdownFunc: func() {},
+	}
+
+	m, err := llm.NewBifrostChatModel(context.Background(), testAccount(), llm.WithBackend(mock))
+	if err != nil {
+		t.Fatalf("NewBifrostChatModel: %v", err)
+	}
+
+	_, err = m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+	var ge *llm.GenerateError
+	if !errors.As(err, &ge) {
+		t.Fatalf("errors.As failed: %v", err)
+	}
+	if ge.Type != errType {
+		t.Errorf("Type = %q, want %q (top-level fallback)", ge.Type, errType)
+	}
+	if ge.CredentialsExhausted() {
+		t.Error("CredentialsExhausted() = true for an unrelated error type")
+	}
+}
+
 // TestBifrostChatModel_GenerateNoChoices verifies an empty Choices slice errors.
 func TestBifrostChatModel_GenerateNoChoices(t *testing.T) {
 	t.Parallel()

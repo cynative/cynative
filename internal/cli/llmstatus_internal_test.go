@@ -164,6 +164,20 @@ func TestLLMRuntimeStatus(t *testing.T) {
 			"request failed",
 		},
 		{
+			// With retries on, Bifrost collapses a permanent per-key 401/402/403
+			// into a synthetic 502 typed upstream_credentials_exhausted (the
+			// literal wire value, duplicated here on purpose as a drift pin).
+			"credentials-exhausted 502 → credential guidance",
+			//nolint:exhaustruct // Code unused.
+			&llm.GenerateError{StatusCode: 502, Type: "upstream_credentials_exhausted", Message: secret},
+			"invalid credentials or billing",
+		},
+		{
+			"plain 502 without the machine type → request failed",
+			&llm.GenerateError{StatusCode: 502, Message: secret}, //nolint:exhaustruct // Code/Type unused.
+			"request failed",
+		},
+		{
 			"no status → could not reach",
 			&llm.GenerateError{StatusCode: 0, Message: secret}, //nolint:exhaustruct // Code unused.
 			"could not reach",
