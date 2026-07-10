@@ -8,22 +8,14 @@ version="$1"; assets="$2"
 : "${GH_TOKEN:?}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Pull a tarball's sha256 out of the assets manifest, failing closed on a missing
-# row or a non-64-hex digest (never publish a Formula with a bad sha256).
-sha_for() {
-  local name="$1" sha
-  sha="$(awk -F'\t' -v n="${name}" '$1==n{print $2; exit}' "${assets}")"
-  [[ "${sha}" =~ ^[0-9a-f]{64}$ ]] || {
-    echo "::error::missing or invalid sha256 for ${name}" >&2
-    exit 1
-  }
-  printf '%s' "${sha}"
-}
+# shellcheck source=scripts/release/assets-lib.sh
+# shellcheck disable=SC1091 # gated standalone; the shellcheck gate runs without -x.
+. "${here}/assets-lib.sh"
 
-sha_darwin_arm="$(sha_for cynative_Darwin_arm64.tar.gz)"
-sha_darwin_intel="$(sha_for cynative_Darwin_x86_64.tar.gz)"
-sha_linux_arm="$(sha_for cynative_Linux_arm64.tar.gz)"
-sha_linux_intel="$(sha_for cynative_Linux_x86_64.tar.gz)"
+sha_darwin_arm="$(sha_for "${assets}" cynative_Darwin_arm64.tar.gz)"
+sha_darwin_intel="$(sha_for "${assets}" cynative_Darwin_x86_64.tar.gz)"
+sha_linux_arm="$(sha_for "${assets}" cynative_Linux_arm64.tar.gz)"
+sha_linux_intel="$(sha_for "${assets}" cynative_Linux_x86_64.tar.gz)"
 
 work="$(mktemp -d)"; trap 'rm -rf "${work}"' EXIT
 git clone --depth 1 \
