@@ -177,6 +177,6 @@ connector-gcp-e2e:
 # documented `brew install cynative/tap/cynative`, asserts `cynative --version`
 # reports the expected release (SMOKE_VERSION, default: latest published),
 # uninstalls, and asserts it is gone. Needs brew and network; no skip path.
-# See docs/e2e/homebrew-smoke.md.
+# The script header documents its env and knobs.
 homebrew-smoke:
 	sh test/homebrew.smoke.test.sh

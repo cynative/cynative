@@ -61,8 +61,8 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via
   the documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports
   the expected release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts
-  it is gone (`test/homebrew.smoke.test.sh`, needs brew; no skip path). See
-  `docs/e2e/homebrew-smoke.md`.
+  it is gone (`test/homebrew.smoke.test.sh`, needs brew; no skip path; the script header
+  documents its env and knobs).
 
 Two linters shape every new test: `paralleltest` requires each test and subtest to call
 `t.Parallel()`, and `forbidigo` bans `os.Getenv`/`LookupEnv`/`Environ` and `t.Setenv` outside
