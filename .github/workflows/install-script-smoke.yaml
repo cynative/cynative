@@ -1,0 +1,108 @@
+name: Install-script smoke
+
+# Post-release public-channel check (cynative#47): prove the documented
+# install-script one-liners work against the public channel - install.sh /
+# install.ps1 served from raw main, release assets from the public download
+# URLs - and that the installed binary reports exactly the expected version
+# and uninstalls cleanly. Two entry points, no PR trigger: the Release
+# Pipeline calls it post-publish, once the release job completes
+# (workflow_call, tag input), and maintainers can dispatch it manually
+# against the latest published release.
+# Unlike the Homebrew smoke there is no propagation poll: the release assets
+# are published before the caller reaches this workflow, and the smoke
+# intentionally tests whatever public main serves for the installer scripts
+# (which can lag or lead the release SHA; accepted residual). Downloads are
+# single-attempt; the recovery for a transient network failure is re-running
+# via workflow_dispatch. All three jobs carry explicit timeout-minutes: a caller
+# job that `uses:` a reusable workflow cannot set one, and on the call path a
+# wedged job would otherwise hold the release-pipeline concurrency group for
+# the default 360 minutes.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to smoke (e.g. v0.4.0)
+        required: true
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      # The tag input wins when present (the call path always passes it); a
+      # manual dispatch has no input and resolves the latest published
+      # release. Keying on input presence rather than the event name matters:
+      # a called workflow inherits the caller's event. An empty tag on any
+      # other event fails fast (required: true is not enforced at runtime,
+      # and silently falling back to the latest release could green-light the
+      # wrong version). GH_TOKEN stays confined to this job; the smoke jobs
+      # below export no token, because they deliberately execute what the
+      # public channel serves.
+      - name: Resolve expected version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ -n "${TAG_INPUT}" ]; then
+            tag="${TAG_INPUT}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" \
+              || { echo "::error::no published release to smoke"; exit 1; }
+          else
+            echo "::error::empty tag input on the workflow_call path"; exit 1
+          fi
+          version="${tag#v}"
+          # Fail closed on a tag of exactly "v": an empty SMOKE_VERSION would
+          # make the smoke scripts resolve latest themselves, un-pinning the
+          # release under test.
+          if [ -z "${version}" ]; then
+            echo "::error::resolved an empty version from tag '${tag}'"; exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "expecting cynative ${version}"
+
+  sh-smoke:
+    name: curl install.sh (${{ matrix.os }})
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      # persist-credentials off: this job executes scripts served by public
+      # main, so it must not hold a repo token it does not need.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install, verify, uninstall via the public install.sh
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: sh test/install-script.smoke.test.sh
+
+  ps1-smoke:
+    name: irm install.ps1 (windows-latest)
+    needs: resolve
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install, verify, uninstall via the public install.ps1
+        shell: powershell # 5.1, not pwsh (7) - the floor install.ps1 targets.
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          & .\test\install-script.smoke.test.ps1
+          exit $LASTEXITCODE

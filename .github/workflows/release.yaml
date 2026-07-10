@@ -19,7 +19,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      # Consumed by the post-publish homebrew-smoke job below.
+      # Consumed by the post-publish channel-smoke jobs below.
       release_created: ${{ steps.release-please.outputs.release_created }}
       tag_name: ${{ steps.release-please.outputs.tag_name }}
     # Bound the job: the concurrency group means a wedged run blocks later
@@ -387,14 +387,16 @@ jobs:
           token: ${{ steps.refresh-token.outputs.token || steps.generate-token.outputs.token }}
           skip-github-release: true
 
-  # Post-publish public-channel check (cynative#45), running after the tap
-  # push. Failure semantics: a red `release` job means the release needs
-  # recovery (see the recovery notes above); a green `release` job with a red
-  # `homebrew-smoke` job means the release published fine but the public
-  # Homebrew channel is broken - investigate and re-run (workflow_dispatch on
-  # homebrew-smoke.yaml), nothing to roll back. Phase-2 release-please is the
-  # last step of the `release` job, so a smoke failure cannot block candidate
-  # computation.
+  # Post-publish public-channel checks. Failure semantics, shared by both
+  # smoke jobs: a red `release` job means the release needs recovery (see the
+  # recovery notes above); a green `release` job with a red smoke job means
+  # the release published fine but that public channel is broken -
+  # investigate and re-run (workflow_dispatch on the smoke workflow), nothing
+  # to roll back. Phase-2 release-please is the last step of the `release`
+  # job, so a smoke failure cannot block candidate computation.
+  # homebrew-smoke (cynative#45) runs after the tap push and validates the
+  # brew channel; install-script-smoke (cynative#47) validates the documented
+  # curl|sh and irm|iex install paths against the public release assets.
   homebrew-smoke:
     name: Homebrew install smoke
     needs: release
@@ -402,5 +404,15 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/homebrew-smoke.yaml
+    with:
+      tag: ${{ needs.release.outputs.tag_name }}
+
+  install-script-smoke:
+    name: Install-script smoke
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/install-script-smoke.yaml
     with:
       tag: ${{ needs.release.outputs.tag_name }}
