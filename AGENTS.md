@@ -14,13 +14,13 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - `make check-go`: generate + lint + shell-complexity + format-diff + test + `windows-build`
   (GOOS=windows amd64/arm64 cross-compile). 100% `go.mod`-pinned and hermetic; **the pre-commit
   hook runs this**.
-- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1` +
-  Pester unit tests + `sh-test` (the POSIX `install.sh` unit tests plus a `python3`-backed
-  loopback smoke test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP
-  reject). Install-free: asserts each pinned tool or module is present and fails with an install
-  hint otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned shellcheck/Pester/
-  PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand; Dependabot has no
-  PowerShell Gallery or raw-binary ecosystem.
+- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1` and
+  `test/install-script.smoke.test.ps1` + Pester unit tests + `sh-test` (the POSIX `install.sh` unit
+  tests plus a `python3`-backed loopback smoke test of the `CYNATIVE_BASE_URL` download-base seam
+  and its non-loopback-HTTP reject). Install-free: asserts each pinned tool or module is present and
+  fails with an install hint otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
+  shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
+  Dependabot has no PowerShell Gallery or raw-binary ecosystem.
 - `make generate`: `go generate ./...` (regenerates the `moq` mocks).
 - `make lint`: `go tool golangci-lint run`.
 - `make format`: `go tool golangci-lint fmt --diff` (prints diffs; does not write).
@@ -58,11 +58,16 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   `python3`), asserting a read of the project's own Cloud Resource Manager metadata and a
   client-side-denied write canary, and skipping cleanly when `GCP_E2E_*`/creds are unset (the
   script header documents its env and knobs). `make homebrew-smoke`: standalone post-release
-  Homebrew install smoke (not part of `make check`); installs cynative from the public tap via
-  the documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports
-  the expected release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts
-  it is gone (`test/homebrew.smoke.test.sh`, needs brew; no skip path; the script header
-  documents its env and knobs).
+  Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
+  documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
+  release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone
+  (`test/homebrew.smoke.test.sh`, needs brew; no skip path; the script header documents its env and
+  knobs). `make install-script-smoke`: standalone post-release public install-script smoke (not part
+  of `make check`); runs the documented `curl .../install.sh | sh` path against the public release
+  assets - install, exact `cynative --version` assert (`SMOKE_VERSION`, default: latest published),
+  documented uninstall, gone-assert (`test/install-script.smoke.test.sh`, needs curl and network; no
+  skip path). The Windows sibling (`test/install-script.smoke.test.ps1`, Windows PowerShell 5.1)
+  runs in CI via `.github/workflows/install-script-smoke.yaml`.
 
 Two linters shape every new test: `paralleltest` requires each test and subtest to call
 `t.Parallel()`, and `forbidigo` bans `os.Getenv`/`LookupEnv`/`Environ` and `t.Setenv` outside
@@ -644,8 +649,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `brew audit --strict` of the rendered formula in a throwaway tap; a failure leaves the draft
   intact) and, after the tap push, calls the reusable `.github/workflows/homebrew-smoke.yaml`
   (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
-  the Homebrew install smoke on macOS and Linux; a red smoke with a green `release` job means
-  public-channel drift, nothing to roll back.
+  the Homebrew install smoke on macOS and Linux. It also calls the reusable
+  `.github/workflows/install-script-smoke.yaml` (also maintainer-dispatchable) once the
+  release job completes, which runs the documented `curl | sh` install path on Linux and macOS and the
+  `irm | iex` path on Windows PowerShell 5.1 against the public release assets. For both:
+  a red smoke with a green `release` job means public-channel drift, nothing to roll back.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and
   `third_party/xar`, plus `tools/rcodesign` (a Cargo stub that pins the `apple-codesign`
