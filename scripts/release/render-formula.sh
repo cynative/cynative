@@ -8,7 +8,7 @@ sha_darwin_arm="$2"; sha_darwin_intel="$3"
 sha_linux_arm="$4"; sha_linux_intel="$5"
 cat <<EOF
 class Cynative < Formula
-  desc "Agentic security research across your code, cloud and runtime — read-only by construction"
+  desc "Agentic security research across your code, cloud, and runtime (read-only)"
   homepage "https://github.com/cynative/cynative"
   version "${version}"
   license "Apache-2.0"

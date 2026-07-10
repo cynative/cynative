@@ -272,6 +272,19 @@ jobs:
           LC_ALL=C sort -o /tmp/expected-assets.tsv /tmp/expected-assets.tsv
           scripts/release/assert-assets.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}" /tmp/expected-assets.tsv
 
+      # Pre-publish formula gate: render the formula from the asserted asset
+      # manifest and `brew audit --strict` it in a throwaway local tap.
+      # Failing here stops the release with the draft intact and the tap
+      # untouched, so a broken formula can never strand a published release
+      # behind a stale tap. Offline by necessity: draft assets are not
+      # publicly downloadable, so --online checks are impossible pre-publish.
+      - name: Audit Homebrew formula
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        timeout-minutes: 5
+        env:
+          VERSION: ${{ steps.release-please.outputs.tag_name }}
+        run: scripts/release/audit-formula.sh "${VERSION#v}" /tmp/expected-assets.tsv
+
       - name: Re-verify tag before publish
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
