@@ -1,6 +1,6 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	connector-gcp-e2e
+	connector-gcp-e2e homebrew-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -168,6 +168,15 @@ llm-smoke:
 # connector-gcp-e2e: live GCP connector end-to-end test (cynative#39). Standalone
 # (NOT part of `make check`): runs the real `cynative -p` against a real GCP fixture
 # project through the gcp connector and needs real credentials; skips cleanly when
-# GCP_E2E_* env is unset. See docs/e2e/live-gcp-connector.md.
+# GCP_E2E_* env is unset. The script header documents its env and knobs.
 connector-gcp-e2e:
 	sh test/connector.gcp.e2e.test.sh
+
+# homebrew-smoke: post-release Homebrew install smoke (cynative#45). Standalone
+# (NOT part of `make check`): installs cynative from the public tap via the
+# documented `brew install cynative/tap/cynative`, asserts `cynative --version`
+# reports the expected release (SMOKE_VERSION, default: latest published),
+# uninstalls, and asserts it is gone. Needs brew and network; no skip path.
+# The script header documents its env and knobs.
+homebrew-smoke:
+	sh test/homebrew.smoke.test.sh
