@@ -15,7 +15,8 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   (GOOS=windows amd64/arm64 cross-compile). 100% `go.mod`-pinned and hermetic; **the pre-commit
   hook runs this**.
 - `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1`,
-  `test/install-script.smoke.test.ps1`, and `test/scoop.smoke.test.ps1` + Pester unit tests +
+  `test/install-script.smoke.test.ps1`, `test/scoop.smoke.test.ps1`, and
+  `test/archive.smoke.test.ps1` + Pester unit tests +
   `sh-test` (the POSIX `install.sh` unit tests plus a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
@@ -658,7 +659,13 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs
   `test/pkg.smoke.test.sh` against each pkg on its native arch (sha256 vs manifest, pkgutil
   signature, stapler validate, gating spctl Gatekeeper assess, real `installer` install, receipt
-  version, exact `--version`); the `publish` job re-asserts the still-editable draft (same id,
+  version, exact `--version`); the `archive-smoke` job (ubuntu-latest, ubuntu-24.04-arm,
+  windows-latest, windows-11-arm; no secrets) runs `test/archive.smoke.test.sh` and
+  `test/archive.smoke.test.ps1` (Windows PowerShell 5.1) against each Linux tar and Windows zip
+  on its native arch (sha256 vs manifest, checksums.txt row cross-check, exact-member tar
+  extraction on Linux, `Expand-Archive` with a root-layout check on Windows, executable bit on
+  Linux, PE machine arch on Windows, exact `--version`); the `publish` job re-asserts the
+  still-editable draft (same id,
   same exact asset set) immediately before publishing, then verifies, pushes the tap, and runs
   release-please phase 2. Publish is additionally gated on `scripts/release/audit-formula.sh`
   (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`

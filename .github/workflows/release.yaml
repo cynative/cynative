@@ -19,8 +19,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      # Consumed by the macos-pkg-smoke and publish jobs below (and via them
-      # by the post-publish channel smokes).
+      # Consumed by the pre-publish smoke and publish jobs below (and via
+      # them by the post-publish channel smokes).
       release_created: ${{ steps.release-please.outputs.release_created }}
       tag_name: ${{ steps.release-please.outputs.tag_name }}
       sha: ${{ steps.release-please.outputs.sha }}
@@ -30,7 +30,8 @@ jobs:
     # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10) plus
     # every short step with slack to spare, so the job limit can never fire
     # mid-step. Publish and its verification live in the downstream publish
-    # job, gated on the macos-pkg-smoke job.
+    # job, gated on the pre-publish smoke jobs (macos-pkg-smoke,
+    # archive-smoke).
     timeout-minutes: 90
     steps:
       # The App must grant contents: write (tag + release), pull-requests:
@@ -73,8 +74,9 @@ jobs:
       #     gh api repos/cynative/cynative/issues/<pr>/labels \
       #       -f "labels[]=autorelease: pending"
       #   Then re-run the workflow; release-please recreates the draft. The
-      #   pre-publish gate spans three jobs (release -> macos-pkg-smoke ->
-      #   publish); a failure in any of them, up to and including the publish
+      #   pre-publish gate spans the release job, the smoke jobs
+      #   (macos-pkg-smoke, archive-smoke), and the publish job; a failure in
+      #   any of them, up to and including the publish
       #   job's re-assertions, leaves the draft intact and these notes apply.
       #   "Publish release" refuses to run while the repo's immutable-releases
       #   setting is disabled (the draft stays intact). If "Verify published
@@ -305,13 +307,14 @@ jobs:
 
       # Hand-off to the pre-publish smoke jobs and the publish job. Sole
       # producer of this artifact (downstream jobs only consume it):
-      # macos-pkg-smoke consumes the pkgs, and the publish job
+      # macos-pkg-smoke consumes the pkgs, archive-smoke consumes the
+      # Linux/Windows archives plus checksums.txt, and the publish job
       # re-asserts the draft against these manifests. "Assert exact asset
       # set" above proved the draft assets' sha256 digests equal these local
       # bytes, so smoking the artifact is provenance-equivalent to smoking
       # the draft assets, with no token handed to the smoke jobs. Staged
-      # flat, keyed by asset name. Future pre-publish smokes (#43) consume
-      # this same artifact: add files here, never a second producer.
+      # flat, keyed by asset name. Future pre-publish smokes consume this
+      # same artifact: add files here, never a second producer.
       - name: Stage release artifacts for smoke & publish
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         run: |
@@ -362,6 +365,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ needs.release.outputs.sha }}
+          persist-credentials: false
 
       - name: Download release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -388,17 +392,115 @@ jobs:
           PKG_PATH="${staged}/${PKG}" SMOKE_VERSION="${TAG#v}" EXPECTED_SHA256="${sha}" \
             sh test/pkg.smoke.test.sh
 
+  # ---- Pre-publish archive install gate --------------------------------
+  # Real extract-and-run smoke of the Linux/Windows release archives
+  # (cynative#43), between the draft build and publish: a truncated archive,
+  # a bad layout, a lost executable bit, a checksums.txt row that stopped
+  # describing its archive, or a binary that cannot run on its native arch
+  # fails here while the release is still an editable draft (recovery notes
+  # above apply unchanged). Each archive runs on its native platform + arch;
+  # asset names are hard-coded so a platform goreleaser silently dropped
+  # cannot lose its leg. The Darwin tarballs are deliberately absent:
+  # assert-binary-equivalence.sh proves their payload byte-identical to the
+  # pkg payload the macos-pkg-smoke job executes, and it asserts the tar
+  # member's executable bit. No secrets and no App token: the job consumes
+  # only the release-artifacts hand-off, and checkout credentials are not
+  # persisted.
+  archive-smoke:
+    name: Archive install smoke (${{ matrix.archive }})
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            archive: cynative_Linux_x86_64.tar.gz
+          - runner: ubuntu-24.04-arm
+            archive: cynative_Linux_arm64.tar.gz
+          - runner: windows-latest
+            archive: cynative_Windows_x86_64.zip
+            arch: amd64
+          - runner: windows-11-arm
+            archive: cynative_Windows_arm64.zip
+            arch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+          persist-credentials: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+
+      # The manifest lookup fails closed before the script runs: exactly one
+      # row for this archive, well-formed sha256, or no smoke. shell: bash
+      # runs on every leg (Git Bash on the Windows runners).
+      - name: Resolve expected digest
+        id: digest
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          staged="${RUNNER_TEMP}/release-artifacts"
+          sha="$(awk -F'\t' -v a="${ARCHIVE}" \
+            '$1 == a { c++; s = $2 } END { if (c == 1 && s ~ /^[0-9a-f]{64}$/) { print s } else { exit 1 } }' \
+            "${staged}/expected-assets.tsv")" \
+            || { echo "::error::expected-assets.tsv must hold exactly one well-formed row for ${ARCHIVE}"; exit 1; }
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+      # The step timeouts (inside the job's 15) keep a hung extraction or
+      # binary from consuming the whole job budget.
+      - name: Smoke archive (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 10
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+          SHA256: ${{ steps.digest.outputs.sha }}
+        run: |
+          set -euo pipefail
+          staged="${RUNNER_TEMP}/release-artifacts"
+          ARCHIVE_PATH="${staged}/${ARCHIVE}" SMOKE_VERSION="${TAG#v}" \
+            EXPECTED_SHA256="${SHA256}" CHECKSUMS_PATH="${staged}/checksums.txt" \
+            sh test/archive.smoke.test.sh
+
+      - name: Smoke archive (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        timeout-minutes: 10
+        shell: powershell # 5.1, not pwsh (7) - the floor install.ps1 targets.
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+          SHA256: ${{ steps.digest.outputs.sha }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          $staged = Join-Path $env:RUNNER_TEMP 'release-artifacts'
+          $env:ARCHIVE_PATH = Join-Path $staged $env:ARCHIVE
+          $env:SMOKE_VERSION = $env:TAG -replace '^v', ''
+          $env:EXPECTED_SHA256 = $env:SHA256
+          $env:CHECKSUMS_PATH = Join-Path $staged 'checksums.txt'
+          & .\test\archive.smoke.test.ps1
+          exit $LASTEXITCODE
+
   # ---- Publish: the instant of immutability ----------------------------
   # Everything before this job's "Publish release" step still runs against
   # an editable draft: any failure leaves nothing published and nothing
   # immutable. The compound if is the skipped-needs handler: !cancelled()
-  # (a status function) forces evaluation even though macos-pkg-smoke is
-  # skipped on a plain push, so release-please phase 2 below still runs;
-  # on a release run the smoke must have succeeded.
+  # (a status function) forces evaluation even though the pre-publish smoke
+  # jobs are skipped on a plain push, so release-please phase 2 below still
+  # runs; on a release run both smoke jobs must have succeeded.
   publish:
     name: Publish release
-    needs: [release, macos-pkg-smoke]
-    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || needs.macos-pkg-smoke.result == 'success') }}
+    needs: [release, macos-pkg-smoke, archive-smoke]
+    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || (needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success')) }}
     runs-on: ubuntu-latest
     # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
     # plus every short step with slack, so the job limit can never fire
@@ -446,7 +548,8 @@ jobs:
           SHA: ${{ needs.release.outputs.sha }}
         run: scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
 
-      # The draft stayed editable while the macOS smoke ran, so prove it
+      # The draft stayed editable while the pre-publish smoke jobs ran, so
+      # prove it
       # still is the one the release job asserted (same id) and still holds
       # exactly the smoked bytes (same exact asset set) immediately before
       # the publish flips it immutable.
@@ -540,7 +643,8 @@ jobs:
           skip-github-release: true
 
   # Post-publish public-channel checks. Failure semantics, shared by the
-  # channel smoke jobs: a red `release` or `macos-pkg-smoke` job, or a red `publish`
+  # channel smoke jobs: a red `release`, `macos-pkg-smoke`, or
+  # `archive-smoke` job, or a red `publish`
   # job that failed BEFORE its "Publish release" step, means the release
   # needs recovery with the draft intact (see the recovery notes above); a
   # red `publish` job AFTER that step means the release is already live and
