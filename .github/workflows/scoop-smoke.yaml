@@ -1,0 +1,200 @@
+name: Scoop install smoke
+
+# Post-release public-channel check (cynative#46): prove the documented
+# `scoop bucket add cynative https://github.com/cynative/scoop-bucket` +
+# `scoop install cynative` serve the expected release, the installed binary
+# reports exactly that version, and uninstall is clean. Two entry points, no
+# PR trigger: the Release Pipeline calls it post-publish (workflow_call, tag
+# input), and maintainers can dispatch it manually against the latest
+# published release. Failure semantics: a red run with a green Release
+# Pipeline `publish` job means the public Scoop channel is broken -
+# investigate and re-run via workflow_dispatch, nothing to roll back.
+# goreleaser currently pushes the bucket manifest during the pre-publish
+# GoReleaser step (cynative#103 tracks moving it post-publish), so on
+# the call path the first bucket probe normally succeeds. A manual dispatch
+# racing a live release run can wedge in exactly one ordering (bucket
+# already advanced, release not yet published): the wait below then times
+# out with instructions; a dispatch before the bucket advances simply
+# validates the previous release. Residual: the manifest's arm64 entry is
+# not exercised (this smoke
+# is x64-only); a windows-11-arm leg needs its own proving run before joining
+# the release-adjacent path. Both jobs carry explicit timeout-minutes: a
+# caller job that `uses:` a reusable workflow cannot set one, and on the call
+# path a wedged job would otherwise hold the release-pipeline concurrency
+# group for the default 360 minutes.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to smoke (e.g. v0.4.0)
+        required: true
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve version & wait for bucket
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      # The tag input wins when present (the call path always passes it); a
+      # manual dispatch has no input and resolves the latest published
+      # release. Keying on input presence rather than the event name matters:
+      # a called workflow inherits the caller's event. An empty tag on any
+      # other event fails fast (required: true is not enforced at runtime,
+      # and silently falling back to the latest release could green-light the
+      # wrong version). GH_TOKEN stays confined to this job; the smoke job
+      # below exports no token, because it deliberately executes what the
+      # public channel serves.
+      - name: Resolve expected version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ -n "${TAG_INPUT}" ]; then
+            tag="${TAG_INPUT}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" \
+              || { echo "::error::no published release to smoke"; exit 1; }
+          else
+            echo "::error::empty tag input on the workflow_call path"; exit 1
+          fi
+          version="${tag#v}"
+          # Fail closed on a tag of exactly "v": an empty SMOKE_VERSION would
+          # make the smoke script resolve latest itself, un-pinning the
+          # release under test.
+          if [ -z "${version}" ]; then
+            echo "::error::resolved an empty version from tag '${tag}'"; exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "expecting cynative ${version}"
+
+      # goreleaser pushes the bucket BEFORE the release publishes, so on the
+      # call path the first probe normally succeeds; the loop is bounded
+      # defense for a manual dispatch racing a live release run (which
+      # freezes the previous release as expected and cannot converge - the
+      # final error says to re-run after publication). Each probe is an
+      # anonymous shallow git clone of the public bucket - the same mechanism
+      # scoop itself uses, with none of the REST rate-limit or cross-repo
+      # token-scope questions. Deliberately not raw.githubusercontent.com: no
+      # freshness guarantee. Probes classify distinctly: UNAVAILABLE (clone
+      # failed), ABSENT (manifest missing), INVALID (version not a nonempty
+      # JSON string), MISMATCH (wrong version). Probe-loop worst case: 12 x
+      # 25s clone caps + 11 x 30s sleeps, about 10.5 minutes, inside this
+      # job's 12-minute timeout (tighter than the homebrew tap poll: the
+      # bucket push happens even earlier than the tap push, so a longer
+      # budget buys nothing). No sleep after the final attempt: the step's
+      # own budget-exhaustion error must fire inside the job timeout (and the
+      # default shell is bash -e, so this must be an if, not a bare [ ] &&
+      # chain).
+      - name: Wait for the bucket to serve the version
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          state="no probe yet"
+          for attempt in $(seq 1 12); do
+            rm -rf /tmp/bucket-probe
+            if timeout 25 git clone --quiet --depth 1 \
+                https://github.com/cynative/scoop-bucket /tmp/bucket-probe 2>/tmp/probe-err; then
+              manifest=/tmp/bucket-probe/bucket/cynative.json
+              if [ ! -f "${manifest}" ]; then
+                state="ABSENT: bucket/cynative.json missing from the bucket"
+              else
+                # Classify inside jq: an exact string compare there cannot be
+                # fooled by command substitution stripping trailing newlines
+                # from a value like "1.5.1\n", and tojson keeps the actual
+                # value readable in the mismatch diagnostic.
+                state="$(jq -r --arg expected "${VERSION}" \
+                  'if (.version | type) != "string" or (.version | length) == 0
+                   then "INVALID: manifest version is not a nonempty string"
+                   elif .version != $expected
+                   then "MISMATCH: bucket serves \(.version | tojson), expected \($expected)"
+                   else "OK" end' "${manifest}" 2>/dev/null)" \
+                  || state="INVALID: manifest is not valid JSON"
+                if [ "${state}" = "OK" ]; then
+                  echo "bucket serves ${VERSION} (attempt ${attempt})"
+                  exit 0
+                fi
+              fi
+            else
+              err="$(tail -c 2000 /tmp/probe-err | tr -d '\r' | tr '\n' ' ')"
+              state="UNAVAILABLE: ${err:-clone timed out or produced no output}"
+            fi
+            echo "attempt ${attempt}/12: ${state}"
+            if [ "${attempt}" -lt 12 ]; then sleep 30; fi
+          done
+          echo "::error::bucket did not serve ${VERSION}; last: ${state} (if a release is mid-run, re-run this dispatch after it publishes)"
+          exit 1
+
+  smoke:
+    name: scoop install (windows-latest)
+    needs: resolve
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      # persist-credentials off: this job executes what the public channel
+      # serves, so it must not hold a repo token it does not need.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # Own step so a bootstrap failure reads as "Scoop bootstrap failed",
+      # never as cynative channel drift. Runner images do not ship scoop; the
+      # official installer is safe to run as admin here (it has an explicit
+      # GITHUB_ACTIONS+CI exception) and prepends the shims dir to this
+      # session's PATH. The fetch is retried, the execution never is (a
+      # partial install must not be rerun blindly). The resolved root and
+      # shims dir propagate to the next step via GITHUB_ENV/GITHUB_PATH;
+      # Windows PowerShell 5.1 needs the explicit utf8 encoding for workflow
+      # command files.
+      - name: Install Scoop
+        shell: powershell # 5.1, not pwsh (7) - scoop's documented floor, and what the smoke runs under.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existing = Get-Command scoop -ErrorAction SilentlyContinue
+          if ($existing) {
+            $shimsDir = Split-Path -Path ([string]$existing.Source) -Parent
+            $scoopRoot = Split-Path -Path $shimsDir -Parent
+            Write-Host "reusing preinstalled scoop at $($existing.Source)"
+          } else {
+            $content = $null
+            foreach ($attempt in 1..3) {
+              try {
+                $content = Invoke-RestMethod -UseBasicParsing -Uri 'https://get.scoop.sh' -TimeoutSec 60
+                if ($content) { break }
+              } catch {
+                Write-Host "installer fetch attempt ${attempt}/3 failed: $($_.Exception.Message)"
+              }
+              if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
+            }
+            if (-not $content) { throw 'could not fetch the scoop installer after 3 attempts' }
+            & ([scriptblock]::Create([string]$content))
+            $scoopRoot = [string]$env:SCOOP
+            if (-not $scoopRoot) { $scoopRoot = Join-Path $env:USERPROFILE 'scoop' }
+            $shimsDir = Join-Path $scoopRoot 'shims'
+          }
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            throw 'scoop not resolvable after bootstrap'
+          }
+          # Health check out of process under Desktop 5.1: scoop's .cmd shim
+          # would prefer pwsh, and an in-process run has no reliable exit
+          # code. Same invocation shape the smoke script uses; a broken or
+          # partial scoop must fail THIS step, never read as channel drift.
+          $scoopPs1 = Join-Path $shimsDir 'scoop.ps1'
+          if (-not (Test-Path -LiteralPath $scoopPs1)) { throw "$scoopPs1 missing after bootstrap" }
+          & (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $scoopPs1 --version
+          if ($LASTEXITCODE -ne 0) { throw "scoop --version exited $LASTEXITCODE" }
+          "SCOOP=$scoopRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $shimsDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install, verify, uninstall via scoop
+        shell: powershell # 5.1, not pwsh (7) - scoop's documented floor.
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          & .\test\scoop.smoke.test.ps1
+          exit $LASTEXITCODE

@@ -68,7 +68,13 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   assets - install, exact `cynative --version` assert (`SMOKE_VERSION`, default: latest published),
   documented uninstall, gone-assert (`test/install-script.smoke.test.sh`, needs curl and network; no
   skip path). The Windows sibling (`test/install-script.smoke.test.ps1`, Windows PowerShell 5.1)
-  runs in CI via `.github/workflows/install-script-smoke.yaml`.
+  runs in CI via `.github/workflows/install-script-smoke.yaml`. The Scoop channel smoke is
+  Windows-only and has no make target: `test/scoop.smoke.test.ps1` (Windows PowerShell 5.1)
+  adds the public bucket, runs the documented `scoop install cynative`, asserts exact
+  `--version` and cynative-bucket provenance, uninstalls, and asserts it is gone; it runs in CI
+  via `.github/workflows/scoop-smoke.yaml` (Release Pipeline call + maintainer dispatch;
+  `SMOKE_VERSION` pins the expected release; no skip path; the script header documents its env
+  and knobs).
 
 Two linters shape every new test: `paralleltest` requires each test and subtest to call
 `t.Parallel()`, and `forbidigo` bans `os.Getenv`/`LookupEnv`/`Environ` and `t.Setenv` outside
