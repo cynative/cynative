@@ -19,14 +19,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      # Consumed by the post-publish channel-smoke jobs below.
+      # Consumed by the macos-pkg-smoke and publish jobs below (and via them
+      # by the post-publish channel smokes).
       release_created: ${{ steps.release-please.outputs.release_created }}
       tag_name: ${{ steps.release-please.outputs.tag_name }}
+      sha: ${{ steps.release-please.outputs.sha }}
+      release_id: ${{ steps.draft.outputs.release_id }}
     # Bound the job: the concurrency group means a wedged run blocks later
     # releases for the default 360 minutes otherwise. The budget covers the
-    # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10, verify 5) plus
+    # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10) plus
     # every short step with slack to spare, so the job limit can never fire
-    # mid-step.
+    # mid-step. Publish and its verification live in the downstream publish
+    # job, gated on the macos-pkg-smoke job.
     timeout-minutes: 90
     steps:
       # The App must grant contents: write (tag + release), pull-requests:
@@ -68,7 +72,10 @@ jobs:
       #       repos/cynative/cynative/issues/<pr>/labels/autorelease%3A%20tagged
       #     gh api repos/cynative/cynative/issues/<pr>/labels \
       #       -f "labels[]=autorelease: pending"
-      #   Then re-run the workflow; release-please recreates the draft.
+      #   Then re-run the workflow; release-please recreates the draft. The
+      #   pre-publish gate spans three jobs (release -> macos-pkg-smoke ->
+      #   publish); a failure in any of them, up to and including the publish
+      #   job's re-assertions, leaves the draft intact and these notes apply.
       #   "Publish release" refuses to run while the repo's immutable-releases
       #   setting is disabled (the draft stays intact). If "Verify published
       #   release" fails, the release is already live — investigate its
@@ -150,9 +157,9 @@ jobs:
       # "Build, sign, notarize & staple macOS pkgs" step below handles that.
       - name: Run GoReleaser
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
-        # Step-level cap so a slow build fails BEFORE publish instead of letting
-        # the job timeout kill the runner between the publish PATCH and the
-        # post-publish verification steps.
+        # Step-level cap so a wedged build fails cleanly while the draft is
+        # still recoverable, before the downstream smoke and publish jobs
+        # ever schedule (publication itself happens in the publish job).
         timeout-minutes: 35
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
@@ -177,6 +184,9 @@ jobs:
           TAG: ${{ steps.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
+          # The glob is the command on purpose: goreleaser emits exactly one
+          # linux_amd64 binary directory per release build.
+          # shellcheck disable=SC2211
           out="$(dist/*_linux_amd64*/cynative --version)"
           echo "${out}"
           # Exact match on the first line, not a prefix: a prefix would also accept a
@@ -226,10 +236,12 @@ jobs:
           done
           cat /tmp/pkg-assets.tsv
 
-      # Refresh the installation token before the publish-critical writes: the
-      # original token (minted at job start, 60-min lifetime) can be near expiry
-      # after GoReleaser + the pkg build/notarize steps. A 401 here would leave an
-      # unpublished draft after all artifacts were built.
+      # Refresh the installation token before the draft-critical writes (pkg
+      # upload, draft and asset assertions): the original token (minted at job
+      # start, 60-min lifetime) can be near expiry after GoReleaser + the pkg
+      # build/notarize steps, and a 401 here would strand an un-asserted draft
+      # after all artifacts were built. The downstream publish job mints its
+      # own fresh token.
       - name: Refresh App Token (pre-publish)
         id: prepublish-token
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
@@ -291,59 +303,111 @@ jobs:
           VERSION: ${{ steps.release-please.outputs.tag_name }}
         run: scripts/release/audit-formula.sh "${VERSION#v}" /tmp/expected-assets.tsv
 
-      - name: Re-verify tag before publish
+      # Hand-off to the pre-publish smoke jobs and the publish job. Sole
+      # producer of this artifact (workflow artifacts are immutable to other
+      # jobs): macos-pkg-smoke consumes the pkgs, and the publish job
+      # re-asserts the draft against these manifests. "Assert exact asset
+      # set" above proved the draft assets' sha256 digests equal these local
+      # bytes, so smoking the artifact is provenance-equivalent to smoking
+      # the draft assets, with no token handed to the smoke jobs. Staged
+      # flat, keyed by asset name. Future pre-publish smokes (#43) consume
+      # this same artifact: add files here, never a second producer.
+      - name: Stage release artifacts for smoke & publish
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
-          TAG: ${{ steps.release-please.outputs.tag_name }}
-          SHA: ${{ steps.release-please.outputs.sha }}
-        run: scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
-
-      # ---- The instant of immutability ------------------------------------
-
-      - name: Publish release
-        if: ${{ steps.release-please.outputs.release_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
-          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
-        run: scripts/release/publish-release.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}"
-
-      # Detection, not gating — publish cannot be rolled back. A failure here
-      # means: investigate; if the artifacts are bad, ship a follow-up patch
-      # release (in-place repair is impossible by design). All checks are
-      # instant reads of the now-frozen release; attestation verification is
-      # asynchronous (15–20+ minutes) and lives in the Release Attestation
-      # workflow, triggered by the publish above.
-      - name: Verify published release
-        if: ${{ steps.release-please.outputs.release_created == 'true' }}
-        timeout-minutes: 5
-        env:
-          GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
-          TAG: ${{ steps.release-please.outputs.tag_name }}
-          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
-          SHA: ${{ steps.release-please.outputs.sha }}
         run: |
-          # Short retry against API flakes only — every check inside is an
-          # immediate read of frozen state.
-          for attempt in 1 2 3; do
-            if scripts/release/verify-published.sh "${GITHUB_REPOSITORY}" "${TAG}" "${RELEASE_ID}" /tmp/expected-assets.tsv "${SHA}"; then
-              exit 0
-            fi
-            echo "verify-published attempt ${attempt}/3 failed"
-            if [ "${attempt}" -lt 3 ]; then
-              sleep 5
-            fi
-          done
-          echo "::error::post-publish verification failed after 3 attempts"
-          exit 1
+          set -euo pipefail
+          staged="${RUNNER_TEMP}/release-artifacts"
+          mkdir -p "${staged}"
+          while IFS=$'\t' read -r name _ path; do
+            cp "${path}" "${staged}/${name}"
+          done < /tmp/expected-assets.tsv
+          cp /tmp/pkg-assets.tsv /tmp/expected-assets.tsv "${staged}/"
+          ls -l "${staged}"
 
-      # Installation tokens live 60 minutes; on a worst-case release run the
-      # phase-2 step below executes ~50 minutes after the first mint, so give
-      # it a fresh token. Skipped on non-release runs (the original token is
-      # minutes old there).
-      - name: Refresh App Token
-        id: refresh-token
+      - name: Upload release artifacts
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  # ---- Pre-publish install gate ---------------------------------------
+  # Real install-and-run smoke of the macOS pkgs (cynative#44), between the
+  # draft build and publish: a package that Gatekeeper or installer(8)
+  # rejects, or whose installed binary does not run, fails here while the
+  # release is still an editable draft (recovery notes above apply
+  # unchanged). Each pkg runs on its native arch: Distribution pins
+  # hostArchitectures, and the labels are pinned images (macos-latest moves
+  # under our feet mid-migration). No secrets and no token: the job consumes
+  # only the release-artifacts hand-off.
+  macos-pkg-smoke:
+    name: macOS pkg install smoke (${{ matrix.runner }})
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            pkg: cynative_Darwin_arm64.pkg
+          - runner: macos-26-intel
+            pkg: cynative_Darwin_x86_64.pkg
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+
+      # The step timeout (inside the job's 15) keeps a hung stapler or spctl
+      # from consuming the whole job budget. The manifest lookup fails closed
+      # before the script runs: exactly one row for this pkg, well-formed
+      # sha256, or no smoke.
+      - name: Smoke pkg
+        timeout-minutes: 10
+        env:
+          PKG: ${{ matrix.pkg }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          staged="${RUNNER_TEMP}/release-artifacts"
+          sha="$(awk -F'\t' -v p="${PKG}" \
+            '$1 == p { c++; s = $2 } END { if (c == 1 && s ~ /^[0-9a-f]{64}$/) { print s } else { exit 1 } }' \
+            "${staged}/pkg-assets.tsv")" \
+            || { echo "::error::pkg-assets.tsv must hold exactly one well-formed row for ${PKG}"; exit 1; }
+          PKG_PATH="${staged}/${PKG}" SMOKE_VERSION="${TAG#v}" EXPECTED_SHA256="${sha}" \
+            sh test/pkg.smoke.test.sh
+
+  # ---- Publish: the instant of immutability ----------------------------
+  # Everything before this job's "Publish release" step still runs against
+  # an editable draft: any failure leaves nothing published and nothing
+  # immutable. The compound if is the skipped-needs handler: !cancelled()
+  # (a status function) forces evaluation even though macos-pkg-smoke is
+  # skipped on a plain push, so release-please phase 2 below still runs;
+  # on a release run the smoke must have succeeded.
+  publish:
+    name: Publish release
+    needs: [release, macos-pkg-smoke]
+    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || needs.macos-pkg-smoke.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Fresh token on every publish run, never release-gated: the release
+      # job's token cannot be handed across jobs, phase-2 release-please
+      # needs one on non-release pushes too, and on release runs the smoke
+      # wait would leave an inherited token near expiry.
+      - name: Generate App Token
+        id: publish-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.APP_ID }}
@@ -354,52 +418,140 @@ jobs:
             homebrew-tap
             scoop-bucket
 
-      - name: Render & push Homebrew formula
-        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+      # The publish scripts live in the repo; check out the exact SHA the
+      # release was cut from.
+      - name: Checkout code
+        if: ${{ needs.release.outputs.release_created == 'true' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+
+      - name: Download release artifacts
+        if: ${{ needs.release.outputs.release_created == 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+
+      - name: Re-verify tag before publish
+        if: ${{ needs.release.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.refresh-token.outputs.token || steps.generate-token.outputs.token }}
-          VERSION: ${{ steps.release-please.outputs.tag_name }}
+          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+          SHA: ${{ needs.release.outputs.sha }}
+        run: scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
+
+      # The draft stayed editable while the macOS smoke ran, so prove it
+      # still is the one the release job asserted (same id) and still holds
+      # exactly the smoked bytes (same exact asset set) immediately before
+      # the publish flips it immutable.
+      - name: Re-assert draft & exact asset set
+        if: ${{ needs.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          release_id="$(scripts/release/assert-draft.sh "${GITHUB_REPOSITORY}" "${TAG}")"
+          if [ "${release_id}" != "${RELEASE_ID}" ]; then
+            echo "::error::draft release id changed (${RELEASE_ID} -> ${release_id})"
+            exit 1
+          fi
+          scripts/release/assert-assets.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}" \
+            "${RUNNER_TEMP}/release-artifacts/expected-assets.tsv"
+
+      - name: Publish release
+        if: ${{ needs.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+        run: scripts/release/publish-release.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}"
+
+      # Detection, not gating - publish cannot be rolled back. A failure here
+      # means: investigate; if the artifacts are bad, ship a follow-up patch
+      # release (in-place repair is impossible by design). All checks are
+      # instant reads of the now-frozen release; attestation verification is
+      # asynchronous (15-20+ minutes) and lives in the Release Attestation
+      # workflow, triggered by the publish above.
+      - name: Verify published release
+        if: ${{ needs.release.outputs.release_created == 'true' }}
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          TAG: ${{ needs.release.outputs.tag_name }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
+          SHA: ${{ needs.release.outputs.sha }}
+        run: |
+          # Short retry against API flakes only - every check inside is an
+          # immediate read of frozen state.
+          for attempt in 1 2 3; do
+            if scripts/release/verify-published.sh "${GITHUB_REPOSITORY}" "${TAG}" "${RELEASE_ID}" \
+                "${RUNNER_TEMP}/release-artifacts/expected-assets.tsv" "${SHA}"; then
+              exit 0
+            fi
+            echo "verify-published attempt ${attempt}/3 failed"
+            if [ "${attempt}" -lt 3 ]; then
+              sleep 5
+            fi
+          done
+          echo "::error::post-publish verification failed after 3 attempts"
+          exit 1
+
+      - name: Render & push Homebrew formula
+        if: ${{ needs.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          VERSION: ${{ needs.release.outputs.tag_name }}
         run: |
           set -euo pipefail
           ver="${VERSION#v}"
-          # /tmp/expected-assets.tsv (name<TAB>sha256<TAB>path) was written by
-          # "Assert exact asset set" earlier in this job; publish-tap.sh derives
-          # the four tarball digests from it, fails closed on any bad/missing one,
-          # writes Formula/cynative.rb, removes the legacy Casks/cynative.rb, and
-          # pushes the tap once.
-          scripts/release/publish-tap.sh "${ver}" /tmp/expected-assets.tsv
+          # expected-assets.tsv (name<TAB>sha256<TAB>path) rode in on the
+          # release-artifacts hand-off; publish-tap.sh derives the four
+          # tarball digests from its name+sha columns, fails closed on any
+          # bad/missing one, writes Formula/cynative.rb, removes the legacy
+          # Casks/cynative.rb, and pushes the tap once.
+          scripts/release/publish-tap.sh "${ver}" \
+            "${RUNNER_TEMP}/release-artifacts/expected-assets.tsv"
 
-      # release-please PHASE 2 — candidate PR only (skip-github-release).
-      # On normal pushes this is the only place the next-release candidate is
-      # created or updated. On release runs it executes after publish, so the
-      # candidate is computed with the new release visible and correctly
-      # bounded — phase 1 never computes candidates, so the draft-blind bogus
-      # PRs that previously required a cleanup step cannot exist. Deliberately
-      # NOT always(): after a failed release run the draft is unpublished and
-      # a candidate computed here would be draft-blind; skipping means no
-      # candidate is created at all. Residual edge: a push to main while a
-      # failed release awaits recovery computes its candidate draft-blind
-      # (full-history shape — do not merge it); it is rewritten correctly by
-      # the next push after recovery, or close it manually.
+      # release-please PHASE 2 - candidate PR only (skip-github-release).
+      # On plain pushes this is the only place the next-release candidate is
+      # created or updated (every earlier step in this job is release-gated,
+      # so the job reduces to token + this step). On release runs it executes
+      # after publish, so the candidate is computed with the new release
+      # visible and correctly bounded - phase 1 never computes candidates, so
+      # draft-blind bogus PRs cannot exist. Deliberately no explicit if
+      # (default success() semantics): after a failed release step the draft
+      # is unpublished and a candidate computed here would be draft-blind;
+      # skipping means no candidate is created at all. Residual edge: a push
+      # to main while a failed release awaits recovery computes its candidate
+      # draft-blind (full-history shape - do not merge it); it is rewritten
+      # correctly by the next push after recovery, or close it manually.
       - name: Compute release candidate PR
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          token: ${{ steps.refresh-token.outputs.token || steps.generate-token.outputs.token }}
+          token: ${{ steps.publish-token.outputs.token }}
           skip-github-release: true
 
   # Post-publish public-channel checks. Failure semantics, shared by both
-  # smoke jobs: a red `release` job means the release needs recovery (see the
-  # recovery notes above); a green `release` job with a red smoke job means
-  # the release published fine but that public channel is broken -
-  # investigate and re-run (workflow_dispatch on the smoke workflow), nothing
-  # to roll back. Phase-2 release-please is the last step of the `release`
-  # job, so a smoke failure cannot block candidate computation.
+  # smoke jobs: a red `release` or `macos-pkg-smoke` job, or a red `publish`
+  # job that failed BEFORE its "Publish release" step, means the release
+  # needs recovery with the draft intact (see the recovery notes above); a
+  # red `publish` job AFTER that step means the release is already live and
+  # immutable - investigate, and if the artifacts are bad ship a follow-up
+  # patch release. A green `publish` with a red channel smoke means the
+  # release published fine but that public channel is broken - investigate
+  # and re-run (workflow_dispatch on the smoke workflow), nothing to roll
+  # back. Phase-2 release-please is the last step of the `publish` job, so a
+  # channel-smoke failure cannot block candidate computation. Both jobs gate
+  # on `publish` (implicit success() across all of needs), so they run only
+  # after the release is published and the tap pushed.
   # homebrew-smoke (cynative#45) runs after the tap push and validates the
   # brew channel; install-script-smoke (cynative#47) validates the documented
   # curl|sh and irm|iex install paths against the public release assets.
   homebrew-smoke:
     name: Homebrew install smoke
-    needs: release
+    needs: [release, publish]
     if: ${{ needs.release.outputs.release_created == 'true' }}
     permissions:
       contents: read
@@ -409,7 +561,7 @@ jobs:
 
   install-script-smoke:
     name: Install-script smoke
-    needs: release
+    needs: [release, publish]
     if: ${{ needs.release.outputs.release_created == 'true' }}
     permissions:
       contents: read

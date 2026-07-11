@@ -3,7 +3,8 @@
 # "name<TAB>sha256<TAB>path", derived from goreleaser's dist/artifacts.json.
 # Covers exactly what goreleaser uploads: archives, the source archive, and
 # the checksums file. Columns 1-2 are the assertion key (assert-assets.sh);
-# column 3 is the local path verify-published.sh feeds to verify-asset.
+# column 3 is the local path the release job stages into the
+# release-artifacts hand-off (downstream consumers never dereference it).
 #
 # Usage: expected-assets.sh <dist-dir>
 set -euo pipefail
