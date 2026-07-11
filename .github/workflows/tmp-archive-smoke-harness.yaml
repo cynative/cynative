@@ -1,0 +1,213 @@
+name: tmp archive smoke harness
+
+# Temporary branch-scoped harness: proves the archive-smoke matrix (runner
+# labels, Git Bash lookup on Windows, Desktop PowerShell 5.1 on
+# windows-11-arm, both smoke scripts) against snapshot archives before the
+# Release Pipeline depends on it. Never merged to main; deleted from the
+# branch once green.
+
+on:
+  push:
+    branches:
+      - test/release-archive-smoke
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: Build snapshot and stage artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # fetch-depth: 0 gets full history + tags so goreleaser can derive the
+      # snapshot version from the latest release tag.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Report tested head SHA
+        run: echo "Testing head SHA ${{ github.sha }}"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: Build the release snapshot
+        run: make snapshot
+      - name: Extract snapshot version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(jq -er .version dist/metadata.json)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "snapshot version ${version}"
+      # Archive-relevant staging subset of the release job: manifest from
+      # expected-assets.sh, files staged flat keyed by asset name, same
+      # artifact name the archive-smoke steps expect. Deliberately NOT
+      # covered here: release-mode goreleaser (this is a snapshot with
+      # --skip=before), draft adoption/upload, assert-assets.sh, and the
+      # pkg rows appended to the manifest.
+      - name: Stage release artifacts
+        run: |
+          set -euo pipefail
+          scripts/release/expected-assets.sh dist > /tmp/expected-assets.tsv
+          staged="${RUNNER_TEMP}/release-artifacts"
+          mkdir -p "${staged}"
+          while IFS=$'\t' read -r name _ path; do
+            cp "${path}" "${staged}/${name}"
+          done < /tmp/expected-assets.tsv
+          cp /tmp/expected-assets.tsv "${staged}/"
+          ls -l "${staged}"
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts/
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  archive-smoke:
+    name: Archive install smoke (${{ matrix.archive }})
+    needs: snapshot
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            archive: cynative_Linux_x86_64.tar.gz
+          - runner: ubuntu-24.04-arm
+            archive: cynative_Linux_arm64.tar.gz
+          - runner: windows-latest
+            archive: cynative_Windows_x86_64.zip
+            arch: amd64
+          - runner: windows-11-arm
+            archive: cynative_Windows_arm64.zip
+            arch: arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+
+      - name: Resolve expected digest
+        id: digest
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          set -euo pipefail
+          staged="${RUNNER_TEMP}/release-artifacts"
+          sha="$(awk -F'\t' -v a="${ARCHIVE}" \
+            '$1 == a { c++; s = $2 } END { if (c == 1 && s ~ /^[0-9a-f]{64}$/) { print s } else { exit 1 } }' \
+            "${staged}/expected-assets.tsv")" \
+            || { echo "::error::expected-assets.tsv must hold exactly one well-formed row for ${ARCHIVE}"; exit 1; }
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+
+      - name: Smoke archive (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        timeout-minutes: 10
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          TAG: v${{ needs.snapshot.outputs.version }}
+          SHA256: ${{ steps.digest.outputs.sha }}
+        run: |
+          set -euo pipefail
+          staged="${RUNNER_TEMP}/release-artifacts"
+          ARCHIVE_PATH="${staged}/${ARCHIVE}" SMOKE_VERSION="${TAG#v}" \
+            EXPECTED_SHA256="${SHA256}" CHECKSUMS_PATH="${staged}/checksums.txt" \
+            sh test/archive.smoke.test.sh
+
+      - name: Smoke archive (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        timeout-minutes: 10
+        shell: powershell # 5.1, not pwsh (7) - the floor install.ps1 targets.
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          TAG: v${{ needs.snapshot.outputs.version }}
+          SHA256: ${{ steps.digest.outputs.sha }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          $staged = Join-Path $env:RUNNER_TEMP 'release-artifacts'
+          $env:ARCHIVE_PATH = Join-Path $staged $env:ARCHIVE
+          $env:SMOKE_VERSION = $env:TAG -replace '^v', ''
+          $env:EXPECTED_SHA256 = $env:SHA256
+          $env:CHECKSUMS_PATH = Join-Path $staged 'checksums.txt'
+          & .\test\archive.smoke.test.ps1
+          exit $LASTEXITCODE
+
+      # Harness-only: prove the ps1 fails closed under real Desktop 5.1.
+      # Each case runs in a child powershell.exe so one FAIL cannot stop the
+      # battery; every case must exit 1 with a FAIL line.
+      - name: Negative battery (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        timeout-minutes: 10
+        shell: powershell
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          TAG: v${{ needs.snapshot.outputs.version }}
+          SHA256: ${{ steps.digest.outputs.sha }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $staged = Join-Path $env:RUNNER_TEMP 'release-artifacts'
+          $work = Join-Path $env:RUNNER_TEMP 'neg'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          $env:ARCHIVE_PATH = Join-Path $staged $env:ARCHIVE
+          $env:SMOKE_VERSION = $env:TAG -replace '^v', ''
+          $env:EXPECTED_SHA256 = $env:SHA256
+          $env:CHECKSUMS_PATH = Join-Path $staged 'checksums.txt'
+          $goodArch = $env:EXPECTED_ARCH
+
+          function Invoke-Case {
+            param([string]$Name)
+            & (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass `
+              -File test\archive.smoke.test.ps1
+            if ($LASTEXITCODE -eq 1) { Write-Host "negative '$Name': failed closed as expected" }
+            else { throw "negative '$Name' exited $LASTEXITCODE, expected 1" }
+          }
+
+          # (a) opposite PE arch expectation.
+          $env:EXPECTED_ARCH = if ($goodArch -eq 'amd64') { 'arm64' } else { 'amd64' }
+          Invoke-Case 'wrong arch'
+          $env:EXPECTED_ARCH = $goodArch
+
+          # (b) duplicate checksums.txt row.
+          $dup = Join-Path $work 'dup.txt'
+          $row = (Get-Content -LiteralPath $env:CHECKSUMS_PATH) | Where-Object { $_ -match [regex]::Escape($env:ARCHIVE) }
+          Set-Content -LiteralPath $dup -Value @($row, $row)
+          $goodChecksums = $env:CHECKSUMS_PATH
+          $env:CHECKSUMS_PATH = $dup
+          Invoke-Case 'duplicate checksum row'
+          $env:CHECKSUMS_PATH = $goodChecksums
+
+          # (c) zip without cynative.exe at the root.
+          $emptyDir = Join-Path $work 'empty'
+          New-Item -ItemType Directory -Path $emptyDir | Out-Null
+          Set-Content -LiteralPath (Join-Path $emptyDir 'readme.txt') -Value 'not a binary'
+          $badZip = Join-Path $work 'bad.zip'
+          Compress-Archive -Path (Join-Path $emptyDir '*') -DestinationPath $badZip
+          $badSha = (Get-FileHash -LiteralPath $badZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $badRows = Join-Path $work 'bad.txt'
+          Set-Content -LiteralPath $badRows -Value "$badSha  bad.zip"
+          $goodArchive = $env:ARCHIVE_PATH; $goodSha = $env:EXPECTED_SHA256
+          $env:ARCHIVE_PATH = $badZip; $env:EXPECTED_SHA256 = $badSha; $env:CHECKSUMS_PATH = $badRows
+          Invoke-Case 'missing root exe'
+          $env:ARCHIVE_PATH = $goodArchive; $env:EXPECTED_SHA256 = $goodSha; $env:CHECKSUMS_PATH = $goodChecksums
+
+          # (d) wrong expected version.
+          $env:SMOKE_VERSION = '0.0.0'
+          Invoke-Case 'wrong version'
+
+          # Reaching here means every case failed closed (a non-failing child
+          # would have thrown under Stop). The last child left $LASTEXITCODE=1,
+          # which the step epilogue would otherwise propagate as a failure.
+          exit 0
