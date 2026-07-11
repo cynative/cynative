@@ -645,9 +645,18 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. `.goreleaser.yaml` handles binary builds for
-  release tags. The Release Pipeline gates publish on `scripts/release/audit-formula.sh` (offline
-  `brew audit --strict` of the rendered formula in a throwaway tap; a failure leaves the draft
-  intact) and, after the tap push, calls the reusable `.github/workflows/homebrew-smoke.yaml`
+  release tags. The Release Pipeline splits at the publish boundary: the `release` job builds,
+  signs, and statically asserts everything, then hands the draft's exact asset set (pkgs,
+  archives, manifests) to downstream jobs as the `release-artifacts` workflow artifact; the
+  `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs
+  `test/pkg.smoke.test.sh` against each pkg on its native arch (sha256 vs manifest, pkgutil
+  signature, stapler validate, gating spctl Gatekeeper assess, real `installer` install, receipt
+  version, exact `--version`); the `publish` job re-asserts the still-editable draft (same id,
+  same exact asset set) immediately before publishing, then verifies, pushes the tap, and runs
+  release-please phase 2. Publish is additionally gated on `scripts/release/audit-formula.sh`
+  (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`
+  job); any pre-publish failure leaves the draft intact. After the tap push, the pipeline calls
+  the reusable `.github/workflows/homebrew-smoke.yaml`
   (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
   the Homebrew install smoke on macOS and Linux. It also calls the reusable
   `.github/workflows/install-script-smoke.yaml` (also maintainer-dispatchable) once the
