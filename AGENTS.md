@@ -651,8 +651,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
   the Homebrew install smoke on macOS and Linux. It also calls the reusable
   `.github/workflows/install-script-smoke.yaml` (also maintainer-dispatchable) once the
-  release job completes, which runs the documented `curl | sh` install path on Linux and macOS and the
-  `irm | iex` path on Windows PowerShell 5.1 against the public release assets. For both:
+  release job completes, which runs the documented `curl | sh` install path on Linux and macOS and
+  the `irm | iex` path on Windows PowerShell 5.1 against the public release assets. For both:
   a red smoke with a green `release` job means public-channel drift, nothing to roll back.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and

@@ -29,8 +29,9 @@ Every PR must pass `make check`, which runs two halves:
   format-diff + the full race-enabled test suite + a `GOOS=windows` cross-build);
   100% `go.mod`-pinned. **The pre-commit hook runs this.**
 - `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer on
-  `install.ps1`, the Pester unit tests, and the POSIX `install.sh` unit + loopback smoke
-  tests (`sh-test`, which needs `python3`), each at a version pinned in the `Makefile`.
+  `install.ps1` and `test/install-script.smoke.test.ps1`, the Pester unit tests, and the POSIX
+  `install.sh` unit + loopback smoke tests (`sh-test`, which needs `python3`), each at a
+  version pinned in the `Makefile`.
 
 ```bash
 make check
