@@ -668,9 +668,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   the Homebrew install smoke on macOS and Linux. It also calls the reusable
   `.github/workflows/install-script-smoke.yaml` (also maintainer-dispatchable) once the
   `publish` job completes, which runs the documented `curl | sh` install path on Linux and macOS
-  and the `irm | iex` path on Windows PowerShell 5.1 against the public release assets. For both:
-  a red channel smoke with a green `publish` job means public-channel drift, nothing to roll
-  back.
+  and the `irm | iex` path on Windows PowerShell 5.1 against the public release assets. It also
+  calls the reusable `.github/workflows/scoop-smoke.yaml` (also maintainer-dispatchable), which
+  waits for the public Scoop bucket to serve the new version and runs the Scoop install smoke on
+  windows-latest. For all three: a red channel smoke with a green `publish` job means
+  public-channel drift, nothing to roll back.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and
   `third_party/xar`, plus `tools/rcodesign` (a Cargo stub that pins the `apple-codesign`
