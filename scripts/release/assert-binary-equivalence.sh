@@ -7,6 +7,10 @@ dist="$1"; tarball="$2"; pkg="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"
 work="$(mktemp -d)"; trap 'rm -rf "${work}"' EXIT
 
 tar -xzf "${tarball}" -C "${work}" cynative
+# The tarball is Homebrew's install source and nothing else checks its mode
+# bit: pkg construction forces 0755 independently, so byte equality alone
+# would pass a tar member that lost its executable bit.
+[ -x "${work}/cynative" ] || { echo "::error::tarball member cynative is not executable" >&2; exit 1; }
 ( cd "${work}" && xar -xf "${pkg}" base.pkg/Payload && gunzip -c base.pkg/Payload | cpio -idm 2>/dev/null )
 
 d="$(sha256sum "${dist}" | cut -d' ' -f1)"
