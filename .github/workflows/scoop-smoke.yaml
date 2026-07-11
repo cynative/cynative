@@ -16,12 +16,11 @@ name: Scoop install smoke
 # already advanced, release not yet published): the wait below then times
 # out with instructions; a dispatch before the bucket advances simply
 # validates the previous release. Residual: the manifest's arm64 entry is
-# not exercised (this smoke
-# is x64-only); a windows-11-arm leg needs its own proving run before joining
-# the release-adjacent path. Both jobs carry explicit timeout-minutes: a
-# caller job that `uses:` a reusable workflow cannot set one, and on the call
-# path a wedged job would otherwise hold the release-pipeline concurrency
-# group for the default 360 minutes.
+# not exercised (this smoke is x64-only); a windows-11-arm leg needs its own
+# proving run before joining the release-adjacent path. Both jobs carry
+# explicit timeout-minutes: a caller job that `uses:` a reusable workflow
+# cannot set one, and on the call path a wedged job would otherwise hold the
+# release-pipeline concurrency group for the default 360 minutes.
 on:
   workflow_call:
     inputs:
@@ -116,7 +115,7 @@ jobs:
                    elif .version != $expected
                    then "MISMATCH: bucket serves \(.version | tojson), expected \($expected)"
                    else "OK" end' "${manifest}" 2>/dev/null)" \
-                  || state="INVALID: manifest is not valid JSON"
+                  || state="INVALID: manifest is not valid JSON or not a JSON object"
                 if [ "${state}" = "OK" ]; then
                   echo "bucket serves ${VERSION} (attempt ${attempt})"
                   exit 0
