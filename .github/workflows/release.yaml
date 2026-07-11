@@ -304,8 +304,8 @@ jobs:
         run: scripts/release/audit-formula.sh "${VERSION#v}" /tmp/expected-assets.tsv
 
       # Hand-off to the pre-publish smoke jobs and the publish job. Sole
-      # producer of this artifact (workflow artifacts are immutable to other
-      # jobs): macos-pkg-smoke consumes the pkgs, and the publish job
+      # producer of this artifact (downstream jobs only consume it):
+      # macos-pkg-smoke consumes the pkgs, and the publish job
       # re-asserts the draft against these manifests. "Assert exact asset
       # set" above proved the draft assets' sha256 digests equal these local
       # bytes, so smoking the artifact is provenance-equivalent to smoking
@@ -400,7 +400,11 @@ jobs:
     needs: [release, macos-pkg-smoke]
     if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || needs.macos-pkg-smoke.result == 'success') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
+    # plus every short step with slack, so the job limit can never fire
+    # mid-step - in particular never between the publish PATCH and its
+    # verification.
+    timeout-minutes: 30
     steps:
       # Fresh token on every publish run, never release-gated: the release
       # job's token cannot be handed across jobs, phase-2 release-please
@@ -429,6 +433,7 @@ jobs:
       - name: Download release artifacts
         if: ${{ needs.release.outputs.release_created == 'true' }}
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        timeout-minutes: 5
         with:
           name: release-artifacts
           path: ${{ runner.temp }}/release-artifacts
@@ -447,6 +452,7 @@ jobs:
       # the publish flips it immutable.
       - name: Re-assert draft & exact asset set
         if: ${{ needs.release.outputs.release_created == 'true' }}
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ steps.publish-token.outputs.token }}
           TAG: ${{ needs.release.outputs.tag_name }}

@@ -5,7 +5,7 @@ name: Install-script smoke
 # install.ps1 served from raw main, release assets from the public download
 # URLs - and that the installed binary reports exactly the expected version
 # and uninstalls cleanly. Two entry points, no PR trigger: the Release
-# Pipeline calls it post-publish, once the release job completes
+# Pipeline calls it post-publish, once the publish job completes
 # (workflow_call, tag input), and maintainers can dispatch it manually
 # against the latest published release.
 # Unlike the Homebrew smoke there is no propagation poll: the release assets
