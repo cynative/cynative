@@ -138,7 +138,7 @@ try {
     $rc = $LASTEXITCODE
     if ($rc -ne 0) { throw "$exe --version exited $rc" }
     $firstLine = [string](@($out)[0])
-    if ($firstLine -ne "cynative $version") {
+    if ($firstLine -cne "cynative $version") {
         throw "--version reported '$firstLine', expected 'cynative $version' (stale release asset?)"
     }
 
