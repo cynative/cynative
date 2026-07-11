@@ -14,8 +14,9 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - `make check-go`: generate + lint + shell-complexity + format-diff + test + `windows-build`
   (GOOS=windows amd64/arm64 cross-compile). 100% `go.mod`-pinned and hermetic; **the pre-commit
   hook runs this**.
-- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1` and
-  `test/install-script.smoke.test.ps1` + Pester unit tests + `sh-test` (the POSIX `install.sh` unit
+- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1`,
+  `test/install-script.smoke.test.ps1`, and `test/scoop.smoke.test.ps1` + Pester unit tests +
+  `sh-test` (the POSIX `install.sh` unit
   tests plus a `python3`-backed loopback smoke test of the `CYNATIVE_BASE_URL` download-base seam
   and its non-loopback-HTTP reject). Install-free: asserts each pinned tool or module is present and
   fails with an install hint otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
