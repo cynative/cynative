@@ -165,7 +165,6 @@ install-e2e:
 # llm-smoke: live, no-tool LLM smoke test (cynative#38). Standalone (NOT part of
 # `make check`): runs the real `cynative -p` against a real provider selected via
 # CYNATIVE_LLM_* env and needs real credentials; skips cleanly when none are set.
-# See docs/e2e/live-llm-smoke.md.
 llm-smoke:
 	sh test/llm.smoke.test.sh
 
@@ -173,7 +172,7 @@ llm-smoke:
 # of `make check`): runs the real `cynative -p` against a real provider selected via
 # CYNATIVE_LLM_* env and proves the model drives the tool loop through
 # code_execution (sums a random integer list in the sandbox); needs real
-# credentials and skips cleanly when none are set. See docs/e2e/live-llm-smoke.md.
+# credentials and skips cleanly when none are set.
 llm-tools-smoke:
 	sh test/llm-tools.smoke.test.sh
 

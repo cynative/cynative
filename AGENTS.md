@@ -54,7 +54,7 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   standalone live LLM smoke (not part of `make check`); runs the real `cynative -p` against a
   real provider chosen via `CYNATIVE_LLM_*` env (nonce echo, no tools; `test/llm.smoke.test.sh`),
   asserting the nonce on stdout and `0 tool calls` in the footer, and skips cleanly when no
-  provider is set. See `docs/e2e/live-llm-smoke.md`. `make connector-gcp-e2e`: standalone
+  provider is set. `make connector-gcp-e2e`: standalone
   live GCP connector e2e (not part of `make check`); runs the real `cynative -p` against a real
   GCP fixture project through the `gcp` connector (`test/connector.gcp.e2e.test.sh`, needs
   `python3`), asserting a read of the project's own Cloud Resource Manager metadata and a
