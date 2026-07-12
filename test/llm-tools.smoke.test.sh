@@ -30,7 +30,7 @@
 # Env:
 #   CYNATIVE_LLM_PROVIDER, CYNATIVE_LLM_MODEL   required (else skip)
 #   provider creds (e.g. AWS creds for Bedrock, a Vertex service account for
-#                   Vertex - see docs/e2e/live-llm-smoke.md)
+#                   Vertex)
 #   SMOKE_TIMEOUT        wall-clock seconds (default 90)
 #   SMOKE_MAX_TOKENS     token ceiling (default 40000; a backstop, not a tight
 #                        budget - a tool turn is two model calls plus the echoed
