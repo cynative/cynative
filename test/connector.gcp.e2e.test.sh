@@ -191,6 +191,9 @@ if [ "${1:-}" = "--selftest" ]; then
 fi
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+# Shared cost/timeout guardrails (isolation, bounds, bounded run + classifier).
+# shellcheck disable=SC1091  # sourced at runtime via a $0-relative path.
+. "$root/test/lib/e2e-guardrails.sh"
 
 # Skip cleanly when required env is unset - unless GCP_E2E_REQUIRE_RUN=1, where a
 # missing var is a failure (a CI job must never go green by skipping).
@@ -208,40 +211,55 @@ if [ -n "$missing" ]; then
 	exit 0
 fi
 
-command -v go >/dev/null 2>&1 || { printf 'FAIL: go not found (needed to build cynative)\n' >&2; exit 1; }
-command -v timeout >/dev/null 2>&1 || { printf 'FAIL: timeout not found\n' >&2; exit 1; }
-command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found (needed to parse the audit log)\n' >&2; exit 1; }
+e2e_require_cmd go "needed to build cynative" || exit 1
+e2e_require_cmd timeout || exit 1
+e2e_require_cmd python3 "needed to parse the audit log" || exit 1
 
 workdir=$(mktemp -d)
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT INT TERM
 
-# Build the binary (or accept a prebuilt one) so the test exercises this checkout.
-bin=${1:-}
-if [ -z "$bin" ]; then
-	bin="$workdir/cynative"
-	printf '== BUILD ==\n' >&2
-	( cd "$root" && go build -o "$bin" ./cmd/cynative ) || { printf 'FAIL: go build failed\n' >&2; exit 1; }
-fi
-[ -x "$bin" ] || { printf 'FAIL: binary not executable: %s\n' "$bin" >&2; exit 1; }
+# Build the binary (or accept a prebuilt one, passed as $1) so the test exercises
+# this checkout.
+bin=$(e2e_build_binary "$root" "$workdir" "${1:-}") || exit 1
 
-# Isolate cynative's own config/cache/audit without moving HOME, so provider SDKs
-# still find file-based ADC. An empty --config ignores the caller's config.yaml;
-# cache/audit go to the temp dir. Silence connector sources unrelated to gcp
-# (github/gitlab/kube), but KEEP the GCP creds - we want the gcp connector to
-# register (the inverse of the llm smoke).
-: > "$workdir/config.yaml"
-export CYNATIVE_CACHE_DIR="$workdir/cache"
-export CYNATIVE_MAX_TOTAL_TOKENS="${GCP_E2E_MAX_TOKENS:-32000}"
-unset GH_CONFIG_DIR GLAB_CONFIG_DIR KUBECONFIG \
-	GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
+# Isolate cynative's config/cache from the caller without moving HOME, so provider
+# SDKs still find file-based ADC. e2e_isolate_env writes an empty --config
+# (ignore the caller's config.yaml), points the cache at the temp dir, and
+# silences connector sources unrelated to gcp (github/gitlab/kube). It leaves the
+# GCP creds alone - we want the gcp connector to register (the inverse of the llm
+# smoke). The per-phase audit path is set by e2e_run_bounded, not here.
+e2e_isolate_env "$workdir"
+# Bounds: the connector run does real tool work, so it keeps the shared iteration
+# default (unlike the no-tool llm smoke). GCP_E2E_* override the token and
+# wall-clock defaults; exported as env-level overrides for e2e_apply_bounds.
+export E2E_MAX_TOKENS="${GCP_E2E_MAX_TOKENS:-32000}"
+export E2E_RUN_TIMEOUT="${GCP_E2E_TIMEOUT:-120}"
+e2e_apply_bounds
 
 # Write the audit parser once; both phases invoke it.
 parser="$workdir/audit_check.py"
 write_parser "$parser"
 
-timeout_s="${GCP_E2E_TIMEOUT:-120}"
+timeout_s="$E2E_RUN_TIMEOUT"
 attempts="${GCP_E2E_ATTEMPTS:-2}"
+
+# classify_or_return RC OUT ERR - run the shared classifier for a phase and map it
+# onto the phase's retry contract: success (0) continues; a budget hit (3) is
+# fatal and must not be retried, so it propagates as 3; any other failure is a
+# retryable 1. The classifier's rc is captured in the else branch (a completed
+# `if` with no matching branch yields status 0, which would swallow it).
+classify_or_return() {
+	if e2e_classify_run "$1" "$2" "$3" "$timeout_s"; then
+		return 0
+	else
+		_cls=$?
+	fi
+	if [ "$_cls" -eq 3 ]; then
+		return 3
+	fi
+	return 1
+}
 
 # ============================ READ PHASE ============================
 # Give the project id, ask for the number: the model can only produce the number
@@ -254,19 +272,12 @@ read_phase() {
 	# records (cynative opens the audit log append-only, so a stale record from a
 	# failed earlier attempt could otherwise satisfy this attempt's parser).
 	: > "$workdir/read.audit.log"
-	if CYNATIVE_AUDIT_PATH="$workdir/read.audit.log" \
-		timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$read_prompt" --auto-approve \
-		>"$workdir/read.out" 2>"$workdir/read.err" </dev/null; then rc=0; else rc=$?; fi
-
-	if [ "$rc" -eq 124 ]; then
-		printf 'read: timed out after %ss\n' "$timeout_s" >&2
-		return 1
-	fi
-	if [ "$rc" -ne 0 ]; then
-		printf 'read: run failed (provider/config/access, exit %s). stderr tail:\n' "$rc" >&2
-		tail -n 20 "$workdir/read.err" >&2
-		return 1
-	fi
+	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
+		"$bin" "$workdir/config.yaml" "$read_prompt"; then rc=0; else rc=$?; fi
+	# Shared classification: a timeout, a budget hit, or a provider/config error
+	# fail this attempt; a budget hit (3) propagates so the retry loop stops
+	# instead of re-burning credits.
+	classify_or_return "$rc" "$workdir/read.out" "$workdir/read.err" || return $?
 	# Verify the environment before the answer: the gcp connector must have
 	# registered and be available under the read-only role. On failure dump the
 	# startup connector inventory and a stderr tail, so a registration skip is
@@ -321,23 +332,14 @@ canary_phase() {
 	# a stale marked+denied record from a failed earlier attempt must not satisfy
 	# this attempt's parser.
 	: > "$workdir/canary.audit.log"
-	if CYNATIVE_AUDIT_PATH="$workdir/canary.audit.log" \
-		timeout "$timeout_s" "$bin" --config "$workdir/config.yaml" -p "$canary_prompt" --auto-approve \
-		>"$workdir/canary.out" 2>"$workdir/canary.err" </dev/null; then crc=0; else crc=$?; fi
+	if e2e_run_bounded "$timeout_s" "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err" \
+		"$bin" "$workdir/config.yaml" "$canary_prompt"; then rc=0; else rc=$?; fi
 
 	# The denial is an in-loop tool result, not a fatal exit, so a correctly denied
-	# write still exits 0. A timeout or any other non-zero exit means the run itself
-	# failed (crash, misconfig, or the model never reaching the write) and must not
-	# be masked by the audit check - fail, like the read phase.
-	if [ "$crc" -eq 124 ]; then
-		printf 'canary: timed out after %ss\n' "$timeout_s" >&2
-		return 1
-	fi
-	if [ "$crc" -ne 0 ]; then
-		printf 'canary: run failed (exit %s). stderr tail:\n' "$crc" >&2
-		tail -n 20 "$workdir/canary.err" >&2
-		return 1
-	fi
+	# write still exits 0. Shared classification only catches a real run failure
+	# (timeout, budget, crash, or the model never reaching the write); it must not
+	# be masked by the audit check. A budget hit (3) is fatal - propagate it.
+	classify_or_return "$rc" "$workdir/canary.out" "$workdir/canary.err" || return $?
 	# The audit log must show the write was attempted AND denied client-side, and no
 	# marked write succeeded.
 	if ! python3 "$parser" canary "$workdir/canary.audit.log"; then
@@ -348,27 +350,38 @@ canary_phase() {
 	return 0
 }
 
-# Run each phase, retrying a non-deterministic model miss up to $attempts times.
-n=0
-while ! read_phase; do
-	n=$((n + 1))
-	if [ "$n" -ge "$attempts" ]; then
-		printf 'FAIL: read phase failed after %d attempt(s)\n' "$n" >&2
-		exit 1
-	fi
-	printf 'retry: read phase attempt %d failed, retrying\n' "$n" >&2
-done
-
-if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
-	n=0
-	while ! canary_phase; do
-		n=$((n + 1))
-		if [ "$n" -ge "$attempts" ]; then
-			printf 'FAIL: canary phase failed after %d attempt(s)\n' "$n" >&2
+# run_with_retries LABEL PHASE_FN - run a phase, retrying a non-deterministic
+# model miss up to $attempts times. A budget hit (the phase returns 3) is fatal
+# and is NOT retried: a retry only burns more credits and re-hits the ceiling.
+# The phase's exit code is captured in the else branch (a completed `if` with no
+# matching branch yields status 0, so reading $? after `fi` would swallow it).
+run_with_retries() {
+	_label=$1
+	_fn=$2
+	_n=0
+	while true; do
+		if "$_fn"; then
+			return 0
+		else
+			_prc=$?
+		fi
+		if [ "$_prc" -eq 3 ]; then
+			printf 'FAIL: %s phase hit the token budget; not retrying\n' "$_label" >&2
 			exit 1
 		fi
-		printf 'retry: canary phase attempt %d failed, retrying\n' "$n" >&2
+		_n=$((_n + 1))
+		if [ "$_n" -ge "$attempts" ]; then
+			printf 'FAIL: %s phase failed after %d attempt(s)\n' "$_label" "$_n" >&2
+			exit 1
+		fi
+		printf 'retry: %s phase attempt %d failed, retrying\n' "$_label" "$_n" >&2
 	done
+}
+
+run_with_retries read read_phase
+
+if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
+	run_with_retries canary canary_phase
 fi
 
 printf 'connector.gcp.e2e: OK (%s)\n' "$GCP_E2E_PROJECT" >&2
