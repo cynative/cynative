@@ -650,6 +650,16 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `install.ps1` floor), hermetic via a stubbed `gh` and a loopback fixture server. None is a
   required status check, so they gate release-please PRs and on-demand runs, never normal
   merges.
+- `.github/workflows/llm-smoke.yaml` runs the live LLM smoke against real providers for release
+  confidence, driven by the checked-in manifest `.github/live-llm-manifest.json`: each enabled
+  row (a provider x suite pair, carrying the model variable, required-or-optional, and auth
+  family) becomes one matrix job, so adding or disabling a same-auth-family provider is a manifest
+  edit, not a workflow change. A `plan` job splits the manifest into per-family matrices; a
+  `gcp-smoke` job (Vertex via Workload Identity Federation) and an `aws-smoke` job (Bedrock via
+  GitHub OIDC under a static `environment: aws-ci`) consume them. Same `detect` gating and
+  fork-trust boundary as `install-e2e.yaml`, and `internal/llm/livellm_manifest_test.go` validates
+  the manifest fail-closed under `Lint & Test`, so a malformed row blocks merge. A new auth family
+  is the one case that adds a job. Not a required status check.
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. `.goreleaser.yaml` handles binary builds for

@@ -1,0 +1,36 @@
+[
+  {
+    "id": "vertex-notool",
+    "enabled": true,
+    "provider": "vertex",
+    "auth": "gcp-wif",
+    "suite": "llm-smoke",
+    "model_var": "CYNATIVE_CLI_CI_VERTEX_MODEL",
+    "required": true,
+    "require_no_connectors": true,
+    "note": "Vertex/Gemini no-tool nonce echo (cynative#38)."
+  },
+  {
+    "id": "vertex-tools",
+    "enabled": true,
+    "provider": "vertex",
+    "auth": "gcp-wif",
+    "suite": "llm-tools-smoke",
+    "model_var": "CYNATIVE_CLI_CI_VERTEX_MODEL",
+    "required": true,
+    "require_no_connectors": false,
+    "note": "code_execution tool-use asserts a tool call, not the connector set (cynative#49)."
+  },
+  {
+    "id": "bedrock-notool",
+    "enabled": true,
+    "provider": "bedrock",
+    "auth": "aws-oidc",
+    "suite": "llm-smoke",
+    "model_var": "CYNATIVE_CLI_CI_BEDROCK_MODEL",
+    "role_var": "CYNATIVE_CLI_CI_AWS_ROLE",
+    "required": true,
+    "require_no_connectors": true,
+    "note": "aws-ci binds the stable OIDC subject; role_var preflight fails loud (cynative#48)."
+  }
+]

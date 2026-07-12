@@ -1,17 +1,23 @@
 name: Live LLM smoke
 
-# Runs the real `cynative -p` against live LLM providers in three jobs: a
-# Vertex/Gemini no-tool nonce-echo smoke (cynative#38) proving the CLI + config +
-# Bifrost wiring + response handling work against a real provider, a Vertex/Gemini
-# code_execution tool-use smoke (cynative#49) proving the model can drive the tool
-# loop end to end, and a Bedrock no-tool nonce-echo smoke (cynative#48) proving the
-# same round-trip against a second provider on a different credential path.
-# Mirrors install-e2e.yaml's detect gating, so the heavy live runs only fire for
-# release-please PRs or a manual dispatch. The Vertex jobs authenticate to GCP
-# project cynative-cli-ci via keyless Workload Identity Federation; the Bedrock job
-# authenticates to AWS via keyless GitHub OIDC role assumption. Every credential
-# step is gated to same-repo events so untrusted forks never reach it. Not a
-# required status check.
+# Runs the real `cynative -p` against live LLM providers, driven by the checked-in
+# manifest .github/live-llm-manifest.json (cynative#50). Each enabled manifest row
+# is one matrix job: a provider x suite pair. The manifest carries the provider
+# details (id, model variable, suite, required-or-optional, auth family) so adding
+# or disabling a same-family provider is a one-row manifest edit, not a workflow
+# rewrite; internal/llm/livellm_manifest_test.go validates it fail-closed under the
+# required `Lint & Test` check, so a malformed row blocks merge.
+#
+# The `plan` job turns the manifest into two per-family matrices; the smoke jobs
+# consume them. Credential mechanics genuinely differ per family and cannot be
+# expressed as data, so each auth family has its own job: `gcp-smoke` authenticates
+# to GCP project cynative-cli-ci via keyless Workload Identity Federation, and
+# `aws-smoke` authenticates to AWS via keyless GitHub OIDC role assumption under a
+# static `environment: aws-ci` (the stable OIDC subject the AWS role trusts). A new
+# auth family is the one deliberate case that adds a job. Mirrors install-e2e.yaml's
+# detect gating, so the heavy live runs only fire for release-please PRs or a manual
+# dispatch, and every credential step is gated to same-repo events so untrusted
+# forks never reach it. Not a required status check.
 on:
   # Include `labeled` (on top of the opened/synchronize/reopened defaults) so the
   # `autorelease: pending` fallback in the detect job actually fires when that
@@ -51,13 +57,62 @@ jobs:
             echo "Not a release-please PR - skipping the live LLM smoke."
           fi
 
-  vertex-smoke:
-    name: Vertex/Gemini no-tool smoke
+  plan:
+    name: Plan provider matrix
     needs: detect
-    # Run only when relevant AND either a manual dispatch (no PR context) or a
-    # same-repo PR. A fork PR must never reach the WIF/OIDC credential step.
+    if: needs.detect.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    # No credentials and no id-token here: this job only reads the checked-in
+    # manifest with jq, so it is fork-safe on its own. The fork-trust boundary is
+    # enforced on the smoke jobs, which are the only ones that mint credentials.
+    outputs:
+      gcp_matrix: ${{ steps.build.outputs.gcp_matrix }}
+      gcp_has: ${{ steps.build.outputs.gcp_has }}
+      aws_matrix: ${{ steps.build.outputs.aws_matrix }}
+      aws_has: ${{ steps.build.outputs.aws_has }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Build per-family matrices from the manifest
+        id: build
+        env:
+          MANIFEST: .github/live-llm-manifest.json
+        run: |
+          # Project only the operational fields each smoke job reads into the matrix
+          # (never `note` or `enabled`). One compact single-line JSON per family (the
+          # name=value GITHUB_OUTPUT contract); a `*_has` boolean guards the
+          # empty-matrix hard-error (a fromJSON matrix with zero entries fails
+          # strategy evaluation instead of skipping).
+          gcp="$(jq -c '{include: [.[] | select(.enabled and .auth == "gcp-wif") | {id, provider, suite, model_var, required, require_no_connectors}]}' "$MANIFEST")"
+          aws="$(jq -c '{include: [.[] | select(.enabled and .auth == "aws-oidc") | {id, provider, suite, model_var, role_var, required, require_no_connectors}]}' "$MANIFEST")"
+          enabled_n="$(jq '[.[] | select(.enabled)] | length' "$MANIFEST")"
+          gcp_n="$(jq '[.[] | select(.enabled and .auth == "gcp-wif")] | length' "$MANIFEST")"
+          aws_n="$(jq '[.[] | select(.enabled and .auth == "aws-oidc")] | length' "$MANIFEST")"
+          # Fail closed: every enabled row must belong to a known auth family, so an
+          # enabled row with an unknown/typo'd auth turns this job red instead of
+          # silently vanishing from every matrix (the Go validator is the merge-time
+          # guard; this is the run-time backstop for a dispatch on unmerged code).
+          if [ "$enabled_n" -ne "$((gcp_n + aws_n))" ]; then
+            echo "::error::$enabled_n enabled rows but only $gcp_n gcp-wif + $aws_n aws-oidc; an enabled row has an unknown auth." >&2
+            exit 1
+          fi
+          {
+            printf 'gcp_matrix=%s\n' "$gcp"
+            printf 'aws_matrix=%s\n' "$aws"
+            printf 'gcp_has=%s\n' "$([ "$gcp_n" -gt 0 ] && echo true || echo false)"
+            printf 'aws_has=%s\n' "$([ "$aws_n" -gt 0 ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+          printf 'enabled: %s | gcp rows: %s | aws rows: %s\n' "$enabled_n" "$gcp_n" "$aws_n"
+
+  gcp-smoke:
+    name: Live LLM / ${{ matrix.id }}
+    needs: [detect, plan]
+    # Run only when relevant, there is at least one enabled gcp-wif row, AND either
+    # a manual dispatch (no PR context) or a same-repo PR. A fork PR must never
+    # reach the WIF credential step. The job-level `if:` references only
+    # github.event / needs, the contexts available to it (matrix and secrets are not).
     if: >-
       needs.detect.outputs.relevant == 'true' &&
+      needs.plan.outputs.gcp_has == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
@@ -65,17 +120,45 @@ jobs:
     permissions:
       contents: read
       id-token: write # mint the OIDC token for Workload Identity Federation
+    strategy:
+      fail-fast: false # one provider's failure must not cancel the others
+      max-parallel: 4 # bound simultaneous live token spend as the matrix grows
+      matrix: ${{ fromJSON(needs.plan.outputs.gcp_matrix) }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Resolve the model variable before minting credentials: a required row with an
+      # unset model fails here (loud, no wasted credential mint); an optional row with
+      # an unset model skips the credentialed steps (run=false) so it never
+      # authenticates. Matrix values (model_var, required) go through env, never into
+      # the run script text.
+      - name: Resolve model
+        id: model
+        env:
+          MODEL: ${{ vars[matrix.model_var] }}
+          MODEL_VAR: ${{ matrix.model_var }}
+          REQUIRED: ${{ matrix.required }}
+        run: |
+          if [ -n "$MODEL" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$REQUIRED" = "true" ]; then
+            echo "::error::required row has unset model variable $MODEL_VAR" >&2
+            exit 1
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "optional row with no model configured ($MODEL_VAR unset); skipping"
+          fi
       - name: Report tested head SHA
         run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - if: steps.model.outputs.run == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - if: steps.model.outputs.run == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
       # Keyless WIF into cynative-cli-ci. export_environment_variables:false keeps
       # GOOGLE_APPLICATION_CREDENTIALS out of the process env, so the gcp connector
       # stays dark; the minted credentials JSON is fed to cynative inline instead.
       - name: Authenticate to GCP (Workload Identity Federation)
+        if: steps.model.outputs.run == 'true'
         id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -84,133 +167,122 @@ jobs:
           service_account: ${{ vars.CYNATIVE_CLI_CI_SA }}
           create_credentials_file: true
           export_environment_variables: false
-      - name: Run the Vertex/Gemini no-tool smoke
+      - name: Run the smoke
+        if: steps.model.outputs.run == 'true'
         env:
-          CYNATIVE_LLM_PROVIDER: vertex
-          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          CYNATIVE_LLM_PROVIDER: ${{ matrix.provider }}
+          CYNATIVE_LLM_MODEL: ${{ vars[matrix.model_var] }}
           CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
           CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
-          SMOKE_REQUIRE_NO_CONNECTORS: "1"
-          # Missing/renamed provider vars must fail the job, never silently skip.
-          SMOKE_REQUIRE_RUN: "1"
+          # required -> hard-fail on an unset/renamed model var (never a silent skip);
+          # require_no_connectors -> hard-fail unless the runner stays connector-dark.
+          SMOKE_REQUIRE_RUN: ${{ matrix.required && '1' || '' }}
+          SMOKE_REQUIRE_NO_CONNECTORS: ${{ matrix.require_no_connectors && '1' || '' }}
+          SUITE: ${{ matrix.suite }}
           CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+        # Literal suite dispatch (fail-closed): the suite is a validated enum, but a
+        # `make ${{ matrix.suite }}` would interpolate a matrix value into the run
+        # script; this keeps the target selection a literal case.
         run: |
-          CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")" make llm-smoke
+          creds="$(cat "$CREDS_FILE")"
+          export CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$creds"
+          case "$SUITE" in
+            llm-smoke) make llm-smoke ;;
+            llm-tools-smoke) make llm-tools-smoke ;;
+            *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
+          esac
 
-  vertex-tools-smoke:
-    name: Vertex/Gemini code_execution smoke
-    needs: detect
-    # Same gating and trust boundary as vertex-smoke: relevant, and a manual
-    # dispatch or same-repo PR only. A fork PR must never reach the credential step.
+  aws-smoke:
+    name: Live LLM / ${{ matrix.id }}
+    needs: [detect, plan]
+    # Same gating and trust boundary as gcp-smoke. A fork PR must never reach the
+    # AWS OIDC step (the same-repo head check is what excludes forks, not the role's
+    # trust policy).
     if: >-
       needs.detect.outputs.relevant == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      id-token: write # mint the OIDC token for Workload Identity Federation
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Report tested head SHA
-        run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version-file: go.mod
-      # Keyless WIF into cynative-cli-ci. export_environment_variables:false keeps
-      # GOOGLE_APPLICATION_CREDENTIALS out of the process env, so the gcp connector
-      # stays dark; the minted credentials JSON is fed to cynative inline instead.
-      - name: Authenticate to GCP (Workload Identity Federation)
-        id: auth
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
-          workload_identity_provider: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
-          service_account: ${{ vars.CYNATIVE_CLI_CI_SA }}
-          create_credentials_file: true
-          export_environment_variables: false
-      - name: Run the Vertex/Gemini code_execution smoke
-        env:
-          CYNATIVE_LLM_PROVIDER: vertex
-          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
-          CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
-          CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
-          # No SMOKE_REQUIRE_NO_CONNECTORS here: this smoke asserts a code_execution
-          # tool call, not the connector set (inline creds keep the runner dark anyway).
-          # Missing/renamed provider vars must fail the job, never silently skip.
-          SMOKE_REQUIRE_RUN: "1"
-          CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
-        run: |
-          CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")" make llm-tools-smoke
-
-  bedrock-smoke:
-    name: Bedrock no-tool smoke
-    needs: detect
-    # Same gating and trust boundary as the Vertex jobs: relevant, and a manual
-    # dispatch or same-repo PR only. A fork PR must never reach the AWS OIDC step
-    # (the same-repo head check is what excludes forks, not the role's trust
-    # policy). The job always starts for a relevant same-repo PR or a dispatch; the
-    # preflight step below is the single guard that fails loud when the AWS role
-    # variable is unset - so a broken or renamed CYNATIVE_CLI_CI_AWS_ROLE surfaces
-    # as a red check on release-please PRs too, never a silent skip that greens CI
-    # without exercising the live Bedrock path.
-    if: >-
-      needs.detect.outputs.relevant == 'true' &&
+      needs.plan.outputs.aws_has == 'true' &&
       (github.event_name == 'workflow_dispatch' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     # Bind to the aws-ci GitHub Environment so the OIDC subject is the stable
-    # repo:cynative/cynative:environment:aws-ci regardless of branch or event.
-    # The AWS role's trust policy pins that one subject, so a manual dispatch from
-    # any branch (e.g. to vet a risky PR) needs no per-branch trust-policy change,
-    # and the environment can carry a required-reviewer gate before creds are minted.
+    # repo:cynative/cynative:environment:aws-ci regardless of branch or event. The
+    # AWS role's trust policy pins that one subject, so a manual dispatch from any
+    # branch needs no per-branch trust-policy change, and the environment can carry a
+    # required-reviewer gate before creds are minted. A static literal (not a matrix
+    # expression), so the OIDC subject can never drift.
     environment: aws-ci
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
       id-token: write # mint the OIDC token for the AWS role assumption
+    strategy:
+      fail-fast: false # one provider's failure must not cancel the others
+      max-parallel: 4 # bound simultaneous live token spend as the matrix grows
+      matrix: ${{ fromJSON(needs.plan.outputs.aws_matrix) }}
     steps:
-      # Fail loud when the AWS role variable is unset (unprovisioned, renamed, or
-      # deleted), for both a dispatch and a relevant same-repo PR - so a broken
-      # variable can never green CI by skipping the live Bedrock path.
-      - name: Preflight - AWS role variable must be set
+      # Resolve the model before minting credentials (see gcp-smoke). A required row
+      # with an unset model fails here; an optional row with an unset model skips the
+      # credentialed steps.
+      - name: Resolve model
+        id: model
         env:
-          AWS_ROLE: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          MODEL: ${{ vars[matrix.model_var] }}
+          MODEL_VAR: ${{ matrix.model_var }}
+          REQUIRED: ${{ matrix.required }}
+        run: |
+          if [ -n "$MODEL" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "$REQUIRED" = "true" ]; then
+            echo "::error::required row has unset model variable $MODEL_VAR" >&2
+            exit 1
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "optional row with no model configured ($MODEL_VAR unset); skipping"
+          fi
+      # Fail loud when the row's AWS role variable is unset (unprovisioned, renamed,
+      # or deleted), so a broken variable can never green CI by skipping the live
+      # Bedrock path; configure-aws-credentials' own error is otherwise opaque.
+      - name: Preflight - AWS role variable must be set
+        if: steps.model.outputs.run == 'true'
+        env:
+          AWS_ROLE: ${{ vars[matrix.role_var] }}
+          ROLE_VAR: ${{ matrix.role_var }}
         run: |
           if [ -z "$AWS_ROLE" ]; then
-            echo "::error::CYNATIVE_CLI_CI_AWS_ROLE is not set. Provision the AWS OIDC role and the Bedrock repo variables before running the Bedrock smoke." >&2
+            echo "::error::AWS role variable $ROLE_VAR is not set. Provision the AWS OIDC role variable before running the Bedrock smoke." >&2
             exit 1
           fi
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Report tested head SHA
         run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+      - if: steps.model.outputs.run == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - if: steps.model.outputs.run == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
-      # Keyless GitHub OIDC into the CI AWS account, no long-lived key. Like the
-      # Vertex jobs, the assumed creds are fed to the provider inline (below) and kept
-      # out of the process env, so cynative's `aws` connector's default credential
-      # chain finds nothing and stays dark - this is a genuinely no-tool, no-connector
-      # smoke (SMOKE_REQUIRE_NO_CONNECTORS=1 below hard-fails on any connector,
-      # catching CI role/credential drift before anything reaches the tool loop). The
-      # CI role also carries SecurityAudit (read-only) for the AWS connector e2e,
-      # which drives the connector via the ambient chain instead.
+      # Keyless GitHub OIDC into the CI AWS account, no long-lived key. Like the gcp
+      # job, the assumed creds are fed to the provider inline (below) and kept out of
+      # the process env, so cynative's `aws` connector's default credential chain
+      # finds nothing and stays dark - a genuinely no-tool, no-connector smoke
+      # (SMOKE_REQUIRE_NO_CONNECTORS below hard-fails on any connector, catching CI
+      # role/credential drift before anything reaches the tool loop).
       - name: Authenticate to AWS (GitHub OIDC)
+        if: steps.model.outputs.run == 'true'
         id: aws
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
         with:
-          role-to-assume: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          role-to-assume: ${{ vars[matrix.role_var] }}
           aws-region: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
-          role-session-name: cynative-bedrock-smoke
+          role-session-name: cynative-live-llm-smoke
           # Expose the assumed creds as step outputs only, not AWS_* env vars, so the
           # aws connector cannot discover them (they go to Bedrock inline below).
           output-env-credentials: false
           output-credentials: true
-      - name: Run the Bedrock no-tool smoke
+      - name: Run the smoke
+        if: steps.model.outputs.run == 'true'
         env:
-          CYNATIVE_LLM_PROVIDER: bedrock
-          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+          CYNATIVE_LLM_PROVIDER: ${{ matrix.provider }}
+          CYNATIVE_LLM_MODEL: ${{ vars[matrix.model_var] }}
           CYNATIVE_LLM_BEDROCK_REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
           # Feed the assumed creds to Bedrock inline (not via AWS_*): Bifrost's bedrock
           # provider uses these explicit keys and only falls back to the AWS default
@@ -219,8 +291,15 @@ jobs:
           CYNATIVE_LLM_BEDROCK_ACCESS_KEY: ${{ steps.aws.outputs.aws-access-key-id }}
           CYNATIVE_LLM_BEDROCK_SECRET_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
           CYNATIVE_LLM_BEDROCK_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
-          # Clean runner has no ambient connector creds, so require the dark state.
-          SMOKE_REQUIRE_NO_CONNECTORS: "1"
-          # Missing/renamed provider vars must fail the job, never silently skip.
-          SMOKE_REQUIRE_RUN: "1"
-        run: make llm-smoke
+          # required -> hard-fail on an unset/renamed model var (never a silent skip);
+          # require_no_connectors -> hard-fail unless the runner stays connector-dark.
+          SMOKE_REQUIRE_RUN: ${{ matrix.required && '1' || '' }}
+          SMOKE_REQUIRE_NO_CONNECTORS: ${{ matrix.require_no_connectors && '1' || '' }}
+          SUITE: ${{ matrix.suite }}
+        # Literal suite dispatch (fail-closed); see gcp-smoke.
+        run: |
+          case "$SUITE" in
+            llm-smoke) make llm-smoke ;;
+            llm-tools-smoke) make llm-tools-smoke ;;
+            *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
+          esac
