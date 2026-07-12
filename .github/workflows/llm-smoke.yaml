@@ -1,12 +1,14 @@
 name: Live LLM smoke
 
-# Runs the real `cynative -p` against a live Vertex/Gemini model (cynative#38):
-# a no-tool nonce-echo smoke proving the CLI + config + Bifrost wiring + response
-# handling work against a real provider. Mirrors install-e2e.yaml's detect gating,
-# so the heavy live run only fires for release-please PRs or a manual dispatch.
-# Authenticates to GCP project cynative-cli-ci via keyless Workload Identity
-# Federation; the credential step is gated to same-repo events so untrusted forks
-# never reach it. Not a required status check.
+# Runs the real `cynative -p` against a live Vertex/Gemini model in two jobs: a
+# no-tool nonce-echo smoke (cynative#38) proving the CLI + config + Bifrost wiring
+# + response handling work against a real provider, and a code_execution tool-use
+# smoke (cynative#49) proving the model can drive the tool loop end to end.
+# Mirrors install-e2e.yaml's detect gating, so the heavy live runs only fire for
+# release-please PRs or a manual dispatch. Authenticates to GCP project
+# cynative-cli-ci via keyless Workload Identity Federation; the credential step is
+# gated to same-repo events so untrusted forks never reach it. Not a required
+# status check.
 on:
   # Include `labeled` (on top of the opened/synchronize/reopened defaults) so the
   # `autorelease: pending` fallback in the detect job actually fires when that
@@ -91,3 +93,50 @@ jobs:
           CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
           CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")" make llm-smoke
+
+  vertex-tools-smoke:
+    name: Vertex/Gemini code_execution smoke
+    needs: detect
+    # Same gating and trust boundary as vertex-smoke: relevant, and a manual
+    # dispatch or same-repo PR only. A fork PR must never reach the credential step.
+    if: >-
+      needs.detect.outputs.relevant == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for Workload Identity Federation
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Report tested head SHA
+        run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      # Keyless WIF into cynative-cli-ci. export_environment_variables:false keeps
+      # GOOGLE_APPLICATION_CREDENTIALS out of the process env, so the gcp connector
+      # stays dark; the minted credentials JSON is fed to cynative inline instead.
+      - name: Authenticate to GCP (Workload Identity Federation)
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          workload_identity_provider: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
+          service_account: ${{ vars.CYNATIVE_CLI_CI_SA }}
+          create_credentials_file: true
+          export_environment_variables: false
+      - name: Run the Vertex/Gemini code_execution smoke
+        env:
+          CYNATIVE_LLM_PROVIDER: vertex
+          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
+          # No SMOKE_REQUIRE_NO_CONNECTORS here: this smoke asserts a code_execution
+          # tool call, not the connector set (inline creds keep the runner dark anyway).
+          # Missing/renamed provider vars must fail the job, never silently skip.
+          SMOKE_REQUIRE_RUN: "1"
+          CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")" make llm-tools-smoke

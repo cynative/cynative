@@ -6,6 +6,14 @@ one talks to a real provider over the network, so it needs real credentials and
 is **not** part of `make check`. It is meant to be run by repo owners on trusted
 PRs and on release-please PRs, as release confidence.
 
+There are two complementary smokes, both driven by the same `CYNATIVE_LLM_*` env
+and the same skip/require conventions:
+
+- the **no-tool smoke** (`make llm-smoke`, below) proves a bare round-trip with
+  no tools;
+- the **tool-use smoke** (`make llm-tools-smoke`, [below](#tool-use-smoke-code_execution))
+  proves the model can drive the tool loop through `code_execution`.
+
 ## What it proves
 
 One bounded, no-tool round-trip: the CLI starts, config loads, the Bifrost
@@ -102,9 +110,96 @@ real safety property is `0 tool calls` (no connector was actually exercised),
 which always holds. On the clean CI runner there is no metadata server and creds
 are inline, so the connector set is dark and the hard check is used.
 
+## Tool-use smoke (`code_execution`)
+
+The no-tool smoke proves a bare round-trip. The **tool-use smoke**
+(`test/llm-tools.smoke.test.sh`, `make llm-tools-smoke`) goes one step further and
+proves a real model can drive Cynative's tool loop. It hands the model a list of
+random integers and tells it to use `code_execution` to compute their exact sum,
+then answer with only that integer.
+
+Where the no-tool smoke asserts that **no** tool ran, this one asserts a tool
+**did** run - specifically `code_execution` - so it catches a different class of
+regression: provider/tool-schema rejection, broken tool-call parsing, a broken
+approval/auto-approve path, and sandbox breakage.
+
+### What it proves
+
+- The provider accepts our tool-schema shape and emits a well-formed
+  `code_execution` call.
+- The agent parses and dispatches the call.
+- The approval layer approves it (the run uses `--auto-approve`).
+- The sandbox actually executes the script and returns the result.
+- The model reads the result and answers with it.
+
+### Run it locally
+
+Same `CYNATIVE_LLM_*` env as the no-tool smoke, a different target:
+
+```bash
+export CYNATIVE_LLM_PROVIDER=bedrock
+export CYNATIVE_LLM_MODEL=us.anthropic.claude-opus-4-8
+export CYNATIVE_LLM_BEDROCK_REGION=us-east-1
+# Bedrock uses the standard AWS credential chain (see docs/providers/bedrock.md).
+
+make llm-tools-smoke
+```
+
+With no `CYNATIVE_LLM_PROVIDER`/`CYNATIVE_LLM_MODEL` set it prints a `skip:` line
+and exits 0, so `make llm-tools-smoke` is a safe no-op. Pass a prebuilt binary
+path to skip the build (then `go` is not needed):
+`sh test/llm-tools.smoke.test.sh /path/to/cynative`. `python3` is required (it
+parses the audit log), matching the repo's other live e2e tests.
+
+#### Knobs
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `SMOKE_TIMEOUT` | `90` | Wall-clock seconds for the run. |
+| `SMOKE_MAX_TOKENS` | `40000` | Token ceiling. A tool turn is two model calls plus the echoed script, so it needs more headroom than the no-tool smoke's `16000`; too low a value discards the answer for a budget notice. |
+| `SMOKE_MAX_ITERATIONS` | `6` | Agent-loop bound. Tool use needs at least 2 (call the tool, then answer). |
+| `SMOKE_REQUIRE_RUN` | unset | When `1`, a missing `CYNATIVE_LLM_PROVIDER`/`CYNATIVE_LLM_MODEL` is a hard failure instead of a skip, so a misconfigured CI job fails loudly. |
+
+There is no `SMOKE_REQUIRE_NO_CONNECTORS` here: this smoke asserts a
+`code_execution` call, not the connector set, so ambient connectors on a cloud
+host are harmless.
+
+### What it asserts
+
+- The process exits 0.
+- The exact computed sum appears in the answer on **stdout** (thousands
+  separators are ignored, and the value is matched whole, not inside a longer
+  number).
+- The footer on **stderr** reports at least one tool call.
+- The audit log holds a `code_execution` **result** record with `outcome` `ok`
+  whose output contains the sum, so the sandbox executed, the approval gate
+  approved it, and it actually computed the answer (rather than the model doing
+  it in its head alongside an unrelated tool call). This is the load-bearing
+  check: it parses the record's outer JSON fields, so it is free of TTY/render
+  coupling and cannot be fooled by the model-controlled arguments.
+- The `--verbose` per-tool-call notice on **stderr** names `code_execution`.
+
+### Failure classification
+
+| Class | Signal | Likely cause |
+| --- | --- | --- |
+| harness/setup | `FAIL:` before any run (build failed, tool missing, fewer than 40 integers generated) | local toolchain, not the provider |
+| provider/config/access | non-zero exit with an LLM status on stderr | bad config, invalid or missing credentials, model not found, tool-schema rejected |
+| timeout | exit 124 | provider slow or unreachable within `SMOKE_TIMEOUT` |
+| no tool use | exit 0 but the tool-call / audit checks fail | the model answered without `code_execution`, or the call was denied or errored |
+
+### Continuous integration
+
+`.github/workflows/llm-smoke.yaml` runs this as a second job
+(`vertex-tools-smoke`) alongside the no-tool job, against Vertex, with the same
+release-please/dispatch gating, same-repo fork guard, and keyless WIF into
+`cynative-cli-ci`. It runs `make llm-tools-smoke` and is not a required status
+check.
+
 ## Extending to other providers
 
 The harness is provider-agnostic. A new provider needs only its own
 `CYNATIVE_LLM_*` env block; the assertions are unchanged. For example, a Bedrock
 smoke sets `CYNATIVE_LLM_PROVIDER=bedrock`, a model id, and the AWS credentials
-its provider needs, then runs the same `make llm-smoke`.
+its provider needs, then runs the same `make llm-smoke` (or `make
+llm-tools-smoke`).
