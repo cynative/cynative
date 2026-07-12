@@ -29,6 +29,9 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+# Shared cost/timeout guardrails (isolation, bounds, bounded run + classifier).
+# shellcheck disable=SC1091  # sourced at runtime via a $0-relative path.
+. "$root/test/lib/e2e-guardrails.sh"
 
 # Skip cleanly when no provider is configured - unless SMOKE_REQUIRE_RUN=1, where
 # a missing provider/model is a failure (a CI job must never go green by skipping).
@@ -41,62 +44,48 @@ if [ -z "${CYNATIVE_LLM_PROVIDER:-}" ] || [ -z "${CYNATIVE_LLM_MODEL:-}" ]; then
 	exit 0
 fi
 
-command -v go >/dev/null 2>&1 || { printf 'FAIL: go not found (needed to build cynative)\n' >&2; exit 1; }
-command -v timeout >/dev/null 2>&1 || { printf 'FAIL: timeout not found\n' >&2; exit 1; }
+e2e_require_cmd go "needed to build cynative" || exit 1
+e2e_require_cmd timeout || exit 1
 
 workdir=$(mktemp -d)
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT INT TERM
 
-# Build the binary (or accept a prebuilt one).
-bin=${1:-}
-if [ -z "$bin" ]; then
-	bin="$workdir/cynative"
-	printf '== BUILD ==\n' >&2
-	( cd "$root" && go build -o "$bin" ./cmd/cynative ) || { printf 'FAIL: go build failed\n' >&2; exit 1; }
-fi
-[ -x "$bin" ] || { printf 'FAIL: binary not executable: %s\n' "$bin" >&2; exit 1; }
+# Build the binary (or accept a prebuilt one, passed as $1).
+bin=$(e2e_build_binary "$root" "$workdir" "${1:-}") || exit 1
 
 # Long, contiguous, no-whitespace nonce that survives markdown reflow.
 nonce="SMOKE-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 prompt="Reply with exactly this token and nothing else: $nonce"
 
-# Isolate cynative's OWN config/cache/audit without moving HOME, so the provider
-# SDKs can still find file-based credentials on a local run (~/.aws for Bedrock,
-# the gcloud ADC file for Vertex, ~/.azure for Azure). An empty --config makes
-# cynative ignore the caller's ~/.cynative/config.yaml, and cache/audit go to the
-# temp dir. Silence connector discovery sources unrelated to any LLM provider
-# (github/gitlab/kube tokens and config-dir overrides are never LLM creds). Do
-# NOT unset AWS/GCP/Azure creds: the LLM provider may need them (e.g. Bedrock uses
-# AWS creds), so the aws/gcp connectors can still register on a cloud host - the
-# 0-tool-calls assertion is the real safety net, and SMOKE_REQUIRE_NO_CONNECTORS
-# is opt-in (CI only, where the runner is clean).
-: > "$workdir/config.yaml"
-export CYNATIVE_CACHE_DIR="$workdir/cache"
-export CYNATIVE_AUDIT_PATH="$workdir/audit.log"
-unset GH_CONFIG_DIR GLAB_CONFIG_DIR KUBECONFIG \
-	GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
+# Isolate cynative's config/cache from the caller without moving HOME, so the
+# provider SDKs can still find file-based credentials on a local run (~/.aws for
+# Bedrock, the gcloud ADC file for Vertex, ~/.azure for Azure). e2e_isolate_env
+# writes an empty --config (ignore the caller's ~/.cynative/config.yaml), points
+# the cache at the temp dir, and silences connector discovery unrelated to any
+# LLM provider (github/gitlab/kube tokens and config-dir overrides). It leaves
+# AWS/GCP/Azure creds alone (the LLM provider may need them, e.g. Bedrock), so
+# the 0-tool-calls assertion is the real safety net and SMOKE_REQUIRE_NO_CONNECTORS
+# is opt-in.
+e2e_isolate_env "$workdir"
+
+# Bounds: this is a no-tool smoke, so cap iterations at 1. The public SMOKE_*
+# knobs override the shared token/wall-clock defaults; the rest (request timeout,
+# subagent iterations, sandbox concurrency) take the shared guardrail defaults.
+# Exported as env-level overrides consumed by e2e_apply_bounds.
+export E2E_MAX_ITERATIONS=1
+export E2E_MAX_TOKENS="${SMOKE_MAX_TOKENS:-16000}"
+export E2E_RUN_TIMEOUT="${SMOKE_TIMEOUT:-60}"
+e2e_apply_bounds
 
 printf '== RUN == %s/%s\n' "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
-# timeout returns non-zero on a slow/failed run, which under `set -e` would abort
-# before rc is captured, so wrap it (house pattern, test/install.e2e.test.sh).
-set +e
-CYNATIVE_MAX_ITERATIONS=1 CYNATIVE_MAX_TOTAL_TOKENS="${SMOKE_MAX_TOKENS:-16000}" \
-	timeout "${SMOKE_TIMEOUT:-60}" "$bin" --config "$workdir/config.yaml" -p "$prompt" --auto-approve \
-		>"$workdir/out" 2>"$workdir/err" </dev/null
-rc=$?
-set -e
+if e2e_run_bounded "$E2E_RUN_TIMEOUT" "$workdir/audit.log" "$workdir/out" "$workdir/err" \
+	"$bin" "$workdir/config.yaml" "$prompt"; then rc=0; else rc=$?; fi
 
-# Failure classification.
-if [ "$rc" -eq 124 ]; then
-	printf 'FAIL: timed out after %ss\n' "${SMOKE_TIMEOUT:-60}" >&2
-	exit 1
-fi
-if [ "$rc" -ne 0 ]; then
-	printf 'FAIL: provider/config/access (exit %s). stderr tail:\n' "$rc" >&2
-	tail -n 20 "$workdir/err" >&2
-	exit 1
-fi
+# Shared classification: a timeout, a budget hit (clear message, not a bogus
+# "nonce not found"), or a provider/config/access error. A clean rc 0 falls
+# through to the smoke's own assertions below.
+e2e_classify_run "$rc" "$workdir/out" "$workdir/err" "$E2E_RUN_TIMEOUT" || exit 1
 
 # Hard: the model echoed the nonce on stdout.
 if ! grep -Fq "$nonce" "$workdir/out"; then

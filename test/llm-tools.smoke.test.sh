@@ -44,6 +44,9 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+# Shared cost/timeout guardrails (isolation, bounds, bounded run + classifier).
+# shellcheck disable=SC1091  # sourced at runtime via a $0-relative path.
+. "$root/test/lib/e2e-guardrails.sh"
 
 # Skip cleanly when no provider is configured - unless SMOKE_REQUIRE_RUN=1, where
 # a missing provider/model is a failure (a CI job must never go green by skipping).
@@ -56,24 +59,18 @@ if [ -z "${CYNATIVE_LLM_PROVIDER:-}" ] || [ -z "${CYNATIVE_LLM_MODEL:-}" ]; then
 	exit 0
 fi
 
-command -v timeout >/dev/null 2>&1 || { printf 'FAIL: timeout not found\n' >&2; exit 1; }
+e2e_require_cmd timeout || exit 1
 # python3 parses the audit log below (the load-bearing tool-use check); the repo's
 # other live e2e tests take the same dependency.
-command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found (needed to parse the audit log)\n' >&2; exit 1; }
+e2e_require_cmd python3 "needed to parse the audit log" || exit 1
 
 workdir=$(mktemp -d)
 cleanup() { rm -rf "$workdir"; }
 trap cleanup EXIT INT TERM
 
-# Build the binary (or accept a prebuilt one). go is only needed when building.
-bin=${1:-}
-if [ -z "$bin" ]; then
-	command -v go >/dev/null 2>&1 || { printf 'FAIL: go not found (needed to build cynative)\n' >&2; exit 1; }
-	bin="$workdir/cynative"
-	printf '== BUILD ==\n' >&2
-	( cd "$root" && go build -o "$bin" ./cmd/cynative ) || { printf 'FAIL: go build failed\n' >&2; exit 1; }
-fi
-[ -x "$bin" ] || { printf 'FAIL: binary not executable: %s\n' "$bin" >&2; exit 1; }
+# Build the binary (or accept a prebuilt one, passed as $1). go is only needed
+# when building; e2e_build_binary presence-checks it in that branch.
+bin=$(e2e_build_binary "$root" "$workdir" "${1:-}") || exit 1
 
 # A deterministic, tool-shaped task: sum 40 random 16-bit integers. The model
 # cannot reliably do this in its head, and the tool's own description reserves
@@ -95,42 +92,35 @@ prompt="You must use the code_execution tool to compute this; do not compute it 
 yourself. Compute the exact integer sum of the following numbers and reply with \
 only that integer and nothing else: $list"
 
-# Isolate cynative's OWN config/cache/audit without moving HOME, so the provider
-# SDKs can still find file-based credentials on a local run (~/.aws for Bedrock,
-# the gcloud ADC file for Vertex). An empty --config makes cynative ignore the
-# caller's ~/.cynative/config.yaml, and cache/audit go to the temp dir. The audit
-# log is asserted below, so pin it on. Silence connector discovery sources
-# unrelated to any LLM provider (github/gitlab/kube tokens and config-dir
-# overrides are never LLM creds); ambient cloud creds may still register the
+# Isolate cynative's config/cache from the caller without moving HOME, so the
+# provider SDKs can still find file-based credentials on a local run (~/.aws for
+# Bedrock, the gcloud ADC file for Vertex). e2e_isolate_env writes an empty
+# --config, points the cache at the temp dir, and silences connector discovery
+# unrelated to any LLM provider; ambient cloud creds may still register the
 # aws/gcp/azure connectors on a cloud host, which is fine - this test asserts a
-# code_execution call, not the connector set.
-: > "$workdir/config.yaml"
-export CYNATIVE_CACHE_DIR="$workdir/cache"
+# code_execution call, not the connector set. The audit log is asserted below, so
+# enable it and route it into the temp dir.
+e2e_isolate_env "$workdir"
 export CYNATIVE_AUDIT_ENABLED=true
-export CYNATIVE_AUDIT_PATH="$workdir/audit.log"
-unset GH_CONFIG_DIR GLAB_CONFIG_DIR KUBECONFIG \
-	GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
+
+# Bounds: tool use needs a few iterations (at least 2 - call the tool, then
+# answer), a larger token budget than the no-tool smoke (a tool turn is two model
+# calls plus the echoed script), and a longer wall-clock. The public SMOKE_* knobs
+# override the shared defaults; the rest take the guardrail defaults.
+export E2E_MAX_ITERATIONS="${SMOKE_MAX_ITERATIONS:-6}"
+export E2E_MAX_TOKENS="${SMOKE_MAX_TOKENS:-40000}"
+export E2E_RUN_TIMEOUT="${SMOKE_TIMEOUT:-90}"
+e2e_apply_bounds
 
 printf '== RUN == %s/%s (sum of %s integers)\n' "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" "$count" >&2
-# timeout returns non-zero on a slow/failed run, which under `set -e` would abort
-# before rc is captured, so wrap it (house pattern, test/llm.smoke.test.sh).
-set +e
-CYNATIVE_MAX_ITERATIONS="${SMOKE_MAX_ITERATIONS:-6}" CYNATIVE_MAX_TOTAL_TOKENS="${SMOKE_MAX_TOKENS:-40000}" \
-	timeout "${SMOKE_TIMEOUT:-90}" "$bin" --config "$workdir/config.yaml" -p "$prompt" --auto-approve --verbose \
-		>"$workdir/out" 2>"$workdir/err" </dev/null
-rc=$?
-set -e
+# --verbose is passed through so check 4 can see the per-tool-call notice.
+if e2e_run_bounded "$E2E_RUN_TIMEOUT" "$workdir/audit.log" "$workdir/out" "$workdir/err" \
+	"$bin" "$workdir/config.yaml" "$prompt" --verbose; then rc=0; else rc=$?; fi
 
-# Failure classification.
-if [ "$rc" -eq 124 ]; then
-	printf 'FAIL: timed out after %ss\n' "${SMOKE_TIMEOUT:-90}" >&2
-	exit 1
-fi
-if [ "$rc" -ne 0 ]; then
-	printf 'FAIL: provider/config/access (exit %s). stderr tail:\n' "$rc" >&2
-	tail -n 20 "$workdir/err" >&2
-	exit 1
-fi
+# Shared classification: a timeout, a budget hit (clear message, not a bogus
+# "sum not found"), or a provider/config/access error. A clean rc 0 falls through
+# to the tool-use assertions below.
+e2e_classify_run "$rc" "$workdir/out" "$workdir/err" "$E2E_RUN_TIMEOUT" || exit 1
 
 # 1. The exact computed sum round-tripped into the answer on stdout. Drop thousands
 # separators, then require some run of digits to equal the sum exactly (grep -Fx),

@@ -101,14 +101,16 @@ pwsh-test:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + Pester $(PESTER_VERSION)."; exit 1; }
 	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
 
-# sh-test: POSIX install.sh unit + loopback smoke tests. Presence-check python3
-# (the smoke test's loopback fixture server) with an install hint, mirroring the
-# shellcheck/pwsh install-free pattern.
+# sh-test: POSIX install.sh unit + loopback smoke tests, plus the live-e2e
+# guardrails library unit tests (test/lib/e2e-guardrails.sh, hermetic). Presence-
+# check python3 (the smoke test's loopback fixture server) with an install hint,
+# mirroring the shellcheck/pwsh install-free pattern.
 sh-test:
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found — needed by the install.sh loopback smoke test (test/install.smoke.test.sh)."; exit 1; }
 	@sh test/install.unit.test.sh
 	@sh test/install.smoke.test.sh
-	@echo "OK: sh-test (install.sh unit + loopback smoke)"
+	@sh test/e2e-guardrails.unit.test.sh
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit)"
 
 SHELL_COMPLEXITY_MAX := 6
 

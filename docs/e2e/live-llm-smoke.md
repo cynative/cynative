@@ -59,6 +59,11 @@ sh test/llm.smoke.test.sh /path/to/cynative
 | `SMOKE_REQUIRE_NO_CONNECTORS` | unset | When `1`, hard-fail unless no connector registers. CI sets this on its clean runner; leave it unset on a cloud host (see the caveat below). |
 | `SMOKE_REQUIRE_RUN` | unset | When `1`, a missing `CYNATIVE_LLM_PROVIDER`/`CYNATIVE_LLM_MODEL` is a hard failure instead of a skip. CI sets this so a misconfigured job (for example a renamed model variable) fails loudly rather than passing green without exercising the model. |
 
+`SMOKE_TIMEOUT` and `SMOKE_MAX_TOKENS` map onto the shared cost/timeout
+guardrails every live suite uses (isolation, token/iteration/request/wall-clock
+bounds, and the budget-hit classifier). See
+[Live e2e guardrails](e2e-guardrails.md) for the full set and defaults.
+
 ## What it asserts
 
 - The process exits 0.
@@ -72,14 +77,18 @@ sh test/llm.smoke.test.sh /path/to/cynative
 
 ## Failure classification
 
-The script separates stdout from stderr and reports a distinct reason per class:
+The script separates stdout from stderr and reports a distinct reason per class.
+The timeout, token-budget, and provider/config classes come from the shared
+guardrail classifier used by every live suite (see
+[Live e2e guardrails](e2e-guardrails.md)):
 
 | Class | Signal | Likely cause |
 | --- | --- | --- |
 | harness/setup | `FAIL:` before any run (build failed, tool missing) | local toolchain, not the provider |
 | provider/config/access | non-zero exit with an LLM status on stderr | bad project/region, invalid or missing credentials, model not found, auth failure |
 | timeout | exit 124 | provider slow or unreachable within `SMOKE_TIMEOUT` |
-| unexpected response | exit 0 but nonce missing | the model did not echo, or the budget was too low and a notice replaced the answer |
+| token budget | `Budget reached` on stdout (the run still exits 0) | `SMOKE_MAX_TOKENS` too low; the notice replaced the answer. Raise it. |
+| unexpected response | exit 0 but nonce missing | the model did not echo the token |
 
 ## Continuous integration
 
