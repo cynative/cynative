@@ -33,13 +33,18 @@ on:
 permissions:
   contents: read
 
-# A stale synchronize event must not multiply live-run spend. Cancellation is scoped to
-# pull_request runs on purpose: on the release path this workflow is a publish gate, and
-# cancelling it mid-release would fail the gate (publish requires result == 'success')
-# and block a release for a reason that has nothing to do with the release.
+# A stale synchronize event must not multiply live-run spend, so PR runs dedupe per PR
+# and cancel their predecessor.
+#
+# The gate path gets a group of its own, keyed on the run id. A called workflow's
+# concurrency group is evaluated in the CALLER's context, so without this a release's
+# gate would share a group with any standalone run on the same ref (a manual dispatch,
+# say) and could be queued behind it or cancelled by it - and a cancelled gate fails
+# publish's `result == 'success'`, blocking a release for a reason that has nothing to do
+# with the release. Cancellation stays scoped to pull_request runs for the same reason.
 concurrency:
-  group: connector-aws-e2e-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: connector-aws-e2e-${{ inputs.gate && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.gate }}
 
 jobs:
   detect:
