@@ -67,16 +67,23 @@ if (
 	[ -f "$td/config.yaml" ] || exit 1     # config written
 	[ ! -s "$td/config.yaml" ] || exit 1   # and empty (ignores caller's config)
 	[ "$CYNATIVE_CACHE_DIR" = "$td/cache" ] || exit 1
-	# All 8 connector-discovery vars the library unsets must be cleared.
+	# Token vars are cleared outright.
 	[ -z "${GITHUB_TOKEN:-}" ] || exit 1
 	[ -z "${GH_TOKEN:-}" ] || exit 1
 	[ -z "${GITLAB_TOKEN:-}" ] || exit 1
 	[ -z "${GITLAB_ACCESS_TOKEN:-}" ] || exit 1
 	[ -z "${OAUTH_TOKEN:-}" ] || exit 1
-	[ -z "${KUBECONFIG:-}" ] || exit 1
-	[ -z "${GH_CONFIG_DIR:-}" ] || exit 1
-	[ -z "${GLAB_CONFIG_DIR:-}" ] || exit 1
-); then pass "isolate_env writes empty config, sets cache, unsets connector env"; else fail "isolate_env"; fi
+	# The config-dir vars are NEUTRALIZED, not unset: unsetting them sends gh, glab,
+	# and kubectl back to their DEFAULT locations (~/.config/gh, ~/.kube/config),
+	# which is the opposite of isolation on a maintainer's machine.
+	[ "$GH_CONFIG_DIR" = "$td/empty-gh" ] || exit 1
+	[ -d "$GH_CONFIG_DIR" ] || exit 1
+	[ "$GLAB_CONFIG_DIR" = "$td/empty-glab" ] || exit 1
+	[ -d "$GLAB_CONFIG_DIR" ] || exit 1
+	[ "$KUBECONFIG" = "$td/empty-kubeconfig" ] || exit 1
+	[ -f "$KUBECONFIG" ] || exit 1
+	[ ! -s "$KUBECONFIG" ] || exit 1
+); then pass "isolate_env writes empty config, sets cache, clears tokens, neutralizes config dirs"; else fail "isolate_env"; fi
 
 # ---- e2e_build_binary: prebuilt path -------------------------------------------
 if (
@@ -165,6 +172,95 @@ if (
 	e2e_require_cmd sh >/dev/null 2>&1 || exit 1                 # present
 	if e2e_require_cmd definitely-not-a-real-cmd-xyz >/dev/null 2>&1; then exit 1; fi  # absent
 ); then pass "require_cmd passes for present, fails for absent"; else fail "require_cmd"; fi
+
+# ---- e2e_require_env -----------------------------------------------------------
+if (
+	E2E_UNIT_SET='present'
+	export E2E_UNIT_SET
+	unset E2E_UNIT_MISSING 2>/dev/null || true
+	# Every var present: proceed.
+	e2e_require_env demo "" E2E_UNIT_SET >/dev/null 2>&1 || exit 1
+	# A missing var with REQUIRE_RUN unset signals "skip" (rc 1) without exiting, so
+	# the caller's `|| exit 0` turns it into a clean skip.
+	if e2e_require_env demo "" E2E_UNIT_SET E2E_UNIT_MISSING >/dev/null 2>&1; then exit 1; fi
+	# With REQUIRE_RUN=1 it must EXIT the script, not return: a `return 1` would be
+	# swallowed by the caller's `|| exit 0` and a CI job would go green by skipping.
+	# Prove it by running the real caller expression in a subshell: if the helper
+	# only returned, the `|| exit 0` would make this subshell exit 0.
+	if ( e2e_require_env demo 1 E2E_UNIT_SET E2E_UNIT_MISSING >/dev/null 2>&1 || exit 0 ); then exit 1; fi
+); then pass "require_env proceeds, signals skip, and hard-EXITS under REQUIRE_RUN=1"; else fail "require_env"; fi
+
+# ---- e2e_run_with_retries ------------------------------------------------------
+# The phase callbacks are defined at top level (not inside the `if (...)` subshell)
+# because they are invoked indirectly, by name, and ShellCheck only resolves that
+# reference at top level (SC2329).
+retry_dir=$(mktemp -d)
+trap 'rm -rf "$retry_dir"' EXIT
+
+# Fails once, then succeeds: must be retried and pass.
+unit_flaky() {
+	printf 'x' >> "$retry_dir/flaky"
+	[ "$(wc -c < "$retry_dir/flaky")" -ge 2 ]
+}
+# Budget hit: fatal, must be invoked exactly once.
+unit_budget() { printf 'x' >> "$retry_dir/budget"; return 3; }
+# Security failure: fatal, must be invoked exactly once. Retrying would erase the
+# evidence (the audit log is truncated per attempt) and let a broken gate pass.
+unit_security() { printf 'x' >> "$retry_dir/security"; return 4; }
+# Always fails: must exhaust the attempts.
+unit_always() { printf 'x' >> "$retry_dir/always"; return 1; }
+
+if (
+	: > "$retry_dir/flaky"
+	e2e_run_with_retries flaky 2 unit_flaky >/dev/null 2>&1 || exit 1
+	[ "$(wc -c < "$retry_dir/flaky")" -eq 2 ] || exit 1
+
+	: > "$retry_dir/budget"
+	if ( e2e_run_with_retries budget 3 unit_budget >/dev/null 2>&1 ); then exit 1; fi
+	[ "$(wc -c < "$retry_dir/budget")" -eq 1 ] || exit 1
+
+	: > "$retry_dir/security"
+	if ( e2e_run_with_retries security 3 unit_security >/dev/null 2>&1 ); then exit 1; fi
+	[ "$(wc -c < "$retry_dir/security")" -eq 1 ] || exit 1
+
+	: > "$retry_dir/always"
+	if ( e2e_run_with_retries always 2 unit_always >/dev/null 2>&1 ); then exit 1; fi
+	[ "$(wc -c < "$retry_dir/always")" -eq 2 ] || exit 1
+
+	# An out-of-range attempt count is rejected rather than silently clamped.
+	if ( e2e_run_with_retries bad 9 unit_always >/dev/null 2>&1 ); then exit 1; fi
+); then pass "run_with_retries retries a miss, never retries a budget (3) or security (4) failure"; else fail "run_with_retries"; fi
+
+# ---- e2e_assert_tool_called ----------------------------------------------------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	printf 'footer: 3 tool calls\n' > "$td/some.err"
+	printf 'footer: 1 tool call\n' > "$td/one.err"
+	printf 'footer: 0 tool calls\n' > "$td/zero.err"
+	: > "$td/none.err"
+	e2e_assert_tool_called "$td/some.err" >/dev/null 2>&1 || exit 1
+	e2e_assert_tool_called "$td/one.err" >/dev/null 2>&1 || exit 1
+	if e2e_assert_tool_called "$td/zero.err" >/dev/null 2>&1; then exit 1; fi
+	# A MISSING footer must fail. The old "reject 0 tool calls" check passed here,
+	# so a run that produced no footer at all looked like a success.
+	if e2e_assert_tool_called "$td/none.err" >/dev/null 2>&1; then exit 1; fi
+); then pass "assert_tool_called requires a positive count, fails on 0 and on a missing footer"; else fail "assert_tool_called"; fi
+
+# ---- e2e_run_bounded truncates the audit log before each attempt ---------------
+if command -v timeout >/dev/null 2>&1; then
+	if (
+		td=$(mktemp -d)
+		trap 'rm -rf "$td"' EXIT
+		printf '{"stale":"record"}\n' > "$td/audit"
+		printf '#!/bin/sh\nexit 0\n' > "$td/noop"
+		chmod +x "$td/noop"
+		e2e_run_bounded 3 "$td/audit" "$td/o" "$td/e" "$td/noop" "$td/cfg" "prompt" || exit 1
+		# The audit log is append-only, so without truncation a retried phase could be
+		# judged against a previous attempt's records.
+		[ ! -s "$td/audit" ] || exit 1
+	); then pass "run_bounded truncates the audit log so a retry sees only its own records"; else fail "run_bounded audit truncation"; fi
+fi
 
 if [ "$fails" -ne 0 ]; then
 	printf 'e2e-guardrails.unit: %d case(s) FAILED\n' "$fails" >&2

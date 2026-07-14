@@ -63,8 +63,16 @@ e2e_isolate_env() {
 	# AWS/GCP/Azure creds are left alone: an LLM provider may need them (e.g.
 	# Bedrock uses AWS creds). The suite's own tool-call / connector assertions
 	# are the safety net for whether a connector should be dark.
-	unset GH_CONFIG_DIR GLAB_CONFIG_DIR KUBECONFIG \
-		GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
+	unset GITHUB_TOKEN GH_TOKEN GITLAB_TOKEN GITLAB_ACCESS_TOKEN OAUTH_TOKEN
+	# The config-dir vars are NEUTRALIZED, not unset. gh, glab, and kubectl all fall
+	# back to a DEFAULT location when their env var is absent (~/.config/gh,
+	# ~/.kube/config), so unsetting them hands a maintainer's real credentials to a
+	# suite that meant to silence them. Empty paths make discovery find nothing.
+	mkdir -p "$1/empty-gh" "$1/empty-glab"
+	: > "$1/empty-kubeconfig"
+	export GH_CONFIG_DIR="$1/empty-gh"
+	export GLAB_CONFIG_DIR="$1/empty-glab"
+	export KUBECONFIG="$1/empty-kubeconfig"
 }
 
 # e2e_build_binary ROOT WORKDIR [PREBUILT] - print a usable cynative binary path.
@@ -101,6 +109,17 @@ e2e_run_bounded() {
 	_cfg=$6
 	_prompt=$7
 	shift 7
+	# Truncate the audit log before every attempt. cynative opens it append-only, so
+	# without this a stale record from a failed earlier attempt could satisfy this
+	# attempt's parser. This lives here, not in the callers, because this helper
+	# already owns the audit path and a caller that forgot it would fail silently.
+	# Fail closed: `set -e` is suppressed for a function used as an `if` condition,
+	# so a failed truncation must be checked explicitly or the run would be judged
+	# against a previous attempt's records.
+	if ! : > "$_audit"; then
+		printf 'FAIL: could not truncate the audit log: %s\n' "$_audit" >&2
+		return 1
+	fi
 	# The exit code is captured in the else branch: a completed `if` with no
 	# matching branch yields status 0, so `return $?` after `fi` would swallow a
 	# timeout/failure. In the else, $? still holds the condition's exit status.
@@ -139,4 +158,97 @@ e2e_classify_run() {
 		return 1
 	fi
 	return 0
+}
+
+# Phase status contract, shared by the connector suites and e2e_run_with_retries:
+#   0  the phase's assertions hold.
+#   1  not proven this attempt (a model miss, a fumbled call, a transient failure).
+#      Retryable: model runs are non-deterministic.
+#   2  the run timed out.
+#   3  the token budget was hit. FATAL: a retry only burns more credits and re-hits
+#      the same ceiling.
+#   4  a SECURITY assertion failed: a request the read-only boundary should have
+#      stopped was dispatched, or a write succeeded. FATAL, and never retried.
+#
+# Status 4 exists because retrying a security failure would launder it. The retry
+# helper truncates the audit log before each attempt, so a first attempt that caught
+# a real boundary violation would have its evidence erased, and a second attempt that
+# happened to be denied would let the suite exit 0 on a broken gate.
+E2E_STATUS_BUDGET=3
+E2E_STATUS_SECURITY=4
+
+# e2e_require_env SUITE REQUIRE_RUN VAR... - gate a suite on its required env.
+# Returns 0 when every VAR is set. Returns 1 (the caller should skip, exit 0) when
+# one is missing. EXITS 1 when REQUIRE_RUN is "1", so a CI job can never go green by
+# silently skipping a renamed or dropped variable.
+e2e_require_env() {
+	_suite=$1
+	_require=$2
+	shift 2
+	_missing=
+	for _v in "$@"; do
+		eval "_val=\${$_v:-}"
+		[ -n "$_val" ] || _missing="$_missing $_v"
+	done
+	[ -n "$_missing" ] || return 0
+	if [ "$_require" = "1" ]; then
+		printf 'FAIL: required env unset but REQUIRE_RUN=1 (%s):%s\n' "$_suite" "$_missing" >&2
+		exit 1
+	fi
+	printf 'skip: %s (unset:%s)\n' "$_suite" "$_missing" >&2
+	return 1
+}
+
+# e2e_run_with_retries LABEL ATTEMPTS PHASE_FN - run a phase, retrying a
+# non-deterministic model miss up to ATTEMPTS times. A budget hit (3) and a security
+# failure (4) are FATAL and are never retried; see the status contract above. Exits 1
+# when attempts are exhausted.
+#
+# The phase's exit code is captured in the else branch: a completed `if` with no
+# matching branch yields status 0, so reading $? after `fi` would swallow it.
+e2e_run_with_retries() {
+	_label=$1
+	_attempts=$2
+	_fn=$3
+	case "$_attempts" in
+		1 | 2 | 3) ;;
+		*)
+			printf 'FAIL: %s: attempts must be 1-3, got %s\n' "$_label" "$_attempts" >&2
+			exit 1
+			;;
+	esac
+	_n=0
+	while true; do
+		if "$_fn"; then
+			return 0
+		else
+			_prc=$?
+		fi
+		if [ "$_prc" -eq "$E2E_STATUS_SECURITY" ]; then
+			printf 'FAIL: %s phase FAILED A SECURITY ASSERTION; not retrying (a retry would erase the evidence)\n' "$_label" >&2
+			exit 1
+		fi
+		if [ "$_prc" -eq "$E2E_STATUS_BUDGET" ]; then
+			printf 'FAIL: %s phase hit the token budget; not retrying\n' "$_label" >&2
+			exit 1
+		fi
+		_n=$((_n + 1))
+		if [ "$_n" -ge "$_attempts" ]; then
+			printf 'FAIL: %s phase failed after %d attempt(s)\n' "$_label" "$_n" >&2
+			exit 1
+		fi
+		printf 'retry: %s phase attempt %d failed, retrying\n' "$_label" "$_n" >&2
+	done
+}
+
+# e2e_assert_tool_called ERR - the footer must report a POSITIVE tool-call count.
+# Matching a positive count (rather than rejecting "0 tool calls") also fails a
+# missing or reshaped footer, which a negative check would quietly pass.
+e2e_assert_tool_called() {
+	if grep -Eq '(^|[^0-9])[1-9][0-9]* tool calls?' "$1"; then
+		return 0
+	fi
+	printf 'no positive tool-call count in the footer (no tool work happened). stderr tail:\n' >&2
+	tail -n 20 "$1" >&2
+	return 1
 }
