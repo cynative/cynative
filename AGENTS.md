@@ -17,8 +17,9 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1`,
   `test/install-script.smoke.test.ps1`, `test/scoop.smoke.test.ps1`, and
   `test/archive.smoke.test.ps1` + Pester unit tests +
-  `sh-test` (the POSIX `install.sh` unit tests plus a `python3`-backed loopback smoke
-  test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject).
+  `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
+  test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
+  live-e2e guardrails unit tests, and both connector suites' offline audit-parser selftests).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
   otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
@@ -59,7 +60,17 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   GCP fixture project through the `gcp` connector (`test/connector.gcp.e2e.test.sh`, needs
   `python3`), asserting a read of the project's own Cloud Resource Manager metadata and a
   client-side-denied write canary, and skipping cleanly when `GCP_E2E_*`/creds are unset (the
-  script header documents its env and knobs). `make homebrew-smoke`: standalone post-release
+  script header documents its env and knobs). `make connector-aws-e2e`: standalone live AWS
+  connector e2e (not part of `make check`); runs the real `cynative -p` against a real AWS fixture
+  account through the `aws` connector (`test/connector.aws.e2e.test.sh`, needs `python3`),
+  asserting a read of an inert fixture IAM role's tag (the value arrives out of band and never
+  appears in the prompt, and the audit parser binds it to the bytes AWS returned) plus a
+  `TagRole` write canary denied before the request leaves the machine, and skipping cleanly when
+  `AWS_E2E_*`/creds are unset (the script header documents its env and knobs). Both connector
+  parsers carry an offline `--selftest` that `make sh-test` gates: the parser is what stops a
+  suite going green while the read-only boundary is broken, so its exit code is the phase status
+  (1 = retryable miss, 4 = boundary failure, never retried, since the per-attempt audit
+  truncation would erase the evidence). `make homebrew-smoke`: standalone post-release
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
   documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
   release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone
