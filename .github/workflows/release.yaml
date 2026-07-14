@@ -504,9 +504,13 @@ jobs:
   #
   # `gate: true` is load-bearing, not decoration. A called workflow inherits the
   # CALLER's event (push), so the connector workflows' own event-based gating
-  # would report "not a release-please PR", skip the live job, and a skipped job
-  # cannot satisfy publish's `result == 'success'` below: the release would block
-  # forever on a gate that never ran.
+  # would report "not a release-please PR" and skip the live job.
+  #
+  # That failure is fail-OPEN, which is why it matters so much: GitHub reports a
+  # conditionally skipped job as a SUCCESS to its caller, so `result == 'success'`
+  # below would be satisfied and the release would publish having tested nothing.
+  # Each called workflow therefore ends with a `gate-assert` job that hard-fails
+  # unless the live job actually SUCCEEDED, which is what makes this gate real.
   connector-gcp-e2e:
     name: Live GCP connector e2e
     needs: release
@@ -514,6 +518,7 @@ jobs:
     uses: ./.github/workflows/connector-gcp-e2e.yaml
     with:
       gate: true
+      ref: ${{ needs.release.outputs.sha }}
     permissions:
       contents: read
       id-token: write
@@ -525,6 +530,7 @@ jobs:
     uses: ./.github/workflows/connector-aws-e2e.yaml
     with:
       gate: true
+      ref: ${{ needs.release.outputs.sha }}
     permissions:
       contents: read
       id-token: write
