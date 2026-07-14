@@ -1,0 +1,47 @@
+name: TEMP call-path harness
+
+# TEMPORARY. Delete before merge.
+#
+# Proves the reusable-workflow call path the Release Pipeline now depends on, which
+# cannot otherwise be tested before merge: release.yaml only runs on push to main, and
+# a brand-new workflow cannot be manually dispatched until it is on the default branch
+# (GitHub returns HTTP 404).
+#
+# What it must prove:
+#   1. `gate: true` reaches the called workflow's detect job, so the live job actually
+#      RUNS on the call path (an event check there would skip it, and a skipped gate
+#      cannot satisfy publish's result == 'success').
+#   2. The caller's `permissions: id-token: write` ceiling lets the called workflow mint
+#      an OIDC token (a reusable workflow can never exceed its caller's grant).
+#   3. GCP's Workload Identity provider accepts the call path. Its attribute condition
+#      pins `job_workflow_ref`, which for a reusable workflow is the ref of the CALLED
+#      workflow, not the caller. If that assumption is wrong, GCP auth fails here rather
+#      than blocking every future release.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  gcp:
+    name: TEMP GCP call path
+    # Same fork-trust boundary as the real callers: no fork PR may reach the credentials.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/connector-gcp-e2e.yaml
+    with:
+      gate: true
+    permissions:
+      contents: read
+      id-token: write
+
+  aws:
+    name: TEMP AWS call path
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/connector-aws-e2e.yaml
+    with:
+      gate: true
+    permissions:
+      contents: read
+      id-token: write
