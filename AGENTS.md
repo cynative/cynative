@@ -685,12 +685,25 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `test/archive.smoke.test.ps1` (Windows PowerShell 5.1) against each Linux tar and Windows zip
   on its native arch (sha256 vs manifest, checksums.txt row cross-check, exact-member tar
   extraction on Linux, `Expand-Archive` with a root-layout check on Windows, executable bit on
-  Linux, PE machine arch on Windows, exact `--version`); the `publish` job re-asserts the
+  Linux, PE machine arch on Windows, exact `--version`); the `connector-gcp-e2e` and
+  `connector-aws-e2e` jobs call the two live connector suites as reusable workflows
+  (`workflow_call` with `gate: true`) against the real GCP and AWS fixture accounts, so a release
+  whose connector cannot authenticate, cannot read, or **fails to deny a write** cannot publish
+  (they exercise the source at the release SHA, not the artifacts, so they need no
+  `release-artifacts` hand-off and run in parallel with the install smokes; the calling job must
+  raise the token ceiling to `id-token: write`, since a reusable workflow can never exceed its
+  caller's grant). **`gate: true` is load-bearing**: a called workflow inherits the *caller's*
+  event (`push`), so the connector workflows' own event-based gating would skip the live job, and
+  a skipped job cannot satisfy publish's `result == 'success'` - the release would block forever
+  on a gate that never ran. The `publish` job re-asserts the
   still-editable draft (same id,
   same exact asset set) immediately before publishing, then verifies, pushes the tap, and runs
   release-please phase 2. Publish is additionally gated on `scripts/release/audit-formula.sh`
   (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`
-  job); any pre-publish failure leaves the draft intact. After the tap push, the pipeline calls
+  job); any pre-publish failure leaves the draft intact. Publish requires
+  `result == 'success'` from every gate job (not `!= 'failure'`), which is what makes a skipped or
+  cancelled gate block the publish instead of waving it through; that is also why the connector
+  workflows scope `cancel-in-progress` to `pull_request` runs only. After the tap push, the pipeline calls
   the reusable `.github/workflows/homebrew-smoke.yaml`
   (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
   the Homebrew install smoke on macOS and Linux. It also calls the reusable

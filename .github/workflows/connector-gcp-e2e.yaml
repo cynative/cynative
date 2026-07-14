@@ -8,13 +8,31 @@ name: Live GCP connector e2e
 # Identity Federation; the credential step is gated to same-repo events so
 # untrusted forks never reach it. Not a required status check. Unlike the llm
 # smoke, this run DOES expose GCP ADC to cynative so the gcp connector registers.
+#
+# Three entry points. The Release Pipeline calls it as a PRE-PUBLISH GATE
+# (workflow_call with gate: true), so a release cannot publish while the read-only
+# boundary is broken; maintainers can dispatch it manually; and it self-gates on PRs to
+# release-please only.
 on:
+  workflow_call:
+    inputs:
+      gate:
+        description: Force the live run (the Release Pipeline sets this to gate publish).
+        type: boolean
+        default: false
   pull_request:
     types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Cancellation is scoped to pull_request runs on purpose: on the release path this
+# workflow is a publish gate, and cancelling it mid-release would fail the gate (publish
+# requires result == 'success') and block a release for an unrelated reason.
+concurrency:
+  group: connector-gcp-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   detect:
@@ -29,14 +47,21 @@ jobs:
           EVENT: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GATE: ${{ inputs.gate }}
         run: |
           relevant=false
+          # The workflow_call path is the Release Pipeline's publish gate, and it MUST key
+          # on the input rather than the event. A called workflow inherits the CALLER's
+          # event (push), so an event check here would report "not relevant", the live job
+          # would skip, and a skipped job cannot satisfy publish's `result == success`:
+          # the release would block forever on a gate that never ran.
+          [ "${GATE}" = "true" ] && relevant=true
           [ "${EVENT}" = "workflow_dispatch" ] && relevant=true
           [ "${HEAD_REF}" = "release-please--branches--main" ] && relevant=true
           case ",${LABELS}," in *",autorelease: pending,"*) relevant=true ;; esac
           echo "relevant=${relevant}" >> "${GITHUB_OUTPUT}"
           if [ "${relevant}" = "true" ]; then
-            echo "Release-please PR or manual dispatch - running the live GCP connector e2e."
+            echo "Release gate, release-please PR, or manual dispatch - running the live GCP connector e2e."
           else
             echo "Not a release-please PR - skipping the live GCP connector e2e."
           fi
@@ -44,11 +69,14 @@ jobs:
   gcp-connector:
     name: GCP connector read + canary
     needs: detect
-    # Run only when relevant AND either a manual dispatch (no PR context) or a
-    # same-repo PR. A fork PR must never reach the WIF/OIDC credential step.
+    # Run only when relevant AND on a trusted path: the Release Pipeline's gate (which
+    # only ever runs from an already-merged commit on main), a manual dispatch (no PR
+    # context), or a same-repo PR. A fork PR must never reach the WIF/OIDC credential
+    # step. `inputs.gate` is null on every non-call event, so it is falsy there.
     if: >-
       needs.detect.outputs.relevant == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
+      (inputs.gate ||
+       github.event_name == 'workflow_dispatch' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     # Headroom for two phases, each retried once, at the per-phase timeout below.
