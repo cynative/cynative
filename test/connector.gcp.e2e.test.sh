@@ -197,19 +197,8 @@ root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 
 # Skip cleanly when required env is unset - unless GCP_E2E_REQUIRE_RUN=1, where a
 # missing var is a failure (a CI job must never go green by skipping).
-missing=
-for v in CYNATIVE_LLM_PROVIDER CYNATIVE_LLM_MODEL GCP_E2E_PROJECT GCP_E2E_EXPECT; do
-	eval "val=\${$v:-}"
-	[ -n "$val" ] || missing="$missing $v"
-done
-if [ -n "$missing" ]; then
-	if [ "${GCP_E2E_REQUIRE_RUN:-}" = "1" ]; then
-		printf 'FAIL: required env unset but GCP_E2E_REQUIRE_RUN=1:%s\n' "$missing" >&2
-		exit 1
-	fi
-	printf 'skip: connector.gcp.e2e (set CYNATIVE_LLM_* + GCP creds + GCP_E2E_PROJECT/EXPECT to run)\n' >&2
-	exit 0
-fi
+e2e_require_env connector.gcp.e2e "${GCP_E2E_REQUIRE_RUN:-}" \
+	CYNATIVE_LLM_PROVIDER CYNATIVE_LLM_MODEL GCP_E2E_PROJECT GCP_E2E_EXPECT || exit 0
 
 e2e_require_cmd go "needed to build cynative" || exit 1
 e2e_require_cmd timeout || exit 1
@@ -244,23 +233,6 @@ write_parser "$parser"
 timeout_s="$E2E_RUN_TIMEOUT"
 attempts="${GCP_E2E_ATTEMPTS:-2}"
 
-# classify_or_return RC OUT ERR - run the shared classifier for a phase and map it
-# onto the phase's retry contract: success (0) continues; a budget hit (3) is
-# fatal and must not be retried, so it propagates as 3; any other failure is a
-# retryable 1. The classifier's rc is captured in the else branch (a completed
-# `if` with no matching branch yields status 0, which would swallow it).
-classify_or_return() {
-	if e2e_classify_run "$1" "$2" "$3" "$timeout_s"; then
-		return 0
-	else
-		_cls=$?
-	fi
-	if [ "$_cls" -eq 3 ]; then
-		return 3
-	fi
-	return 1
-}
-
 # ============================ READ PHASE ============================
 # Give the project id, ask for the number: the model can only produce the number
 # by actually reading the resource through the connector.
@@ -268,16 +240,12 @@ read_prompt="Use the gcp connector to look up the Google Cloud project \"$GCP_E2
 
 read_phase() {
 	printf '== READ == %s (%s/%s)\n' "$GCP_E2E_PROJECT" "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
-	# Truncate the audit log so a retry is evaluated against only this attempt's
-	# records (cynative opens the audit log append-only, so a stale record from a
-	# failed earlier attempt could otherwise satisfy this attempt's parser).
-	: > "$workdir/read.audit.log"
 	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
 		"$bin" "$workdir/config.yaml" "$read_prompt"; then rc=0; else rc=$?; fi
 	# Shared classification: a timeout, a budget hit, or a provider/config error
 	# fail this attempt; a budget hit (3) propagates so the retry loop stops
 	# instead of re-burning credits.
-	classify_or_return "$rc" "$workdir/read.out" "$workdir/read.err" || return $?
+	if e2e_classify_run "$rc" "$workdir/read.out" "$workdir/read.err" "$timeout_s"; then :; else return $?; fi
 	# Verify the environment before the answer: the gcp connector must have
 	# registered and be available under the read-only role. On failure dump the
 	# startup connector inventory and a stderr tail, so a registration skip is
@@ -294,11 +262,7 @@ read_phase() {
 		return 1
 	fi
 	# A tool was actually called (opposite of the no-tool llm smoke).
-	if grep -Eq '(^|[^0-9])0 tool calls' "$workdir/read.err"; then
-		printf 'read: footer reports 0 tool calls (no read happened). stderr tail:\n' >&2
-		tail -n 20 "$workdir/read.err" >&2
-		return 1
-	fi
+	e2e_assert_tool_called "$workdir/read.err" || return 1
 	# Answer identifies the resource: the project number (fed out of band) is echoed.
 	if ! grep -Fiq "$GCP_E2E_EXPECT" "$workdir/read.out"; then
 		printf 'read: project number not found in answer (no real read?). stdout tail:\n' >&2
@@ -328,10 +292,6 @@ canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL
 
 canary_phase() {
 	printf '== CANARY == attempting a denied write on %s\n' "$GCP_E2E_PROJECT" >&2
-	# Truncate first so a retry sees only this attempt's records (see read_phase):
-	# a stale marked+denied record from a failed earlier attempt must not satisfy
-	# this attempt's parser.
-	: > "$workdir/canary.audit.log"
 	if e2e_run_bounded "$timeout_s" "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err" \
 		"$bin" "$workdir/config.yaml" "$canary_prompt"; then rc=0; else rc=$?; fi
 
@@ -339,7 +299,7 @@ canary_phase() {
 	# write still exits 0. Shared classification only catches a real run failure
 	# (timeout, budget, crash, or the model never reaching the write); it must not
 	# be masked by the audit check. A budget hit (3) is fatal - propagate it.
-	classify_or_return "$rc" "$workdir/canary.out" "$workdir/canary.err" || return $?
+	if e2e_classify_run "$rc" "$workdir/canary.out" "$workdir/canary.err" "$timeout_s"; then :; else return $?; fi
 	# The audit log must show the write was attempted AND denied client-side, and no
 	# marked write succeeded.
 	if ! python3 "$parser" canary "$workdir/canary.audit.log"; then
@@ -350,38 +310,10 @@ canary_phase() {
 	return 0
 }
 
-# run_with_retries LABEL PHASE_FN - run a phase, retrying a non-deterministic
-# model miss up to $attempts times. A budget hit (the phase returns 3) is fatal
-# and is NOT retried: a retry only burns more credits and re-hits the ceiling.
-# The phase's exit code is captured in the else branch (a completed `if` with no
-# matching branch yields status 0, so reading $? after `fi` would swallow it).
-run_with_retries() {
-	_label=$1
-	_fn=$2
-	_n=0
-	while true; do
-		if "$_fn"; then
-			return 0
-		else
-			_prc=$?
-		fi
-		if [ "$_prc" -eq 3 ]; then
-			printf 'FAIL: %s phase hit the token budget; not retrying\n' "$_label" >&2
-			exit 1
-		fi
-		_n=$((_n + 1))
-		if [ "$_n" -ge "$attempts" ]; then
-			printf 'FAIL: %s phase failed after %d attempt(s)\n' "$_label" "$_n" >&2
-			exit 1
-		fi
-		printf 'retry: %s phase attempt %d failed, retrying\n' "$_label" "$_n" >&2
-	done
-}
-
-run_with_retries read read_phase
+e2e_run_with_retries read "$attempts" read_phase
 
 if [ "${GCP_E2E_CANARY:-1}" != "0" ]; then
-	run_with_retries canary canary_phase
+	e2e_run_with_retries canary "$attempts" canary_phase
 fi
 
 printf 'connector.gcp.e2e: OK (%s)\n' "$GCP_E2E_PROJECT" >&2
