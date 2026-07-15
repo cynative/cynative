@@ -36,6 +36,16 @@ const (
 // constant.
 const reasonAssumeRoleUnavailable = "assume_role_unavailable"
 
+// reasonUnrecognizedARN is the machine-readable reason a caller ARN could not
+// be classified (unparseable, malformed, or an unrecognized identity shape).
+const reasonUnrecognizedARN = "unrecognized_arn"
+
+// ARN service namespaces DetectCredScope classifies caller identities by.
+const (
+	arnServiceIAM = "iam"
+	arnServiceSTS = "sts"
+)
+
 // CredScopeDecision is the result of DetectCredScope: the chosen mode plus
 // (for assumed-role) the derived role ARN to assume, and (on a disabled
 // classification) a machine-readable Reason for the posture log.
@@ -58,18 +68,18 @@ type CredScopeDecision struct {
 func DetectCredScope(callerARN string) CredScopeDecision {
 	parsed, err := arn.Parse(callerARN)
 	if err != nil {
-		return CredScopeDecision{Mode: CredScopeDisabled, Reason: "unrecognized_arn"}
+		return CredScopeDecision{Mode: CredScopeDisabled, Reason: reasonUnrecognizedARN}
 	}
 	switch {
-	case parsed.Service == "iam" &&
+	case parsed.Service == arnServiceIAM &&
 		(parsed.Resource == "root" || strings.HasPrefix(parsed.Resource, "user/")):
 		return CredScopeDecision{Mode: CredScopeDisabled}
-	case parsed.Service == "sts" && strings.HasPrefix(parsed.Resource, "assumed-role/"):
+	case parsed.Service == arnServiceSTS && strings.HasPrefix(parsed.Resource, "assumed-role/"):
 		return decodeAssumedRole(parsed)
-	case parsed.Service == "sts" && strings.HasPrefix(parsed.Resource, "federated-user/"):
+	case parsed.Service == arnServiceSTS && strings.HasPrefix(parsed.Resource, "federated-user/"):
 		return CredScopeDecision{Mode: CredScopeDisabled, Reason: "unsupported_credential_type:federated-user"}
 	default:
-		return CredScopeDecision{Mode: CredScopeDisabled, Reason: "unrecognized_arn"}
+		return CredScopeDecision{Mode: CredScopeDisabled, Reason: reasonUnrecognizedARN}
 	}
 }
 
@@ -81,11 +91,11 @@ func decodeAssumedRole(parsed arn.ARN) CredScopeDecision {
 	roleAndSession := strings.TrimPrefix(parsed.Resource, "assumed-role/")
 	role, _, sepFound := strings.Cut(roleAndSession, "/")
 	if !sepFound || role == "" {
-		return CredScopeDecision{Mode: CredScopeDisabled, Reason: "unrecognized_arn"}
+		return CredScopeDecision{Mode: CredScopeDisabled, Reason: reasonUnrecognizedARN}
 	}
 	roleARN := arn.ARN{
 		Partition: parsed.Partition,
-		Service:   "iam",
+		Service:   arnServiceIAM,
 		Region:    "",
 		AccountID: parsed.AccountID,
 		Resource:  "role/" + role,
@@ -160,6 +170,13 @@ func (p *ScopedProvider) Retrieve(ctx context.Context) (aws.Credentials, error) 
 	return aws.Credentials{}, fmt.Errorf("ScopedProvider: unknown CredScopeMode %v", mode)
 }
 
+// codeAccessDenied and codeAccessDeniedException are the smithy API error codes
+// for a definitive AWS authorization denial.
+const (
+	codeAccessDenied          = "AccessDenied"
+	codeAccessDeniedException = "AccessDeniedException"
+)
+
 // isAccessDenied reports whether err is a definitive AWS authorization denial
 // (a smithy.APIError whose code is "AccessDenied" or "AccessDeniedException").
 // It is the sole trigger for credential-scoping degradation; transient errors
@@ -170,7 +187,7 @@ func isAccessDenied(err error) bool {
 	}
 	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
 		code := apiErr.ErrorCode()
-		return code == "AccessDenied" || code == "AccessDeniedException"
+		return code == codeAccessDenied || code == codeAccessDeniedException
 	}
 	return false
 }

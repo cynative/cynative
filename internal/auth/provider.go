@@ -49,8 +49,8 @@ type tokenSource interface {
 // Compile-time assertions that the local mirror interfaces match the external
 // ones they stand in for.
 var (
-	_ tokenCredential = (azcore.TokenCredential)(nil)
-	_ tokenSource     = (oauth2.TokenSource)(nil)
+	_ tokenCredential = azcore.TokenCredential(nil)
+	_ tokenSource     = oauth2.TokenSource(nil)
 )
 
 // ErrModelSuppliedCredential is returned when a request already carries
@@ -58,7 +58,8 @@ var (
 // sole setters of credentials; a pre-existing one means the model smuggled
 // its own.
 var ErrModelSuppliedCredential = errors.New(
-	"model-supplied credential rejected; credentials are injected automatically by the auth_provider")
+	"model-supplied credential rejected; credentials are injected automatically by the auth_provider",
+)
 
 // Inject finds the named provider and injects credentials into the request.
 // It fails closed first if the request already carries a model-supplied

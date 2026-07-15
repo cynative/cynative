@@ -10,7 +10,6 @@ import (
 
 // defaultTermWidth returns the current terminal width, or 0 if not a TTY.
 func defaultTermWidth() int {
-	//nolint:gosec // Fd() returns a uintptr that is always a valid small int on all supported platforms.
 	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		return w
 	}
@@ -22,7 +21,6 @@ func defaultTermWidth() int {
 func stdoutIsTTY() bool {
 	// Mirrors defaultTermWidth's cast rationale: Fd() returns a uintptr that is
 	// always a valid small int on all supported platforms.
-	//nolint:gosec // Fd() returns a uintptr that is always a valid small int on all supported platforms.
 	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 

@@ -181,6 +181,13 @@ linters:
       # Default: 0.0
       package-average: 10.0
 
+    goconst:
+      # Don't count occurrences in test files toward the threshold. Test files
+      # are already excluded from goconst reports (see exclusions.rules below);
+      # this keeps a string that only repeats across fixtures from being flagged
+      # in production code it appears in just once.
+      ignore-tests: true
+
     depguard:
       # Rules to apply.
       #

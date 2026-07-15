@@ -655,7 +655,8 @@ func formatFooter(s metrics.Stats, label string) string {
 // writeChrome appends the activity line: duration, model/tool-call counts,
 // optional sub-agent/verifier segments, and provider/model.
 func writeChrome(b *strings.Builder, s metrics.Stats) {
-	fmt.Fprintf(b, "── %s · %d model %s · %d tool %s",
+	fmt.Fprintf(
+		b, "── %s · %d model %s · %d tool %s",
 		humanDuration(s.Elapsed),
 		s.RoundTrips, plural(s.RoundTrips, "call", "calls"),
 		s.ToolCalls, plural(s.ToolCalls, "call", "calls"),

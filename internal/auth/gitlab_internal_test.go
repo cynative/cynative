@@ -686,7 +686,8 @@ func TestGitlabAuthorizeAction_DeniesGraphQL(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com")
 	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodPost, "https://gitlab.com/api/graphql", nil)
+		context.Background(), http.MethodPost, "https://gitlab.com/api/graphql", nil,
+	)
 	err := p.AuthorizeAction(context.Background(), req, nil)
 	if !errors.Is(err, gitlabclass.ErrGraphQLUnsupported) {
 		t.Fatalf("AuthorizeAction(/api/graphql) err = %v, want ErrGraphQLUnsupported", err)

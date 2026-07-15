@@ -190,6 +190,8 @@ var (
 	_ runScopedTool        = (*verifyFindingsTool)(nil)
 )
 
+const verifyFindingsToolName = "verify_findings"
+
 const verifyFindingsDesc = "Submit your security findings (claim + raw evidence) for adversarial " +
 	"verification before reporting them. Two passes try to refute each claim using ONLY the evidence " +
 	"you pass; keep evidence concise and complete. Report only VERIFIED findings; " +
@@ -228,7 +230,7 @@ func newVerifyFindingsTool(a *Agent) *verifyFindingsTool {
 	return &verifyFindingsTool{
 		agent: a,
 		info: &schema.ToolInfo{
-			Name:   "verify_findings",
+			Name:   verifyFindingsToolName,
 			Desc:   verifyFindingsDesc,
 			Params: schema.ReflectParams[verifyFindingsArgs](),
 		},

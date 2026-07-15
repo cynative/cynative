@@ -82,7 +82,8 @@ func TestK8sGate_authorizeAction(t *testing.T) {
 		g := newGateTest()
 		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
 			return nil, fmt.Errorf(
-				"%w: reading clusterrole %q returned k8s API 401 Unauthorized", ErrClusterAccessDenied, "view")
+				"%w: reading clusterrole %q returned k8s API 401 Unauthorized", ErrClusterAccessDenied, "view",
+			)
 		}}
 		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
 		err := g.authorizeAction(context.Background(), req, args)

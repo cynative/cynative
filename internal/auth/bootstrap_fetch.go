@@ -43,7 +43,8 @@ const (
 // attach the gh token), mirroring the K8s ClusterRole bootstrap fetch.
 func newGithubOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(githubFetchTimeout), githubOpenAPIURL, githubFetchAccept, "github_hardening")
+		buildBootstrapFetchClient(githubFetchTimeout), githubOpenAPIURL, githubFetchAccept, "github_hardening",
+	)
 }
 
 // newGitLabOpenAPIFetcher returns a fetcher that downloads the raw OpenAPI v3
@@ -52,7 +53,8 @@ func newGithubOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
 // anonymous fetch). https-only, no-redirect, size-capped.
 func newGitLabOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(gitlabFetchTimeout), gitlabOpenAPIURL, "", "gitlab_hardening")
+		buildBootstrapFetchClient(gitlabFetchTimeout), gitlabOpenAPIURL, "", "gitlab_hardening",
+	)
 }
 
 // bootstrapDialAuthorizer denies dials to internal IPs (loopback/link-local/

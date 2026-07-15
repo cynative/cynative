@@ -82,7 +82,8 @@ func TestGitHubProvider_InjectAuth(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://api.github.com/repos/test/test", nil)
+		"https://api.github.com/repos/test/test", nil,
+	)
 
 	if err := p.InjectAuth(req, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -106,7 +107,8 @@ func TestGitHubProvider_InjectAuth_StripsModelApiVersion(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://api.github.com/repos/test/test", nil)
+		"https://api.github.com/repos/test/test", nil,
+	)
 	req.Header.Set("X-Github-Api-Version", "2099-01-01") // model-supplied — must be removed.
 
 	if err := p.InjectAuth(req, nil); err != nil {
@@ -668,7 +670,8 @@ func TestInject_MatchesProvider(t *testing.T) {
 	p := &githubProvider{token: "ghp_test123"}
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://api.github.com/repos/test/test", nil)
+		"https://api.github.com/repos/test/test", nil,
+	)
 
 	if err := Inject(req, "github", []Provider{p}, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -685,7 +688,8 @@ func TestInject_CaseInsensitive(t *testing.T) {
 	p := &githubProvider{token: "ghp_case"}
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://api.github.com/repos/test/test", nil)
+		"https://api.github.com/repos/test/test", nil,
+	)
 
 	if err := Inject(req, "GitHub", []Provider{p}, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -701,7 +705,8 @@ func TestInject_UnknownProvider(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://example.com", nil)
+		"https://example.com", nil,
+	)
 
 	err := Inject(req, "nonexistent", nil, nil)
 	if err == nil {
@@ -718,7 +723,8 @@ func TestInject_ProviderError(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://example.com", nil)
+		"https://example.com", nil,
+	)
 
 	err := Inject(req, "failing", []Provider{&authtest.FailingProvider{}}, nil)
 	if err == nil {
@@ -768,7 +774,8 @@ func TestInject_RejectsModelSuppliedCredentialHeaders(t *testing.T) {
 			p := &githubProvider{token: "ghp_never_injected"}
 			req, _ := http.NewRequestWithContext(
 				context.Background(), http.MethodGet,
-				"https://api.github.com/repos/test/test", nil)
+				"https://api.github.com/repos/test/test", nil,
+			)
 			tc.seed(req)
 
 			err := Inject(req, "github", []Provider{p}, nil)
@@ -871,7 +878,8 @@ func TestInject_RejectsURLUserinfo(t *testing.T) {
 	p := &githubProvider{token: "ghp_never_injected"}
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
-		"https://model:smuggled@api.github.com/repos/test/test", nil)
+		"https://model:smuggled@api.github.com/repos/test/test", nil,
+	)
 
 	err := Inject(req, "github", []Provider{p}, nil)
 	if !errors.Is(err, ErrModelSuppliedCredential) {
@@ -901,7 +909,8 @@ func TestInject_MTLSProvidersRejectSeededHeader(t *testing.T) {
 
 			req, _ := http.NewRequestWithContext(
 				context.Background(), http.MethodGet,
-				"https://10.0.0.1:6443/api/v1/namespaces/default/pods", nil)
+				"https://10.0.0.1:6443/api/v1/namespaces/default/pods", nil,
+			)
 			req.Header.Set("Authorization", "Bearer model-smuggled")
 
 			err := Inject(req, tc.name, []Provider{tc.p}, nil)
@@ -3397,6 +3406,7 @@ type fakeAuthorizingProvider struct {
 func (f *fakeAuthorizingProvider) Name() string                                        { return f.name }
 func (f *fakeAuthorizingProvider) Description() string                                 { return "" }
 func (f *fakeAuthorizingProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+
 func (f *fakeAuthorizingProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
 	return true, nil
 }
@@ -3407,9 +3417,12 @@ func (f *fakeAuthorizingProvider) AuthorizeAction(ctx context.Context, req *http
 
 type fakeProviderNoActionAuth struct{ name string }
 
-func (f *fakeProviderNoActionAuth) Name() string                                        { return f.name }
-func (f *fakeProviderNoActionAuth) Description() string                                 { return "" }
+func (f *fakeProviderNoActionAuth) Name() string { return f.name }
+
+func (f *fakeProviderNoActionAuth) Description() string { return "" }
+
 func (f *fakeProviderNoActionAuth) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+
 func (f *fakeProviderNoActionAuth) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
 	return true, nil
 }

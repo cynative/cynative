@@ -387,7 +387,8 @@ func (m *verifierScriptModel) Generate(
 	if strings.Contains(msgs[0].Text(), "adversarial reviewer") {
 		return schema.AssistantMessage(
 			`{"f1":{"verdict":"confirmed","justification":"evidence holds"},`+
-				`"f2":{"verdict":"refuted","justification":"the key was rotated"}}`, nil), nil
+				`"f2":{"verdict":"refuted","justification":"the key was rotated"}}`, nil,
+		), nil
 	}
 
 	m.mu.Lock()

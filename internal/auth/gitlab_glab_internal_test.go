@@ -226,7 +226,8 @@ func TestGlabHelperSource(t *testing.T) {
 		calls := 0
 		s := newGlabHelperSource(
 			func() (*oauth2.Token, error) { calls++; return mk("new", base.Add(time.Hour)), nil },
-			func() time.Time { return base }, mk("seed", base.Add(time.Hour)))
+			func() time.Time { return base }, mk("seed", base.Add(time.Hour)),
+		)
 		tok, err := s.Token()
 		if err != nil || tok.AccessToken != "seed" || calls != 0 {
 			t.Fatalf("got (%v,%v) calls=%d, want seed with no fetch", tok, err, calls)
@@ -239,7 +240,8 @@ func TestGlabHelperSource(t *testing.T) {
 		s := newGlabHelperSource(
 			// Never called (PAT cached forever); returns an error to satisfy nilnil.
 			func() (*oauth2.Token, error) { calls++; return nil, errGitLabHelperUnavailable },
-			func() time.Time { return base.Add(1000 * time.Hour) }, mk("pat", time.Time{}))
+			func() time.Time { return base.Add(1000 * time.Hour) }, mk("pat", time.Time{}),
+		)
 		tok, _ := s.Token()
 		if tok.AccessToken != "pat" || calls != 0 {
 			t.Fatalf("PAT re-fetched: calls=%d", calls)
@@ -250,7 +252,8 @@ func TestGlabHelperSource(t *testing.T) {
 		t.Parallel()
 		s := newGlabHelperSource(
 			func() (*oauth2.Token, error) { return mk("fresh", base.Add(2*time.Hour)), nil },
-			func() time.Time { return base.Add(time.Hour) }, mk("stale", base.Add(30*time.Minute)))
+			func() time.Time { return base.Add(time.Hour) }, mk("stale", base.Add(30*time.Minute)),
+		)
 		tok, err := s.Token()
 		if err != nil || tok.AccessToken != "fresh" {
 			t.Fatalf("got (%v,%v), want fresh", tok, err)
@@ -263,7 +266,8 @@ func TestGlabHelperSource(t *testing.T) {
 		// still not hard-expired, so it is adopted.
 		s := newGlabHelperSource(
 			func() (*oauth2.Token, error) { return nil, errGitLabHelperUnavailable },
-			func() time.Time { return base.Add(time.Hour) }, mk("seed", base.Add(time.Hour+30*time.Second)))
+			func() time.Time { return base.Add(time.Hour) }, mk("seed", base.Add(time.Hour+30*time.Second)),
+		)
 		tok, err := s.Token()
 		if err != nil || tok.AccessToken != "seed" {
 			t.Fatalf("got (%v,%v), want seed adopted on transient failure", tok, err)
@@ -274,7 +278,8 @@ func TestGlabHelperSource(t *testing.T) {
 		t.Parallel()
 		s := newGlabHelperSource(
 			func() (*oauth2.Token, error) { return nil, errGitLabHelperUnavailable },
-			func() time.Time { return base.Add(2 * time.Hour) }, mk("dead", base.Add(time.Hour)))
+			func() time.Time { return base.Add(2 * time.Hour) }, mk("dead", base.Add(time.Hour)),
+		)
 		if _, err := s.Token(); err == nil {
 			t.Fatal("want error when cached is hard-expired and fetch fails")
 		}
@@ -286,7 +291,8 @@ func TestGlabHelperSource(t *testing.T) {
 		now := base.Add(2 * time.Hour) // seed hard-expired.
 		s := newGlabHelperSource(
 			func() (*oauth2.Token, error) { calls++; return nil, errGitLabHelperUnavailable },
-			func() time.Time { return now }, mk("dead", base.Add(time.Hour)))
+			func() time.Time { return now }, mk("dead", base.Add(time.Hour)),
+		)
 		_, _ = s.Token() // first call: fetch (calls=1), records lastFail.
 		_, _ = s.Token() // second call within cooldown: no new fetch.
 		if calls != 1 {

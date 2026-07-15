@@ -24,6 +24,8 @@ var (
 	_ runScopedTool        = (*taskTool)(nil)
 )
 
+const taskToolName = "task"
+
 const taskDesc = "Delegate a focused sub-investigation to a sub-agent that starts " +
 	"with a clean context and returns only a concise result. Use this to keep your " +
 	"main context focused when a step requires many tool calls."
@@ -45,7 +47,7 @@ const subagentDelegationGuidance = "Sub-agents cannot themselves delegate with t
 func newTaskTool(a *Agent) *taskTool {
 	return &taskTool{
 		agent: a,
-		info:  &schema.ToolInfo{Name: "task", Desc: taskDesc, Params: schema.ReflectParams[taskArgs]()},
+		info:  &schema.ToolInfo{Name: taskToolName, Desc: taskDesc, Params: schema.ReflectParams[taskArgs]()},
 	}
 }
 
@@ -112,5 +114,5 @@ func (t *taskTool) runScoped(ctx context.Context, rs *runState, argumentsInJSON 
 
 	// The summary is shaped by a sub-investigation of external data, so fence it
 	// as untrusted to close the instruction-laundering path.
-	return wrapUntrusted("task", answer), nil
+	return wrapUntrusted(taskToolName, answer), nil
 }

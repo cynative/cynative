@@ -63,7 +63,8 @@ func keyConfigError(provider schemas.ModelProvider) error {
 		"%w: provider %q requires structured llm.%s.* configuration; set it via "+
 			"llm.%s.* (an api_key or environment fallback alone is not sufficient) — "+
 			"see docs/providers/%s.md",
-		ErrKeyConfigRequired, provider, provider, provider, provider)
+		ErrKeyConfigRequired, provider, provider, provider, provider,
+	)
 }
 
 // ValidateKeyPresence returns ErrNoKeysForProvider when no key ENTRY exists after

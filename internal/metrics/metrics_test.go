@@ -412,7 +412,8 @@ func TestTurnSnapshot_DeltaAcrossTurns(t *testing.T) {
 	// Reads: StartTurn1=base, EndTurn1=base+1s, StartTurn2=base+2s, EndTurn2=base+3s.
 	// Snapshot/TurnSnapshot after EndTurn must NOT read the clock (scriptedClock panics if they do).
 	acc := metrics.NewAccumulator("p", "m", metrics.WithClock(scriptedClock(
-		base, base.Add(time.Second), base.Add(2*time.Second), base.Add(3*time.Second))))
+		base, base.Add(time.Second), base.Add(2*time.Second), base.Add(3*time.Second),
+	)))
 
 	acc.StartTurn() // turn 1.
 	acc.AddRoundTrip()
