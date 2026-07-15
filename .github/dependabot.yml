@@ -1,15 +1,29 @@
 version: 2
+
 multi-ecosystem-groups:
   all-dependencies:
     schedule:
       interval: "daily"
     commit-message:
       prefix: "fix(deps)"
+
 updates:
   - package-ecosystem: "gomod"
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
+    # dependency-type "all" turns on updates for indirect (transitive) modules,
+    # not just direct ones.
+    allow:
+      - dependency-type: "all"
+    ignore:
+      # Untagged nested modules of the charmbracelet/x monorepo. The root module
+      # is tagged (v0.1.0) but these submodules have no tags, so Dependabot's Go
+      # version discovery mis-resolves them to the root and fails the gomod
+      # update (dependency_file_not_resolvable). Deep terminal-UI transitives
+      # (via glamour and via goreleaser -> fang). Revisit if charmbracelet tags
+      # the x/exp submodules.
+      - dependency-name: "github.com/charmbracelet/x/exp/*"
   - package-ecosystem: "github-actions"
     directory: "/"
     patterns: ["*"]
