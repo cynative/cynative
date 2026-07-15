@@ -185,6 +185,22 @@ def index_calls(recs):
     return out
 
 
+def _fold_keys(d, what):
+    """Mirror Go's case-insensitive JSON field matching: the transport decodes the
+    raw arguments with encoding/json, which binds e.g. "HEADERS" to the headers
+    field, so the parser must see the same view or a miscased key could add wire
+    behavior (a smuggled header on a "headerless" read) invisible to the sweep.
+    A case-fold collision is ambiguous (which value Go bound is decoder-internal),
+    so it fails closed like a duplicate key."""
+    out = {}
+    for k, v in d.items():
+        f = k.casefold() if isinstance(k, str) else k
+        if f in out:
+            insecure("case-folded duplicate key %r in %s - failing closed" % (k, what))
+        out[f] = v
+    return out
+
+
 def args_of(rec):
     a = rec.get("arguments")
     if isinstance(a, str):
@@ -196,7 +212,7 @@ def args_of(rec):
         return {}
     if not isinstance(a, dict):
         insecure("http_request arguments are not an object: %r" % type(a).__name__)
-    return a
+    return _fold_keys(a, "http_request arguments")
 
 
 def _str(v):
@@ -253,6 +269,7 @@ def headers_of(rec):
     for h in hs:
         if not isinstance(h, dict):
             insecure("http_request header is not an object")
+        h = _fold_keys(h, "http_request header")
         out.append(((h.get("key") or "").strip().lower(), (h.get("value") or "").strip()))
     return out
 
@@ -507,6 +524,16 @@ def _selftest():
                                                  "auth_provider": "gitlab"}, sres(200, "{}")), mark),
         ("read_direct_ok", 0, "read", pair("c1", read_args,
             "HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n" + ok_body), mark),
+        # A miscased headers key: Go binds "HEADERS" to the headers field and sends
+        # them on the wire, so the parser must fold keys the same way or a smuggled
+        # method-override on a "headerless" 200 read would pass the sweep.
+        ("read_folded_headers", 4, "read", pair("c1", {**read_args, "HEADERS":
+            [{"key": "X-HTTP-Method-Override", "value": "PATCH"}]},
+            sres(200, ok_body)), mark),
+        # Keys that collide after case folding are ambiguous (which one Go bound is
+        # decoder-internal): fail closed like a duplicate key.
+        ("read_fold_collision", 4, "read", pair("c1", {**read_args, "Method": "GET"},
+            sres(200, ok_body)), mark),
         ("read_malformed_mid", 4, "read", ["{bad json", jline("c1", "attempt", read_args)], mark),
         ("read_malformed_trailing", 0, "read", pair("c1", read_args, sres(200, ok_body)) + ["{partial"], mark),
         ("read_attemptonly", 1, "read", [jline("c1", "attempt", read_args)], mark),
@@ -532,6 +559,15 @@ def _selftest():
         ("canary_spoof", 4, "canary", pair("c1", write_args, sres(200, wdenial))),
         ("canary_wrongerr", 1, "canary", pair("c1", write_args,
             WRAP_DIRECT + "github_hardening: cannot classify request", outcome="error")),
+        # A miscased method key still IS the sanctioned canary once folded the way Go
+        # decodes it (the wire saw a PATCH; the denial is the exposure ceiling's).
+        ("canary_folded_method", 0, "canary", pair("c1",
+            {**{k: v for k, v in write_args.items() if k != "method"}, "Method": "PATCH"},
+            wdenial, outcome="error")),
+        # Miscased header-item keys ("KEY"/"VALUE") bind to the Header struct the same
+        # way, so the sanctioned Content-Type must still be recognized once folded.
+        ("canary_folded_hdr", 0, "canary", pair("c1", {**write_args, "headers":
+            [{"KEY": "Content-Type", "VALUE": "application/json"}]}, wdenial, outcome="error")),
         ("canary_ct", 1, "canary", pair("c1", {**write_args, "headers":
             [{"key": "Content-Type", "value": "text/plain"}]}, wdenial, outcome="error")),
         ("canary_mutated", 1, "canary", pair("c1", {**write_args, "body": '{"has_issues":true}'}, wdenial, outcome="error")),
@@ -630,7 +666,12 @@ arbitrate() {
 
 if [ "${1:-}" = "--selftest" ]; then
 	command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found\n' >&2; exit 1; }
-	_pt=$(mktemp); trap 'rm -f "$_pt"' EXIT INT TERM
+	_pt=$(mktemp)
+	# Cleanup on EXIT only; INT/TERM clean up and exit 130/143 so an interrupt is not
+	# absorbed and misread as a plain failure (see the main-body trap below).
+	trap 'rm -f "$_pt"' EXIT
+	trap 'trap - EXIT; rm -f "$_pt"; exit 130' INT
+	trap 'trap - EXIT; rm -f "$_pt"; exit 143' TERM
 	write_parser "$_pt"
 	python3 "$_pt" --selftest || exit 1
 	_af=0
@@ -674,7 +715,15 @@ cleanup() {
 	fi
 	rm -rf "$workdir"
 }
-trap cleanup EXIT INT TERM
+# Cleanup runs on EXIT only. A trap that also caught INT/TERM would, in POSIX sh,
+# RESUME after the handler returned, so a Ctrl-C or TERM landing between commands
+# would be swallowed: the interrupted bounded run would surface as a plain nonzero
+# exit, e2e_classify_run would read it as a retryable failure, and the retry loop
+# could launch another live attempt. Instead the signal handlers clean up once
+# (clearing the EXIT trap first) and exit with the conventional 130/143.
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT
+trap 'trap - EXIT; cleanup; exit 143' TERM
 
 bin=$(e2e_build_binary "$root" "$workdir" "${1:-}") || exit 1
 

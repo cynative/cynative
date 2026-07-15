@@ -731,7 +731,12 @@ arbitrate() {
 
 if [ "${1:-}" = "--selftest" ]; then
 	command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found\n' >&2; exit 1; }
-	_pt=$(mktemp); trap 'rm -f "$_pt"' EXIT INT TERM
+	_pt=$(mktemp)
+	# Cleanup on EXIT only; INT/TERM clean up and exit 130/143 so an interrupt is not
+	# absorbed and misread as a plain failure (see the main-body trap below).
+	trap 'rm -f "$_pt"' EXIT
+	trap 'trap - EXIT; rm -f "$_pt"; exit 130' INT
+	trap 'trap - EXIT; rm -f "$_pt"; exit 143' TERM
 	write_parser "$_pt"
 	python3 "$_pt" --selftest || exit 1
 	_af=0
@@ -779,7 +784,15 @@ cleanup() {
 	fi
 	rm -rf "$workdir"
 }
-trap cleanup EXIT INT TERM
+# Cleanup runs on EXIT only. A trap that also caught INT/TERM would, in POSIX sh,
+# RESUME after the handler returned, so a Ctrl-C or TERM landing between commands
+# would be swallowed: the interrupted bounded run would surface as a plain nonzero
+# exit, e2e_classify_run would read it as a retryable failure, and the retry loop
+# could launch another live attempt. Instead the signal handlers clean up once
+# (clearing the EXIT trap first) and exit with the conventional 130/143.
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT
+trap 'trap - EXIT; cleanup; exit 143' TERM
 
 # Build the binary (or accept a prebuilt one, passed as $1) so the test exercises
 # this checkout.
