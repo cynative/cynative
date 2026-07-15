@@ -535,6 +535,20 @@ jobs:
       contents: read
       id-token: write
 
+  connector-github-e2e:
+    name: Live GitHub connector e2e
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/connector-github-e2e.yaml
+    with:
+      gate: true
+      ref: ${{ needs.release.outputs.sha }}
+    secrets:
+      GH_E2E_APP_PRIVATE_KEY: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
+    permissions:
+      contents: read
+      id-token: write
+
   # ---- Publish: the instant of immutability ----------------------------
   # Everything before this job's "Publish release" step still runs against
   # an editable draft: any failure leaves nothing published and nothing
@@ -546,8 +560,8 @@ jobs:
   # publish rather than wave it through.
   publish:
     name: Publish release
-    needs: [release, macos-pkg-smoke, archive-smoke, connector-gcp-e2e, connector-aws-e2e]
-    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || (needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-gcp-e2e.result == 'success' && needs.connector-aws-e2e.result == 'success')) }}
+    needs: [release, macos-pkg-smoke, archive-smoke, connector-gcp-e2e, connector-aws-e2e, connector-github-e2e]
+    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || (needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-gcp-e2e.result == 'success' && needs.connector-aws-e2e.result == 'success' && needs.connector-github-e2e.result == 'success')) }}
     runs-on: ubuntu-latest
     # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
     # plus every short step with slack, so the job limit can never fire
