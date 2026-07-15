@@ -22,7 +22,9 @@
 #                               gemini-2.5-flash spends a few thousand tokens, and
 #                               the budget is checked after the response, so too
 #                               low a value discards the answer for a budget notice)
-#   SMOKE_REQUIRE_NO_CONNECTORS =1 hard-fails unless no connector registers
+#   SMOKE_REQUIRE_NO_CONNECTORS =1 hard-fails when an AVAILABLE connector
+#                               registers (an unavailable "skipped" inventory
+#                               line is fine: it cannot serve a request)
 #   SMOKE_REQUIRE_RUN          =1 hard-fails (instead of skipping) when provider/
 #                               model are unset, so a misconfigured CI job that
 #                               would silently skip is caught as a failure
@@ -103,12 +105,16 @@ if ! grep -Eq '(^|[^0-9])0 tool calls' "$workdir/err"; then
 fi
 
 # Connector check: soft warn by default, hard when SMOKE_REQUIRE_NO_CONNECTORS=1.
-if ! grep -Fq '(no connectors detected)' "$workdir/err"; then
+# Only an AVAILABLE connector counts as registered: e2e_isolate_env's
+# explicit-but-empty KUBECONFIG makes the kubernetes connector print a loud
+# "✗ ... skipped" inventory line even on a credential-less CI runner, and an
+# unavailable connector cannot serve a request.
+if ! e2e_assert_no_available_connectors "$workdir/err"; then
 	if [ "${SMOKE_REQUIRE_NO_CONNECTORS:-}" = "1" ]; then
-		printf 'FAIL: a connector registered (SMOKE_REQUIRE_NO_CONNECTORS=1)\n' >&2
+		printf 'FAIL: an available connector registered (SMOKE_REQUIRE_NO_CONNECTORS=1)\n' >&2
 		exit 1
 	fi
-	printf 'warn: a connector registered (expected none); the 0-tool-calls assertion still holds\n' >&2
+	printf 'warn: an available connector registered (expected none); the 0-tool-calls assertion still holds\n' >&2
 fi
 
 printf 'llm.smoke: OK (%s/%s)\n' "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2

@@ -247,6 +247,81 @@ if (
 	if e2e_assert_tool_called "$td/none.err" >/dev/null 2>&1; then exit 1; fi
 ); then pass "assert_tool_called requires a positive count, fails on 0 and on a missing footer"; else fail "assert_tool_called"; fi
 
+# ---- e2e_assert_no_available_connectors -----------------------------------------
+# Fixtures reproduce the rendered startup inventory (internal/ui formatConnector +
+# internal/cli/research.go): "  Connectors", a "  ──" rule, then "  ✓/✗/⚠ name …"
+# lines or "  (no connectors detected)". inv() writes the banner + header + rule so
+# each fixture is just its distinguishing section lines; an empty arg is a blank
+# line, and an arg may carry embedded newlines (a multi-line skip reason). The
+# noise fixtures (sdk/footer) mirror real stderr: the AWS SDK logs and the run
+# footer interleave with the inventory and carry no two-space indent.
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	rule='  ────────────────'
+	k8s='  ✗ kubernetes  kubernetes_hardening: skipped: kubernetes: no current-context set'
+	sdk='SDK 2026/07/15 21:19:52 WARN falling back to IMDSv1: operation error ec2imds: getToken'
+	footer='── 0.1s · 1 model call · 0 tool calls · bedrock/model-id'
+	inv() { printf 'banner noise\n\n  Connectors\n%s\n' "$rule"; [ "$#" -eq 0 ] || printf '%s\n' "$@"; }
+
+	# Real CI success shape: only kubernetes loud-skips (explicit-but-empty
+	# KUBECONFIG), and an SDK warning + the run footer interleave before EOF (a
+	# successful `-p` run renders no LLM section). Must pass: no connector is
+	# available, and the non-indented noise lines are not inventory records.
+	inv "$k8s" "$sdk" "$footer" > "$td/ci-eof.err"
+	e2e_assert_no_available_connectors "$td/ci-eof.err" >/dev/null 2>&1 || exit 1
+
+	# Same, with an LLM section after a blank line: its "✓ provider" line reuses
+	# the glyph but must not count, since the scan stops at the "  LLM" header.
+	inv "$k8s" "$sdk" "$footer" "" "  LLM" "$rule" "  ✓ bedrock   model-id" > "$td/ci-llm.err"
+	e2e_assert_no_available_connectors "$td/ci-llm.err" >/dev/null 2>&1 || exit 1
+
+	# The empty-inventory marker passes.
+	inv "  (no connectors detected)" > "$td/marker.err"
+	e2e_assert_no_available_connectors "$td/marker.err" >/dev/null 2>&1 || exit 1
+
+	# A multi-line skip reason (an Azure credential-chain error) whose
+	# continuation lines carry no two-space indent must be tolerated, not
+	# fail-closed: a skipped connector is still unavailable.
+	az='  ✗ azure       azure_hardening: skipped (no usable credentials): failed to acquire a token.
+Attempted credentials:
+	EnvironmentCredential: missing environment variable AZURE_TENANT_ID'
+	inv "$k8s" "$az" "$footer" > "$td/multiline.err"
+	e2e_assert_no_available_connectors "$td/multiline.err" >/dev/null 2>&1 || exit 1
+
+	# An available connector (✓) fails, even after a multi-line skip reason (the
+	# scan must not stop early on the reason's blank/continuation lines).
+	inv "$az" "  ✓ aws         access=default(read-only)" > "$td/avail.err"
+	if e2e_assert_no_available_connectors "$td/avail.err" >/dev/null 2>&1; then exit 1; fi
+
+	# A warn-flagged connector (⚠) is still available: fails.
+	inv "  ⚠ github      access=widened" > "$td/warn.err"
+	if e2e_assert_no_available_connectors "$td/warn.err" >/dev/null 2>&1; then exit 1; fi
+
+	# A mixed section fails on the available line even alongside a skip.
+	inv "$k8s" "  ✓ gcp         access=default(read-only)" > "$td/mixed.err"
+	if e2e_assert_no_available_connectors "$td/mixed.err" >/dev/null 2>&1; then exit 1; fi
+
+	# Fail-closed: an empty section body (header + rule then EOF) must fail, not
+	# quietly pass - a truncated or reshaped inventory is not a clean bill.
+	inv > "$td/empty.err"
+	if e2e_assert_no_available_connectors "$td/empty.err" >/dev/null 2>&1; then exit 1; fi
+
+	# Fail-closed: a blank line right after the rule then an available connector.
+	# The blank must not terminate the scan before the ✓ is classified.
+	inv "" "  ✓ gcp         access=default(read-only)" > "$td/blank-then-avail.err"
+	if e2e_assert_no_available_connectors "$td/blank-then-avail.err" >/dev/null 2>&1; then exit 1; fi
+
+	# Fail-closed: no Connectors header at all (a missing or reshaped inventory).
+	printf 'banner noise\nno inventory here\n' > "$td/nohdr.err"
+	if e2e_assert_no_available_connectors "$td/nohdr.err" >/dev/null 2>&1; then exit 1; fi
+
+	# Fail-closed: an unrecognized two-space-indented line inside the section
+	# (e.g. a changed glyph convention) must fail, not quietly pass.
+	inv "  OK gcp        access=default(read-only)" > "$td/drift.err"
+	if e2e_assert_no_available_connectors "$td/drift.err" >/dev/null 2>&1; then exit 1; fi
+); then pass "assert_no_available_connectors passes dark inventories with interleaved noise, anchors to the section, fails on ✓/⚠ and fails closed on empty/missing/reshaped"; else fail "assert_no_available_connectors"; fi
+
 # ---- e2e_run_bounded truncates the audit log before each attempt ---------------
 if command -v timeout >/dev/null 2>&1; then
 	if (
