@@ -1,0 +1,236 @@
+name: Live GitHub connector e2e
+
+# Runs the real `cynative -p` against a private fixture GitHub repository through the
+# github connector (cynative#53): a read of the fixture repo's description (the fact
+# arrives out of band, never in the prompt) plus two write-deny canaries (a PATCH and a
+# secret-scanning GET), proving read-only enforcement end to end. Mirrors
+# connector-aws-e2e.yaml's detect gating so the heavy live run only fires for
+# release-please PRs or a manual dispatch. Not a required status check.
+#
+# Two credential sources, kept separate on purpose:
+#   - The github connector under test is lit by a short-lived, metadata-read-only App
+#     installation token minted per run (owner cynative, the fixture repo only). The App
+#     private key reaches this reusable workflow ONLY through the declared workflow_call
+#     secret below - never secrets: inherit.
+#   - The LLM driving the loop is Bedrock, authenticated via keyless GitHub OIDC under a
+#     static `environment: aws-ci`. Credential wiring matches llm-smoke.yaml's bedrock
+#     job (output-env-credentials: false), so AWS_* never enters the env and the aws
+#     connector stays DARK; the run asserts aws did not register. Bedrock still gets its
+#     credentials inline via CYNATIVE_LLM_BEDROCK_*.
+#
+# Three entry points. The Release Pipeline calls it as a PRE-PUBLISH GATE (workflow_call
+# with gate: true), so a release cannot publish while the read-only boundary is broken;
+# maintainers can dispatch it manually; and it self-gates on PRs to release-please only.
+on:
+  workflow_call:
+    inputs:
+      gate:
+        description: Force the live run (the Release Pipeline sets this to gate publish).
+        type: boolean
+        default: false
+      ref:
+        description: >-
+          Commit to test. The Release Pipeline passes the SHA the release was tagged at,
+          which is not necessarily the SHA that triggered the pipeline. Empty means the
+          default checkout ref.
+        type: string
+        default: ''
+    secrets:
+      GH_E2E_APP_PRIVATE_KEY:
+        description: Private key of the dedicated metadata-read fixture App. Required.
+        required: true
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A stale synchronize event must not multiply live-run spend, so PR runs dedupe per PR
+# and cancel their predecessor.
+#
+# The gate path gets a group of its own, keyed on the run id. A called workflow's
+# concurrency group is evaluated in the CALLER's context, so without this a release's
+# gate would share a group with any standalone run on the same ref and could be queued
+# behind it or cancelled by it. A cancelled gate fails gate-assert below, blocking a
+# release for a reason unrelated to the release. Cancellation stays scoped to
+# pull_request runs for the same reason. The prefix is distinct per suite.
+concurrency:
+  group: connector-github-e2e-${{ inputs.gate && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !inputs.gate }}
+
+jobs:
+  detect:
+    name: Detect release-please PR
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - name: Detect release-please PR
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          GATE: ${{ inputs.gate }}
+        run: |
+          relevant=false
+          # The workflow_call path is the Release Pipeline's publish gate, and it MUST key
+          # on the input rather than the event. A called workflow inherits the CALLER's
+          # event (push), so an event check here would report "not relevant" and the live
+          # job would SKIP.
+          #
+          # That would not merely be an inert gate, it would be a fail-OPEN one: GitHub
+          # reports a conditionally skipped job as a SUCCESS to its caller, so publish's
+          # `result == 'success'` check would be satisfied and the release would ship with
+          # its read-only boundary never tested. The gate-assert job below is the backstop
+          # that turns that silence into a hard failure.
+          [ "${GATE}" = "true" ] && relevant=true
+          [ "${EVENT}" = "workflow_dispatch" ] && relevant=true
+          [ "${HEAD_REF}" = "release-please--branches--main" ] && relevant=true
+          case ",${LABELS}," in *",autorelease: pending,"*) relevant=true ;; esac
+          echo "relevant=${relevant}" >> "${GITHUB_OUTPUT}"
+          if [ "${relevant}" = "true" ]; then
+            echo "Release gate, release-please PR, or manual dispatch - running the live GitHub connector e2e."
+          else
+            echo "Not a release-please PR - skipping the live GitHub connector e2e."
+          fi
+
+  github-connector:
+    name: GitHub connector read + canaries
+    needs: detect
+    # Run only when relevant AND on a trusted path: this repository's own Release
+    # Pipeline gate (which only ever runs from an already-merged commit on main), a
+    # manual dispatch (no PR context), or a same-repo PR.
+    #
+    # The `github.repository` guard carries MORE weight here than in the OIDC-only
+    # siblings: this is a PUBLIC reusable workflow that takes a secret, so any public repo
+    # could otherwise call it with gate: true. The guard is what actually makes "a fork
+    # never reaches the App-key or credential steps" true rather than merely survivable.
+    #
+    # `inputs.gate` is undefined on every non-call event, and an undefined context
+    # property is an empty string, which is falsy.
+    if: >-
+      github.repository == 'cynative/cynative' &&
+      needs.detect.outputs.relevant == 'true' &&
+      (inputs.gate ||
+       github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    # Headroom for three phases, each retried once, at the per-phase timeout below, plus
+    # the build and the first-request OpenAPI table fetch. Well under the App token's 1h.
+    timeout-minutes: 35
+    # Static, so the OIDC subject stays repo:cynative/cynative:environment:aws-ci
+    # regardless of branch or event (Bedrock drives the LLM).
+    environment: aws-ci
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for the Bedrock role assumption
+    steps:
+      # On the release path the caller passes the SHA the release was TAGGED at, which is
+      # not necessarily the SHA that triggered the pipeline: release-please re-derives its
+      # work from repository state, so main can advance in between. Testing the triggering
+      # commit instead would gate the release on code that is not the code being released.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Report tested SHA
+        run: |
+          echo "Testing SHA $(git rev-parse HEAD)"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      # Fail loudly on a missing or renamed variable/secret: the downstream errors are
+      # otherwise opaque, and the suite must never go green by skipping.
+      - name: Preflight the required repo variables and secret
+        env:
+          REPO: ${{ vars.GH_E2E_REPO }}
+          EXPECT: ${{ vars.GH_E2E_EXPECT }}
+          CLIENT_ID: ${{ vars.GH_E2E_APP_CLIENT_ID }}
+          APP_KEY: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
+          ROLE: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+        run: |
+          missing=
+          [ -n "${REPO}" ]      || missing="${missing} GH_E2E_REPO"
+          [ -n "${EXPECT}" ]    || missing="${missing} GH_E2E_EXPECT"
+          [ -n "${CLIENT_ID}" ] || missing="${missing} GH_E2E_APP_CLIENT_ID"
+          [ -n "${APP_KEY}" ]   || missing="${missing} GH_E2E_APP_PRIVATE_KEY(secret)"
+          [ -n "${ROLE}" ]      || missing="${missing} CYNATIVE_CLI_CI_AWS_ROLE"
+          [ -n "${REGION}" ]    || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_REGION"
+          [ -n "${MODEL}" ]     || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_MODEL"
+          if [ -n "${missing}" ]; then
+            echo "FAIL: missing repo variables/secret:${missing}"
+            exit 1
+          fi
+      # Bedrock creds for the LLM only. output-env-credentials: false keeps AWS_* OUT of
+      # the env so the aws connector never registers (the suite asserts that); the three
+      # credential outputs feed Bedrock inline instead.
+      - name: Authenticate to AWS for Bedrock (GitHub OIDC)
+        id: aws
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
+        with:
+          role-to-assume: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          aws-region: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          role-session-name: cynative-github-connector-e2e
+          output-env-credentials: false
+          output-credentials: true
+      # Short-lived installation token scoped to metadata:read on the fixture repo only.
+      # NOTE: v3.2.0 takes a Client ID via `client-id`, not `app-id`.
+      - name: Mint the read-only fixture App token
+        id: apptoken
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.GH_E2E_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
+          owner: cynative
+          repositories: connector-e2e-fixture
+          permission-metadata: read
+      - name: Run the GitHub connector e2e
+        env:
+          CYNATIVE_LLM_PROVIDER: bedrock
+          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+          CYNATIVE_LLM_BEDROCK_REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          CYNATIVE_LLM_BEDROCK_ACCESS_KEY: ${{ steps.aws.outputs.aws-access-key-id }}
+          CYNATIVE_LLM_BEDROCK_SECRET_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          CYNATIVE_LLM_BEDROCK_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          GH_E2E_REPO: ${{ vars.GH_E2E_REPO }}
+          GH_E2E_EXPECT: ${{ vars.GH_E2E_EXPECT }}
+          GH_E2E_TOKEN: ${{ steps.apptoken.outputs.token }}
+          # CI keeps the aws connector dark; assert it did not register.
+          GH_E2E_EXPECT_NO_AWS: "1"
+          # A tool-driven run needs more than the no-tool defaults, and the first
+          # authorization cold-fetches the ~12.8MB GitHub OpenAPI table.
+          GH_E2E_TIMEOUT: "240"
+          GH_E2E_MAX_TOKENS: "100000"
+          # Missing or renamed vars must fail the job, never silently skip.
+          GH_E2E_REQUIRE_RUN: "1"
+        run: make connector-github-e2e
+
+  # ---- The gate's fail-closed assertion --------------------------------------
+  # A conditionally SKIPPED job reports success to its caller. So if the live job above
+  # ever silently stops running on the gate path (a renamed input, a detect condition
+  # that stops matching, a typo in the `if:`), this workflow would still conclude
+  # "success" and the Release Pipeline would publish a release whose read-only boundary
+  # was never tested. That is the one failure mode a safety gate must not have.
+  #
+  # This job exists purely to turn that silence into a hard failure. It runs only on the
+  # gate path, and it demands the live job actually SUCCEEDED - not merely "did not fail".
+  gate-assert:
+    name: Assert the gate actually ran
+    needs: [detect, github-connector]
+    if: ${{ always() && inputs.gate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: The live connector job must have succeeded
+        env:
+          RESULT: ${{ needs.github-connector.result }}
+          RELEVANT: ${{ needs.detect.outputs.relevant }}
+        run: |
+          if [ "${RESULT}" != "success" ]; then
+            echo "::error::The release gate was requested (gate: true) but the live GitHub connector job did not succeed (result=${RESULT}, detect.relevant=${RELEVANT}). A skipped job reports success to the caller, so this assertion is what keeps the release gate fail-closed."
+            exit 1
+          fi
+          echo "OK: the live GitHub connector job ran and succeeded, so the gate is real."
