@@ -4,9 +4,9 @@
 # effects at source time, so an offline caller (e.g. the connector script's
 # --selftest) can source it safely.
 #
-# It keeps the two live suites - test/llm.smoke.test.sh and
-# test/connector.gcp.e2e.test.sh - on one bounded configuration so a broken live
-# run cannot quietly burn credits, hang a runner, or leave a maintainer guessing.
+# It keeps the live suites - the LLM smoke and the gcp/aws/github connector e2es -
+# on one bounded configuration so a broken live run cannot quietly burn credits,
+# hang a runner, or leave a maintainer guessing.
 #
 # The library reads no suite-specific env. Callers resolve their own public knobs
 # (SMOKE_* / GCP_E2E_*) into the generic E2E_* override vars before calling

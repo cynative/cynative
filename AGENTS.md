@@ -19,7 +19,7 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   `test/archive.smoke.test.ps1` + Pester unit tests +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
-  live-e2e guardrails unit tests, and both connector suites' offline audit-parser selftests).
+  live-e2e guardrails unit tests, and all three connector suites' offline audit-parser selftests).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
   otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
@@ -66,7 +66,15 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   asserting a read of an inert fixture IAM role's tag (the value arrives out of band and never
   appears in the prompt, and the audit parser binds it to the bytes AWS returned) plus a
   `TagRole` write canary denied before the request leaves the machine, and skipping cleanly when
-  `AWS_E2E_*`/creds are unset (the script header documents its env and knobs). Both connector
+  `AWS_E2E_*`/creds are unset (the script header documents its env and knobs). `make
+  connector-github-e2e`: standalone live GitHub connector e2e (not part of `make check`); runs the
+  real `cynative -p` against a private fixture repo through the `github` connector
+  (`test/connector.github.e2e.test.sh`, needs `python3`), asserting a read of the fixture repo's
+  description (the marker arrives out of band and never appears in the prompt, and the audit parser
+  binds it to the bytes GitHub returned, requiring a private 200 so the read also proves credential
+  injection) plus a `PATCH` write canary and a secret-scanning-read canary, each denied before the
+  request leaves the machine, and skipping cleanly when `GH_E2E_*`/creds are unset (the script
+  header documents its env and knobs). All three connector
   parsers carry an offline `--selftest` that `make sh-test` gates: the parser is what stops a
   suite going green while the read-only boundary is broken, so its exit code is the phase status
   (1 = retryable miss, 4 = boundary failure, never retried, since the per-attempt audit
@@ -685,11 +693,13 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `test/archive.smoke.test.ps1` (Windows PowerShell 5.1) against each Linux tar and Windows zip
   on its native arch (sha256 vs manifest, checksums.txt row cross-check, exact-member tar
   extraction on Linux, `Expand-Archive` with a root-layout check on Windows, executable bit on
-  Linux, PE machine arch on Windows, exact `--version`); the `connector-gcp-e2e` and
-  `connector-aws-e2e` jobs call the two live connector suites as reusable workflows
-  (`workflow_call` with `gate: true` and `ref: <release SHA>`) against the real GCP and AWS
-  fixture accounts, so a release whose connector cannot authenticate, cannot read, or **fails to
-  deny a write** cannot publish. They exercise the source at the **release** SHA, not the
+  Linux, PE machine arch on Windows, exact `--version`); the `connector-gcp-e2e`,
+  `connector-aws-e2e`, and `connector-github-e2e` jobs call the three live connector suites as
+  reusable workflows
+  (`workflow_call` with `gate: true` and `ref: <release SHA>`) against the real GCP, AWS, and
+  GitHub fixture accounts, so a release whose connector cannot authenticate, cannot read, or
+  **fails to deny a write** cannot publish. The github one additionally receives the fixture App's
+  private key through a declared `workflow_call` secret (never `secrets: inherit`). They exercise the source at the **release** SHA, not the
   triggering SHA (release-please re-derives its work from repository state, so the two can
   diverge, and a gate that tested the wrong commit would be worthless) and not the built
   artifacts, so they need no `release-artifacts` hand-off and run in parallel with the install
@@ -702,7 +712,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   nothing. Hence (1) `gate: true`, which is what makes the live job run on the call path, and
   (2) a `gate-assert` job at the end of each connector workflow that hard-fails unless the live
   job actually **succeeded**. Do not assume a skipped inner job blocks anything; it does the
-  opposite. Both connector workflows also carry an explicit `github.repository` guard on the live
+  opposite. All three connector workflows also carry an explicit `github.repository` guard on the live
   job: they are **public** reusable workflows, so any public repo may call them with `gate: true`
   and `id-token: write` (cloud trust would still refuse to mint credentials, but the guard is what
   makes "a fork never reaches the credential step" true rather than merely survivable). The
