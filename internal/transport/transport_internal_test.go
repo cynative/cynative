@@ -884,7 +884,8 @@ type hostOnlyProvider struct {
 	caCert string
 }
 
-func (p *hostOnlyProvider) Name() string                                        { return "host-only" }
+func (p *hostOnlyProvider) Name() string { return "host-only" }
+
 func (p *hostOnlyProvider) Description() string                                 { return "authorizes host only" }
 func (p *hostOnlyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
 
@@ -903,7 +904,8 @@ type addrAllowProvider struct {
 	caCert string
 }
 
-func (p *addrAllowProvider) Name() string                                        { return "addr-allow" }
+func (p *addrAllowProvider) Name() string { return "addr-allow" }
+
 func (p *addrAllowProvider) Description() string                                 { return "allows hosts and addrs" }
 func (p *addrAllowProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
 
@@ -1387,7 +1389,8 @@ func TestTLSTransport_ServerName_Unset(t *testing.T) {
 // configureTransport snErr branch.
 type errServerNameProvider struct{}
 
-func (p *errServerNameProvider) Name() string                                    { return "kubernetes" }
+func (p *errServerNameProvider) Name() string { return "kubernetes" }
+
 func (p *errServerNameProvider) Description() string                             { return "err sni" }
 func (p *errServerNameProvider) InjectAuth(*http.Request, json.RawMessage) error { return nil }
 

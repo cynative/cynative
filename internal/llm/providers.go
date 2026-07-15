@@ -92,6 +92,7 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.OpencodeGo:    "OPENCODE_API_KEY",
 	schemas.OpencodeZen:   "OPENCODE_API_KEY",
 	schemas.DeepSeek:      "DEEPSEEK_API_KEY",
+	schemas.Sarvam:        "SARVAM_API_KEY",
 	schemas.Bedrock:       "",
 	schemas.BedrockMantle: "",
 	schemas.Ollama:        "",

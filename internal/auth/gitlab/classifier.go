@@ -9,19 +9,22 @@ import (
 	"github.com/cynative/cynative/internal/auth/exposure"
 )
 
+// apiSegment is the first path segment of GitLab's REST API root ("/api/v4/...").
+const apiSegment = "api"
+
 // graphQLSegments are the trailing path segments of GitLab's GraphQL endpoint.
 // Requests to this endpoint are detected for denial — GraphQL is not supported.
 // Matched by trailing segments so a subpath-mounted instance (e.g.
 // /gitlab/api/graphql) is also caught.
 //
 //nolint:gochecknoglobals // stateless endpoint-segment list.
-var graphQLSegments = []string{"api", "graphql"}
+var graphQLSegments = []string{apiSegment, "graphql"}
 
 // markdownSegments are the trailing path segments of the documented POST endpoint
 // that renders content without mutating any resource; it classifies as Read.
 //
 //nolint:gochecknoglobals // stateless endpoint-segment list.
-var markdownSegments = []string{"api", "v4", "markdown"}
+var markdownSegments = []string{apiSegment, "v4", "markdown"}
 
 // IsGraphQLEndpoint reports whether path targets GitLab's GraphQL endpoint
 // (/api/graphql), tolerant of a trailing slash and evasion-resistant via the same

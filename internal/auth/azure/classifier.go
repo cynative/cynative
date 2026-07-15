@@ -16,6 +16,16 @@ type Action struct {
 	Full         string
 }
 
+// ARM path tokens and RBAC verbs that recur across the classification tables
+// below. verbRead is the resolved read verb; the seg* values are lowercase
+// provider-less ARM path segments (matched case-insensitively).
+const (
+	verbRead          = "read"
+	segSubscriptions  = "subscriptions"
+	segResourceGroups = "resourcegroups"
+	segProviders      = "providers"
+)
+
 // postReadAllowList is the explicit, catalog-verified set of genuine query-style
 // POST reads. A POST never otherwise synthesizes a /read. Keyed by the full
 // "{namespace}/{resourceTypePath}/{verbToken}" (case-insensitive); the value is
@@ -24,13 +34,13 @@ type Action struct {
 //
 //nolint:gochecknoglobals // stateless lookup table, the documented exception.
 var postReadAllowList = map[string]string{
-	"microsoft.resourcegraph/resources/resources":                         "read",
-	"microsoft.resourcegraph/resourcechanges/resourcechanges":             "read",
-	"microsoft.resourcegraph/resourcechangedetails/resourcechangedetails": "read",
-	"microsoft.resourcegraph/resourceshistory/resourceshistory":           "read",
-	"microsoft.operationalinsights/workspaces/query":                      "read",
-	"microsoft.network/networkwatchers/topology":                          "read",
-	"microsoft.network/networkwatchers/nexthop":                           "read",
+	"microsoft.resourcegraph/resources/resources":                         verbRead,
+	"microsoft.resourcegraph/resourcechanges/resourcechanges":             verbRead,
+	"microsoft.resourcegraph/resourcechangedetails/resourcechangedetails": verbRead,
+	"microsoft.resourcegraph/resourceshistory/resourceshistory":           verbRead,
+	"microsoft.operationalinsights/workspaces/query":                      verbRead,
+	"microsoft.network/networkwatchers/topology":                          verbRead,
+	"microsoft.network/networkwatchers/nexthop":                           verbRead,
 }
 
 // pollSegments are the GET async-poll shapes that degrade to a scope-level read.
@@ -81,7 +91,7 @@ func DeriveAction(ctx context.Context, req *http.Request, cat Catalog) (Action, 
 func resolveNamespace(segs []string) (string, []string, bool) {
 	last := -1
 	for i, s := range segs {
-		if strings.EqualFold(s, "providers") {
+		if strings.EqualFold(s, segProviders) {
 			last = i
 		}
 	}
@@ -107,17 +117,17 @@ type providerLessRoute struct {
 //
 //nolint:gochecknoglobals // stateless provider-less ARM route table, the documented exception.
 var providerLessRoutes = []providerLessRoute{
-	{[]string{"subscriptions"}, "subscriptions"},
-	{[]string{"subscriptions", "{}"}, "subscriptions"},
-	{[]string{"subscriptions", "{}", "resourcegroups"}, "subscriptions/resourceGroups"},
-	{[]string{"subscriptions", "{}", "resourcegroups", "{}"}, "subscriptions/resourceGroups"},
-	{[]string{"subscriptions", "{}", "locations"}, "subscriptions/locations"},
-	{[]string{"subscriptions", "{}", "providers"}, "subscriptions/providers"},
-	{[]string{"subscriptions", "{}", "tagnames"}, "subscriptions/tagNames"},
-	{[]string{"subscriptions", "{}", "resources"}, "subscriptions/resources"},
-	{[]string{"subscriptions", "{}", "resourcegroups", "{}", "resources"}, "subscriptions/resourceGroups/resources"},
+	{[]string{segSubscriptions}, "subscriptions"},
+	{[]string{segSubscriptions, "{}"}, "subscriptions"},
+	{[]string{segSubscriptions, "{}", segResourceGroups}, "subscriptions/resourceGroups"},
+	{[]string{segSubscriptions, "{}", segResourceGroups, "{}"}, "subscriptions/resourceGroups"},
+	{[]string{segSubscriptions, "{}", "locations"}, "subscriptions/locations"},
+	{[]string{segSubscriptions, "{}", segProviders}, "subscriptions/providers"},
+	{[]string{segSubscriptions, "{}", "tagnames"}, "subscriptions/tagNames"},
+	{[]string{segSubscriptions, "{}", "resources"}, "subscriptions/resources"},
+	{[]string{segSubscriptions, "{}", segResourceGroups, "{}", "resources"}, "subscriptions/resourceGroups/resources"},
 	{[]string{"tenants"}, "tenants"},
-	{[]string{"providers"}, "providers"},
+	{[]string{segProviders}, "providers"},
 }
 
 // providerLessAction matches the request path against the exact provider-less GET
@@ -131,7 +141,7 @@ func providerLessAction(method string, segs []string) (Action, error) {
 	}
 	for _, r := range providerLessRoutes {
 		if matchTemplate(r.template, segs) {
-			return mk("Microsoft.Resources", r.resource, "read"), nil
+			return mk("Microsoft.Resources", r.resource, verbRead), nil
 		}
 	}
 	return Action{}, fmt.Errorf("%w: no provider-less route matches %v", ErrActionUnresolved, segs)
@@ -168,7 +178,7 @@ func pollAction(method, namespace string, rest []string) (Action, bool) {
 	}
 	for i := 0; i < len(rest); i += typeNameStride {
 		if pollSegments[strings.ToLower(rest[i])] && isPollShape(i, len(rest)) {
-			return mk(namespace, strings.ToLower(rest[i]), "read"), true
+			return mk(namespace, strings.ToLower(rest[i]), verbRead), true
 		}
 	}
 	return Action{}, false
@@ -253,7 +263,7 @@ func verbAction(
 ) (Action, error) {
 	switch method {
 	case http.MethodGet:
-		return mk(namespace, typePath, "read"), nil
+		return mk(namespace, typePath, verbRead), nil
 	case http.MethodPut, http.MethodPatch:
 		return mk(namespace, typePath, "write"), nil
 	case http.MethodDelete:

@@ -17,6 +17,7 @@ type validatingCatalog struct {
 func (v validatingCatalog) ResolveCloud(_ context.Context, p ParsedHost) (ParsedHost, error) {
 	return p, nil
 }
+
 func (v validatingCatalog) ResourceTypes(context.Context, string) ([]string, error) { return nil, nil }
 
 func (v validatingCatalog) LookupOperation(

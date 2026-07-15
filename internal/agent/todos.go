@@ -29,6 +29,8 @@ var (
 // exists only to satisfy schema.InvokableTool.
 const orchestrationOutsideLoop = "This orchestration tool runs only inside the agent loop."
 
+const writeTodosToolName = "write_todos"
+
 const writeTodosDesc = "Record or update your investigation plan as a todo list for genuinely " +
 	"multi-step investigations; skip it when a single objective can be answered with one or two scripts. " +
 	"Pass the FULL list each time (it replaces the previous list) and update it only when the plan " +
@@ -39,7 +41,7 @@ func newWriteTodosTool(a *Agent) *writeTodosTool {
 	return &writeTodosTool{
 		agent: a,
 		info: &schema.ToolInfo{
-			Name:   "write_todos",
+			Name:   writeTodosToolName,
 			Desc:   writeTodosDesc,
 			Params: schema.ReflectParams[writeTodosArgs](),
 		},

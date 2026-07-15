@@ -240,7 +240,7 @@ func decodeSegs(escapedPath string) []string {
 // cannot register anyway (the eager /api/v4/user probe runs at the host root), so
 // a root-only anchor closes that de-facto non-API carve-out.
 func anchorIndex(segs []string) int {
-	if len(segs) >= 2 && segs[0] == "api" && segs[1] == "v4" {
+	if len(segs) >= 2 && segs[0] == apiSegment && segs[1] == "v4" {
 		return 0
 	}
 	return -1

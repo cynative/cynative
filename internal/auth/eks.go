@@ -288,7 +288,8 @@ func defaultEKSPresign(ctx context.Context, cfg aws.Config, clusterName string) 
 		ctx, &sts.GetCallerIdentityInput{},
 		func(po *sts.PresignOptions) {
 			po.ClientOptions = append(po.ClientOptions, func(o *sts.Options) {
-				o.APIOptions = append(o.APIOptions,
+				o.APIOptions = append(
+					o.APIOptions,
 					smithyhttp.SetHeaderValue("x-k8s-aws-id", clusterName),
 					setQueryValue("X-Amz-Expires", strconv.Itoa(eksTokenExpiry)),
 				)

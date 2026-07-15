@@ -113,7 +113,8 @@ func TestGithubAuthorizeAction_DeniesGraphQL(t *testing.T) {
 			t.Parallel()
 			p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 			req, _ := http.NewRequestWithContext(
-				context.Background(), method, "https://api.github.com/graphql", nil)
+				context.Background(), method, "https://api.github.com/graphql", nil,
+			)
 			err := p.AuthorizeAction(context.Background(), req, nil)
 			if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
 				t.Fatalf("AuthorizeAction(%s /graphql) err = %v, want ErrGraphQLUnsupported", method, err)
@@ -129,7 +130,8 @@ func TestGithubAuthorizeAction_GraphQLHostOverrideNotBypassed(t *testing.T) {
 	t.Parallel()
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "https://api.github.com/graphql", nil)
+		context.Background(), http.MethodGet, "https://api.github.com/graphql", nil,
+	)
 	req.Host = "codeload.github.com"
 	err := p.AuthorizeAction(context.Background(), req, nil)
 	if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
@@ -146,7 +148,8 @@ func TestGithubAuthorizeAction_EncodedGraphQLFailsClosed(t *testing.T) {
 	t.Parallel()
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodPost, "https://api.github.com/%67raphql", nil)
+		context.Background(), http.MethodPost, "https://api.github.com/%67raphql", nil,
+	)
 	err := p.AuthorizeAction(context.Background(), req, nil)
 	if !errors.Is(err, githubhardening.ErrUnclassifiable) {
 		t.Fatalf("AuthorizeAction(POST /%%67raphql) err = %v, want ErrUnclassifiable (fail-closed)", err)

@@ -626,7 +626,8 @@ func (mixedSplitModel) Generate(
 ) (*schema.Message, error) {
 	if strings.Contains(msgs[len(msgs)-1].Text(), lensSufficiency) {
 		return schema.AssistantMessage(
-			`{"f1":{"verdict":"insufficient_evidence","justification":"merely suggests"}}`, nil), nil
+			`{"f1":{"verdict":"insufficient_evidence","justification":"merely suggests"}}`, nil,
+		), nil
 	}
 
 	return schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"holds up"}}`, nil), nil

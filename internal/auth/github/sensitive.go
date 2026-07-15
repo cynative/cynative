@@ -28,7 +28,7 @@ type sensitivePattern struct {
 // category), the secret-scanning:none baseline in the default Exposure, and
 // fail-closed-on-unknown (ErrUnclassifiable for routes not in the table).
 var sensitivePatterns = []sensitivePattern{ //nolint:gochecknoglobals // immutable security constant.
-	{segment: "secret-scanning", route: Route{Category: "secret-scanning", Subcategory: "secret-scanning"}},
+	{segment: secretScanningKey, route: Route{Category: secretScanningKey, Subcategory: secretScanningKey}},
 }
 
 // hasSegment reports whether any path segment equals seg (so "secret-scanning"

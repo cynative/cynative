@@ -153,7 +153,8 @@ func glabLoginHost(configHost, apiHost string) string {
 // errGitLabInstanceMismatch means glab returned a token for a different instance than
 // the requested login host.
 var errGitLabInstanceMismatch = errors.New(
-	"gitlab: credential-helper returned a token for a different instance")
+	"gitlab: credential-helper returned a token for a different instance",
+)
 
 // validateInstanceURL fails closed unless instanceURL's host matches the login host or,
 // for a split login/API-host setup, the configured api_host (both case- and
@@ -212,7 +213,8 @@ const (
 // errGitLabHelperUnavailable is the terminal "no usable glab token right now" error;
 // its message steers the operator to re-auth or set a PAT.
 var errGitLabHelperUnavailable = errors.New(
-	"gitlab: glab credential unavailable - run `glab auth login`, or set GITLAB_TOKEN to a PAT for unattended use")
+	"gitlab: glab credential unavailable - run `glab auth login`, or set GITLAB_TOKEN to a PAT for unattended use",
+)
 
 // glabHelperSource is the caching oauth2.TokenSource backing a glab credential. It
 // returns the cached token while valid, re-fetches via the injected helper near expiry,
@@ -331,14 +333,17 @@ func seedToken(cred glabCredential) *oauth2.Token {
 // Discovery-time steer sentinels. All are LOUD-skip reasons gated on config presence.
 var (
 	errGlabMissingWithConfig = errors.New(
-		"gitlab: glab not installed but a glab config exists - install glab or set GITLAB_TOKEN")
+		"gitlab: glab not installed but a glab config exists - install glab or set GITLAB_TOKEN",
+	)
 	errGlabTooOld = errors.New(
 		"gitlab: installed glab is too old for the credential-helper (need v1.85.2+) - upgrade glab or set GITLAB_TOKEN",
 	)
 	errGlabSessionUnusable = errors.New(
-		"gitlab: glab session is not usable - run `glab auth login` or set GITLAB_TOKEN")
+		"gitlab: glab session is not usable - run `glab auth login` or set GITLAB_TOKEN",
+	)
 	errGlabExecFailed = errors.New(
-		"gitlab: glab credential-helper failed - set GITLAB_TOKEN for unattended use")
+		"gitlab: glab credential-helper failed - set GITLAB_TOKEN for unattended use",
+	)
 )
 
 // decideGlab classifies a discovery-time helper attempt into a usable credential, a

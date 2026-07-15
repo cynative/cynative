@@ -45,9 +45,9 @@ const (
 func CanonicalGlobalRegion(p ParsedHost) string {
 	switch p.Partition { //nolint:exhaustive // default covers PartitionStandard and any zero value.
 	case PartitionChina:
-		return "cn-north-1"
+		return chinaGlobalRegion
 	case PartitionGovCloud:
-		return "us-gov-west-1"
+		return govCloudGlobalRegion
 	default:
 		return s3GlobalRegion
 	}
@@ -64,6 +64,16 @@ const (
 	partsStandardRegional = 2
 	// s3GlobalRegion is the canonical SigV4 region for global S3 endpoints.
 	s3GlobalRegion = "us-east-1"
+	// chinaGlobalRegion is the canonical global-service signing region in the China partition.
+	chinaGlobalRegion = "cn-north-1"
+	// govCloudGlobalRegion is the canonical global-service signing region in the GovCloud partition.
+	govCloudGlobalRegion = "us-gov-west-1"
+	// s3GlobalHost is the path-style global S3 endpoint host.
+	s3GlobalHost = "s3.amazonaws.com"
+	// s3ControlPrefix is the canonical S3 Control endpoint prefix.
+	s3ControlPrefix = "s3-control"
+	// localhostName is the literal localhost hostname, rejected by ParseHost.
+	localhostName = "localhost"
 )
 
 // ParseHost classifies host. It rejects IP literals and non-ASCII / IDN hosts up
@@ -82,14 +92,15 @@ func ParseHost(host string) (ParsedHost, error) {
 		return ParsedHost{}, fmt.Errorf("%w: %w", ErrHostPattern, err)
 	}
 	host = norm
-	if host == "localhost" {
+	if host == localhostName {
 		return ParsedHost{}, fmt.Errorf("%w: %q (localhost)", ErrHostPattern, host)
 	}
 
 	if isVPCEndpoint(host) {
 		return ParsedHost{}, fmt.Errorf(
 			"%w: %q (VPC endpoint — host alone does not identify target service)",
-			ErrHostPattern, host)
+			ErrHostPattern, host,
+		)
 	}
 
 	// Account-scoped S3 Control must be matched before the partition branches so
@@ -197,7 +208,7 @@ func tryS3Patterns(host string) (ParsedHost, bool) {
 	}
 
 	// Path-style global: s3.amazonaws.com → us-east-1 path-style.
-	if host == "s3.amazonaws.com" {
+	if host == s3GlobalHost {
 		return ParsedHost{Service: "s3", Region: s3GlobalRegion}, true
 	}
 
@@ -385,8 +396,8 @@ func matchAccountScopedS3(host, infix string, leadingOK func(string) bool) (stri
 // a valid AWS account id, so non-account "s3-control.{region}…" hosts decline
 // here and parse via the generic rule.
 func tryS3Control(host string) (ParsedHost, bool) {
-	if region, ok := matchAccountScopedS3(host, "s3-control", isAWSAccountID); ok {
-		return ParsedHost{Service: "s3-control", Region: region}, true
+	if region, ok := matchAccountScopedS3(host, s3ControlPrefix, isAWSAccountID); ok {
+		return ParsedHost{Service: s3ControlPrefix, Region: region}, true
 	}
 	return ParsedHost{}, false
 }
@@ -469,7 +480,7 @@ func Verify(p ParsedHost, claimedService, claimedRegion string) error {
 	if p.Region == "" {
 		// Global service — accept canonical region claims only.
 		switch strings.ToLower(claimedRegion) {
-		case "", "aws-global", "us-east-1", "us-gov-west-1", "cn-north-1":
+		case "", "aws-global", s3GlobalRegion, govCloudGlobalRegion, chinaGlobalRegion:
 			return nil
 		default:
 			return fmt.Errorf("%w: global service %q got non-canonical region claim %q",

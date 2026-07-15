@@ -271,7 +271,8 @@ func (p *gitlabProvider) CACertData(_ context.Context, _ json.RawMessage) (strin
 // errGitLabSudoBlocked is returned when a request carries a model-supplied GitLab
 // sudo impersonation control. The model must never act as another user.
 var errGitLabSudoBlocked = errors.New(
-	"gitlab_hardening: model-supplied sudo impersonation is not permitted")
+	"gitlab_hardening: model-supplied sudo impersonation is not permitted",
+)
 
 // rejectGitLabSmuggledControls fails closed when the request carries a
 // model-supplied GitLab control the connector must own and the central denylist

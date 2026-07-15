@@ -56,12 +56,14 @@ func clusterRoleFetchStatusError(clusterRole string, status int) error {
 			"%w: reading clusterrole %q returned k8s API 401 Unauthorized; the identity is not "+
 				"authenticated to this cluster (for EKS, it is likely not mapped in the cluster's "+
 				"access entries / aws-auth)",
-			ErrClusterAccessDenied, clusterRole)
+			ErrClusterAccessDenied, clusterRole,
+		)
 	case http.StatusForbidden:
 		return fmt.Errorf(
 			"%w: reading clusterrole %q returned k8s API 403 Forbidden; the identity is "+
 				"authenticated but not authorized to read it",
-			ErrClusterAccessDenied, clusterRole)
+			ErrClusterAccessDenied, clusterRole,
+		)
 	default:
 		return &clusterRoleStatusError{clusterRole: clusterRole, code: status}
 	}

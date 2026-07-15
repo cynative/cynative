@@ -23,7 +23,6 @@ func resolveInteraction() (io.Reader, io.Writer, bool, *editorTarget) {
 		return strings.NewReader(""), os.Stderr, false, nil
 	}
 
-	//nolint:gosec // Fd() returns a uintptr that is always a valid small int.
 	fd := int(tty.Fd())
 	if !term.IsTerminal(fd) || !foreground(fd) {
 		_ = tty.Close()

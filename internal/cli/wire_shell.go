@@ -87,7 +87,6 @@ func buildController(editor *editorTarget, state *interrupt.State) *ui.TerminalC
 // config loader), the auth providers, stdio, and the glamour-backed UI — so it
 // lives in the shell, excluded from the coverage gate.
 func newDeps() *deps {
-	//nolint:gosec // Fd() returns a uintptr that is always a valid small int.
 	stdinIsTTY := term.IsTerminal(int(os.Stdin.Fd()))
 	inR, promptW, hasTerminal, editor := resolveInteraction()
 

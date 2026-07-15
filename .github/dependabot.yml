@@ -24,6 +24,14 @@ updates:
       # (via glamour and via goreleaser -> fang). Revisit if charmbracelet tags
       # the x/exp submodules.
       - dependency-name: "github.com/charmbracelet/x/exp/*"
+      # go-header v1 is a breaking API rewrite that golangci-lint (which pins
+      # the v0.5.x API) cannot compile against, so forcing the major bump on
+      # this indirect module breaks `go tool golangci-lint`. Minor/patch
+      # updates stay allowed, and once golangci-lint itself requires v1 the
+      # module graph will follow without Dependabot's help. Drop this entry
+      # when that happens.
+      - dependency-name: "github.com/denis-tingaikin/go-header"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     patterns: ["*"]

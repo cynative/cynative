@@ -58,7 +58,8 @@ func validateGCPRole(role string) error {
 	if _, err := gcphardening.ParseRoleReference(role); err != nil {
 		return fmt.Errorf(
 			"connectors.gcp.role must be a predefined role (roles/<id>) or a custom role "+
-				"(projects/<p>/roles/<r> or organizations/<o>/roles/<r>), got %q", role)
+				"(projects/<p>/roles/<r> or organizations/<o>/roles/<r>), got %q", role,
+		)
 	}
 	return nil
 }
@@ -641,7 +642,8 @@ func (l *Loader) Load(cfgFile string) (Config, error) {
 	}
 
 	var cfg Config
-	if err := v.Unmarshal(&cfg,
+	if err := v.Unmarshal(
+		&cfg,
 		viper.DecodeHook(mapstructure.ComposeDecodeHookFunc(
 			llm.RejectNonStringDurationHookFunc(),
 			mapstructure.StringToTimeDurationHookFunc(),

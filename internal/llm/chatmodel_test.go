@@ -491,7 +491,8 @@ func TestBifrostChatModel_ReasoningEffortOnly(t *testing.T) {
 
 	var reqs []*bschemas.BifrostChatRequest
 	m, err := llm.NewBifrostChatModel(
-		context.Background(), reasoningAccount("high", 0), llm.WithBackend(captureBackend(&reqs)))
+		context.Background(), reasoningAccount("high", 0), llm.WithBackend(captureBackend(&reqs)),
+	)
 	if err != nil {
 		t.Fatalf("NewBifrostChatModel: %v", err)
 	}
@@ -515,7 +516,8 @@ func TestBifrostChatModel_ReasoningMaxTokensOnly(t *testing.T) {
 
 	var reqs []*bschemas.BifrostChatRequest
 	m, err := llm.NewBifrostChatModel(
-		context.Background(), reasoningAccount("", 2048), llm.WithBackend(captureBackend(&reqs)))
+		context.Background(), reasoningAccount("", 2048), llm.WithBackend(captureBackend(&reqs)),
+	)
 	if err != nil {
 		t.Fatalf("NewBifrostChatModel: %v", err)
 	}
@@ -540,7 +542,8 @@ func TestBifrostChatModel_ReasoningTools_FreshPerCall(t *testing.T) {
 
 	var reqs []*bschemas.BifrostChatRequest
 	m, err := llm.NewBifrostChatModel(
-		context.Background(), reasoningAccount("low", 1024), llm.WithBackend(captureBackend(&reqs)))
+		context.Background(), reasoningAccount("low", 1024), llm.WithBackend(captureBackend(&reqs)),
+	)
 	if err != nil {
 		t.Fatalf("NewBifrostChatModel: %v", err)
 	}

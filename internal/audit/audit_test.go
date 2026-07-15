@@ -26,7 +26,8 @@ func TestLogger_Log_StampsRedactsAndSequences(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
-	l := audit.New(&buf,
+	l := audit.New(
+		&buf,
 		audit.WithClock(fixedClock()),
 		audit.WithRedactor(fixedRedactor{}),
 		audit.WithActor("anthropic/claude-opus-4-8"),
