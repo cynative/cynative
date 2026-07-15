@@ -76,9 +76,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   request leaves the machine, and skipping cleanly when `GH_E2E_*`/creds are unset (the script
   header documents its env and knobs). All three connector
   parsers carry an offline `--selftest` that `make sh-test` gates: the parser is what stops a
-  suite going green while the read-only boundary is broken, so its exit code is the phase status
-  (1 = retryable miss, 4 = boundary failure, never retried, since the per-attempt audit
-  truncation would erase the evidence). `make homebrew-smoke`: standalone post-release
+  suite going green while the read-only boundary is broken. The aws and github parsers make the
+  parser's exit code the phase status (1 = retryable miss, 4 = boundary failure, never retried,
+  since the per-attempt audit truncation would erase the evidence); the gcp parser predates that
+  exit-4 contract and is being brought up to it. `make homebrew-smoke`: standalone post-release
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
   documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
   release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone

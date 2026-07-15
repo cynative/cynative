@@ -2,8 +2,9 @@ name: Live GitHub connector e2e
 
 # Runs the real `cynative -p` against a private fixture GitHub repository through the
 # github connector (cynative#53): a read of the fixture repo's description (the fact
-# arrives out of band, never in the prompt) plus two write-deny canaries (a PATCH and a
-# secret-scanning GET), proving read-only enforcement end to end. Mirrors
+# arrives out of band, never in the prompt) plus two deny canaries (a PATCH write and a
+# secret-scanning read, each denied client-side), proving read-only enforcement end to
+# end by verb and by sensitive category. Mirrors
 # connector-aws-e2e.yaml's detect gating so the heavy live run only fires for
 # release-please PRs or a manual dispatch. Not a required status check.
 #
