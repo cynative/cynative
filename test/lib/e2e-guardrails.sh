@@ -241,6 +241,65 @@ e2e_run_with_retries() {
 	done
 }
 
+# e2e_assert_no_available_connectors ERR - the startup connector inventory must
+# show no AVAILABLE connector. Available renders as a "✓" (ok) or "⚠" (warn)
+# line inside the "Connectors" section; an unavailable "✗ ... skipped"
+# diagnostic is not a registration, so it passes - e2e_isolate_env's
+# explicit-but-empty KUBECONFIG makes the kubernetes connector emit exactly
+# that on a host with no other credentials.
+#
+# Every inventory record is one line that starts with two spaces (a glyph line,
+# the "  ──" rule, or "  (no connectors detected)"), rendered by internal/ui
+# formatConnector and internal/cli/research.go. The scan begins at the
+# "  Connectors" header and ends at the "  LLM" header (whose section reuses the
+# same glyphs) or at EOF (a successful `-p` run prints no LLM section). Lines
+# without the two-space indent are NOT records - the AWS SDK's logs and the run
+# footer interleave with the inventory on real stderr, and a multi-line skip
+# reason's continuation lines wrap unindented - so they are ignored rather than
+# treated as drift. A blank line is one such non-record line and does not end
+# the scan (the footer and the multi-line reasons both sit before the blank that
+# precedes the LLM section).
+#
+# Fail-closed: a two-space-indented line that matches no known record shape is
+# drift and fails; and the section must contain the rule plus at least one record
+# line, so a missing header, a truncated inventory, or a reshape that empties the
+# scan window fails loudly instead of quietly passing.
+e2e_assert_no_available_connectors() {
+	_rc=0
+	_hdr=0
+	_in=0
+	_rule=0
+	_records=0
+	while IFS= read -r _line || [ -n "$_line" ]; do
+		case $_line in
+			'  Connectors') _hdr=1; _in=1; continue ;;
+			'  LLM') _in=0; continue ;; # next section (same glyphs): stop scanning.
+		esac
+		[ "$_in" -eq 1 ] || continue
+		case $_line in
+			'  ──'*) _rule=1 ;; # the section's horizontal rule
+			'  (no connectors detected)') _records=$((_records + 1)) ;;
+			'  ✗ '*) _records=$((_records + 1)) ;; # unavailable (skipped/invalid): not a registration
+			'  ✓ '* | '  ⚠ '*)
+				printf 'available connector in the startup inventory: %s\n' "$_line" >&2
+				_records=$((_records + 1))
+				_rc=1
+				;;
+			'  '*)
+				printf 'unrecognized connector-inventory line (fail closed): %s\n' "$_line" >&2
+				_rc=1
+				;;
+			*) ;; # no two-space indent: SDK log, run footer, blank, or a wrapped skip reason.
+		esac
+	done < "$1"
+	if [ "$_hdr" -eq 0 ] || [ "$_rule" -eq 0 ] || [ "$_records" -eq 0 ]; then
+		printf 'no well-formed "Connectors" inventory in stderr (missing, empty, or reshaped). stderr tail:\n' >&2
+		tail -n 20 "$1" >&2
+		return 1
+	fi
+	return "$_rc"
+}
+
 # e2e_assert_tool_called ERR - the footer must report a POSITIVE tool-call count.
 # Matching a positive count (rather than rejecting "0 tool calls") also fails a
 # missing or reshaped footer, which a negative check would quietly pass.
