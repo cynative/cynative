@@ -177,9 +177,9 @@ def index_calls(recs):
         a, r = slot.get("attempt"), slot.get("result")
         if a is not None and r is not None:
             for field in ("tool", "via", "depth"):
-                if a.get(field) != r.get(field):
+                if not type_strict_eq(a.get(field), r.get(field)):
                     insecure("attempt/result disagree on %s for %r" % (field, k))
-            if args_of(a) != args_of(r):
+            if not type_strict_eq(args_of(a), args_of(r)):
                 insecure("attempt/result arguments disagree for %r" % (k,))
         out.append((k, slot))
     return out
@@ -519,6 +519,12 @@ def _selftest():
             jline("c1", "weird", read_args, result=sres(200, ok_body), outcome="ok")], mark),
         ("index_tuple_mismatch", 4, "read", [jline("c1", "attempt", read_args),
             jline("c1", "result", write_args, result=sres(200, "{}"), outcome="ok")], mark),
+        # A bool/int type collision between attempt and result args must NOT pass as equal
+        # (False == 0 in plain Python); type-strict pairing makes it a breach.
+        ("index_type_collision", 4, "read", [
+            jline("c1", "attempt", {**read_args, "timeout_seconds": False}),
+            jline("c1", "result", {**read_args, "timeout_seconds": 0},
+                  result=sres(200, ok_body), outcome="ok")], mark),
         ("dupkey_final", 4, "read", pair("c1", read_args, sres(200, ok_body)) +
             ['{"call_id":"c2","call_id":"c2","tool":"http_request","phase":"attempt","session_id":"s","run_id":"r","arguments":{}}'], mark),
         ("canary_ok", 0, "canary", pair("c1", write_args, wdenial, outcome="error")),
@@ -735,6 +741,9 @@ run_phase() {
 	else
 		if python3 "$parser" "$_mode" "$_audit" "$repo"; then _p=0; else _p=$?; fi
 	fi
+	# A breach short-circuits BEFORE the classifier and every soft gate: nothing may
+	# suppress or delay a security failure.
+	if [ "$_p" = 4 ]; then return 4; fi
 	if e2e_classify_run "$rc" "$_out" "$_err" "$timeout_s"; then _c=0; else _c=$?; fi
 	arbitrate "$_p" "$_c"; _s=$?
 	if [ "$_s" != 0 ]; then return "$_s"; fi
