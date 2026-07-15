@@ -4,12 +4,12 @@
 # effects at source time, so an offline caller (e.g. the connector script's
 # --selftest) can source it safely.
 #
-# It keeps the two live suites - test/llm.smoke.test.sh and
-# test/connector.gcp.e2e.test.sh - on one bounded configuration so a broken live
-# run cannot quietly burn credits, hang a runner, or leave a maintainer guessing.
+# It keeps the live suites - the LLM smoke and the gcp/aws/github connector e2es -
+# on one bounded configuration so a broken live run cannot quietly burn credits,
+# hang a runner, or leave a maintainer guessing.
 #
 # The library reads no suite-specific env. Callers resolve their own public knobs
-# (SMOKE_* / GCP_E2E_*) into the generic E2E_* override vars before calling
+# (SMOKE_* / GCP_E2E_* / AWS_E2E_* / GH_E2E_*) into the generic E2E_* override vars before calling
 # e2e_apply_bounds, so the library stays generic and the documented per-suite
 # knobs keep working.
 #
@@ -148,7 +148,7 @@ e2e_classify_run() {
 		return 2
 	fi
 	if grep -Fq 'Budget reached' "$2" 2>/dev/null; then
-		printf 'FAIL: token budget reached - raise the token limit (E2E_MAX_TOKENS / SMOKE_MAX_TOKENS / GCP_E2E_MAX_TOKENS). Notice:\n' >&2
+		printf 'FAIL: token budget reached - raise the token limit (E2E_MAX_TOKENS / SMOKE_MAX_TOKENS / GCP_E2E_MAX_TOKENS / AWS_E2E_MAX_TOKENS / GH_E2E_MAX_TOKENS). Notice:\n' >&2
 		grep -F 'Budget reached' "$2" >&2 || true
 		return 3
 	fi

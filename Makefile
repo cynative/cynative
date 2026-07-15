@@ -1,6 +1,6 @@
 .PHONY: check check-go check-scripts lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	llm-tools-smoke connector-gcp-e2e connector-aws-e2e homebrew-smoke install-script-smoke
+	llm-tools-smoke connector-gcp-e2e connector-aws-e2e connector-github-e2e homebrew-smoke install-script-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -102,7 +102,7 @@ pwsh-test:
 	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
 
 # sh-test: POSIX install.sh unit + loopback smoke tests, the live-e2e guardrails
-# library unit tests (test/lib/e2e-guardrails.sh), and both connector suites'
+# library unit tests (test/lib/e2e-guardrails.sh), and all three connector suites'
 # offline audit-parser selftests (--selftest). All hermetic: no network, no
 # credentials. The parsers are the security boundary of the live connector e2es,
 # so they are gated here rather than only exercised on a live run. Presence-
@@ -115,6 +115,7 @@ sh-test:
 	@sh test/e2e-guardrails.unit.test.sh
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
+	@sh test/connector.github.e2e.test.sh --selftest
 	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector audit parsers)"
 
 SHELL_COMPLEXITY_MAX := 6
@@ -194,6 +195,13 @@ connector-gcp-e2e:
 # AWS_E2E_* env is unset. The script header documents its env and knobs.
 connector-aws-e2e:
 	sh test/connector.aws.e2e.test.sh
+
+# connector-github-e2e: live GitHub connector end-to-end test (cynative#53). Standalone
+# (NOT part of `make check`): runs the real `cynative -p` against a private fixture repo
+# through the github connector and needs a token; skips cleanly when GH_E2E_* is unset.
+# The script header documents its env and knobs.
+connector-github-e2e:
+	sh test/connector.github.e2e.test.sh
 
 # homebrew-smoke: post-release Homebrew install smoke (cynative#45). Standalone
 # (NOT part of `make check`): installs cynative from the public tap via the
