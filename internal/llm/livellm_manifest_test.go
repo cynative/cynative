@@ -245,23 +245,47 @@ func TestLiveLLMManifest_CheckedInFileValidates(t *testing.T) {
 		t.Fatalf("unmarshal manifest: %v", uerr)
 	}
 
-	// Golden: the Vertex + Bedrock starters are still present (guards against an
-	// accidental deletion that would silently drop release coverage), and both
-	// auth families are exercised (so the two-family workflow keeps both jobs live).
-	ids := make(map[string]bool, len(rows))
-	auths := make(map[string]bool, len(rows))
-	for _, r := range rows {
-		ids[r.ID] = true
-		auths[r.Auth] = true
+	// Golden: every starter row is present, enabled, and wired as the workflow
+	// expects (guards against an accidental deletion, a silent disable, or a
+	// miswired row quietly dropping release coverage), and every auth family is
+	// exercised by an enabled row (so the three-family workflow keeps all jobs
+	// live). model_var and the flags stay unpinned on purpose: the id and the
+	// adapter map cross-check the rest, and pinning every field would turn each
+	// legitimate manifest tweak into a test edit.
+	starters := map[string]struct{ provider, auth, suite string }{
+		"vertex-notool":    {provider: "vertex", auth: authGCPWIF, suite: suiteNoTool},
+		"vertex-tools":     {provider: "vertex", auth: authGCPWIF, suite: suiteTools},
+		"bedrock-notool":   {provider: "bedrock", auth: authAWSOIDC, suite: suiteNoTool},
+		"openai-notool":    {provider: "openai", auth: authAPIKey, suite: suiteNoTool},
+		"openai-tools":     {provider: "openai", auth: authAPIKey, suite: suiteTools},
+		"anthropic-notool": {provider: "anthropic", auth: authAPIKey, suite: suiteNoTool},
+		"anthropic-tools":  {provider: "anthropic", auth: authAPIKey, suite: suiteTools},
 	}
-	for _, want := range []string{"vertex-notool", "vertex-tools", "bedrock-notool"} {
-		if !ids[want] {
-			t.Errorf("manifest is missing starter row %q", want)
+	rowsByID := make(map[string]liveLLMRow, len(rows))
+	enabledAuths := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		rowsByID[r.ID] = r
+		if r.Enabled != nil && *r.Enabled {
+			enabledAuths[r.Auth] = true
 		}
 	}
-	for _, want := range []string{authGCPWIF, authAWSOIDC} {
-		if !auths[want] {
-			t.Errorf("manifest has no %q row; both auth families must stay covered", want)
+	for id, want := range starters {
+		r, ok := rowsByID[id]
+		if !ok {
+			t.Errorf("manifest is missing starter row %q", id)
+			continue
+		}
+		if r.Enabled == nil || !*r.Enabled {
+			t.Errorf("starter row %q must stay enabled", id)
+		}
+		if r.Provider != want.provider || r.Auth != want.auth || r.Suite != want.suite {
+			t.Errorf("starter row %q is miswired: got (%s, %s, %s), want (%s, %s, %s)",
+				id, r.Provider, r.Auth, r.Suite, want.provider, want.auth, want.suite)
+		}
+	}
+	for _, want := range []string{authGCPWIF, authAWSOIDC, authAPIKey} {
+		if !enabledAuths[want] {
+			t.Errorf("manifest has no enabled %q row; every auth family must stay covered", want)
 		}
 	}
 }

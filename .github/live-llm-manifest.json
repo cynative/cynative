@@ -32,5 +32,49 @@
     "required": true,
     "require_no_connectors": true,
     "note": "aws-ci binds the stable OIDC subject; role_var preflight fails loud (cynative#48)."
+  },
+  {
+    "id": "openai-notool",
+    "enabled": true,
+    "provider": "openai",
+    "auth": "api-key",
+    "suite": "llm-smoke",
+    "model_var": "CYNATIVE_CLI_CI_OPENAI_MODEL",
+    "required": true,
+    "require_no_connectors": true,
+    "note": "Direct OpenAI no-tool nonce echo over the api-key family (cynative#119)."
+  },
+  {
+    "id": "openai-tools",
+    "enabled": true,
+    "provider": "openai",
+    "auth": "api-key",
+    "suite": "llm-tools-smoke",
+    "model_var": "CYNATIVE_CLI_CI_OPENAI_MODEL",
+    "required": true,
+    "require_no_connectors": false,
+    "note": "Direct OpenAI code_execution tool-use proof (cynative#119)."
+  },
+  {
+    "id": "anthropic-notool",
+    "enabled": true,
+    "provider": "anthropic",
+    "auth": "api-key",
+    "suite": "llm-smoke",
+    "model_var": "CYNATIVE_CLI_CI_ANTHROPIC_MODEL",
+    "required": true,
+    "require_no_connectors": true,
+    "note": "Direct Anthropic no-tool nonce echo over the api-key family (cynative#119)."
+  },
+  {
+    "id": "anthropic-tools",
+    "enabled": true,
+    "provider": "anthropic",
+    "auth": "api-key",
+    "suite": "llm-tools-smoke",
+    "model_var": "CYNATIVE_CLI_CI_ANTHROPIC_MODEL",
+    "required": true,
+    "require_no_connectors": false,
+    "note": "Direct Anthropic code_execution tool-use proof (cynative#119)."
   }
 ]
