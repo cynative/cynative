@@ -681,11 +681,17 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   is the one case that adds a job. Not a required status check.
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
-  version bump, enforced by `semantic-pr.yaml`. `.goreleaser.yaml` handles binary builds for
-  release tags. The Release Pipeline splits at the publish boundary: the `release` job builds,
-  signs, and statically asserts everything, then hands the draft's exact asset set (pkgs,
-  archives, manifests) to downstream jobs as the `release-artifacts` workflow artifact; the
-  `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs
+  version bump, enforced by `semantic-pr.yaml`. Dependency bumps use the `deps:` type
+  (Dependabot's commit prefix) and render under a dedicated Dependencies changelog section, one
+  entry per updated package: the auto-merge workflow writes a release-please commit-override
+  block into the PR body via `scripts/ci/dependabot-commit-override.sh` (unit-tested by `make
+  sh-test`), falling back to the group title when the metadata cannot be parsed. `deps` commits
+  still cut patch releases; `release-please-config.json` pins the visible section list
+  explicitly, so re-check it when release-please is bumped. `.goreleaser.yaml` handles binary
+  builds for release tags. The Release Pipeline splits at the publish boundary: the `release`
+  job builds, signs, and statically asserts everything, then hands the draft's exact asset set
+  (pkgs, archives, manifests) to downstream jobs as the `release-artifacts` workflow artifact;
+  the `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs
   `test/pkg.smoke.test.sh` against each pkg on its native arch (sha256 vs manifest, pkgutil
   signature, stapler validate, gating spctl Gatekeeper assess, real `installer` install, receipt
   version, exact `--version`); the `archive-smoke` job (ubuntu-latest, ubuntu-24.04-arm,
