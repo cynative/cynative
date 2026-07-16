@@ -68,6 +68,31 @@ func newGKEProvider(tokenSource oauth2.TokenSource) *gkeProvider {
 	return p
 }
 
+// tokenWithContext mints a token from ts under the caller's context. oauth2's
+// TokenSource.Token takes no context, so a stalled refresh would otherwise be
+// uncancellable and could wedge the preflight; the goroutine + select makes the
+// wait honor ctx (the abandoned refresh drains into the buffered channel and the
+// goroutine exits when it finally returns).
+func tokenWithContext(ctx context.Context, ts oauth2.TokenSource) (*oauth2.Token, error) {
+	type result struct {
+		tok *oauth2.Token
+		err error
+	}
+
+	ch := make(chan result, 1)
+	go func() {
+		tok, err := ts.Token()
+		ch <- result{tok: tok, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("gke: token refresh cancelled: %w", ctx.Err())
+	case r := <-ch:
+		return r.tok, r.err
+	}
+}
+
 func (p *gkeProvider) Name() string {
 	return gkeProviderName
 }

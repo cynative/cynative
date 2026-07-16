@@ -467,6 +467,17 @@ func (p *kubernetesProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, 
 	return p.authorizesDialIP(ctx, ip)
 }
 
+// probeAndSeedView validates at registration that the configured ClusterRole is
+// fetchable and parseable AND seeds the runtime view-policy cache, so the first
+// request skips the redundant fetch through the same lazy path. It resolves
+// through resolveViewPolicy (which caches on success) rather than a bare fetch,
+// so the eager validation and the cache seed are one call.
+func (p *kubernetesProvider) probeAndSeedView(ctx context.Context) error {
+	_, err := p.resolveViewPolicy(ctx, nil)
+
+	return err
+}
+
 // AuthorizeAction enforces the read-only ClusterRole posture via the shared k8sGate.
 func (p *kubernetesProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
 	args, err := parseKubernetesArgs(rawArgs)

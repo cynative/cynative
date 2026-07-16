@@ -19,9 +19,22 @@ const maxViewRoleBytes = 1 << 20 // 1 MiB.
 // (base64 PEM), optionally presenting a client certificate (base64 PEM cert+key)
 // for mTLS clusters, via [BuildTLSConfig] (the same builder the transport
 // request path uses). control, when non-nil, is installed as the [net.Dialer]
-// ControlContext hook so the bootstrap fetch runs through the dial guard.
+// ControlContext hook so the bootstrap fetch runs through the dial guard. The
+// client carries the production phase timeouts so a stalled cluster endpoint is
+// bounded even when the caller supplies no context deadline.
 func pinnedHTTPClient(
 	caData, clientCert, clientKey, serverName string,
+	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
+) (*http.Client, error) {
+	return pinnedHTTPClientWithTimeouts(caData, clientCert, clientKey, serverName, defaultK8sFetchTimeouts(), control)
+}
+
+// pinnedHTTPClientWithTimeouts is pinnedHTTPClient with the phase timeouts made
+// explicit so tests can drive small values against a stalling server; production
+// callers go through pinnedHTTPClient with defaultK8sFetchTimeouts.
+func pinnedHTTPClientWithTimeouts(
+	caData, clientCert, clientKey, serverName string,
+	to k8sFetchTimeouts,
 	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
 ) (*http.Client, error) {
 	tlsCfg, err := BuildTLSConfig(x509.SystemCertPool, caData, clientCert, clientKey, serverName)
@@ -29,14 +42,17 @@ func pinnedHTTPClient(
 		return nil, err
 	}
 
-	tr := &http.Transport{ //nolint:exhaustruct // only TLS + dial control configured.
-		TLSClientConfig: tlsCfg,
-		DialContext: (&net.Dialer{ //nolint:exhaustruct // only ControlContext configured.
+	tr := &http.Transport{ //nolint:exhaustruct // only TLS, dial control, and phase timeouts configured.
+		TLSClientConfig:       tlsCfg,
+		TLSHandshakeTimeout:   to.tlsHandshake,
+		ResponseHeaderTimeout: to.responseHeader,
+		DialContext: (&net.Dialer{ //nolint:exhaustruct // only Timeout + ControlContext configured.
+			Timeout:        to.dial,
 			ControlContext: control,
 		}).DialContext,
 	}
 
-	return &http.Client{Transport: tr}, nil //nolint:exhaustruct // only Transport set.
+	return &http.Client{Transport: tr, Timeout: to.overall}, nil //nolint:exhaustruct // Transport + Timeout set.
 }
 
 // fetchClusterRoleRaw GETs the named cluster-scoped ClusterRole and returns the

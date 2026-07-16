@@ -16,7 +16,7 @@ func (p *gkeProvider) defaultFetchView(ctx context.Context, args *GKEAuthArgs) (
 		return nil, err
 	}
 
-	token, err := p.tokenSource.Token()
+	token, err := tokenWithContext(ctx, p.tokenSource)
 	if err != nil {
 		return nil, err
 	}

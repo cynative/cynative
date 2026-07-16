@@ -222,9 +222,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 			return p
 		},
 		probeKube: func(ctx context.Context, p *kubernetesProvider) error {
-			_, err := p.defaultFetchView(ctx, nil)
-
-			return err
+			return p.probeAndSeedView(ctx)
 		},
 		k8sClusterRole: cfg.Kubernetes.ClusterRole,
 	}

@@ -61,6 +61,49 @@ func mockTokenSource(token *oauth2.Token, err error) *tokenSourceMock {
 	}
 }
 
+func TestTokenWithContext_ReturnsToken(t *testing.T) {
+	t.Parallel()
+
+	ts := mockTokenSource(&oauth2.Token{AccessToken: "abc"}, nil) //nolint:exhaustruct // only AccessToken.
+
+	tok, err := tokenWithContext(context.Background(), ts)
+	if err != nil {
+		t.Fatalf("tokenWithContext: %v", err)
+	}
+	if tok.AccessToken != "abc" {
+		t.Fatalf("AccessToken = %q, want abc", tok.AccessToken)
+	}
+}
+
+func TestTokenWithContext_ReturnsWhenContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	// A token source whose refresh stalls (no context to cancel it): only the
+	// caller's context can end the wait.
+	ts := &tokenSourceMock{TokenFunc: func() (*oauth2.Token, error) {
+		<-release
+
+		return &oauth2.Token{AccessToken: "late"}, nil //nolint:exhaustruct // only AccessToken.
+	}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tok, err := tokenWithContext(ctx, ts)
+	if err == nil {
+		t.Fatal("expected a context error from the stalled token refresh, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if tok != nil {
+		t.Fatalf("want nil token on cancellation, got %+v", tok)
+	}
+}
+
 func TestGitHubProvider_NameAndDescription(t *testing.T) {
 	t.Parallel()
 

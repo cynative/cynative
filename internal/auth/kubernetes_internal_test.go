@@ -898,6 +898,36 @@ func TestKubernetesProvider_bearerToken(t *testing.T) {
 	})
 }
 
+func TestKubernetesProbeAndSeedView_SeedsViewPolicyCache(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	vp := k8sauthz.BuildViewPolicy(nil)
+	p := newKubernetesProvider(resolvedCluster{mode: credBearer, token: "t"})
+	p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
+		calls++
+
+		return vp, nil
+	}
+
+	// The registration probe validates the ClusterRole live AND must seed the
+	// runtime cache, so the first request does not repeat the fetch.
+	if err := p.probeAndSeedView(context.Background()); err != nil {
+		t.Fatalf("probeAndSeedView: %v", err)
+	}
+
+	if _, err := p.resolveViewPolicy(context.Background(), nil); err != nil {
+		t.Fatalf("resolveViewPolicy: %v", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf(
+			"fetchView called %d times; the probe should have seeded the cache so the request skips the fetch",
+			calls,
+		)
+	}
+}
+
 func TestKubernetesFetchViewBearerContract(t *testing.T) {
 	t.Parallel()
 
