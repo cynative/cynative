@@ -5,7 +5,7 @@ multi-ecosystem-groups:
     schedule:
       interval: "daily"
     commit-message:
-      prefix: "fix(deps)"
+      prefix: "deps"
 
 updates:
   - package-ecosystem: "gomod"
