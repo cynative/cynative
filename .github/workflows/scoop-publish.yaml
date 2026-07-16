@@ -1,0 +1,116 @@
+name: Publish Scoop manifest
+
+# Render + push cynative/scoop-bucket's bucket/cynative.json AFTER the release is
+# published and verified (cynative#103). goreleaser no longer pushes the bucket
+# (scoops[0].skip_upload: true); this workflow owns the live manifest. Two entry
+# points, no PR trigger: the Release Pipeline calls it post-publish
+# (workflow_call, tag input), and maintainers can dispatch it manually to
+# recover from a channel-push failure without re-running the publish gate against
+# an already-published release. Self-contained: it derives the two Windows-zip
+# hashes from the immutable published release's checksums.txt, so both entry
+# points share one code path and neither needs the release-artifacts hand-off.
+# The Scoop smoke runs after this publisher.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to publish (e.g. v0.4.0)
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish (blank = latest published release)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-scoop:
+    name: Render & push Scoop manifest
+    # Public reusable workflow hygiene: the App secrets never flow to a fork
+    # calling this via a local path, but the guard makes "a fork never reaches
+    # the push" explicit rather than merely survivable.
+    if: ${{ github.repository == 'cynative/cynative' }}
+    runs-on: ubuntu-latest
+    # Bounded: a wedged call would otherwise hold the release-pipeline
+    # concurrency group for the default 360 minutes.
+    timeout-minutes: 10
+    steps:
+      # scoop-bucket write is the point of this job; cynative read authorizes the
+      # release read/download below. This is the ONLY place scoop-bucket write
+      # authority lives now.
+      - name: Generate App Token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            cynative
+            scoop-bucket
+
+      # The tag input wins when present (the call path always passes it); a
+      # manual dispatch with no input resolves the latest published release.
+      # Keying on input presence rather than the event name matters: a called
+      # workflow inherits the caller's event. Fail closed on an empty tag or an
+      # empty resolved version.
+      - name: Resolve tag & version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ -n "${TAG_INPUT}" ]; then
+            tag="${TAG_INPUT}"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" \
+              || { echo "::error::no published release to publish"; exit 1; }
+          else
+            echo "::error::empty tag input on the workflow_call path"; exit 1
+          fi
+          # Guard the tag shape as a whole string BEFORE it reaches GITHUB_OUTPUT
+          # and the checkout ref: our release tags are always v<version>. The
+          # bash =~ anchors ^...$ over the entire value, so a newline- or
+          # metacharacter-bearing dispatch input (output/ref injection) is
+          # rejected rather than split into extra outputs.
+          if [[ ! "${tag}" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::unexpected tag format '${tag}' (want v<version>)"; exit 1
+          fi
+          version="${tag#v}"
+          if [ -z "${version}" ]; then
+            echo "::error::resolved an empty version from tag '${tag}'"; exit 1
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "publishing scoop manifest for ${tag}"
+
+      # Render from the exact source the release was cut from (provenance).
+      # persist-credentials off: publish-scoop.sh does its own authenticated
+      # clone of scoop-bucket with the App token.
+      - name: Checkout scripts at the release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+          persist-credentials: false
+
+      # The published release's checksums.txt is immutable and authoritative; it
+      # was asserted byte-equal to the built assets pre-publish and re-verified
+      # post-publish, and archive-smoke cross-checks its rows.
+      - name: Download published checksums
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --pattern checksums.txt --dir "${RUNNER_TEMP}" --clobber
+          test -s "${RUNNER_TEMP}/checksums.txt"
+
+      - name: Render & push manifest
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: scripts/release/publish-scoop.sh "${VERSION}" "${RUNNER_TEMP}/checksums.txt"
