@@ -131,7 +131,13 @@ block=$(printf '%s' "$parsed" | awk -F '\t' -v bodylen="$bodylen" -v max="$max_b
 		if (NR == 0) exit 0
 		reserve = 80
 		tail = "\nEND_COMMIT_OVERRIDE"
-		block = "BEGIN_COMMIT_OVERRIDE\n" lines[1]
+		# The first entry is admitted only if it fits the budget too; when even
+		# that does not fit, emit nothing so the caller skips the edit and the
+		# group title renders unchanged.
+		first = "BEGIN_COMMIT_OVERRIDE\n" lines[1]
+		r = (NR > 1) ? reserve : 0
+		if (bodylen + 2 + length(first) + length(tail) + r > max) exit 0
+		block = first
 		used = 1
 		for (i = 2; i <= NR; i++) {
 			add = "\nBEGIN_NESTED_COMMIT\n" lines[i] "\nEND_NESTED_COMMIT"

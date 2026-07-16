@@ -225,6 +225,15 @@ if (
 	exit 0
 ); then pass "MAX_BODY overflow collapses tail into summary"; else fail "overflow cap"; fi
 
+# ---- an oversized existing body leaves no room for even the first entry --------
+if (
+	awk 'BEGIN { for (i = 0; i < 20; i++) print "This existing PR body line pads out the body content." }' \
+		> "$tmp/bigbody.txt"
+	out=$(MAX_BODY=100 "$render" render "$tmp/bigbody.txt" < "$tmp/prose.msg") || exit 1
+	[ -z "$out" ] || exit 1
+	exit 0
+); then pass "oversized existing body yields empty output"; else fail "oversized body"; fi
+
 # ---- duplicate name+version pairs are deduplicated ------------------------------
 cat > "$tmp/dupes.msg" <<'EOF'
 deps: Bump the all-dependencies group with 1 update
