@@ -151,7 +151,7 @@ jobs:
       - if: steps.model.outputs.run == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - if: steps.model.outputs.run == 'true'
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       # Keyless WIF into cynative-cli-ci. export_environment_variables:false keeps
@@ -257,7 +257,7 @@ jobs:
       - if: steps.model.outputs.run == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - if: steps.model.outputs.run == 'true'
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       # Keyless GitHub OIDC into the CI AWS account, no long-lived key. Like the gcp
