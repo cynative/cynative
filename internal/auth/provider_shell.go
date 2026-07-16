@@ -183,7 +183,12 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		validateAWSPolicy: validateAWSPolicy,
 
 		findGCP: func(ctx context.Context) (*google.Credentials, error) {
-			return google.FindDefaultCredentials(ctx, gcpScope)
+			// Bound every token refresh minted from the registered source: the
+			// context carries only an oauth2.HTTPClient value (per-request
+			// Client.Timeout, no deadline), so it stays deadline-free (see the
+			// note in registerGCP) while a stalled token endpoint can no longer
+			// hang ts.Token().
+			return google.FindDefaultCredentials(boundedADCContext(ctx, adcTokenRefreshTimeout), gcpScope)
 		},
 		probeGCP:    probeGCPToken,
 		gcpIdentity: gcpRegistrationIdentity,

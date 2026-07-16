@@ -72,7 +72,10 @@ func newGKEProvider(tokenSource oauth2.TokenSource) *gkeProvider {
 // TokenSource.Token takes no context, so a stalled refresh would otherwise be
 // uncancellable and could wedge the preflight; the goroutine + select makes the
 // wait honor ctx (the abandoned refresh drains into the buffered channel and the
-// goroutine exits when it finally returns).
+// goroutine exits when it returns). That return is now time-bounded: ADC token
+// refreshes are capped (boundedADCContext for token-endpoint creds, the metadata
+// client's own timeout in-cluster), so an abandoned goroutine cannot leak
+// indefinitely. A tighter ctx cancellation still returns first.
 func tokenWithContext(ctx context.Context, ts oauth2.TokenSource) (*oauth2.Token, error) {
 	type result struct {
 		tok *oauth2.Token

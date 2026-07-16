@@ -203,11 +203,14 @@ func awsScopeDegraded(decision awshardening.CredScopeDecision, result awshardeni
 // regardless of explicit/verbose: the credential is confirmed present. On
 // success it captures a bounded, display-only identity.
 func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connectorOutcome {
-	// findGCP MUST use the unbounded ctx: google.FindDefaultCredentials' returned
-	// TokenSource retains the supplied context, and the registered provider mints
-	// tokens from it for the whole session. Only the probe is bounded — and it
-	// builds a SEPARATE source (probeGCPToken), so cancelling pctx never poisons
-	// the registered source.
+	// findGCP MUST use a DEADLINE-FREE ctx: google.FindDefaultCredentials'
+	// returned TokenSource retains the supplied context, and the registered
+	// provider mints tokens from it for the whole session, so a deadline would
+	// eventually poison it. findGCP still wraps ctx with boundedADCContext, which
+	// adds only an oauth2.HTTPClient value (a per-request Client.Timeout, not a
+	// deadline), so each refresh is bounded without poisoning the source. Only the
+	// probe is deadline-bounded, and it builds a SEPARATE source (probeGCPToken),
+	// so cancelling pctx never poisons the registered source.
 	creds, findErr := d.findGCP(ctx)
 
 	var probeErr error
