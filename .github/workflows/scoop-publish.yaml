@@ -65,28 +65,44 @@ jobs:
       # manual dispatch with no input resolves the latest published release
       # (releases/latest excludes drafts). Keying on input presence rather than
       # the event name matters: a called workflow inherits the caller's event.
-      # Fail closed on an empty tag or an empty resolved version.
+      # The resolved tag must equal the latest published release (the bucket
+      # tracks latest, never a downgrade). Fail closed on an empty tag, a
+      # non-latest tag, or an empty resolved version.
       - name: Resolve tag & version
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_INPUT: ${{ inputs.tag }}
         run: |
+          # releases/latest excludes drafts; empty when there is no published
+          # release yet.
+          latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null)" \
+            || latest_tag=""
           if [ -n "${TAG_INPUT}" ]; then
             tag="${TAG_INPUT}"
           elif [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" \
-              || { echo "::error::no published release to publish"; exit 1; }
+            [ -n "${latest_tag}" ] || { echo "::error::no published release to publish"; exit 1; }
+            tag="${latest_tag}"
           else
             echo "::error::empty tag input on the workflow_call path"; exit 1
           fi
-          # Guard the tag shape as a whole string BEFORE it reaches GITHUB_OUTPUT
-          # and the checkout ref: our release tags are always v<version>. The
-          # bash =~ anchors ^...$ over the entire value, so a newline- or
-          # metacharacter-bearing dispatch input (output/ref injection) is
-          # rejected rather than split into extra outputs.
+          # Guard the tag shape as a whole string BEFORE it reaches GITHUB_OUTPUT:
+          # our release tags are always v<version>. The bash =~ anchors ^...$ over
+          # the entire value, so a newline- or metacharacter-bearing dispatch
+          # input (output injection) is rejected rather than split into extra
+          # outputs.
           if [[ ! "${tag}" =~ ^v[0-9][0-9A-Za-z.+-]*$ ]]; then
             echo "::error::unexpected tag format '${tag}' (want v<version>)"; exit 1
+          fi
+          # The Scoop bucket serves only the latest release. Refuse a non-latest
+          # tag: publish-scoop.sh clones the current bucket tip, and a plain
+          # fast-forward push would otherwise commit a DOWNGRADE on top of a newer
+          # manifest. On the call path the just-published tag is already latest
+          # (verify-published.sh asserted make_latest before this job); this also
+          # fences a manual dispatch that names a stale tag.
+          if [ -z "${latest_tag}" ] || [ "${tag}" != "${latest_tag}" ]; then
+            echo "::error::refusing to publish ${tag}: latest published release is ${latest_tag:-<none>}; the Scoop bucket tracks latest (dispatch with no tag, or the latest tag)"
+            exit 1
           fi
           version="${tag#v}"
           if [ -z "${version}" ]; then
@@ -122,15 +138,19 @@ jobs:
           fi
           echo "release ${TAG} is published (${published})"
 
-      # Render from the exact source the release was cut from (provenance).
-      # refs/tags/ is explicit: an unqualified ref lets actions/checkout prefer a
-      # like-named branch, which would supply the privileged publish script while
-      # checksums still came from the real release. persist-credentials off:
-      # publish-scoop.sh does its own authenticated clone of scoop-bucket.
-      - name: Checkout scripts at the release tag
+      # Check out the commit that triggered THIS run (default checkout ref = the
+      # release commit on the call path, the dispatched branch's HEAD on
+      # recovery), NOT the release tag. The manifest content is fully determined
+      # by the tag's version and the published checksums.txt, not by the revision
+      # of these scripts, so a bug fixed in render-scoop.sh / publish-scoop.sh can
+      # be dispatched for an already-published tag instead of re-running the tag's
+      # frozen (possibly broken) copy. The default ref is a concrete commit SHA
+      # from our own repo, so there is no branch/tag ambiguity or fork exposure.
+      # persist-credentials off: publish-scoop.sh does its own authenticated clone
+      # of scoop-bucket.
+      - name: Checkout scripts
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: refs/tags/${{ steps.resolve.outputs.tag }}
           persist-credentials: false
 
       # The published release's checksums.txt is immutable and authoritative; it
