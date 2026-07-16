@@ -102,9 +102,28 @@ jobs:
           echo "Wrote per-package override to PR #${PR_NUMBER}."
       # Arm auto-merge with the App token so the completed merge is attributed to the App
       # and its push to main triggers the Release Pipeline.
+      # Retried because the body edit above races the merge: the PATCH fires a
+      # pull_request_target "edited" event that re-runs the required "Validate PR title"
+      # check, while gh handles GitHub's refusal to arm auto-merge on an already-clean PR
+      # by falling back to a direct merge. When the re-run check registers between those
+      # two calls, the ruleset rejects the direct merge ("Validate PR title is expected")
+      # and nothing re-triggers this workflow. A later attempt converges either way:
+      # check still pending arms auto-merge, check finished direct-merges clean.
       - name: Enable auto-merge
         if: steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
-        run: gh pr merge --auto --squash --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh pr merge --auto --squash --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Merge attempt ${attempt} rejected; retrying in 20s."
+              sleep 20
+            fi
+          done
+          echo "Auto-merge still rejected after 3 attempts." >&2
+          exit 1
