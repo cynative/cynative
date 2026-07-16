@@ -32,6 +32,16 @@ updates:
       # when that happens.
       - dependency-name: "github.com/denis-tingaikin/go-header"
         update-types: ["version-update:semver-major"]
+      # go-msix v1 is a breaking API rewrite (Builder became an interface,
+      # Build takes a context, the Manifest/Identity/Resource types were
+      # removed) that goreleaser's nfpm (v2.47.0, the latest release) still
+      # calls with the v0.3.x API, so forcing the major bump on this indirect
+      # module breaks `make snapshot` (the goreleaser Windows MSIX packager).
+      # Minor/patch updates stay allowed, and once nfpm adopts the v1 API the
+      # module graph will follow without Dependabot's help. Drop this entry
+      # when that happens.
+      - dependency-name: "go.digitalxero.dev/go-msix"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     patterns: ["*"]
