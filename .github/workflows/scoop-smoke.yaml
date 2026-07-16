@@ -9,13 +9,13 @@ name: Scoop install smoke
 # published release. Failure semantics: a red run with a green Release
 # Pipeline `publish` job means the public Scoop channel is broken -
 # investigate and re-run via workflow_dispatch, nothing to roll back.
-# goreleaser currently pushes the bucket manifest during the pre-publish
-# GoReleaser step (cynative#103 tracks moving it post-publish), so on
-# the call path the first bucket probe normally succeeds. A manual dispatch
-# racing a live release run can wedge in exactly one ordering (bucket
-# already advanced, release not yet published): the wait below then times
-# out with instructions; a dispatch before the bucket advances simply
-# validates the previous release. Residual: the manifest's arm64 entry is
+# The scoop-publish workflow (cynative#103) renders and pushes the bucket
+# manifest after publish, and on the release-pipeline call path it runs before
+# this smoke, so the first bucket probe normally succeeds. A manual dispatch
+# racing a live release run can wedge in exactly one ordering (release
+# published but scoop-publish not yet pushed): the wait below then times out
+# with instructions; a dispatch before the bucket advances simply validates the
+# previous release. Residual: the manifest's arm64 entry is
 # not exercised (this smoke is x64-only); a windows-11-arm leg needs its own
 # proving run before joining the release-adjacent path. Both jobs carry
 # explicit timeout-minutes: a caller job that `uses:` a reusable workflow
@@ -74,8 +74,8 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "expecting cynative ${version}"
 
-      # goreleaser pushes the bucket BEFORE the release publishes, so on the
-      # call path the first probe normally succeeds; the loop is bounded
+      # scoop-publish pushes the bucket after publish, before this smoke on the
+      # call path, so the first probe normally succeeds; the loop is bounded
       # defense for a manual dispatch racing a live release run (which
       # freezes the previous release as expected and cannot converge - the
       # final error says to re-run after publication). Each probe is an
@@ -86,9 +86,10 @@ jobs:
       # failed), ABSENT (manifest missing), INVALID (version not a nonempty
       # JSON string), MISMATCH (wrong version). Probe-loop worst case: 12 x
       # 25s clone caps + 11 x 30s sleeps, about 10.5 minutes, inside this
-      # job's 12-minute timeout (tighter than the homebrew tap poll: the
-      # bucket push happens even earlier than the tap push, so a longer
-      # budget buys nothing). No sleep after the final attempt: the step's
+      # job's 12-minute timeout (the bucket now advances post-publish in
+      # scoop-publish, which this smoke gates on, so on the call path the
+      # manifest is already served and this budget is race defense for a manual
+      # dispatch). No sleep after the final attempt: the step's
       # own budget-exhaustion error must fire inside the job timeout (and the
       # default shell is bash -e, so this must be an if, not a bare [ ] &&
       # chain).

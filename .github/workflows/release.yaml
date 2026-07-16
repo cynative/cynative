@@ -47,7 +47,6 @@ jobs:
           repositories: |
             cynative
             homebrew-tap
-            scoop-bucket
 
       # release-please PHASE 1 — releases only (skip-github-pull-request):
       # creates the GitHub release as a DRAFT ("draft": true in
@@ -255,7 +254,6 @@ jobs:
           repositories: |
             cynative
             homebrew-tap
-            scoop-bucket
 
       - name: Upload pkgs to draft release
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
@@ -583,7 +581,6 @@ jobs:
           repositories: |
             cynative
             homebrew-tap
-            scoop-bucket
 
       # The publish scripts live in the repo; check out the exact SHA the
       # release was cut from.
@@ -720,8 +717,10 @@ jobs:
   # homebrew-smoke (cynative#45) runs after the tap push and validates the
   # brew channel; install-script-smoke (cynative#47) validates the documented
   # curl|sh and irm|iex install paths against the public release assets;
-  # scoop-smoke (cynative#46) validates the documented scoop bucket add +
-  # install path against the public bucket and release assets.
+  # scoop-publish (cynative#103) renders and pushes the Scoop bucket manifest
+  # after publish (goreleaser no longer pushes it), and scoop-smoke (cynative#46)
+  # then validates the documented scoop bucket add + install path against the
+  # public bucket and release assets.
   homebrew-smoke:
     name: Homebrew install smoke
     needs: [release, publish]
@@ -742,9 +741,23 @@ jobs:
     with:
       tag: ${{ needs.release.outputs.tag_name }}
 
+  # Renders and pushes the Scoop bucket manifest after publish (cynative#103),
+  # replacing goreleaser's pre-publish bucket push. secrets: inherit passes the
+  # App credentials the reusable workflow mints its scoop-bucket token from.
+  scoop-publish:
+    name: Publish Scoop manifest
+    needs: [release, publish]
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/scoop-publish.yaml
+    with:
+      tag: ${{ needs.release.outputs.tag_name }}
+    secrets: inherit
+
   scoop-smoke:
     name: Scoop install smoke
-    needs: [release, publish]
+    needs: [release, publish, scoop-publish]
     if: ${{ needs.release.outputs.release_created == 'true' }}
     permissions:
       contents: read
