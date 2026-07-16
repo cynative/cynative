@@ -682,7 +682,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. `.goreleaser.yaml` handles binary builds for
-  release tags. The Release Pipeline splits at the publish boundary: the `release` job builds,
+  release tags. The Release Pipeline (`release.yaml`) runs `on: push` to `main`, plus a 6-hourly
+  `schedule` and `workflow_dispatch`, so release-please re-derives the release PR from repository
+  state even when commits arrive via a GITHUB_TOKEN push (e.g. a Dependabot auto-merge), which
+  does not trigger `on: push`; every heavy/publish step stays gated on `release_created`, so a
+  non-release trigger only refreshes the candidate PR. The Release Pipeline splits at the publish
+  boundary: the `release` job builds,
   signs, and statically asserts everything, then hands the draft's exact asset set (pkgs,
   archives, manifests) to downstream jobs as the `release-artifacts` workflow artifact; the
   `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs

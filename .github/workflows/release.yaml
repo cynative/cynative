@@ -4,6 +4,22 @@ on:
   push:
     branches:
       - main
+  # Manual refresh. Re-run release-please on demand to fold newly merged
+  # commits into the release PR and rebase its branch onto current main
+  # (handy right before cutting a release, since a strict up-to-date ruleset
+  # blocks merging a BEHIND branch).
+  workflow_dispatch:
+  # Safety net for commits that land via a GITHUB_TOKEN push. A Dependabot PR
+  # auto-merged by dependabot-auto-merge.yaml is merged under the default
+  # GITHUB_TOKEN, and pushes made by GITHUB_TOKEN do NOT trigger `on: push`
+  # (GitHub's recursion guard). Release-please would therefore never see those
+  # merges and the release PR would drift stale (missing merged fixes) and
+  # BEHIND main. This periodic run re-derives the release PR from repository
+  # state regardless of how commits arrived. Every heavy/publish step is gated
+  # on release_created, so a run with nothing to release only refreshes the
+  # candidate PR (release-please phase 2); it never publishes.
+  schedule:
+    - cron: "17 */6 * * *"
 
 permissions:
   contents: read
