@@ -9,8 +9,10 @@ on:
     workflows: [CI]
     types: [completed]
 
-# The dedicated App token performs the merge; GITHUB_TOKEN only reads the PR to identify it.
+# The dedicated App token performs the body edit and the merge; GITHUB_TOKEN only
+# reads the PR to identify it and checks out the trusted default-branch scripts.
 permissions:
+  contents: read
   pull-requests: read
 
 jobs:
@@ -56,6 +58,42 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
           permission-workflows: write
+      # Check out the trusted default-branch copy of the override renderer. A
+      # workflow_run job resolves to the default branch's commit, so a Dependabot
+      # PR that modifies the script can never influence this run.
+      - name: Checkout override renderer
+        if: steps.pr.outputs.number != ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: scripts/ci/dependabot-commit-override.sh
+          sparse-checkout-cone-mode: false
+      # Rewrite the PR body with a release-please commit-override block so the
+      # changelog lists each updated package instead of the opaque group title.
+      # Fail-safe: an unparseable message or an already-current body skips the
+      # edit and the squash title renders as before; continue-on-error keeps a
+      # failure here from ever blocking the merge.
+      - name: Write per-package changelog override
+        if: steps.pr.outputs.number != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}" --jq '.commit.message' > /tmp/commit-msg
+          gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""' > /tmp/pr-body
+          new_body="$(sh scripts/ci/dependabot-commit-override.sh render /tmp/pr-body < /tmp/commit-msg)"
+          if [ -z "${new_body}" ]; then
+            echo "No dependency metadata parsed; leaving the body unchanged."
+            exit 0
+          fi
+          if [ "${new_body}" = "$(cat /tmp/pr-body)" ]; then
+            echo "Override already current."
+            exit 0
+          fi
+          gh api -X PATCH "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" -f body="${new_body}"
+          echo "Wrote per-package override to PR #${PR_NUMBER}."
       # Arm auto-merge with the App token so the completed merge is attributed to the App
       # and its push to main triggers the Release Pipeline.
       - name: Enable auto-merge
