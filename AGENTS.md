@@ -718,8 +718,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   makes "a fork never reaches the credential step" true rather than merely survivable). The
   `publish` job re-asserts the
   still-editable draft (same id,
-  same exact asset set) immediately before publishing, then verifies, pushes the tap, and runs
-  release-please phase 2. Publish is additionally gated on `scripts/release/audit-formula.sh`
+  same exact asset set) immediately before publishing, then verifies and pushes the tap; a
+  separate `candidate-pr` job (gated on `publish`) then runs release-please phase 2. Phase 2
+  lives in its own job, not inside `publish`, so a flake computing the next-release candidate
+  can never fail `publish` and skip the post-publish channel jobs (cynative#140). Publish is
+  additionally gated on `scripts/release/audit-formula.sh`
   (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`
   job); any pre-publish failure leaves the draft intact. Publish requires
   `result == 'success'` from every gate job (not `!= 'failure'`), so a cancelled gate blocks the
