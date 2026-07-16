@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.2](https://github.com/cynative/cynative/compare/v1.5.1...v1.5.2) (2026-07-16)
+
+
+### Bug Fixes
+
+* bound the GCP token refresh with a client-side HTTP timeout ([#136](https://github.com/cynative/cynative/issues/136)) ([3f66e87](https://github.com/cynative/cynative/commit/3f66e87af80d437a4dc37284aaef8d8503d0b467)), closes [#131](https://github.com/cynative/cynative/issues/131)
+* bound the Kubernetes ClusterRole preflight against a stalled cluster ([#130](https://github.com/cynative/cynative/issues/130)) ([fc16c28](https://github.com/cynative/cynative/commit/fc16c287d2c0db3389ac5e813b26ed6742c7d56e))
+* **deps:** Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#124](https://github.com/cynative/cynative/issues/124)) ([15aa538](https://github.com/cynative/cynative/commit/15aa5383bd6462f1e0e756d7252555a5c23d9c58))
+* **deps:** Bump the all-dependencies group with 2 updates ([#135](https://github.com/cynative/cynative/issues/135)) ([2134362](https://github.com/cynative/cynative/commit/213436276e742526cfba05b67d50936bf7388773))
+* **deps:** Bump the all-dependencies group with 23 updates ([#128](https://github.com/cynative/cynative/issues/128)) ([6db1011](https://github.com/cynative/cynative/commit/6db101106eb71ffb0a2fb597f36a588b1cbd1602))
+* **deps:** Bump the all-dependencies group with 4 updates ([#110](https://github.com/cynative/cynative/issues/110)) ([7d733a9](https://github.com/cynative/cynative/commit/7d733a924d22692da9203fb8533d5675b2437b8f))
+* **deps:** pin go-msix to v0.3.1 to keep the release snapshot building ([#132](https://github.com/cynative/cynative/issues/132)) ([b0814fa](https://github.com/cynative/cynative/commit/b0814fa042b1ef8b561ce286084c9a18b757998b))
+
 ## [1.5.1](https://github.com/cynative/cynative/compare/v1.5.0...v1.5.1) (2026-07-10)
 
 
