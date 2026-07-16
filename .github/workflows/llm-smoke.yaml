@@ -4,20 +4,23 @@ name: Live LLM smoke
 # manifest .github/live-llm-manifest.json (cynative#50). Each enabled manifest row
 # is one matrix job: a provider x suite pair. The manifest carries the provider
 # details (id, model variable, suite, required-or-optional, auth family) so adding
-# or disabling a same-family provider is a one-row manifest edit, not a workflow
-# rewrite; internal/llm/livellm_manifest_test.go validates it fail-closed under the
+# or disabling a row for an already-wired provider is a one-row manifest edit, not
+# a workflow rewrite (a new provider needs its family's credential wiring too);
+# internal/llm/livellm_manifest_test.go validates it fail-closed under the
 # required `Lint & Test` check, so a malformed row blocks merge.
 #
-# The `plan` job turns the manifest into two per-family matrices; the smoke jobs
+# The `plan` job turns the manifest into three per-family matrices; the smoke jobs
 # consume them. Credential mechanics genuinely differ per family and cannot be
 # expressed as data, so each auth family has its own job: `gcp-smoke` authenticates
-# to GCP project cynative-cli-ci via keyless Workload Identity Federation, and
+# to GCP project cynative-cli-ci via keyless Workload Identity Federation,
 # `aws-smoke` authenticates to AWS via keyless GitHub OIDC role assumption under a
-# static `environment: aws-ci` (the stable OIDC subject the AWS role trusts). A new
-# auth family is the one deliberate case that adds a job. Mirrors install-e2e.yaml's
-# detect gating, so the heavy live runs only fire for release-please PRs or a manual
-# dispatch, and every credential step is gated to same-repo events so untrusted
-# forks never reach it. Not a required status check.
+# static `environment: aws-ci` (the stable OIDC subject the AWS role trusts), and
+# `api-smoke` runs the direct API-key providers (OpenAI, Anthropic) with real
+# long-lived secrets held behind the reviewer-protected `environment:
+# llm-api-keys`. A new auth family is the one deliberate case that adds a job.
+# Mirrors install-e2e.yaml's detect gating, so the heavy live runs only fire for
+# release-please PRs or a manual dispatch, and every credential step is gated to
+# same-repo events so untrusted forks never reach it. Not a required status check.
 on:
   # Include `labeled` (on top of the opened/synchronize/reopened defaults) so the
   # `autorelease: pending` fallback in the detect job actually fires when that
@@ -28,6 +31,15 @@ on:
 
 permissions:
   contents: read
+
+# One live run per PR: an environment-gated job can wait on reviewer approval for
+# up to 30 days, so without this every push to a release PR would stack another
+# pending run. PR runs share a PR-scoped group and cancel their predecessor; a
+# manual dispatch gets a per-run group so it never cancels (or is cancelled by)
+# anything else.
+concurrency:
+  group: llm-smoke-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   detect:
@@ -70,6 +82,8 @@ jobs:
       gcp_has: ${{ steps.build.outputs.gcp_has }}
       aws_matrix: ${{ steps.build.outputs.aws_matrix }}
       aws_has: ${{ steps.build.outputs.aws_has }}
+      api_matrix: ${{ steps.build.outputs.api_matrix }}
+      api_has: ${{ steps.build.outputs.api_has }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build per-family matrices from the manifest
@@ -84,24 +98,28 @@ jobs:
           # strategy evaluation instead of skipping).
           gcp="$(jq -c '{include: [.[] | select(.enabled and .auth == "gcp-wif") | {id, provider, suite, model_var, required, require_no_connectors}]}' "$MANIFEST")"
           aws="$(jq -c '{include: [.[] | select(.enabled and .auth == "aws-oidc") | {id, provider, suite, model_var, role_var, required, require_no_connectors}]}' "$MANIFEST")"
+          api="$(jq -c '{include: [.[] | select(.enabled and .auth == "api-key") | {id, provider, suite, model_var, required, require_no_connectors}]}' "$MANIFEST")"
           enabled_n="$(jq '[.[] | select(.enabled)] | length' "$MANIFEST")"
           gcp_n="$(jq '[.[] | select(.enabled and .auth == "gcp-wif")] | length' "$MANIFEST")"
           aws_n="$(jq '[.[] | select(.enabled and .auth == "aws-oidc")] | length' "$MANIFEST")"
+          api_n="$(jq '[.[] | select(.enabled and .auth == "api-key")] | length' "$MANIFEST")"
           # Fail closed: every enabled row must belong to a known auth family, so an
           # enabled row with an unknown/typo'd auth turns this job red instead of
           # silently vanishing from every matrix (the Go validator is the merge-time
           # guard; this is the run-time backstop for a dispatch on unmerged code).
-          if [ "$enabled_n" -ne "$((gcp_n + aws_n))" ]; then
-            echo "::error::$enabled_n enabled rows but only $gcp_n gcp-wif + $aws_n aws-oidc; an enabled row has an unknown auth." >&2
+          if [ "$enabled_n" -ne "$((gcp_n + aws_n + api_n))" ]; then
+            echo "::error::$enabled_n enabled rows but only $gcp_n gcp-wif + $aws_n aws-oidc + $api_n api-key; an enabled row has an unknown auth." >&2
             exit 1
           fi
           {
             printf 'gcp_matrix=%s\n' "$gcp"
             printf 'aws_matrix=%s\n' "$aws"
+            printf 'api_matrix=%s\n' "$api"
             printf 'gcp_has=%s\n' "$([ "$gcp_n" -gt 0 ] && echo true || echo false)"
             printf 'aws_has=%s\n' "$([ "$aws_n" -gt 0 ] && echo true || echo false)"
+            printf 'api_has=%s\n' "$([ "$api_n" -gt 0 ] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
-          printf 'enabled: %s | gcp rows: %s | aws rows: %s\n' "$enabled_n" "$gcp_n" "$aws_n"
+          printf 'enabled: %s | gcp rows: %s | aws rows: %s | api rows: %s\n' "$enabled_n" "$gcp_n" "$aws_n" "$api_n"
 
   gcp-smoke:
     name: Live LLM / ${{ matrix.id }}
