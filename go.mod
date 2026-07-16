@@ -34,7 +34,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	google.golang.org/api v0.288.0
+	google.golang.org/api v0.289.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/client-go v0.36.2
@@ -114,7 +114,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.14 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.29 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.30 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.33 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.34 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager v0.3.2 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30 // indirect
@@ -126,7 +126,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.30 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.31 // indirect
 	github.com/aws/aws-sdk-go-v2/service/kms v1.54.1 // indirect
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.105.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.4.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.32.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.37.1 // indirect
@@ -200,7 +200,7 @@ require (
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/dlclark/regexp2 v1.12.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.0 // indirect
-	github.com/docker/cli v29.6.1+incompatible // indirect
+	github.com/docker/cli v29.6.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
