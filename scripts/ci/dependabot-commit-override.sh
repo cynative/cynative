@@ -101,6 +101,11 @@ parsed=$(awk '
 			if (name !~ /^[A-Za-z0-9@._\/+-]+$/) exit 0
 			if (nv != "" && nv !~ /^[A-Za-z0-9._+-]+$/) exit 0
 			if (old != "" && old !~ /^[A-Za-z0-9._+-]+$/) old = ""
+			# A marker substring in any field would corrupt the override
+			# framing (release-please and our own strip scan both match
+			# markers unanchored), so the render abandons, the same
+			# fail-safe as the charset checks above.
+			if ((name old nv) ~ /(BEGIN|END)_(COMMIT_OVERRIDE|NESTED_COMMIT)/) exit 0
 			out = out name "\t" old "\t" nv "\n"
 		}
 		printf "%s", out
@@ -142,7 +147,12 @@ block=$(printf '%s' "$parsed" | awk -F '\t' -v bodylen="$bodylen" -v max="$max_b
 		for (i = 2; i <= NR; i++) {
 			add = "\nBEGIN_NESTED_COMMIT\n" lines[i] "\nEND_NESTED_COMMIT"
 			cand = block add
-			if (bodylen + 2 + length(cand) + length(tail) + reserve > max) break
+			# Only a later entry could still force a summary, so the
+			# reserve is charged for every candidate except the last:
+			# a final entry that fits must not be collapsed into a
+			# "1 more dependencies" summary it does not need.
+			r2 = (i < NR) ? reserve : 0
+			if (bodylen + 2 + length(cand) + length(tail) + r2 > max) break
 			block = cand
 			used++
 		}

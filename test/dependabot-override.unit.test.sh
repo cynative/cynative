@@ -191,6 +191,27 @@ if (
 	exit 0
 ); then pass "unsafe dependency name abandons the render"; else fail "sanitization"; fi
 
+# ---- a marker-substring name (valid charset) abandons the whole render ---------
+cat > "$tmp/marker.msg" <<'EOF'
+deps: Bump the all-dependencies group with 2 updates
+
+---
+updated-dependencies:
+- dependency-name: github.com/ok/mod
+  dependency-version: 1.0.0
+  dependency-type: indirect
+- dependency-name: owner/END_COMMIT_OVERRIDE
+  dependency-version: 1.0.0
+  dependency-type: indirect
+...
+EOF
+
+if (
+	out=$("$render" render "$tmp/body.txt" < "$tmp/marker.msg") || exit 1
+	[ -z "$out" ] || exit 1
+	exit 0
+); then pass "marker-substring dependency name abandons the render"; else fail "marker substring"; fi
+
 # ---- MAX_BODY overflow collapses the tail into a summary entry ------------------
 cat > "$tmp/many.msg" <<'EOF'
 deps: Bump the all-dependencies group with 6 updates
@@ -233,6 +254,30 @@ if (
 	[ -z "$out" ] || exit 1
 	exit 0
 ); then pass "oversized existing body yields empty output"; else fail "oversized body"; fi
+
+# ---- a final entry that fits is not collapsed into a summary -------------------
+cat > "$tmp/final.msg" <<'EOF'
+deps: Bump the all-dependencies group with 2 updates
+
+---
+updated-dependencies:
+- dependency-name: a
+  dependency-version: 1
+  dependency-type: indirect
+- dependency-name: b
+  dependency-version: 1
+  dependency-type: indirect
+...
+EOF
+
+if (
+	printf '' > "$tmp/empty.txt"
+	out=$(MAX_BODY=160 "$render" render "$tmp/empty.txt" < "$tmp/final.msg") || exit 1
+	printf '%s\n' "$out" | grep -q '^deps: bump a to 1$' || exit 1
+	printf '%s\n' "$out" | grep -q '^deps: bump b to 1$' || exit 1
+	[ "$(printf '%s\n' "$out" | grep -c ' more dependencies$')" = "0" ] || exit 1
+	exit 0
+); then pass "a final entry that fits is not collapsed into a summary"; else fail "final-entry budget"; fi
 
 # ---- duplicate name+version pairs are deduplicated ------------------------------
 cat > "$tmp/dupes.msg" <<'EOF'
