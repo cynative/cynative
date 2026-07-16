@@ -51,11 +51,18 @@ scoops:
       owner: cynative
       name: scoop-bucket
       branch: main
+    # skip_upload: goreleaser still generates its Scoop manifest locally under
+    # dist/ but no longer pushes it during the pre-publish build (cynative#103).
+    # The live manifest is rendered and pushed after publish by
+    # scripts/release/render-scoop.sh + publish-scoop.sh, which is the
+    # authoritative renderer; the fields below only shape goreleaser's inert
+    # local copy.
+    skip_upload: true
     # Scoop's recommended layout keeps manifests in a `bucket/` subdirectory
     # (mirrors the official ScoopInstaller bucket template).
     directory: bucket
     homepage: "https://github.com/cynative/cynative"
-    description: "Agentic security research across your code, cloud and runtime — read-only by construction"
+    description: "Agentic security research across your code, cloud, and runtime (read-only)"
     license: "Apache-2.0"
 
 release:

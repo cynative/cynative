@@ -113,10 +113,11 @@ sh-test:
 	@sh test/install.unit.test.sh
 	@sh test/install.smoke.test.sh
 	@sh test/e2e-guardrails.unit.test.sh
+	@sh test/render-scoop.unit.test.sh
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector audit parsers)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + render-scoop unit + connector audit parsers)"
 
 SHELL_COMPLEXITY_MAX := 6
 

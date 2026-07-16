@@ -1,18 +1,66 @@
 name: Dependabot auto-merge
 
-on: pull_request
+# Runs in the trusted default-branch context after CI completes on a PR, so the App key
+# (an Actions secret) is never exposed to a Dependabot PR's head-modified workflow code,
+# and the merge is attributed to the App so its push to main triggers the Release Pipeline
+# (GITHUB_TOKEN merges never trigger further workflows, which left the release PR stale).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
+# The dedicated App token performs the merge; GITHUB_TOKEN only reads the PR to identify it.
 permissions:
-  contents: write
-  pull-requests: write
+  pull-requests: read
 
 jobs:
-  dependabot:
+  automerge:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
     steps:
-      - name: Enable auto-merge
-        run: gh pr merge --auto --squash "$PR_URL"
+      # Identify the PR from the completed run's head SHA using the read-only GITHUB_TOKEN.
+      # Only an open, base-main, Dependabot-authored PR whose current head is still exactly
+      # that SHA proceeds; everything else no-ops (human PRs, push-triggered CI runs, or a
+      # stale run after a Dependabot rebase, which the new head's CI run re-arms), so the
+      # App token is never even minted for them.
+      - name: Resolve Dependabot PR
+        id: pr
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          num="$(gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+            --jq '[.[] | select(.state=="open" and .base.ref=="main" and .user.login=="dependabot[bot]" and .head.sha==env.HEAD_SHA)][0].number // empty')"
+          if [ -n "${num}" ]; then
+            echo "number=${num}" >> "${GITHUB_OUTPUT}"
+            echo "Matched Dependabot PR #${num}"
+          else
+            echo "No matching open Dependabot PR for ${HEAD_SHA}; nothing to do."
+          fi
+      # Mint a dedicated-App installation token, scoped to this repo and downscoped to the
+      # three permissions arming auto-merge on a workflow-touching PR needs. Only reached
+      # for a real Dependabot PR. This is the trusted default-branch workflow, so the key
+      # is never handed to unreviewed PR code.
+      - name: Generate App Token
+        id: app-token
+        if: steps.pr.outputs.number != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.AUTOMERGE_APP_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cynative
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+      # Arm auto-merge with the App token so the completed merge is attributed to the App
+      # and its push to main triggers the Release Pipeline.
+      - name: Enable auto-merge
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: gh pr merge --auto --squash --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}"
