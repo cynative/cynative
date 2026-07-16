@@ -20,7 +20,10 @@ name: Live LLM smoke
 # llm-api-keys`. A new auth family is the one deliberate case that adds a job.
 # Mirrors install-e2e.yaml's detect gating, so the heavy live runs only fire for
 # release-please PRs or a manual dispatch, and every credential step is gated to
-# same-repo events so untrusted forks never reach it. Not a required status check.
+# same-repo events so untrusted forks never reach it. The `Live LLM gate` summary
+# job is a required status check: on a release-please PR a red, cancelled, or
+# skipped live leg blocks the merge, while a non-release PR passes trivially
+# (everything skips).
 on:
   # Include `labeled` (on top of the opened/synchronize/reopened defaults) so the
   # `autorelease: pending` fallback in the detect job actually fires when that
@@ -412,3 +415,42 @@ jobs:
             llm-tools-smoke) exec make llm-tools-smoke ;;
             *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
           esac
+
+  gate:
+    name: Live LLM gate
+    needs: [detect, plan, gcp-smoke, aws-smoke, api-smoke]
+    # The one stable check name the ruleset pins as a required status check (matrix
+    # leg names change with the manifest, so the legs themselves cannot be pinned).
+    # Runs on every PR: on a non-release PR the live jobs skip and this passes
+    # trivially; on a release-please PR or a dispatch it fails unless every live job
+    # actually SUCCEEDED. GitHub satisfies a required check with a conditionally
+    # skipped job, which would fail open, so this job runs on always() and asserts
+    # results explicitly (result == 'success', never != 'failure': a cancelled or
+    # skipped live leg must block the merge, not slip past it).
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Assert live legs ran and passed
+        env:
+          DETECT: ${{ needs.detect.result }}
+          RELEVANT: ${{ needs.detect.outputs.relevant }}
+          PLAN: ${{ needs.plan.result }}
+          GCP: ${{ needs.gcp-smoke.result }}
+          AWS: ${{ needs.aws-smoke.result }}
+          API: ${{ needs.api-smoke.result }}
+        run: |
+          if [ "$DETECT" != "success" ]; then
+            echo "::error::detect did not succeed (result: $DETECT)" >&2
+            exit 1
+          fi
+          if [ "$RELEVANT" != "true" ]; then
+            echo "not a release-please PR or dispatch; nothing to gate"
+            exit 0
+          fi
+          rc=0
+          [ "$PLAN" = "success" ] || { echo "::error::plan result: $PLAN" >&2; rc=1; }
+          [ "$GCP" = "success" ] || { echo "::error::gcp-smoke result: $GCP" >&2; rc=1; }
+          [ "$AWS" = "success" ] || { echo "::error::aws-smoke result: $AWS" >&2; rc=1; }
+          [ "$API" = "success" ] || { echo "::error::api-smoke result: $API" >&2; rc=1; }
+          exit $rc

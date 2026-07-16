@@ -651,16 +651,16 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 ### CI and release
 
 - `.github/workflows/ci.yaml` runs `make check` as the single **`Lint & Test`** job on every PR
-  against `main`; a bootstrap step installs the pinned shellcheck (download + SHA-256 verify)
-  and the pinned Pester/PSScriptAnalyzer modules, versions read from the `Makefile` via
-  `make -s print-*`. The job is gated to pull requests (the workflow also fires on push to
-  `main`, where it skips). Direct pushes to `main` are **blocked** by an active GitHub
-  **ruleset** (squash-only merges, linear history, required review-thread resolution, no human
-  bypass) whose required status checks, under a strict up-to-date policy, are **`Lint & Test`**,
-  **`Validate PR title`** (`semantic-pr.yaml`), and **`Build & smoke-test macOS packaging
-  toolchain`** (`pkg-tools.yaml`); the ruleset also runs Copilot code review on each push. The
-  pre-commit hook runs the fast hermetic `make check-go`, a local mirror of the Go half of the
-  gate, not the enforcement boundary.
+  against `main`; a bootstrap step installs the pinned shellcheck (download + SHA-256 verify) and
+  the pinned Pester/PSScriptAnalyzer modules, versions read from the `Makefile` via `make -s
+  print-*`. The job is gated to pull requests (the workflow also fires on push to `main`, where
+  it skips). Direct pushes to `main` are **blocked** by an active GitHub **ruleset** (squash-only
+  merges, linear history, required review-thread resolution, no human bypass) whose required
+  status checks, under a strict up-to-date policy, are **`Lint & Test`**, **`Validate PR title`**
+  (`semantic-pr.yaml`), **`Build & smoke-test macOS packaging toolchain`** (`pkg-tools.yaml`),
+  and **`Live LLM gate`** (`llm-smoke.yaml`); the ruleset also runs Copilot code review on each
+  push. The pre-commit hook runs the fast hermetic `make check-go`, a local mirror of the Go half
+  of the gate, not the enforcement boundary.
 - `.github/workflows/install-e2e.yaml` exercises the real installer against the goreleaser
   release archives for release confidence. It does not run on normal PRs: a `detect` job flags
   release-please PRs and manual `workflow_dispatch`, one `snapshot` job builds the archives
@@ -680,8 +680,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   reviewer-protected `environment: llm-api-keys`; contents-read only, no id-token, in-shell secret
   selection) consume them. Same `detect` gating and fork-trust boundary as `install-e2e.yaml`, and
   `internal/llm/livellm_manifest_test.go` validates the manifest fail-closed under `Lint & Test`,
-  so a malformed row blocks merge. A new auth family is the one case that adds a job. Not a
-  required status check.
+  so a malformed row blocks merge. A new auth family is the one case that adds a job. The `Live LLM
+  gate` summary job is a required status check (added to the ruleset post-merge): it asserts every
+  live leg's result is exactly `success` when the detect gate fired, so a release-please PR cannot
+  merge with a red, cancelled, or unapproved-and-expired live run, while non-release PRs pass
+  trivially because everything skips. The matrix legs themselves stay unpinned (their names change
+  with the manifest).
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. Dependency bumps use the `deps:` type
