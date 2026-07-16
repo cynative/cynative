@@ -61,8 +61,11 @@ jobs:
       # Check out the trusted default-branch copy of the override renderer. A
       # workflow_run job resolves to the default branch's commit, so a Dependabot
       # PR that modifies the script can never influence this run.
+      # continue-on-error here too: a checkout failure must degrade to the group title, never
+      # block the merge.
       - name: Checkout override renderer
         if: steps.pr.outputs.number != ''
+        continue-on-error: true
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: scripts/ci/dependabot-commit-override.sh
