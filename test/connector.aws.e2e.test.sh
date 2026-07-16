@@ -124,6 +124,21 @@ def result_http_records(path):
     return out
 
 
+def _fold_keys(d, what):
+    """Mirror Go's case-insensitive JSON field matching: the transport decodes the
+    raw arguments with encoding/json, which binds e.g. "HEADERS" to the headers field
+    or "Method" to method, so the parser must see the same view or a miscased key could
+    add wire behavior invisible to the allow-list sweep. A case-fold collision is
+    ambiguous (which value Go bound is decoder-internal), so it fails closed."""
+    out = {}
+    for k, v in d.items():
+        f = k.casefold() if isinstance(k, str) else k
+        if f in out:
+            insecure("case-folded duplicate key %r in %s - failing closed" % (k, what))
+        out[f] = v
+    return out
+
+
 def args_of(rec):
     a = rec.get("arguments")
     if isinstance(a, str):
@@ -131,7 +146,16 @@ def args_of(rec):
             a = json.loads(a)
         except ValueError:
             die("audit: unparseable http_request arguments")
-    return a if isinstance(a, dict) else {}
+    if not isinstance(a, dict):
+        return {}
+    return _fold_keys(a, "http_request arguments")
+
+
+def aws_service_of(a):
+    """The aws_auth.service claim, folded the way Go binds it (aws_auth is a struct, so
+    "Service"/"SERVICE" bind to the Service field), or None when absent."""
+    g = a.get("aws_auth")
+    return _fold_keys(g, "aws_auth").get("service") if isinstance(g, dict) else None
 
 
 def result_of(rec):
@@ -208,7 +232,10 @@ def action_of(rec):
 
 def header_of(rec, name):
     for h in args_of(rec).get("headers") or []:
-        if isinstance(h, dict) and (h.get("key") or "").strip().lower() == name:
+        if not isinstance(h, dict):
+            continue
+        h = _fold_keys(h, "http_request header")
+        if (h.get("key") or "").strip().lower() == name:
             return (h.get("value") or "").strip()
     return None
 
@@ -255,8 +282,8 @@ def canary_defects(rec, role):
         bad.append("url=%r, want %r" % (a.get("url"), CANARY_URL))
     if a.get("auth_provider") != "aws":
         bad.append("auth_provider=%r" % a.get("auth_provider"))
-    if (a.get("aws_auth") or {}).get("service") != "iam":
-        bad.append("aws_auth.service=%r, want iam" % (a.get("aws_auth") or {}).get("service"))
+    if aws_service_of(a) != "iam":
+        bad.append("aws_auth.service=%r, want iam" % aws_service_of(a))
     if header_of(rec, "host") is not None:
         bad.append("carries a Host override")
     # Media type only, exact: a substring check would accept
@@ -325,7 +352,7 @@ def mode_read(recs, role, nonce):
             continue
         if action_of(r) not in TAG_READS:
             continue
-        if (a.get("aws_auth") or {}).get("service") != "iam":
+        if aws_service_of(a) != "iam":
             continue
         if one(params_of(r), "RoleName") != role:
             continue
@@ -392,7 +419,11 @@ PY
 # (RETURN traps are a bashism, SC3047, and the main body never runs in selftest mode).
 selftest() {
 	td=$(mktemp -d)
-	trap 'rm -rf "$td"' EXIT INT TERM
+	# Cleanup on EXIT only; INT/TERM clean up and exit 130/143 so an interrupt is not
+	# absorbed and misread as a plain failure (see the main-body trap below).
+	trap 'rm -rf "$td"' EXIT
+	trap 'trap - EXIT; rm -rf "$td"; exit 130' INT
+	trap 'trap - EXIT; rm -rf "$td"; exit 143' TERM
 	command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found\n' >&2; exit 1; }
 	p="$td/parser.py"
 	write_parser "$p"
@@ -446,6 +477,18 @@ selftest() {
 		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":$rargs,\"outcome\":\"ok\",\"result\":\"$ok200\"}" \
 		"{not json" \
 		>"$td/read_malformed.log"
+	# A read whose method key is miscased: Go binds "METHOD" to the method field and
+	# sends the GET, so the parser must fold keys the same way to see the sanctioned read.
+	fmargs="{\"METHOD\":\"GET\",\"url\":\"$gurl\",\"auth_provider\":\"aws\",\"aws_auth\":{\"service\":\"iam\"}}"
+	printf '%s\n' \
+		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":$fmargs,\"outcome\":\"ok\",\"result\":\"$ok200\"}" \
+		>"$td/read_folded_method.log"
+	# Two keys that collide after case folding (method + Method) are ambiguous - which
+	# one Go bound is decoder-internal - so the parser fails closed like a duplicate key.
+	fcargs="{\"method\":\"GET\",\"Method\":\"GET\",\"url\":\"$gurl\",\"auth_provider\":\"aws\",\"aws_auth\":{\"service\":\"iam\"}}"
+	printf '%s\n' \
+		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":$fcargs,\"outcome\":\"ok\",\"result\":\"$ok200\"}" \
+		>"$td/read_fold_collision.log"
 
 	# CANARY. The sanctioned shape: denied by the policy gate, never dispatched.
 	cbody="Action=TagRole&Version=2010-05-08&RoleName=$role&Tags.member.1.Key=cynative-e2e&Tags.member.1.Value=canary"
@@ -522,6 +565,19 @@ selftest() {
 	printf '%s\n' \
 		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":$rargs,\"outcome\":\"ok\",\"result\":\"$ok200\"}" \
 		>"$td/canary_none.log"
+	# The sanctioned canary with miscased header-item keys ("KEY"/"VALUE"): they bind to
+	# the Header struct the same way, so the Content-Type must still be recognized once
+	# folded, and the shape stays exactly the sanctioned canary.
+	fhargs="{\"method\":\"POST\",\"url\":\"https://iam.amazonaws.com/\",\"auth_provider\":\"aws\",\"aws_auth\":{\"service\":\"iam\"},\"headers\":[{\"KEY\":\"Content-Type\",\"VALUE\":\"application/x-www-form-urlencoded\"}],\"body\":\"$cbody\"}"
+	printf '%s\n' \
+		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":$fhargs,\"outcome\":\"error\",\"result\":\"$denial\"}" \
+		>"$td/canary_folded_hdr.log"
+	# The sanctioned canary with a miscased aws_auth.service key ("Service"): it binds to
+	# the Service field, so the claim must still resolve to iam once the sub-object is folded.
+	fsargs="{\"method\":\"POST\",\"url\":\"https://iam.amazonaws.com/\",\"auth_provider\":\"aws\",\"aws_auth\":{\"Service\":\"iam\"},\"headers\":[{\"key\":\"Content-Type\",\"value\":\"application/x-www-form-urlencoded\"}],\"body\":\"$cbody\"}"
+	printf '%s\n' \
+		"{\"tool\":\"http_request\",\"phase\":\"result\",\"arguments\":$fsargs,\"outcome\":\"error\",\"result\":\"$denial\"}" \
+		>"$td/canary_folded_service.log"
 
 	fails=0
 	# expect_code EXPECTED MODE... - the parser's exit code IS the contract: 1 is a
@@ -545,6 +601,8 @@ selftest() {
 	expect_code 1 read   "$td/read_notag.log"         "$role" "$nonce"
 	expect_code 4 read   "$td/read_foreign.log"       "$role" "$nonce"
 	expect_code 1 read   "$td/read_malformed.log"     "$role" "$nonce"
+	expect_code 0 read   "$td/read_folded_method.log" "$role" "$nonce"
+	expect_code 4 read   "$td/read_fold_collision.log" "$role" "$nonce"
 	expect_code 0 canary "$td/canary_ok.log"          "$role"
 	expect_code 4 canary "$td/canary_succeeded.log"   "$role"
 	expect_code 4 canary "$td/canary_spoof.log"       "$role"
@@ -562,12 +620,14 @@ selftest() {
 	expect_code 4 canary "$td/canary_dispatched.log"  "$role"
 	expect_code 4 canary "$td/canary_bodyfail.log"    "$role"
 	expect_code 1 canary "$td/canary_none.log"        "$role"
+	expect_code 0 canary "$td/canary_folded_hdr.log"     "$role"
+	expect_code 0 canary "$td/canary_folded_service.log" "$role"
 
 	if [ "$fails" -ne 0 ]; then
 		printf 'selftest: %d case(s) FAILED\n' "$fails" >&2
 		exit 1
 	fi
-	printf 'selftest: OK (22 cases)\n' >&2
+	printf 'selftest: OK (26 cases)\n' >&2
 }
 
 # --- offline self-test: verify the embedded audit parser without credentials ---
@@ -601,7 +661,15 @@ cleanup() {
 	fi
 	rm -rf "$workdir"
 }
-trap cleanup EXIT INT TERM
+# Cleanup runs on EXIT only. A trap that also caught INT/TERM would, in POSIX sh,
+# RESUME after the handler returned, so a Ctrl-C or TERM landing between commands
+# would be swallowed: the interrupted bounded run would surface as a plain nonzero
+# exit, e2e_classify_run would read it as a retryable failure, and the retry loop
+# could launch another live attempt. Instead the signal handlers clean up once
+# (clearing the EXIT trap first) and exit with the conventional 130/143.
+trap cleanup EXIT
+trap 'trap - EXIT; cleanup; exit 130' INT
+trap 'trap - EXIT; cleanup; exit 143' TERM
 
 # Build the binary (or accept a prebuilt one, passed as $1) so the test exercises
 # this checkout.
