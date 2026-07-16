@@ -19,8 +19,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      # Consumed by the pre-publish smoke and publish jobs below (and via
-      # them by the post-publish channel smokes).
+      # Consumed directly by the pre-publish smoke, publish, candidate-pr,
+      # and post-publish channel jobs below (each lists `release` in its own
+      # needs and reads these outputs directly).
       release_created: ${{ steps.release-please.outputs.release_created }}
       tag_name: ${{ steps.release-please.outputs.tag_name }}
       sha: ${{ steps.release-please.outputs.sha }}
@@ -56,8 +57,9 @@ jobs:
       # just-created draft is invisible to release-please (lazy tag, null
       # tagCommit), so a candidate computed now would be draft-blind and span
       # bogus history (observed live: full-history 0.4.0 candidates right
-      # after v0.3.1 and v0.3.2). Phase 2 at the end of the run computes the
-      # candidate once the release is published and visible.
+      # after v0.3.1 and v0.3.2). Phase 2 (the candidate-pr job) computes the
+      # candidate at the end of the run, once the release is published and
+      # visible.
       #
       # RECOVERY after a failed run (nothing published, nothing immutable):
       #   gh release delete <tag> --yes
@@ -548,18 +550,20 @@ jobs:
       id-token: write
 
   # ---- Publish: the instant of immutability ----------------------------
+  # Runs only on release runs, once every pre-publish gate has SUCCEEDED.
   # Everything before this job's "Publish release" step still runs against
   # an editable draft: any failure leaves nothing published and nothing
-  # immutable. The compound if is the skipped-needs handler: !cancelled()
-  # (a status function) forces evaluation even though the pre-publish gate
-  # jobs are skipped on a plain push, so release-please phase 2 below still
-  # runs; on a release run every gate job must have SUCCEEDED. `== 'success'`
-  # (not `!= 'failure'`) is what makes a skipped or cancelled gate block the
-  # publish rather than wave it through.
+  # immutable. The compound if - !cancelled() plus explicit `== 'success'`
+  # result checks (not `!= 'failure'`) - is what makes a skipped or cancelled
+  # gate block the publish rather than wave it through. On a plain push
+  # (release_created != 'true') this skips: nothing is published, and the
+  # candidate-pr job below computes the next-release candidate instead. A
+  # green `publish` therefore means "published + verified + tap pushed",
+  # nothing more (cynative#140).
   publish:
     name: Publish release
     needs: [release, macos-pkg-smoke, archive-smoke, connector-gcp-e2e, connector-aws-e2e, connector-github-e2e]
-    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || (needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-gcp-e2e.result == 'success' && needs.connector-aws-e2e.result == 'success' && needs.connector-github-e2e.result == 'success')) }}
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-gcp-e2e.result == 'success' && needs.connector-aws-e2e.result == 'success' && needs.connector-github-e2e.result == 'success' }}
     runs-on: ubuntu-latest
     # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
     # plus every short step with slack, so the job limit can never fire
@@ -567,10 +571,9 @@ jobs:
     # verification.
     timeout-minutes: 30
     steps:
-      # Fresh token on every publish run, never release-gated: the release
-      # job's token cannot be handed across jobs, phase-2 release-please
-      # needs one on non-release pushes too, and on release runs the smoke
-      # wait would leave an inherited token near expiry.
+      # Fresh token on every release run (never inherited): the release job's
+      # token cannot be handed across jobs, and the pre-publish smoke wait
+      # would leave an inherited token near expiry.
       - name: Generate App Token
         id: publish-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -681,23 +684,54 @@ jobs:
           scripts/release/publish-tap.sh "${ver}" \
             "${RUNNER_TEMP}/release-artifacts/expected-assets.tsv"
 
-      # release-please PHASE 2 - candidate PR only (skip-github-release).
-      # On plain pushes this is the only place the next-release candidate is
-      # created or updated (every earlier step in this job is release-gated,
-      # so the job reduces to token + this step). On release runs it executes
-      # after publish, so the candidate is computed with the new release
-      # visible and correctly bounded - phase 1 never computes candidates, so
-      # draft-blind bogus PRs cannot exist. Deliberately no explicit if
-      # (default success() semantics): after a failed release step the draft
-      # is unpublished and a candidate computed here would be draft-blind;
-      # skipping means no candidate is created at all. Residual edge: a push
-      # to main while a failed release awaits recovery computes its candidate
-      # draft-blind (full-history shape - do not merge it); it is rewritten
-      # correctly by the next push after recovery, or close it manually.
+  # ---- release-please PHASE 2: the next-release candidate PR ------------
+  # Extracted from the publish job (cynative#140) so a flake in this
+  # release-please call can never fail `publish` and thereby skip the
+  # post-publish channel jobs (all of which gate on `publish`). It runs in
+  # parallel with those channel jobs on the same `publish` gate.
+  #
+  # The compound if mirrors the pattern the publish job used to carry:
+  #   - Plain push (release_created != 'true'): the ONLY place the candidate
+  #     is created or updated. publish skips on a plain push, so this gates
+  #     on the `release` success alone (an explicit if lets a skipped
+  #     `publish` need through).
+  #   - Release run: waits for `publish` to SUCCEED, so the candidate is
+  #     computed with the new release published and visible - never
+  #     draft-blind, correctly bounded. A failed or skipped publish (a red
+  #     release-critical step, or a skipped pre-publish gate) leaves the
+  #     draft unpublished, so `publish.result != 'success'` skips this and no
+  #     candidate is created at all.
+  # `!cancelled()` blocks a cancelled run. Phase 1 (in the release job) never
+  # computes candidates, so draft-blind bogus PRs cannot exist. Residual
+  # edge: a push to main while a failed release awaits recovery computes its
+  # candidate draft-blind (full-history shape - do not merge it); the next
+  # push after recovery rewrites it, or close it manually.
+  candidate-pr:
+    name: Compute release candidate PR
+    needs: [release, publish]
+    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.release.outputs.release_created != 'true' || needs.publish.result == 'success') }}
+    runs-on: ubuntu-latest
+    # Bound the job: one release-please invocation plus its token mint.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      # Own token, scoped to cynative only: phase 2 creates/updates the
+      # release PR (contents: write + pull-requests: write via the App's
+      # installation grant) and touches neither the tap nor the bucket.
+      - name: Generate App Token
+        id: candidate-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cynative
+
       - name: Compute release candidate PR
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          token: ${{ steps.publish-token.outputs.token }}
+          token: ${{ steps.candidate-token.outputs.token }}
           skip-github-release: true
 
   # Post-publish public-channel checks. Failure semantics, shared by the
@@ -710,10 +744,12 @@ jobs:
   # patch release. A green `publish` with a red channel smoke means the
   # release published fine but that public channel is broken - investigate
   # and re-run (workflow_dispatch on the smoke workflow), nothing to roll
-  # back. Phase-2 release-please is the last step of the `publish` job, so a
-  # channel-smoke failure cannot block candidate computation. All three jobs
-  # gate on `publish` (implicit success() across all of needs), so they run
-  # only after the release is published and the tap pushed.
+  # back. These jobs gate on `publish` (implicit success() across all of
+  # needs; scoop-smoke additionally on scoop-publish), so they run only after
+  # the release is published and the tap pushed. The candidate-pr job runs in
+  # parallel with them on the same `publish` gate, so a channel-smoke failure
+  # cannot block candidate computation, and - the point of cynative#140 - a
+  # candidate flake can no longer skip these channel jobs.
   # homebrew-smoke (cynative#45) runs after the tap push and validates the
   # brew channel; install-script-smoke (cynative#47) validates the documented
   # curl|sh and irm|iex install paths against the public release assets;
