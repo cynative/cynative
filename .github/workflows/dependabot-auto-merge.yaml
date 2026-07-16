@@ -75,16 +75,19 @@ jobs:
       # Fail-safe: an unparseable message or an already-current body skips the
       # edit and the squash title renders as before; continue-on-error keeps a
       # failure here from ever blocking the merge.
+      # The metadata commit is selected by content, not position: a branch updated by a merge
+      # from main has a metadata-free head commit, and the bump commit is what carries
+      # updated-dependencies.
       - name: Write per-package changelog override
         if: steps.pr.outputs.number != ''
         continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}" --jq '.commit.message' > /tmp/commit-msg
+          gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
+            --jq '[.[].commit.message | select(contains("updated-dependencies:"))] | last // ""' > /tmp/commit-msg
           gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""' > /tmp/pr-body
           new_body="$(sh scripts/ci/dependabot-commit-override.sh render /tmp/pr-body < /tmp/commit-msg)"
           if [ -z "${new_body}" ]; then
