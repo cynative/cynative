@@ -49,6 +49,7 @@ type liveLLMRow struct {
 const (
 	authGCPWIF  = "gcp-wif"
 	authAWSOIDC = "aws-oidc"
+	authAPIKey  = "api-key"
 	suiteNoTool = "llm-smoke"
 	suiteTools  = "llm-tools-smoke"
 	// maxRows is a deliberately small cap on live legs (each is a real,
@@ -60,14 +61,17 @@ const (
 
 // providerAuthAdapter pins each provider to the one credential+env-wiring adapter
 // the workflow implements for it: gcp-wif exports only CYNATIVE_LLM_VERTEX_*,
-// aws-oidc only CYNATIVE_LLM_BEDROCK_*. Membership in llm.ChatProviders() means
-// "chat-capable", not "wired for CI", so a row's (provider, auth) pair must be one
-// of these adapters. A genuinely new provider needs a new adapter (a workflow
-// job), which is the deliberate non-data case; a same-adapter model (another
-// Vertex or Bedrock model id) is a pure manifest edit.
+// aws-oidc only CYNATIVE_LLM_BEDROCK_*, api-key only CYNATIVE_LLM_API_KEY.
+// Membership in llm.ChatProviders() means "chat-capable", not "wired for CI", so
+// a row's (provider, auth) pair must be one of these adapters. A genuinely new
+// provider needs new adapter wiring (a job for a new auth family; a secret and a
+// selection branch for another api-key provider), the deliberate non-data cases;
+// a same-adapter model id is a pure manifest edit.
 var providerAuthAdapter = map[string]string{ //nolint:gochecknoglobals // stateless test data table.
-	"vertex":  authGCPWIF,
-	"bedrock": authAWSOIDC,
+	"vertex":    authGCPWIF,
+	"bedrock":   authAWSOIDC,
+	"openai":    authAPIKey,
+	"anthropic": authAPIKey,
 }
 
 // idPattern and varNamePattern pin the manifest's identifier and variable-name
@@ -156,8 +160,9 @@ func validateRowEnums(r liveLLMRow, validProviders map[string]bool) error {
 	if !validProviders[r.Provider] {
 		return fmt.Errorf("row %q: provider %q is not a known chat provider", r.ID, r.Provider)
 	}
-	if r.Auth != authGCPWIF && r.Auth != authAWSOIDC {
-		return fmt.Errorf("row %q: auth %q must be %q or %q", r.ID, r.Auth, authGCPWIF, authAWSOIDC)
+	if r.Auth != authGCPWIF && r.Auth != authAWSOIDC && r.Auth != authAPIKey {
+		return fmt.Errorf("row %q: auth %q must be one of %q, %q, %q",
+			r.ID, r.Auth, authGCPWIF, authAWSOIDC, authAPIKey)
 	}
 	if providerAuthAdapter[r.Provider] != r.Auth {
 		return fmt.Errorf("row %q: provider %q is wired for auth %q, not %q",
@@ -173,14 +178,15 @@ func validateRowEnums(r liveLLMRow, validProviders map[string]bool) error {
 }
 
 // validateRoleVar enforces that role_var is present and valid exactly for the
-// aws-oidc family (which needs a role ARN to assume); gcp-wif must not carry one.
+// aws-oidc family (which needs a role ARN to assume); gcp-wif and api-key must
+// not carry one.
 func validateRoleVar(r liveLLMRow) error {
 	switch r.Auth {
 	case authAWSOIDC:
 		return validateVarName("role_var", r.ID, r.RoleVar)
-	case authGCPWIF:
+	case authGCPWIF, authAPIKey:
 		if r.RoleVar != "" {
-			return fmt.Errorf("row %q: gcp-wif must not set role_var (got %q)", r.ID, r.RoleVar)
+			return fmt.Errorf("row %q: auth %q must not set role_var (got %q)", r.ID, r.Auth, r.RoleVar)
 		}
 	}
 	return nil
@@ -239,23 +245,47 @@ func TestLiveLLMManifest_CheckedInFileValidates(t *testing.T) {
 		t.Fatalf("unmarshal manifest: %v", uerr)
 	}
 
-	// Golden: the Vertex + Bedrock starters are still present (guards against an
-	// accidental deletion that would silently drop release coverage), and both
-	// auth families are exercised (so the two-family workflow keeps both jobs live).
-	ids := make(map[string]bool, len(rows))
-	auths := make(map[string]bool, len(rows))
-	for _, r := range rows {
-		ids[r.ID] = true
-		auths[r.Auth] = true
+	// Golden: every starter row is present, enabled, and wired as the workflow
+	// expects (guards against an accidental deletion, a silent disable, or a
+	// miswired row quietly dropping release coverage), and every auth family is
+	// exercised by an enabled row (so the three-family workflow keeps all jobs
+	// live). model_var and the flags stay unpinned on purpose: the id and the
+	// adapter map cross-check the rest, and pinning every field would turn each
+	// legitimate manifest tweak into a test edit.
+	starters := map[string]struct{ provider, auth, suite string }{
+		"vertex-notool":    {provider: "vertex", auth: authGCPWIF, suite: suiteNoTool},
+		"vertex-tools":     {provider: "vertex", auth: authGCPWIF, suite: suiteTools},
+		"bedrock-notool":   {provider: "bedrock", auth: authAWSOIDC, suite: suiteNoTool},
+		"openai-notool":    {provider: "openai", auth: authAPIKey, suite: suiteNoTool},
+		"openai-tools":     {provider: "openai", auth: authAPIKey, suite: suiteTools},
+		"anthropic-notool": {provider: "anthropic", auth: authAPIKey, suite: suiteNoTool},
+		"anthropic-tools":  {provider: "anthropic", auth: authAPIKey, suite: suiteTools},
 	}
-	for _, want := range []string{"vertex-notool", "vertex-tools", "bedrock-notool"} {
-		if !ids[want] {
-			t.Errorf("manifest is missing starter row %q", want)
+	rowsByID := make(map[string]liveLLMRow, len(rows))
+	enabledAuths := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		rowsByID[r.ID] = r
+		if r.Enabled != nil && *r.Enabled {
+			enabledAuths[r.Auth] = true
 		}
 	}
-	for _, want := range []string{authGCPWIF, authAWSOIDC} {
-		if !auths[want] {
-			t.Errorf("manifest has no %q row; both auth families must stay covered", want)
+	for id, want := range starters {
+		r, ok := rowsByID[id]
+		if !ok {
+			t.Errorf("manifest is missing starter row %q", id)
+			continue
+		}
+		if r.Enabled == nil || !*r.Enabled {
+			t.Errorf("starter row %q must stay enabled", id)
+		}
+		if r.Provider != want.provider || r.Auth != want.auth || r.Suite != want.suite {
+			t.Errorf("starter row %q is miswired: got (%s, %s, %s), want (%s, %s, %s)",
+				id, r.Provider, r.Auth, r.Suite, want.provider, want.auth, want.suite)
+		}
+	}
+	for _, want := range []string{authGCPWIF, authAWSOIDC, authAPIKey} {
+		if !enabledAuths[want] {
+			t.Errorf("manifest has no enabled %q row; every auth family must stay covered", want)
 		}
 	}
 }
@@ -263,10 +293,11 @@ func TestLiveLLMManifest_CheckedInFileValidates(t *testing.T) {
 func TestLiveLLMManifest_AcceptsValid(t *testing.T) {
 	t.Parallel()
 
-	providers := map[string]bool{"vertex": true, "bedrock": true}
+	providers := map[string]bool{"vertex": true, "bedrock": true, "openai": true, "anthropic": true}
 	valid := `[
 	  {"id":"vertex-notool","enabled":true,"provider":"vertex","auth":"gcp-wif","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_VERTEX_MODEL","required":true,"require_no_connectors":true,"note":"ok"},
-	  {"id":"bedrock-notool","enabled":true,"provider":"bedrock","auth":"aws-oidc","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_BEDROCK_MODEL","role_var":"CYNATIVE_CLI_CI_AWS_ROLE","required":false,"require_no_connectors":true}
+	  {"id":"bedrock-notool","enabled":true,"provider":"bedrock","auth":"aws-oidc","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_BEDROCK_MODEL","role_var":"CYNATIVE_CLI_CI_AWS_ROLE","required":false,"require_no_connectors":true},
+	  {"id":"openai-notool","enabled":true,"provider":"openai","auth":"api-key","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_OPENAI_MODEL","required":true,"require_no_connectors":true,"note":"ok"}
 	]`
 	if err := validateLiveLLMManifest([]byte(valid), providers); err != nil {
 		t.Fatalf("expected valid manifest to pass, got: %v", err)
@@ -276,7 +307,7 @@ func TestLiveLLMManifest_AcceptsValid(t *testing.T) {
 func TestLiveLLMManifest_RejectsInvalid(t *testing.T) {
 	t.Parallel()
 
-	providers := map[string]bool{"vertex": true, "bedrock": true}
+	providers := map[string]bool{"vertex": true, "bedrock": true, "openai": true, "anthropic": true}
 	// Each case is a full manifest that must be rejected for exactly one reason.
 	cases := map[string]string{
 		"unknown field": `[{"id":"a","enabled":true,"provider":"vertex","auth":"gcp-wif","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","required":true,"require_no_connectors":true,"bogus":1}]`,
@@ -305,6 +336,12 @@ func TestLiveLLMManifest_RejectsInvalid(t *testing.T) {
 		// provider is chat-capable but its (provider, auth) pair is not a wired adapter.
 		"vertex with aws auth":  `[{"id":"a","enabled":true,"provider":"vertex","auth":"aws-oidc","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","role_var":"CYNATIVE_CLI_CI_AWS_ROLE","required":true,"require_no_connectors":true}]`,
 		"bedrock with gcp auth": `[{"id":"a","enabled":true,"provider":"bedrock","auth":"gcp-wif","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","required":true,"require_no_connectors":true}]`,
+		// api-key carries no role to assume: role_var stays aws-oidc-only.
+		"api-key with role_var": `[{"id":"a","enabled":true,"provider":"openai","auth":"api-key","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","role_var":"CYNATIVE_CLI_CI_AWS_ROLE","required":true,"require_no_connectors":true}]`,
+		// openai/anthropic are wired for api-key only; a federated auth is a miswire.
+		"openai with gcp auth":    `[{"id":"a","enabled":true,"provider":"openai","auth":"gcp-wif","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","required":true,"require_no_connectors":true}]`,
+		"openai with aws auth":    `[{"id":"a","enabled":true,"provider":"openai","auth":"aws-oidc","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","role_var":"CYNATIVE_CLI_CI_AWS_ROLE","required":true,"require_no_connectors":true}]`,
+		"anthropic with gcp auth": `[{"id":"a","enabled":true,"provider":"anthropic","auth":"gcp-wif","suite":"llm-smoke","model_var":"CYNATIVE_CLI_CI_X","required":true,"require_no_connectors":true}]`,
 		// require_no_connectors is a silent no-op on the tools suite, so true is rejected.
 		"tools with require_no_connectors": `[{"id":"a","enabled":true,"provider":"vertex","auth":"gcp-wif","suite":"llm-tools-smoke","model_var":"CYNATIVE_CLI_CI_X","required":true,"require_no_connectors":true}]`,
 	}
