@@ -182,8 +182,11 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		awsPolicyARN:      cfg.AWS.PolicyARN,
 		validateAWSPolicy: validateAWSPolicy,
 
+		// withBoundedTokenRefresh gives the retained session token source a
+		// client-side HTTP timeout, so every refresh is bounded even though ctx is
+		// (deliberately) deadline-free and oauth2.TokenSource.Token takes no context.
 		findGCP: func(ctx context.Context) (*google.Credentials, error) {
-			return google.FindDefaultCredentials(ctx, gcpScope)
+			return google.FindDefaultCredentials(withBoundedTokenRefresh(ctx), gcpScope)
 		},
 		probeGCP:    probeGCPToken,
 		gcpIdentity: gcpRegistrationIdentity,

@@ -207,7 +207,9 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 	// TokenSource retains the supplied context, and the registered provider mints
 	// tokens from it for the whole session. Only the probe is bounded — and it
 	// builds a SEPARATE source (probeGCPToken), so cancelling pctx never poisons
-	// the registered source.
+	// the registered source. The production findGCP still bounds each refresh via a
+	// per-request client timeout (withBoundedTokenRefresh) rather than a ctx
+	// deadline, which would poison the retained source.
 	creds, findErr := d.findGCP(ctx)
 
 	var probeErr error
