@@ -46,6 +46,18 @@ if (
 	exit 0
 ); then pass "render-scoop renders version/arches/urls/bin/hash/meta, no checkver/autoupdate, no em dash"; else fail "render-scoop happy path"; fi
 
+# ---- render-scoop.sh: byte-for-byte parity against a frozen golden -----------
+# Pins field order, four-space indent, and the single trailing LF - Scoop and
+# the previous goreleaser output are byte-shaped, and the semantic jq asserts
+# above cannot catch a formatting regression. Update the golden deliberately
+# (regenerate with the same args) if the manifest shape is intentionally changed.
+golden="$here/testdata/scoop-cynative.golden.json"
+if "$render" 1.5.1 "$sha_a" "$sha_b" | diff -u "$golden" - >/dev/null 2>&1; then
+	pass "render-scoop output matches the frozen golden byte-for-byte"
+else
+	fail "render-scoop golden byte parity (regenerate test/testdata/scoop-cynative.golden.json if intentional)"
+fi
+
 # ---- render-scoop.sh: fail-closed on a malformed hash ------------------------
 if "$render" 1.5.1 not-a-hash "$sha_b" >/dev/null 2>&1; then fail "render-scoop malformed hash should fail"; else pass "render-scoop fails on a malformed hash"; fi
 

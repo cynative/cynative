@@ -1,0 +1,22 @@
+{
+    "version": "1.5.1",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/cynative/cynative/releases/download/v1.5.1/cynative_Windows_x86_64.zip",
+            "bin": [
+                "cynative.exe"
+            ],
+            "hash": "5c712baad9179d576da1f8cff632b840b4b03495fd565a79fea8fe1a2b8b6be1"
+        },
+        "arm64": {
+            "url": "https://github.com/cynative/cynative/releases/download/v1.5.1/cynative_Windows_arm64.zip",
+            "bin": [
+                "cynative.exe"
+            ],
+            "hash": "1321513cd9c9a8bd117c0ec1986845daf9face1ccdc35441b2b1910e50ce7be8"
+        }
+    },
+    "homepage": "https://github.com/cynative/cynative",
+    "license": "Apache-2.0",
+    "description": "Agentic security research across your code, cloud, and runtime (read-only)"
+}

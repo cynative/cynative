@@ -11,11 +11,11 @@ name: Scoop install smoke
 # investigate and re-run via workflow_dispatch, nothing to roll back.
 # The scoop-publish workflow (cynative#103) renders and pushes the bucket
 # manifest after publish, and on the release-pipeline call path it runs before
-# this smoke, so the first bucket probe normally succeeds. A manual dispatch
-# racing a live release run can wedge in exactly one ordering (release
-# published but scoop-publish not yet pushed): the wait below then times out
-# with instructions; a dispatch before the bucket advances simply validates the
-# previous release. Residual: the manifest's arm64 entry is
+# this smoke, so the first bucket probe normally succeeds. A manual dispatch can
+# race a live release run: if it resolves the just-published version before
+# scoop-publish has pushed, the wait below converges once the publisher pushes,
+# or times out with instructions if that push is delayed or failed; a dispatch
+# that resolves an already-served version validates it immediately. Residual: the manifest's arm64 entry is
 # not exercised (this smoke is x64-only); a windows-11-arm leg needs its own
 # proving run before joining the release-adjacent path. Both jobs carry
 # explicit timeout-minutes: a caller job that `uses:` a reusable workflow
@@ -76,9 +76,9 @@ jobs:
 
       # scoop-publish pushes the bucket after publish, before this smoke on the
       # call path, so the first probe normally succeeds; the loop is bounded
-      # defense for a manual dispatch racing a live release run (which
-      # freezes the previous release as expected and cannot converge - the
-      # final error says to re-run after publication). Each probe is an
+      # defense for a manual dispatch that resolves a just-published version
+      # before scoop-publish has pushed it - it converges when the publisher
+      # pushes, or the final error says to re-run after the publisher completes. Each probe is an
       # anonymous shallow git clone of the public bucket - the same mechanism
       # scoop itself uses, with none of the REST rate-limit or cross-repo
       # token-scope questions. Deliberately not raw.githubusercontent.com: no

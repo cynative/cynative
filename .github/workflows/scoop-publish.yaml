@@ -17,6 +17,13 @@ on:
         description: Release tag to publish (e.g. v0.4.0)
         required: true
         type: string
+    # Only the App credentials are needed; declaring them keeps the caller from
+    # handing this workflow every secret (no `secrets: inherit`).
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       tag:
@@ -39,9 +46,11 @@ jobs:
     # concurrency group for the default 360 minutes.
     timeout-minutes: 10
     steps:
-      # scoop-bucket write is the point of this job; cynative read authorizes the
-      # release read/download below. This is the ONLY place scoop-bucket write
-      # authority lives now.
+      # Least privilege: the App token is scoped to scoop-bucket with only
+      # contents:write (the push), the single authority this job needs. Release
+      # reads/downloads below use the job's read-only GITHUB_TOKEN, so the
+      # privileged publish script never gets write access to the cynative repo.
+      # This is the ONLY place scoop-bucket write authority lives now.
       - name: Generate App Token
         id: token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -49,19 +58,18 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            cynative
-            scoop-bucket
+          repositories: scoop-bucket
+          permission-contents: write
 
       # The tag input wins when present (the call path always passes it); a
-      # manual dispatch with no input resolves the latest published release.
-      # Keying on input presence rather than the event name matters: a called
-      # workflow inherits the caller's event. Fail closed on an empty tag or an
-      # empty resolved version.
+      # manual dispatch with no input resolves the latest published release
+      # (releases/latest excludes drafts). Keying on input presence rather than
+      # the event name matters: a called workflow inherits the caller's event.
+      # Fail closed on an empty tag or an empty resolved version.
       - name: Resolve tag & version
         id: resolve
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           TAG_INPUT: ${{ inputs.tag }}
         run: |
           if [ -n "${TAG_INPUT}" ]; then
@@ -88,13 +96,41 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "publishing scoop manifest for ${tag}"
 
+      # Refuse to advance Scoop for anything but a PUBLISHED release. gh's
+      # explicit-tag resolution (and gh release download) will resolve a DRAFT by
+      # its pending tag, so a manual dispatch naming the in-flight draft would
+      # otherwise push the bucket before publication - the exact failure #103
+      # fixes. releases/latest already excludes drafts, so this guards the
+      # explicit-tag dispatch path (and is a cheap belt-and-braces check on the
+      # call path, which only runs after the publish job). Fails closed if the
+      # release is a draft, unpublished, tag-mismatched, or not visible.
+      - name: Assert the release is published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          info="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft,tagName,publishedAt 2>/dev/null)" \
+            || { echo "::error::no visible release for tag ${TAG}; refusing to advance Scoop"; exit 1; }
+          draft="$(printf '%s' "${info}" | jq -r '.isDraft')"
+          published="$(printf '%s' "${info}" | jq -r '.publishedAt')"
+          rtag="$(printf '%s' "${info}" | jq -r '.tagName')"
+          if [ "${rtag}" != "${TAG}" ] || [ "${draft}" != "false" ] \
+              || [ -z "${published}" ] || [ "${published}" = "null" ]; then
+            echo "::error::release ${TAG} is not published (isDraft=${draft}, publishedAt=${published}, tagName=${rtag}); refusing to advance Scoop"
+            exit 1
+          fi
+          echo "release ${TAG} is published (${published})"
+
       # Render from the exact source the release was cut from (provenance).
-      # persist-credentials off: publish-scoop.sh does its own authenticated
-      # clone of scoop-bucket with the App token.
+      # refs/tags/ is explicit: an unqualified ref lets actions/checkout prefer a
+      # like-named branch, which would supply the privileged publish script while
+      # checksums still came from the real release. persist-credentials off:
+      # publish-scoop.sh does its own authenticated clone of scoop-bucket.
       - name: Checkout scripts at the release tag
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ steps.resolve.outputs.tag }}
+          ref: refs/tags/${{ steps.resolve.outputs.tag }}
           persist-credentials: false
 
       # The published release's checksums.txt is immutable and authoritative; it
@@ -102,7 +138,7 @@ jobs:
       # post-publish, and archive-smoke cross-checks its rows.
       - name: Download published checksums
         env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" \

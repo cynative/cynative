@@ -51,9 +51,9 @@ scoops:
       owner: cynative
       name: scoop-bucket
       branch: main
-    # skip_upload: goreleaser still generates dist/bucket/cynative.json but no
-    # longer pushes it during the pre-publish build (cynative#103). The live
-    # manifest is rendered and pushed after publish by
+    # skip_upload: goreleaser still generates its Scoop manifest locally under
+    # dist/ but no longer pushes it during the pre-publish build (cynative#103).
+    # The live manifest is rendered and pushed after publish by
     # scripts/release/render-scoop.sh + publish-scoop.sh, which is the
     # authoritative renderer; the fields below only shape goreleaser's inert
     # local copy.

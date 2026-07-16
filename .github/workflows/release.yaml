@@ -742,8 +742,9 @@ jobs:
       tag: ${{ needs.release.outputs.tag_name }}
 
   # Renders and pushes the Scoop bucket manifest after publish (cynative#103),
-  # replacing goreleaser's pre-publish bucket push. secrets: inherit passes the
-  # App credentials the reusable workflow mints its scoop-bucket token from.
+  # replacing goreleaser's pre-publish bucket push. Only the App credentials are
+  # passed (not `secrets: inherit`); the reusable workflow mints its
+  # scoop-bucket-scoped, contents:write token from them.
   scoop-publish:
     name: Publish Scoop manifest
     needs: [release, publish]
@@ -753,7 +754,9 @@ jobs:
     uses: ./.github/workflows/scoop-publish.yaml
     with:
       tag: ${{ needs.release.outputs.tag_name }}
-    secrets: inherit
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 
   scoop-smoke:
     name: Scoop install smoke
