@@ -54,9 +54,11 @@ Add tests alongside any new code, or the coverage gate fails. Useful targets:
 
 - **Branch** from `main`; direct pushes to `main` are blocked.
 - **Conventional-Commit PR titles** are required (CI enforces this): `feat:`,
-  `fix:`, `docs:`, `refactor:`, `chore:`, etc. Use `!` and a `BREAKING CHANGE:`
-  footer for breaking changes. Releases and the changelog are automated by
-  release-please from these titles — **do not hand-edit `CHANGELOG.md`**.
+  `fix:`, `docs:`, `refactor:`, `chore:`, etc. Dependency-only updates use
+  `deps:` (rendered in the changelog's Dependencies section); reserve `fix:`
+  for product defects. Use `!` and a `BREAKING CHANGE:` footer for breaking
+  changes. Releases and the changelog are automated by release-please from
+  these titles — **do not hand-edit `CHANGELOG.md`**.
 - PRs are **squash-merged** with linear history; keep them focused.
 - Required checks (`Lint & Test`, `Validate PR title`, `Build & smoke-test macOS
   packaging toolchain`) must pass and review threads must be resolved before merge.

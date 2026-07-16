@@ -4,6 +4,13 @@
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": true,
   "draft": true,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "deps", "section": "Dependencies" },
+    { "type": "revert", "section": "Reverts" }
+  ],
   "packages": {
     ".": {}
   }
