@@ -26,7 +26,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jmespath/go-jmespath v0.4.1-0.20220621161143-b0104c826a24
-	github.com/maximhq/bifrost/core v1.7.1
+	github.com/maximhq/bifrost/core v1.7.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/net v0.57.0
@@ -233,10 +233,10 @@ require (
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
 	github.com/go-openapi/jsonreference v1.0.0 // indirect
 	github.com/go-openapi/loads v0.24.0 // indirect
-	github.com/go-openapi/runtime v0.32.4 // indirect
-	github.com/go-openapi/runtime/server-middleware v0.32.4 // indirect
+	github.com/go-openapi/runtime v0.32.5 // indirect
+	github.com/go-openapi/runtime/server-middleware v0.32.5 // indirect
 	github.com/go-openapi/spec v0.22.6 // indirect
-	github.com/go-openapi/strfmt v0.26.4 // indirect
+	github.com/go-openapi/strfmt v0.27.0 // indirect
 	github.com/go-openapi/swag v0.27.0 // indirect
 	github.com/go-openapi/swag/cmdutils v0.27.0 // indirect
 	github.com/go-openapi/swag/conv v0.27.0 // indirect
