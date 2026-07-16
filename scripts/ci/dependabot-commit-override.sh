@@ -33,6 +33,15 @@ max_body=${MAX_BODY:-60000}
 # Pass 1: parse the commit message into "NAME<TAB>OLD<TAB>NEW" lines (OLD may
 # be empty). Emits nothing when the fragment is absent or any entry is unsafe.
 parsed=$(awk '
+	# Dependabot YAML-quotes numeric-looking scalars ('\''5'\'', "25.0"); strip a
+	# matched surrounding quote pair so the sanitize charset sees the value.
+	function dequote(s,    q) {
+		q = substr(s, 1, 1)
+		if ((q == "\"" || q == "'\''") && length(s) >= 2 && substr(s, length(s), 1) == q) {
+			return substr(s, 2, length(s) - 2)
+		}
+		return s
+	}
 	# Prose enrichment: Updates `NAME` from OLD to NEW (versions may be
 	# backticked for submodule bumps).
 	/^Updates `[^`]+` from .* to .*$/ {
@@ -80,11 +89,11 @@ parsed=$(awk '
 	inyaml && /^- dependency-name: / {
 		n++
 		dep = $0; sub(/^- dependency-name: /, "", dep)
-		names[n] = dep; vers[n] = ""
+		names[n] = dequote(dep); vers[n] = ""
 	}
 	inyaml && /^  dependency-version: / && n > 0 {
 		v = $0; sub(/^  dependency-version: /, "", v)
-		vers[n] = v
+		vers[n] = dequote(v)
 	}
 	END {
 		if (n == 0) exit 0

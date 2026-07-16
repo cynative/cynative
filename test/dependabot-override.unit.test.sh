@@ -162,6 +162,29 @@ if (
 	exit 0
 ); then pass "backticked submodule versions stripped"; else fail "submodule backticks"; fi
 
+# ---- YAML-quoted version scalars are dequoted -----------------------------------
+cat > "$tmp/quoted.msg" <<'EOF'
+deps: Bump the all-dependencies group with 2 updates
+
+---
+updated-dependencies:
+- dependency-name: github.com/example/five
+  dependency-version: '5'
+  dependency-type: indirect
+- dependency-name: github.com/example/twofive
+  dependency-version: "25.0"
+  dependency-type: indirect
+...
+EOF
+
+if (
+	out=$("$render" render "$tmp/body.txt" < "$tmp/quoted.msg") || exit 1
+	printf '%s\n' "$out" | grep -q '^deps: bump github.com/example/five to 5$' || exit 1
+	printf '%s\n' "$out" | grep -q '^deps: bump github.com/example/twofive to 25.0$' || exit 1
+	[ "$(printf '%s\n' "$out" | grep '^deps: bump' | grep -Ec "['\"]")" = "0" ] || exit 1
+	exit 0
+); then pass "YAML-quoted version scalars are dequoted"; else fail "quoted versions"; fi
+
 # ---- no metadata: empty output (caller skips the edit) --------------------------
 if (
 	printf 'fix: a human commit\n\nNo dependabot fragment here.\n' > "$tmp/human.msg"
