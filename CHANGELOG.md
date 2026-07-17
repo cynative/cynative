@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.4](https://github.com/cynative/cynative/compare/v1.5.3...v1.5.4) (2026-07-17)
+
+
+### Bug Fixes
+
+* decode byte[] checksum body in the Windows installer ([#148](https://github.com/cynative/cynative/issues/148)) ([d824d54](https://github.com/cynative/cynative/commit/d824d54b822326178de81926af2849b4b1754af7))
+
 ## [1.5.3](https://github.com/cynative/cynative/compare/v1.5.2...v1.5.3) (2026-07-16)
 
 
