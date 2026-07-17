@@ -131,7 +131,12 @@ function Resolve-CynAttestationAction {
 
 function Get-CynString {
     param([Parameter(Mandatory)][string]$Url)
-    (Invoke-WebRequest -UseBasicParsing -Uri $Url -Headers @{ 'User-Agent' = 'cynative-install' }).Content
+    $content = (Invoke-WebRequest -UseBasicParsing -Uri $Url -Headers @{ 'User-Agent' = 'cynative-install' }).Content
+    # Windows PowerShell 5.1 returns .Content as a byte[] when the response Content-Type is not
+    # text. GitHub serves every release asset - checksums.txt included - as
+    # application/octet-stream, so decode a byte[] body here to hand callers a string always.
+    if ($content -is [byte[]]) { return [System.Text.Encoding]::UTF8.GetString($content) }
+    [string]$content
 }
 
 function Save-CynFile {

@@ -12,6 +12,15 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def guess_type(self, path):
+        # GitHub serves every release asset, checksums.txt included, as
+        # application/octet-stream. Mirror that so the Windows installer e2e exercises
+        # Invoke-WebRequest's WinPS 5.1 byte[] .Content path (the one Get-CynString decodes),
+        # instead of the text/plain SimpleHTTPRequestHandler would infer from the extension.
+        if path.endswith("checksums.txt"):
+            return "application/octet-stream"
+        return super().guess_type(path)
+
 
 handler = functools.partial(Quiet, directory=srv_dir)
 httpd = http.server.HTTPServer(("127.0.0.1", 0), handler)

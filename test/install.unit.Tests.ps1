@@ -48,6 +48,23 @@ Describe 'Resolve-CynBaseUrl' {
     }
 }
 
+Describe 'Get-CynString' {
+    # Windows PowerShell 5.1's Invoke-WebRequest hands back .Content as a byte[] for a
+    # non-text Content-Type. GitHub serves release assets (checksums.txt) as
+    # application/octet-stream, so without decoding the byte[] flows into a [string] param
+    # and fails to bind ("Cannot convert value to type System.String"). This mocks that path.
+    It 'decodes a byte[] body (WinPS 5.1 octet-stream path) to a string' {
+        Mock Invoke-WebRequest {
+            [pscustomobject]@{ Content = [System.Text.Encoding]::UTF8.GetBytes("aaaa1111  a.zip`n") }
+        }
+        Get-CynString -Url 'https://example.com/checksums.txt' | Should -Be "aaaa1111  a.zip`n"
+    }
+    It 'passes a string body through unchanged (PS7 / text Content-Type path)' {
+        Mock Invoke-WebRequest { [pscustomobject]@{ Content = "plain text body" } }
+        Get-CynString -Url 'https://example.com/x' | Should -Be 'plain text body'
+    }
+}
+
 Describe 'Get-CynExpectedHash' {
     # Pester 5 separates discovery from run: fixtures must be set in BeforeAll, not the
     # Describe body, or they are undefined inside It during the run phase.
