@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.5.3](https://github.com/cynative/cynative/compare/v1.5.2...v1.5.3) (2026-07-16)
+
+
+### Bug Fixes
+
+* **deps:** Bump the all-dependencies group with 4 updates ([#142](https://github.com/cynative/cynative/issues/142)) ([4058867](https://github.com/cynative/cynative/commit/40588670648336fcf4f51f8bd16dbb4aa1985ab5))
+
+
+### Dependencies
+
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/manager from 1.22.33 to 1.22.34 ([ae5f712](https://github.com/cynative/cynative/commit/ae5f71290e8fb35743282d28ad35d03b7402b5c5))
+* bump github.com/aws/aws-sdk-go-v2/service/s3 from 1.105.1 to 1.105.2 ([ae5f712](https://github.com/cynative/cynative/commit/ae5f71290e8fb35743282d28ad35d03b7402b5c5))
+* bump github.com/docker/cli from 29.6.1+incompatible to 29.6.2+incompatible ([ae5f712](https://github.com/cynative/cynative/commit/ae5f71290e8fb35743282d28ad35d03b7402b5c5))
+* bump google.golang.org/api from 0.288.0 to 0.289.0 ([ae5f712](https://github.com/cynative/cynative/commit/ae5f71290e8fb35743282d28ad35d03b7402b5c5))
+
 ## [1.5.2](https://github.com/cynative/cynative/compare/v1.5.1...v1.5.2) (2026-07-16)
 
 
