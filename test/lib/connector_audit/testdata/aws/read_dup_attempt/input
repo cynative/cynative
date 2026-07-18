@@ -1,2 +1,0 @@
-{"tool":"http_request","phase":"attempt","session_id":"s","run_id":"r","call_id":"c1","arguments":{"method":"GET","url":"https://iam.amazonaws.com/?Action=GetRole&RoleName=cynative-connector-e2e-fixture&Version=2010-05-08","auth_provider":"aws","aws_auth":{"service":"iam"}}}
-{"tool":"http_request","phase":"attempt","session_id":"s","run_id":"r","call_id":"c1","arguments":{"method":"GET","url":"https://iam.amazonaws.com/?Action=GetRole&RoleName=cynative-connector-e2e-fixture&Version=2010-05-08","auth_provider":"aws","aws_auth":{"service":"iam"}}}

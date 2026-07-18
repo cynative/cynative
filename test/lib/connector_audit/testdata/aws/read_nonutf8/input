@@ -1,3 +1,0 @@
-{"tool":"http_request","phase":"attempt","session_id":"s","run_id":"r","call_id":"c1","arguments":{"method":"GET","url":"https://iam.amazonaws.com/?Action=GetRole&RoleName=cynative-connector-e2e-fixture&Version=2010-05-08","auth_provider":"aws","aws_auth":{"service":"iam"}}}
-{"tool":"http_request","phase":"result","session_id":"s","run_id":"r","call_id":"c1","arguments":{"method":"GET","url":"https://iam.amazonaws.com/?Action=GetRole&RoleName=cynative-connector-e2e-fixture&Version=2010-05-08","auth_provider":"aws","aws_auth":{"service":"iam"}},"outcome":"ok","result":"HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\n\r\n<Tags><member><Value>test-nonce-1234</Value><Key>cynative-e2e-fixture</Key></member></Tags>"}
-ÿ

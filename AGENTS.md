@@ -85,9 +85,9 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   is the phase status (1 = retryable miss, 4 = boundary failure, never retried, since the per-attempt
   audit truncation would erase the evidence), and a first-line credential prepass fails closed (4) if
   credential material was logged. `make sh-test` gates the parser: each suite's offline `--selftest`
-  drives it and pins the suite's frozen case-name/code set (`connector_audit/testdata/`), plus a
-  shared-machinery `--selftest` that exercises the engine's own fail-closed and prepass cases; the
-  frozen corpus doubles as a byte-exact differential when the parser changes. `make homebrew-smoke`: standalone post-release
+  drives it and pins the suite's frozen case-name/code set
+  (`connector_audit/testdata/<provider>.names.txt`), plus a shared-machinery `--selftest` that
+  exercises the engine's own fail-closed and prepass cases. `make homebrew-smoke`: standalone post-release
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
   documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
   release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone

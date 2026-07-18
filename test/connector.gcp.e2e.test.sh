@@ -59,9 +59,9 @@ set -eu
 # token to the shared entrypoint and never re-implements them.
 snapshot_parser() {
 	cp -R "$root/test/lib/connector_audit" "$1/"
-	# The live phase never reads testdata/ (only --selftest/--dump-names/differential
-	# do, and those run against the repo path, not this snapshot), so drop it here to
-	# avoid copying the frozen corpus into every live run's workdir.
+	# The live phase never reads testdata/ (only the offline --selftest name+code pin
+	# does, against the repo path, not this snapshot), so drop it here to avoid copying
+	# the pinned case set into every live run's workdir.
 	rm -rf "$1/connector_audit/testdata"
 	cp "$root/test/lib/connector-audit-parser.py" "$1/"
 	parser="$1/connector-audit-parser.py"

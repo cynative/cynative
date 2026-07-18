@@ -1,2 +1,0 @@
-{bad json
-{"session_id": "s", "run_id": "r", "call_id": "c1", "tool": "http_request", "phase": "attempt", "arguments": {"method": "GET", "url": "https://api.github.com/repos/cynative/connector-e2e-fixture", "auth_provider": "github"}}

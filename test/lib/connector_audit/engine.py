@@ -912,17 +912,6 @@ def _run_entry_with_broken_engine(engine_body, mode_args):
         return proc.returncode
 
 
-def _diff_smoke():
-    """Prove differential.compare imports and runs over an empty corpus (no spec is
-    registered yet, so an empty run is the whole check). Returns 0 on the expected
-    (0, 0) equivalence tally, 1 otherwise."""
-    import tempfile
-    from connector_audit import differential
-    with tempfile.TemporaryDirectory() as tmp:
-        equal, total = differential.compare("/nonexistent-old-parser", "enginetest", tmp)
-    return 0 if (equal, total) == (0, 0) else 1
-
-
 def _shared_selftest():
     import tempfile
     spec = _engine_test_spec()
@@ -1086,7 +1075,6 @@ def _shared_selftest():
                 "raise ImportError('boom')", ["enginetest", "read", p_unreadable, target, expect])),
             ("entry_import_sysexit", 4, lambda: _run_entry_with_broken_engine(
                 "raise SystemExit(1)", ["enginetest", "read", p_unreadable, target, expect])),
-            ("differential_runs", 0, _diff_smoke),
             ("cred_akia_in_args", 4, lambda: _guard(lambda: cp([akia_line]))),
             ("cred_pem_in_result", 4, lambda: _guard(lambda: cp([pem_line]))),
             ("cred_trailing_partial", 4, lambda: _guard(lambda: cp([clean_line, partial_secret_line]))),

@@ -114,8 +114,8 @@ pwsh-test:
 # credentials. The parsers are the security boundary of the live connector e2es, so
 # they are gated here rather than only exercised on a live run. The syntax check runs
 # under PYTHONDONTWRITEBYTECODE=1 with python3 -B so it leaves no __pycache__; it uses
-# ast.parse rather than py_compile for the same reason, and it covers
-# differential.py, which --selftest alone does not exercise. Presence-check
+# ast.parse rather than py_compile for the same reason, and it covers every package
+# file including specs that a single provider --selftest does not exercise. Presence-check
 # python3 (the smoke test's loopback fixture server) with an install hint,
 # mirroring the shellcheck/pwsh install-free pattern.
 sh-test:
