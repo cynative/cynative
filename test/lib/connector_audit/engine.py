@@ -532,15 +532,30 @@ _CONTENT_RULES = (
 )
 
 # class-3: positional credential families (internal/redact credentialRules). A
-# credential-named JSON/XML field or a signing/session query param leaks by position:
-# the captured value is a breach unless it is already the redactor's placeholder (which
-# begins "[REDACTED"). URL userinfo and denylisted credential-header values are
-# deliberately absent here: they are VALUE-gated, and the class-1/class-2 anywhere-scan
-# already flags them exactly when the value is a real secret, so the AWS canary_url
-# "u:p" and GitHub canary "Authorization: Bearer x" stay canary defects (1), not leaks.
+# credential-named JSON/XML/YAML/env field or a signing/session query param leaks by
+# position: the captured value is a breach unless it is already the redactor's
+# placeholder (which begins "[REDACTED"). URL userinfo and denylisted credential-header
+# values are deliberately absent here: they are VALUE-gated, and the class-1/class-2
+# anywhere-scan already flags them exactly when the value is a real secret, so the AWS
+# canary_url "u:p" and GitHub canary "Authorization: Bearer x" stay canary defects (1),
+# not leaks.
 _POSITIONAL_RULES = (
     (re.compile(r'"(?:' + _CRED_NAME + r')"\s*:\s*"((?:\\.|[^"\\])*)"', re.I), "credential-field"),
     (re.compile(r"<(?:" + _CRED_NAME + r")>([^<]*)</[A-Za-z0-9_:.-]+>", re.I), "credential-field"),
+    # YAML "key: value" line: the key ENDS in a credential name, so DB_/AWS_/client-
+    # prefixes are allowed, plus an optional "- " sequence-item marker. Line-anchored
+    # (re.M) so a prose "token:" mid-line is not matched; the value's first char excludes
+    # '[' so an already-redacted "[REDACTED:...]" placeholder keeps its label and inline
+    # lists are skipped. Mirrors internal/redact rules.go's YAML credential-field rule,
+    # same credName vocabulary. Covers kubeconfig / k8s-manifest piped input.
+    (re.compile(r"^[ \t]*(?:-[ \t]+)?[\w.-]*(?:" + _CRED_NAME + r")[ \t]*:[ \t]*([^\s\[][^\r\n]*)",
+                re.I | re.M), "credential-field"),
+    # env "KEY=value" line: same key vocabulary (AWS_SECRET_ACCESS_KEY, DB_PASSWORD,
+    # API_TOKEN, ...), an optional shell "export " prefix, and the same '[' exclusion.
+    # Mirrors internal/redact rules.go's env credential-field rule. Covers .env / shell
+    # piped input.
+    (re.compile(r"^[ \t]*(?:export[ \t]+)?[\w.-]*(?:" + _CRED_NAME + r")[ \t]*=[ \t]*([^\s\[][^\r\n]*)",
+                re.I | re.M), "credential-field"),
     (re.compile(r"(?:X-Amz-Signature|X-Goog-Signature|Signature|sig)=([^&\"'\s]+)", re.I),
      "signed-url-signature"),
     (re.compile(r"(?:X-Amz-Security-Token)=([^&\"'\s]+)", re.I), "aws-session-token"),
@@ -1031,6 +1046,23 @@ def _shared_selftest():
         enc_line = _jline("c1", "attempt", {
             "method": "GET", "url": "https://iam.amazonaws.com/?token=aa%2Fbb%2Bcc%3Ddd-EE",
             "auth_provider": "aws"})
+        # class-3 (new YAML/env line rules): a neutral-shaped value under a credential-
+        # named key, carried as a request body. The value is the neutral live-secret
+        # string (no production shape of its own) but NO --live-secrets file is passed,
+        # so class-1 stays off and only the new YAML/env class-3 rule can flag it - a
+        # true RED-before/GREEN-after pin of that rule (a passed live-secrets file would
+        # let class-1 short-circuit before the class-3 rule ever ran).
+        yaml_cred_line = _jline("c1", "attempt", {
+            "method": "GET", "url": "https://iam.amazonaws.com/", "auth_provider": "aws",
+            "body": "password: " + live_secret})
+        env_cred_line = _jline("c1", "attempt", {
+            "method": "GET", "url": "https://iam.amazonaws.com/", "auth_provider": "aws",
+            "body": "AWS_SECRET_ACCESS_KEY=" + live_secret})
+        # --live-secrets edge paths (class-1 file mechanism): an empty file is valid
+        # (ambient-credential runs enumerate no env secret) and a missing/unreadable path
+        # is a wiring bug that fails closed.
+        p_empty_secrets = _write(tmp, "")
+        p_missing_secrets = os.path.join(tmp, "no-such-secrets.txt")
 
         cases = [
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
@@ -1065,6 +1097,13 @@ def _shared_selftest():
             ("cred_redacted_placeholder_ok", 0, lambda: _guard(lambda: cp([redacted_line]))),
             ("cred_witness_fact_ok", 0, lambda: _guard(lambda: cp([witness_line]))),
             ("cred_percent_encoded_secret", 4, lambda: _guard(lambda: cp([enc_line], p_secrets))),
+            # class-3 new rules: a credential-named YAML/env line leaks its value.
+            ("cred_yaml_credential_field", 4, lambda: _guard(lambda: cp([yaml_cred_line]))),
+            ("cred_env_credential_field", 4, lambda: _guard(lambda: cp([env_cred_line]))),
+            # --live-secrets edge paths: a missing/unreadable file fails closed, an empty
+            # file is valid (class-1 skipped) and leaves an otherwise-clean scan clean.
+            ("cred_missing_secrets_file", 4, lambda: _guard(lambda: cp([clean_line], p_missing_secrets))),
+            ("cred_empty_secrets_file", 0, lambda: _guard(lambda: cp([clean_line], p_empty_secrets))),
         ]
 
         failures = 0
