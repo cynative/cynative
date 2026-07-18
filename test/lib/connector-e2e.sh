@@ -121,8 +121,14 @@ e2e_pin_audit_size() {
 # gates the run. Matches class-1 in both literal and percent-encoded form and
 # class-2/class-3 in both literal and percent-decoded form (cynative#59 review-4):
 # a shape or a live secret hiding behind percent-encoding must not survive into the
-# published summary. Never fails the caller (a scrub problem must not mask the real
-# failure being reported): on any error it falls back to writing an empty DEST.
+# published summary. Those passes only know a secret's literal and quote_plus()
+# canonical form, so a NON-canonical reversible encoding (lowercase %2f, an over-
+# encoded %61%62, %20 for a space) would still slip through; a final line backstop
+# mirrors the prepass's decoded-view detection and drops any whole line whose
+# percent-decoded form still reveals a secret the passes could not scrub, the only
+# safe move when the encoding cannot be enumerated (cynative#152). Never fails the
+# caller (a scrub problem must not mask the real failure being reported): on any error
+# it falls back to writing an empty DEST.
 _e2e_scrub_file() {
 	_src=$1
 	_dst=$2
@@ -173,6 +179,25 @@ def redact_decoded_matches(t, decoded):
     return t
 
 
+def has_secret(t):
+    """True when a class-1 live secret, a class-2 shape, or a class-3 positional
+    credential value appears in `t` - the same detection the credential prepass runs,
+    over the same imported rules. A "[REDACTED..." value carries none of these shapes
+    and the class-3 loop skips it, so an already-redacted line reads clean."""
+    for secret in secrets:
+        if secret and secret in t:
+            return True
+    for keywords, rx, _label in _CONTENT_RULES:
+        if any(k in t for k in keywords) and rx.search(t):
+            return True
+    for rx, _label in _POSITIONAL_RULES:
+        for m in rx.finditer(t):
+            val = m.group(1)
+            if val and not val.startswith("[REDACTED"):
+                return True
+    return False
+
+
 def redact_literal(t):
     """Pass 2: the ordinary literal-matching redaction, over whatever pass 1 left
     (secrets/shapes never behind encoding, the common case)."""
@@ -206,6 +231,21 @@ decoded = unquote_plus(text)
 if decoded != text:
     text = redact_decoded_matches(text, decoded)
 text = redact_literal(text)
+
+# Pass 3: non-canonical-encoding backstop (cynative#152). Passes 1-2 know only a
+# secret's literal and quote_plus() canonical form, so a secret in a NON-canonical
+# reversible encoding (lowercase %2f, an over-encoded %61%62, %20 for a space) survives
+# them. Mirror the credential prepass line by line, over whatever passes 1-2 left: if a
+# line's percent-decoded view still reveals a secret/shape the redaction could not
+# scrub from the line itself, drop the whole line - the only safe move when the
+# encoding cannot be enumerated. A line already clean after passes 1-2 decodes to no
+# secret, so this never over-redacts a benign percent-encoded line (a path, a query).
+lines = text.split("\n")
+for i, line in enumerate(lines):
+    dec = unquote_plus(line)
+    if dec != line and has_secret(dec):
+        lines[i] = "[REDACTED-LINE]"
+text = "\n".join(lines)
 
 with open(dst, "w", encoding="utf-8") as f:
     f.write(text)

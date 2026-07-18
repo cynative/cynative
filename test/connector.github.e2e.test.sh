@@ -173,11 +173,14 @@ repo="$GH_E2E_REPO"
 # The out-of-band class-1 live-secret file for the credential prepass: the enumerable
 # env-var credentials this suite can name, one per line, mode 0600, in its own mktemp
 # OUTSIDE the workdir so cleanup shreds it even under GH_E2E_KEEP_WORKDIR. GH_E2E_TOKEN
-# is the fixture App/PAT the run injects, plus the LLM driver's api key when the run
-# supplies one; an ambient LLM (Bedrock/Vertex) leaves that unset, which is valid - the
-# class-2/class-3 SHAPE families cover any leaked shaped key.
+# is the fixture App/PAT the run injects, plus the LLM driver's credentials when the run
+# supplies them: an api key for the direct providers, or the Bedrock static-credential
+# trio CI feeds inline (a Bedrock secret-access-key or session-token has no reliable
+# class-2/class-3 shape, so it must ride the class-1 sweep). e2e_write_live_secrets skips
+# unset/empty vars, so an ambient LLM run naming none of them is valid.
 secret_file=$(mktemp)
-e2e_write_live_secrets "$secret_file" GH_E2E_TOKEN CYNATIVE_LLM_API_KEY
+e2e_write_live_secrets "$secret_file" GH_E2E_TOKEN CYNATIVE_LLM_API_KEY \
+	CYNATIVE_LLM_BEDROCK_ACCESS_KEY CYNATIVE_LLM_BEDROCK_SECRET_KEY CYNATIVE_LLM_BEDROCK_SESSION_TOKEN
 
 # Sanitized-artifact wiring for e2e_run_with_retries (cynative#59): a no-op locally
 # (CONNECTOR_E2E_ARTIFACTS_DIR is unset), populated by CI in cynative#153.

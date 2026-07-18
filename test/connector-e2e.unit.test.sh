@@ -176,6 +176,45 @@ if (
 	case "$ad" in "$wd"/*) exit 1 ;; esac
 ); then pass "e2e_collect_artifacts: sanitized artifacts, raw workdir untouched, no audit.log, meta.txt, outside workdir"; else fail "e2e_collect_artifacts"; fi
 
+# ---- e2e_collect_artifacts: a live secret in a NON-CANONICAL percent-encoding is --
+# ---- scrubbed (cynative#152 F1). The literal + quote_plus() canonical passes cannot --
+# ---- remove a secret whose bytes are over-encoded (here 'c' -> %63): unquote_plus ----
+# ---- restores it, but neither the literal value nor its quote_plus() form is present. --
+# ---- The decoded-line backstop must drop the whole line so no reversibly-encoded ----
+# ---- secret survives into the published artifact. -------------------------------
+if (
+	wd=$(mktemp -d)
+	ad=$(mktemp -d)
+	trap 'rm -rf "$wd" "$ad"' EXIT
+	live_secret="abcdef012345live-xyz"
+	sf=$(mktemp)
+	printf '%s\n' "$live_secret" > "$sf"
+	# The same secret bytes reversibly hidden behind a non-canonical percent-encoding
+	# (over-encoding the 'c' as %63). quote_plus() leaves this all-safe value unchanged,
+	# so the literal + canonical passes have no form to match; only the decoded backstop
+	# can catch it. No credential-named key/colon/equals, so class-2/class-3 stay silent.
+	encoded="ab%63def012345live-xyz"
+	printf 'noise line\nleaked here %s trailing\nmore noise\n' "$encoded" > "$wd/read.err"
+	printf 'benign %%2Fhome value\n' > "$wd/read.out"
+
+	e2e_collect_artifacts myread "$wd" "$ad" "$sf" || exit 1
+
+	# (a) neither the decoded secret nor its encoded form survives in the artifact.
+	grep -q "$live_secret" "$ad/myread/read.err" && exit 1
+	grep -q "$encoded" "$ad/myread/read.err" && exit 1
+	# (b) the strongest assertion: unquote_plus of the whole scrubbed file reveals no
+	# secret bytes - no reversible encoding slipped through.
+	python3 - "$ad/myread/read.err" "$live_secret" <<'PY' || exit 1
+import sys, urllib.parse
+data = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+sys.exit(1 if sys.argv[2] in urllib.parse.unquote_plus(data) else 0)
+PY
+	# (c) no over-redaction: a benign percent-encoded line (a path, not a secret) is kept.
+	grep -q 'benign' "$ad/myread/read.out" || exit 1
+	# (d) the raw workdir file is untouched (the encoded secret bytes are still there).
+	grep -q "$encoded" "$wd/read.err" || exit 1
+); then pass "e2e_collect_artifacts: a live secret in a non-canonical percent-encoding is scrubbed"; else fail "e2e_collect_artifacts non-canonical encoding"; fi
+
 # ---- e2e_collect_artifacts: a no-op when ARTIFACTS_DIR is empty -----------------
 if (
 	wd=$(mktemp -d)

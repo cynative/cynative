@@ -168,11 +168,13 @@ attempts="${GCP_E2E_ATTEMPTS:-2}"
 # The out-of-band class-1 live-secret file for the credential prepass: the enumerable
 # env-var credentials this suite can name, one per line, mode 0600, in its own mktemp
 # OUTSIDE the workdir so cleanup shreds it even under GCP_E2E_KEEP_WORKDIR. GCP reads
-# ambient ADC, so the only enumerable secret is the LLM driver's api key when the run
-# supplies one; an ambient LLM (Bedrock/Vertex) leaves the file empty, which is valid -
-# the class-2/class-3 SHAPE families cover any leaked shaped key.
+# ambient ADC, so the enumerable secrets are the LLM driver's credentials when the run
+# supplies them: an api key for the direct providers, or the Vertex service-account JSON
+# CI feeds inline via CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS (a raw JSON blob with no
+# reliable class-2/class-3 shape, so it must ride the class-1 sweep). e2e_write_live_secrets
+# skips unset/empty vars, so an ambient-only run naming none of them is valid.
 secret_file=$(mktemp)
-e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY
+e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS
 
 # Sanitized-artifact wiring for e2e_run_with_retries (cynative#59): a no-op locally
 # (CONNECTOR_E2E_ARTIFACTS_DIR is unset), populated by CI in cynative#153.
