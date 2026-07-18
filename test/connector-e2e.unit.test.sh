@@ -127,6 +127,88 @@ if (
 	[ "$CYNATIVE_AUDIT_COMPRESS" = "false" ] || exit 1
 ); then pass "e2e_pin_audit_size exports a rotation-free audit configuration"; else fail "e2e_pin_audit_size"; fi
 
+# ---- e2e_collect_artifacts (cynative#59) -----------------------------------------
+# Sanitized-artifact collection reuses the shared parser's class-2/class-3 regex
+# families (test/lib/connector_audit/engine.py), so it needs python3 - the same
+# dependency `make sh-test` already asserts before running this file.
+command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found\n' >&2; exit 1; }
+
+# ---- e2e_collect_artifacts: sanitized artifacts, raw workdir left untouched, ----
+# ---- no audit log published, meta.txt present, artifacts dir outside workdir ----
+if (
+	wd=$(mktemp -d)
+	ad=$(mktemp -d)
+	trap 'rm -rf "$wd" "$ad"' EXIT
+	live_secret="s3cr3t-live-value-abcdef0123"
+	sf=$(mktemp)
+	printf '%s\n' "$live_secret" > "$sf"
+	# A fake class-2 secret SHAPE (AWS's own documented example access key id; never a
+	# real credential) that has nothing to do with the live-secret file.
+	shape="AKIAIOSFODNN7EXAMPLE"
+	printf 'reading with key %s now\n' "$shape" > "$wd/read.out"
+	# The exact class-1 live-secret value, as --auto-approve would print a raw tool-call
+	# argument to stderr.
+	printf 'stderr noise\ntool call arg leaked: %s\nmore noise\n' "$live_secret" > "$wd/read.err"
+	# A raw audit log carrying a credential in its (verbatim, approval-gated) arguments -
+	# this must never be copied into the published artifacts at all.
+	printf '{"tool":"http_request","arguments":"{\\"headers\\":[{\\"key\\":\\"Authorization\\",\\"value\\":\\"Bearer %s\\"}]}"}\n' \
+		"$live_secret" > "$wd/read.audit.log"
+
+	e2e_collect_artifacts myread "$wd" "$ad" "$sf" || exit 1
+
+	# (a) the class-2 shape is scrubbed from the sanitized read.out.
+	grep -q "$shape" "$ad/myread/read.out" && exit 1
+	grep -q 'REDACTED' "$ad/myread/read.out" || exit 1
+	# (b) the exact class-1 live secret is scrubbed from the sanitized read.err.
+	grep -q "$live_secret" "$ad/myread/read.err" && exit 1
+	grep -q 'REDACTED' "$ad/myread/read.err" || exit 1
+	# (c) the raw workdir files are untouched (the secret bytes are still there).
+	grep -q "$shape" "$wd/read.out" || exit 1
+	grep -q "$live_secret" "$wd/read.err" || exit 1
+	# (d) no *.audit.log anywhere under the artifacts dir.
+	[ ! -e "$ad/myread/read.audit.log" ] || exit 1
+	find "$ad" -name '*.audit.log' 2>/dev/null | grep -q . && exit 1
+	# (e) meta.txt exists and names only the suite/fixture identifiers, never the
+	# secret bytes.
+	[ -e "$ad/myread/meta.txt" ] || exit 1
+	grep -q "$live_secret" "$ad/myread/meta.txt" && exit 1
+	# (f) the artifacts dir is outside the workdir.
+	case "$ad" in "$wd"/*) exit 1 ;; esac
+); then pass "e2e_collect_artifacts: sanitized artifacts, raw workdir untouched, no audit.log, meta.txt, outside workdir"; else fail "e2e_collect_artifacts"; fi
+
+# ---- e2e_collect_artifacts: a no-op when ARTIFACTS_DIR is empty -----------------
+if (
+	wd=$(mktemp -d)
+	trap 'rm -rf "$wd"' EXIT
+	printf 'hello\n' > "$wd/read.out"
+	e2e_collect_artifacts myread "$wd" "" "" || exit 1
+	# Nothing besides the seeded file exists in the workdir: no stray directory was
+	# created from concatenating an empty ARTIFACTS_DIR with the suite name.
+	[ "$(find "$wd" -mindepth 1 | wc -l)" -eq 1 ] || exit 1
+); then pass "e2e_collect_artifacts: a no-op when ARTIFACTS_DIR is empty"; else fail "e2e_collect_artifacts no-op"; fi
+
+# ---- e2e_run_with_retries: fires the collection before a fatal exit (cynative#59) --
+# The phase callback is defined at top level (not inside the `if (...)` subshell)
+# because it is invoked indirectly, by name, and ShellCheck only resolves that
+# reference at top level (SC2329), mirroring test/e2e-guardrails.unit.test.sh.
+unit_security_wired() { return 4; }
+
+if (
+	wd=$(mktemp -d)
+	ad=$(mktemp -d)
+	trap 'rm -rf "$wd" "$ad"' EXIT
+	printf 'answer text\n' > "$wd/read.out"
+	printf 'sdk log\n' > "$wd/read.err"
+	export E2E_ARTIFACTS_SUITE=wired
+	export E2E_ARTIFACTS_WORKDIR="$wd"
+	export E2E_ARTIFACTS_DIR="$ad"
+	export E2E_ARTIFACTS_SECRET_FILE=""
+	if ( e2e_run_with_retries wired 1 unit_security_wired >/dev/null 2>&1 ); then exit 1; fi
+	[ -e "$ad/wired/read.out" ] || exit 1
+	[ -e "$ad/wired/meta.txt" ] || exit 1
+	unset E2E_ARTIFACTS_SUITE E2E_ARTIFACTS_WORKDIR E2E_ARTIFACTS_DIR E2E_ARTIFACTS_SECRET_FILE
+); then pass "e2e_run_with_retries: collects sanitized artifacts before its fatal exit on a security failure"; else fail "e2e_run_with_retries artifact wiring"; fi
+
 if [ "$fails" -ne 0 ]; then
 	printf 'connector-e2e.unit: %d case(s) FAILED\n' "$fails" >&2
 	exit 1

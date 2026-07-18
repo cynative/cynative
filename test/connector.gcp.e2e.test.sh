@@ -30,6 +30,9 @@
 #   GCP_E2E_KEEP_WORKDIR   =1 keep the temp workdir (parser, audit logs, output) for
 #                          debugging instead of deleting it on exit
 #   GCP_E2E_REQUIRE_RUN    =1 hard-fail instead of skipping when required env is unset
+#   CONNECTOR_E2E_ARTIFACTS_DIR  (shared across all three connector suites) a path
+#                          OUTSIDE the workdir where a fatal failure's sanitized
+#                          artifacts are published (cynative#59); unset = no-op
 set -eu
 
 # snapshot_parser DEST_DIR copies the shared connector-audit-parser package (the
@@ -166,6 +169,15 @@ attempts="${GCP_E2E_ATTEMPTS:-2}"
 # the class-2/class-3 SHAPE families cover any leaked shaped key.
 secret_file=$(mktemp)
 e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY
+
+# Sanitized-artifact wiring for e2e_run_with_retries (cynative#59): a no-op locally
+# (CONNECTOR_E2E_ARTIFACTS_DIR is unset), populated by CI in cynative#153.
+# ARTIFACTS_DIR must stay OUTSIDE workdir so this suite's own cleanup() does not
+# delete what was just collected on a fatal failure.
+export E2E_ARTIFACTS_SUITE=gcp
+export E2E_ARTIFACTS_WORKDIR="$workdir"
+export E2E_ARTIFACTS_DIR="${CONNECTOR_E2E_ARTIFACTS_DIR:-}"
+export E2E_ARTIFACTS_SECRET_FILE="$secret_file"
 
 # assert_gcp_posture ERR - the gcp connector must be registered live under the
 # read-only roles/viewer role (this suite runs on the default config, so a widened

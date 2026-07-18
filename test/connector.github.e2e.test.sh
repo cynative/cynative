@@ -36,6 +36,9 @@
 #   GH_E2E_KEEP_WORKDIR   =1 keep the temp workdir (parser, audit logs, output) for
 #                         debugging instead of deleting it on exit
 #   GH_E2E_REQUIRE_RUN    =1 hard-fail instead of skipping when required env is unset
+#   CONNECTOR_E2E_ARTIFACTS_DIR  (shared across all three connector suites) a path
+#                         OUTSIDE the workdir where a fatal failure's sanitized
+#                         artifacts are published (cynative#59); unset = no-op
 set -eu
 
 # snapshot_parser DEST_DIR copies the shared connector-audit-parser package (the whole
@@ -171,6 +174,15 @@ repo="$GH_E2E_REPO"
 # class-2/class-3 SHAPE families cover any leaked shaped key.
 secret_file=$(mktemp)
 e2e_write_live_secrets "$secret_file" GH_E2E_TOKEN CYNATIVE_LLM_API_KEY
+
+# Sanitized-artifact wiring for e2e_run_with_retries (cynative#59): a no-op locally
+# (CONNECTOR_E2E_ARTIFACTS_DIR is unset), populated by CI in cynative#153.
+# ARTIFACTS_DIR must stay OUTSIDE workdir so this suite's own cleanup() does not
+# delete what was just collected on a fatal failure.
+export E2E_ARTIFACTS_SUITE=github
+export E2E_ARTIFACTS_WORKDIR="$workdir"
+export E2E_ARTIFACTS_DIR="${CONNECTOR_E2E_ARTIFACTS_DIR:-}"
+export E2E_ARTIFACTS_SECRET_FILE="$secret_file"
 
 assert_github_posture() {
 	_err=$1

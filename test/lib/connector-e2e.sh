@@ -113,6 +113,148 @@ e2e_pin_audit_size() {
 	export CYNATIVE_AUDIT_COMPRESS=false
 }
 
+# _e2e_scrub_file SRC DEST SECRET_FILE - write a scrubbed copy of SRC to DEST.
+# SECRET_FILE may be empty (no exact class-1 live-secret values to scrub; the
+# class-2/class-3 shape families still run). Reuses the shared audit parser's regex
+# families (test/lib/connector_audit/engine.py _CONTENT_RULES/_POSITIONAL_RULES/
+# _read_live_secrets) so the scrub can never drift from the credential prepass that
+# gates the run. Matches class-1 in both literal and percent-encoded form and
+# class-2/class-3 in both literal and percent-decoded form (cynative#59 review-4):
+# a shape or a live secret hiding behind percent-encoding must not survive into the
+# published summary. Never fails the caller (a scrub problem must not mask the real
+# failure being reported): on any error it falls back to writing an empty DEST.
+_e2e_scrub_file() {
+	_src=$1
+	_dst=$2
+	_secrets=$3
+	python3 -B - "$_src" "$_dst" "$_secrets" "$_connector_e2e_dir/lib" <<'PYEOF' || : > "$_dst"
+import sys
+from urllib.parse import quote_plus, unquote_plus
+
+sys.path.insert(0, sys.argv[4])
+from connector_audit.engine import _CONTENT_RULES, _POSITIONAL_RULES, _read_live_secrets
+
+src, dst, secrets_path = sys.argv[1], sys.argv[2], (sys.argv[3] or None)
+secrets = [s for s in _read_live_secrets(secrets_path) if s] if secrets_path else []
+
+
+def redact_decoded_matches(t, decoded):
+    """Pass 1: find every class-1/2/3 match in the CLEAN decoded view and redact its
+    full span - both literal and percent-encoded form - directly in `t` (still
+    untouched by any other pass). This must run BEFORE any literal-regex pass touches
+    `t`: a shape whose characters straddle a percent-encoded byte (e.g. a base64 blob
+    containing "+") would otherwise regex-match only its unencoded prefix in `t`,
+    leaving a half-redacted shape with a leftover encoded tail - a real leak. Finding
+    the full match in `decoded` first and mopping up both encodings in one shot avoids
+    that entirely."""
+    for secret in secrets:
+        if secret and secret in decoded:
+            t = t.replace(secret, "[REDACTED:live-secret]")
+            enc = quote_plus(secret)
+            if enc != secret:
+                t = t.replace(enc, "[REDACTED:live-secret]")
+    for keywords, rx, label in _CONTENT_RULES:
+        if any(k in decoded for k in keywords):
+            for m in rx.finditer(decoded):
+                val = m.group(0)
+                t = t.replace(val, "[REDACTED:%s]" % label)
+                enc = quote_plus(val)
+                if enc != val:
+                    t = t.replace(enc, "[REDACTED:%s]" % label)
+    for rx, label in _POSITIONAL_RULES:
+        for m in rx.finditer(decoded):
+            val = m.group(1)
+            if not val or val.startswith("[REDACTED"):
+                continue
+            t = t.replace(val, "[REDACTED:%s]" % label)
+            enc = quote_plus(val)
+            if enc != val:
+                t = t.replace(enc, "[REDACTED:%s]" % label)
+    return t
+
+
+def redact_literal(t):
+    """Pass 2: the ordinary literal-matching redaction, over whatever pass 1 left
+    (secrets/shapes never behind encoding, the common case)."""
+    for secret in secrets:
+        t = t.replace(secret, "[REDACTED:live-secret]")
+        enc = quote_plus(secret)
+        if enc != secret:
+            t = t.replace(enc, "[REDACTED:live-secret]")
+    for keywords, rx, label in _CONTENT_RULES:
+        if any(k in t for k in keywords):
+            t = rx.sub("[REDACTED:%s]" % label, t)
+    for rx, label in _POSITIONAL_RULES:
+        def repl(m, _label=label):
+            val = m.group(1)
+            if not val or val.startswith("[REDACTED"):
+                return m.group(0)
+            whole = m.group(0)
+            s, e = m.start(1) - m.start(0), m.end(1) - m.start(0)
+            return whole[:s] + ("[REDACTED:%s]" % _label) + whole[e:]
+        t = rx.sub(repl, t)
+    return t
+
+
+try:
+    with open(src, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+except OSError:
+    text = ""
+
+decoded = unquote_plus(text)
+if decoded != text:
+    text = redact_decoded_matches(text, decoded)
+text = redact_literal(text)
+
+with open(dst, "w", encoding="utf-8") as f:
+    f.write(text)
+PYEOF
+}
+
+# e2e_collect_artifacts SUITE WORKDIR ARTIFACTS_DIR SECRET_FILE - on a fatal failure,
+# publish a SANITIZED artifact summary for CI upload (cynative#59). A no-op when
+# ARTIFACTS_DIR is empty (the local default; CI sets CONNECTOR_E2E_ARTIFACTS_DIR,
+# cynative#153). Writes <ARTIFACTS_DIR>/<SUITE>/<phase>.{out,err} for every *.out/
+# *.err file WORKDIR holds (read/canary/secretscan, whichever phases ran before the
+# failure), each scrubbed by _e2e_scrub_file over the class-1 exact live-secret
+# values from SECRET_FILE and the class-2/class-3 secret-shape families, plus
+# meta.txt naming only the suite and the collected filenames - never secret bytes.
+#
+# Deliberately does NOT copy *.audit.log. http_request ARGUMENTS are written
+# verbatim for approval-gated I/O (RedactArgs is false for them), so on a
+# credential-prepass 4 the audit is known to contain a credential in `arguments`;
+# publishing it would leak exactly what cynative#56 detects. The raw evidence stays
+# only in the private WORKDIR (preserved today by each suite's *_KEEP_WORKDIR knob).
+#
+# ARTIFACTS_DIR must be a path OUTSIDE WORKDIR so the suite's own cleanup() does not
+# delete what was just collected; callers must invoke this BEFORE a fatal exit; a
+# `cleanup()` running first would remove the evidence before this ever runs.
+#
+# Never fails the caller (mkdir -p returning nonzero, e.g. an unwritable
+# ARTIFACTS_DIR, is swallowed): a collection problem must not mask or replace the
+# real failure being reported.
+e2e_collect_artifacts() {
+	_suite=$1
+	_workdir=$2
+	_artifacts_dir=$3
+	_secret_file=$4
+	[ -n "$_artifacts_dir" ] || return 0
+	_dest="$_artifacts_dir/$_suite"
+	mkdir -p "$_dest" 2>/dev/null || return 0
+	{
+		printf 'suite: %s\n' "$_suite"
+		printf 'collected_utc: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+	} > "$_dest/meta.txt"
+	for _f in "$_workdir"/*.out "$_workdir"/*.err; do
+		[ -e "$_f" ] || continue
+		_name=$(basename "$_f")
+		_e2e_scrub_file "$_f" "$_dest/$_name" "$_secret_file"
+		printf 'file: %s\n' "$_name" >> "$_dest/meta.txt"
+	done
+	return 0
+}
+
 # e2e_write_live_secrets DEST VAR... - build the out-of-band class-1 live-secret file
 # the credential prepass reads via --live-secrets. Writes each SET and NON-EMPTY named
 # env var's value, one per line, to DEST at mode 0600; the values never touch argv or a

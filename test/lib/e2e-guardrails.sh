@@ -199,10 +199,30 @@ e2e_require_env() {
 	return 1
 }
 
+# _e2e_collect_artifacts_if_configured - call e2e_collect_artifacts (cynative#59)
+# with the suite-exported E2E_ARTIFACTS_* env vars, right before a fatal
+# e2e_run_with_retries exit. A no-op when E2E_ARTIFACTS_DIR is unset/empty (the
+# local default) or when e2e_collect_artifacts is not defined in this shell:
+# e2e-guardrails.sh is also sourced standalone by the llm smoke, which never sets
+# these vars and does not source connector-e2e.sh (where e2e_collect_artifacts
+# lives), so this must not hard-depend on it. Never fails the caller: a collection
+# problem must not mask or replace the real failure being reported.
+_e2e_collect_artifacts_if_configured() {
+	[ -n "${E2E_ARTIFACTS_DIR:-}" ] || return 0
+	command -v e2e_collect_artifacts >/dev/null 2>&1 || return 0
+	e2e_collect_artifacts "${E2E_ARTIFACTS_SUITE:-}" "${E2E_ARTIFACTS_WORKDIR:-}" \
+		"$E2E_ARTIFACTS_DIR" "${E2E_ARTIFACTS_SECRET_FILE:-}" || true
+}
+
 # e2e_run_with_retries LABEL ATTEMPTS PHASE_FN - run a phase, retrying a
 # non-deterministic model miss up to ATTEMPTS times. A budget hit (3) and a security
 # failure (4) are FATAL and are never retried; see the status contract above. Exits 1
-# when attempts are exhausted.
+# when attempts are exhausted. Gains no new positional args: this signature is shared
+# with the llm smoke, which sources this file directly. Every fatal exit below first
+# calls _e2e_collect_artifacts_if_configured (cynative#59), BEFORE `exit 1` runs the
+# caller's EXIT cleanup trap, so a fatal status 3/4 or an exhausted-attempts failure
+# still yields the sanitized artifacts even though the private workdir (and, on a
+# security failure, the raw audit evidence) is about to be removed.
 #
 # The phase's exit code is captured in the else branch: a completed `if` with no
 # matching branch yields status 0, so reading $? after `fi` would swallow it.
@@ -226,15 +246,18 @@ e2e_run_with_retries() {
 		fi
 		if [ "$_prc" -eq "$E2E_STATUS_SECURITY" ]; then
 			printf 'FAIL: %s phase FAILED A SECURITY ASSERTION; not retrying (a retry would erase the evidence)\n' "$_label" >&2
+			_e2e_collect_artifacts_if_configured
 			exit 1
 		fi
 		if [ "$_prc" -eq "$E2E_STATUS_BUDGET" ]; then
 			printf 'FAIL: %s phase hit the token budget; not retrying\n' "$_label" >&2
+			_e2e_collect_artifacts_if_configured
 			exit 1
 		fi
 		_n=$((_n + 1))
 		if [ "$_n" -ge "$_attempts" ]; then
 			printf 'FAIL: %s phase failed after %d attempt(s)\n' "$_label" "$_n" >&2
+			_e2e_collect_artifacts_if_configured
 			exit 1
 		fi
 		printf 'retry: %s phase attempt %d failed, retrying\n' "$_label" "$_n" >&2
