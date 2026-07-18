@@ -661,12 +661,39 @@ def _selftest():
         # No write was attempted at all (the model refused to issue it).
         ("canary_none", 1, "canary", pair("c1", read_args, sres(200, ok_body))),
     ]
+    # dump_root, when set, points at the frozen differential corpus
+    # (test/lib/connector_audit/testdata) so the equivalence proof for a later
+    # extraction can replay these exact bytes against both the old and new parsers.
+    # DUMP_CORPUS=1 (re)populates test/lib/connector_audit/testdata/gcp/<name>/ from
+    # THIS pre-extraction parser; a normal --selftest run never writes it, only reads
+    # gcp.names.txt for the name+code pin below.
+    dump_root = os.environ.get("CONNECTOR_AUDIT_TESTDATA_DIR")
+    dumping = bool(dump_root) and os.environ.get("DUMP_CORPUS") == "1"
+    provider_dir = os.path.join(dump_root, "gcp") if dump_root else None
+    if dumping:
+        import shutil
+        shutil.rmtree(provider_dir, ignore_errors=True)
+        os.makedirs(provider_dir, exist_ok=True)
     failures = 0
+    observed = []
     for name, want, mode, lines, *rest in cases:
         fd, path = tempfile.mkstemp(suffix=".log")
         with os.fdopen(fd, "w") as fh:
             fh.write("\n".join(lines) + "\n")
         argv = ["x", mode, path, project] + list(rest)
+        observed.append("%s %d" % (name, want))
+        if dumping:
+            case_dir = os.path.join(provider_dir, name)
+            os.makedirs(case_dir, exist_ok=True)
+            with open(path, "rb") as rf:
+                raw = rf.read()
+            with open(os.path.join(case_dir, "input"), "wb") as f:
+                f.write(raw)
+            with open(os.path.join(case_dir, "argv"), "w") as f:
+                for a in argv[1:]:
+                    f.write(("@AUDIT@" if a == path else a) + "\n")
+            with open(os.path.join(case_dir, "code"), "w") as f:
+                f.write("%d\n" % want)
         old_argv, old_out = sys.argv, sys.stdout
         sys.argv = argv
         sys.stdout = io.StringIO()  # suppress per-case parser diagnostics
@@ -681,10 +708,32 @@ def _selftest():
         if got != want:
             failures += 1
             print("selftest FAIL %s: want %d got %d" % (name, want, got))
+    # Name+code pin: the sorted set of "<name> <code>" this run exercised must equal
+    # the frozen testdata/gcp.names.txt exactly, so a case silently dropped, added, or
+    # renumbered by a future refactor (e.g. the shared-harness extraction) is caught
+    # here rather than passing on a shorter or drifted table.
+    if dump_root:
+        names_file = os.path.join(dump_root, "gcp.names.txt")
+        if dumping:
+            with open(names_file, "w") as f:
+                for line in sorted(observed):
+                    f.write(line + "\n")
+        if os.path.exists(names_file):
+            with open(names_file) as f:
+                want_names = sorted(line.rstrip("\n") for line in f if line.strip())
+            got_names = sorted(observed)
+            if got_names != want_names:
+                failures += 1
+                print("selftest FAIL: case name+code set differs from %s" % names_file)
+                print("  only in frozen table: %s" % sorted(set(want_names) - set(got_names)))
+                print("  only in this run:     %s" % sorted(set(got_names) - set(want_names)))
+        else:
+            failures += 1
+            print("selftest FAIL: %s missing (run DUMP_CORPUS=1 to populate it)" % names_file)
     if failures:
         print("selftest: %d/%d FAILED" % (failures, len(cases)))
         sys.exit(1)
-    print("selftest: OK (%d parser cases)" % len(cases))
+    print("selftest: OK (%d cases: name+code set verified)" % len(cases))
 
 
 def main():
@@ -738,7 +787,13 @@ if [ "${1:-}" = "--selftest" ]; then
 	trap 'trap - EXIT; rm -f "$_pt"; exit 130' INT
 	trap 'trap - EXIT; rm -f "$_pt"; exit 143' TERM
 	write_parser "$_pt"
-	python3 "$_pt" --selftest || exit 1
+	# CONNECTOR_AUDIT_TESTDATA_DIR points the embedded selftest's name+code pin (and,
+	# under DUMP_CORPUS=1, its frozen-corpus dump) at the shared differential corpus.
+	# $root is not yet assigned this early in the file (it is computed further down,
+	# right before the main run), so it is resolved locally here.
+	_root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
+	CONNECTOR_AUDIT_TESTDATA_DIR="$_root/test/lib/connector_audit/testdata" \
+		python3 "$_pt" --selftest || exit 1
 	_af=0
 	check_arb() { arbitrate "$2" "$3" && _g=0 || _g=$?; if [ "$_g" != "$1" ]; then printf 'arbitrate(%s,%s) want %s got %s\n' "$2" "$3" "$1" "$_g" >&2; _af=1; fi; }
 	check_arb 4 4 0    # breach + clean run

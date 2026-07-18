@@ -613,6 +613,20 @@ selftest() {
 	p="$td/parser.py"
 	write_parser "$p"
 
+	# observed_names accumulates "<case> <expected code>" for every expect_code call
+	# below, so the name+code pin at the end of selftest can compare the exact set
+	# this run exercised against the frozen testdata/aws.names.txt. corpus_dir holds
+	# the frozen per-case input+argv+code, dumped once from THIS (pre-extraction)
+	# parser when DUMP_CORPUS=1 is set; normal --selftest runs never write it, only
+	# read testdata/aws.names.txt for the pin.
+	observed_names="$td/observed.names.txt"
+	: >"$observed_names"
+	corpus_dir="$root/test/lib/connector_audit/testdata/aws"
+	if [ "${DUMP_CORPUS:-}" = "1" ]; then
+		rm -rf "$corpus_dir"
+		mkdir -p "$corpus_dir"
+	fi
+
 	role=cynative-connector-e2e-fixture
 	nonce=test-nonce-1234
 	gurl="https://iam.amazonaws.com/?Action=GetRole&RoleName=$role&Version=2010-05-08"
@@ -832,11 +846,34 @@ selftest() {
 	pair c1 "$ehargs" "$denial" error >"$td/canary_extra_header.log"
 
 	fails=0
-	# expect_code EXPECTED MODE... - the parser's exit code IS the contract: 1 is a
-	# retryable miss, 4 is a security failure the caller must never retry.
+	# expect_code EXPECTED MODE AUDIT ARGS... - the parser's exit code IS the contract:
+	# 1 is a retryable miss, 4 is a security failure the caller must never retry. The
+	# case name is derived from the audit log's basename (every fixture above writes to
+	# "$td/<name>.log", read_unreadable being the one path deliberately never created),
+	# which also doubles as the corpus/pin key.
 	expect_code() {
 		_want=$1
 		shift
+		_case=$(basename "$2" .log)
+		printf '%s %s\n' "$_case" "$_want" >>"$observed_names"
+		if [ "${DUMP_CORPUS:-}" = "1" ]; then
+			_case_dir="$corpus_dir/$_case"
+			mkdir -p "$_case_dir"
+			if [ -f "$2" ]; then
+				cp "$2" "$_case_dir/input"
+			else
+				printf 'STATE=missing\n' >"$_case_dir/input"
+			fi
+			: >"$_case_dir/argv"
+			for _a in "$@"; do
+				if [ "$_a" = "$2" ]; then
+					printf '@AUDIT@\n' >>"$_case_dir/argv"
+				else
+					printf '%s\n' "$_a" >>"$_case_dir/argv"
+				fi
+			done
+			printf '%s\n' "$_want" >"$_case_dir/code"
+		fi
 		if python3 "$p" "$@" >/dev/null 2>&1; then _got=0; else _got=$?; fi
 		if [ "$_got" -ne "$_want" ]; then
 			printf 'selftest FAIL: exit %s, want %s: %s\n' "$_got" "$_want" "$*" >&2
@@ -889,11 +926,33 @@ selftest() {
 	expect_code 0 canary "$td/canary_folded_service.log" "$role"
 	expect_code 1 canary "$td/canary_extra_header.log"   "$role"
 
+	# Name+code pin: the sorted set of "<case> <expected code>" this run exercised must
+	# equal the frozen testdata/aws.names.txt exactly, so a case silently dropped,
+	# added, or renumbered during a future refactor (e.g. the shared-harness
+	# extraction) is caught here rather than passing on a shorter or drifted table.
+	names_file="$corpus_dir.names.txt"
+	if [ "${DUMP_CORPUS:-}" = "1" ]; then
+		sort "$observed_names" >"$names_file"
+	fi
+	sort "$observed_names" >"$td/observed.sorted"
+	if [ ! -f "$names_file" ]; then
+		printf 'selftest FAIL: %s missing (run DUMP_CORPUS=1 to populate it)\n' "$names_file" >&2
+		fails=$((fails + 1))
+	else
+		sort "$names_file" >"$td/want.sorted"
+		if ! cmp -s "$td/observed.sorted" "$td/want.sorted"; then
+			printf 'selftest FAIL: case name+code set differs from %s\n' "$names_file" >&2
+			diff "$td/want.sorted" "$td/observed.sorted" >&2 || true
+			fails=$((fails + 1))
+		fi
+	fi
+
 	if [ "$fails" -ne 0 ]; then
 		printf 'selftest: %d case(s) FAILED\n' "$fails" >&2
 		exit 1
 	fi
-	printf 'selftest: OK (40 cases)\n' >&2
+	_n=$(wc -l <"$td/observed.sorted" | tr -d '[:space:]')
+	printf 'selftest: OK (%s cases: name+code set verified)\n' "$_n" >&2
 }
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
