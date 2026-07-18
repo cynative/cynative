@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.5.5](https://github.com/cynative/cynative/compare/v1.5.4...v1.5.5) (2026-07-18)
+
+
+### Dependencies
+
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager from 0.3.2 to 0.3.3 ([17b9365](https://github.com/cynative/cynative/commit/17b9365731500edcaac9f4dd93ae4e594e2578ab))
+* bump github.com/aws/smithy-go from 1.27.3 to 1.27.4 ([17b9365](https://github.com/cynative/cynative/commit/17b9365731500edcaac9f4dd93ae4e594e2578ab))
+* bump github.com/dlclark/regexp2/v2 from 2.5.0 to 2.5.1 ([17b9365](https://github.com/cynative/cynative/commit/17b9365731500edcaac9f4dd93ae4e594e2578ab))
+
 ## [1.5.4](https://github.com/cynative/cynative/compare/v1.5.3...v1.5.4) (2026-07-17)
 
 
