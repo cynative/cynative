@@ -107,8 +107,10 @@ pwsh-test:
 # + e2e_pin_audit_size), the per-package changelog override renderer unit tests
 # (test/dependabot-override.unit.test.sh), an AST syntax check of every file in the
 # shared connector audit-parser package (test/lib/connector-audit-parser.py,
-# test/lib/connector_audit/*.py, and its specs/), and all three connector suites'
-# offline audit-parser selftests (--selftest). All hermetic: no network, no
+# test/lib/connector_audit/*.py, and its specs/), all three connector suites' offline
+# audit-parser selftests (--selftest), and the shared-machinery selftest (the engine's
+# own cases run with no provider, including the #56 credential prepass detection
+# fixtures the per-provider selftests only prove inert on). All hermetic: no network, no
 # credentials. The parsers are the security boundary of the live connector e2es, so
 # they are gated here rather than only exercised on a live run. The syntax check runs
 # under PYTHONDONTWRITEBYTECODE=1 with python3 -B so it leaves no __pycache__; it uses
@@ -128,7 +130,8 @@ sh-test:
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + python syntax gate + connector audit parsers)"
+	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + python syntax gate + connector audit parsers + shared-machinery selftest)"
 
 SHELL_COMPLEXITY_MAX := 6
 

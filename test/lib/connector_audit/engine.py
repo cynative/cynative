@@ -25,7 +25,7 @@ import re
 import sys
 from dataclasses import dataclass
 from typing import Callable
-from urllib.parse import urlparse
+from urllib.parse import quote_plus, unquote_plus, urlparse
 
 NOT_PROVEN = 1
 SECURITY = 4
@@ -498,11 +498,142 @@ def run_canary(records, spec, canary, target):
     print("%s: OK (%d sanctioned canary denied by the gate before dispatch)" % (canary.label, len(candidates)))
 
 
+# credName mirrors internal/redact credentialRules' key vocabulary exactly (the
+# underscore-optional, multi-component *_token family included), so the parser
+# recognizes the same credential-named fields the production redactor targets.
+_CRED_NAME = (r"access_?token|refresh_?token|id_?token|client_?secret|secret|password|"
+              r"secret_?access_?key|session_?token|api_?key|apikey|private_?key|"
+              r"(?:[a-z0-9]+_)+token|token")
+
+# class-2: whole-content secret families (internal/redact contentRules), scanned
+# anywhere. Each is keyword-pre-gated - run the regex only when a cheap distinctive
+# substring is present, no entropy heuristics - mirroring the production redactor. A
+# raw (unredacted) match is a breach; a "[REDACTED:<label>]" placeholder carries none
+# of these shapes, so an already-redacted value is accepted for free.
+_CONTENT_RULES = (
+    (("PRIVATE KEY",),
+     re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)", re.S),
+     "pem-private-key"),
+    (("LS0tLS1CRUdJTi",),
+     re.compile(r"LS0tLS1CRUdJTi[A-Za-z0-9+/=]+(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+/=]{32,})*"),
+     "base64-pem"),
+    (("eyJ",), re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?"), "jwt"),
+    (("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"),
+     re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{82,})"), "github-token"),
+    (("glpat-",), re.compile(r"glpat-[A-Za-z0-9_-]{20,}"), "gitlab-token"),
+    (("xox", "xapp-"), re.compile(r"(?:xox[baprse]-|xapp-)[A-Za-z0-9-]{10,}"), "slack-token"),
+    (("AIza",), re.compile(r"AIza[A-Za-z0-9_-]{35}"), "google-api-key"),
+    (("ya29.",), re.compile(r"ya29\.[A-Za-z0-9_-]{20,}"), "google-oauth-token"),
+    (("AKIA", "ASIA", "AROA", "AIDA"), re.compile(r"(?:AKIA|ASIA|AROA|AIDA)[A-Z0-9]{16}"),
+     "aws-access-key-id"),
+    (("sk-",),
+     re.compile(r"\bsk-(?:ant-[A-Za-z0-9_-]{20,}|proj-[A-Za-z0-9_-]{20,}|"
+                r"svcacct-[A-Za-z0-9_-]{20,}|[A-Za-z0-9]{20,})"), "llm-api-key"),
+)
+
+# class-3: positional credential families (internal/redact credentialRules). A
+# credential-named JSON/XML field or a signing/session query param leaks by position:
+# the captured value is a breach unless it is already the redactor's placeholder (which
+# begins "[REDACTED"). URL userinfo and denylisted credential-header values are
+# deliberately absent here: they are VALUE-gated, and the class-1/class-2 anywhere-scan
+# already flags them exactly when the value is a real secret, so the AWS canary_url
+# "u:p" and GitHub canary "Authorization: Bearer x" stay canary defects (1), not leaks.
+_POSITIONAL_RULES = (
+    (re.compile(r'"(?:' + _CRED_NAME + r')"\s*:\s*"((?:\\.|[^"\\])*)"', re.I), "credential-field"),
+    (re.compile(r"<(?:" + _CRED_NAME + r")>([^<]*)</[A-Za-z0-9_:.-]+>", re.I), "credential-field"),
+    (re.compile(r"(?:X-Amz-Signature|X-Goog-Signature|Signature|sig)=([^&\"'\s]+)", re.I),
+     "signed-url-signature"),
+    (re.compile(r"(?:X-Amz-Security-Token)=([^&\"'\s]+)", re.I), "aws-session-token"),
+)
+
+
+def _read_live_secrets(path):
+    """The out-of-band live secret values, one per line, blanks dropped. The suites
+    always pass the flag, so a MISSING/UNREADABLE file is a wiring bug and fails closed
+    (4). An EMPTY file is legitimate: ambient-credential runs (AWS profiles/instance
+    roles, GCP ADC, Bedrock/Vertex chains) enumerate no env secret and rely on the
+    class-2/class-3 SHAPE families, so an empty file must not fail. path is None only on
+    the offline replay that passes no flag; class-1 is then skipped, never fatal, so the
+    frozen corpus stays inert."""
+    if path is None:
+        return []
+    text = None
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError as e:
+        insecure("credential prepass: cannot read live-secrets file %s: %s - failing closed" % (path, e))
+    except UnicodeDecodeError:
+        insecure("credential prepass: live-secrets file is not valid UTF-8 - failing closed")
+    return [s for s in (line.strip() for line in text.splitlines()) if s]
+
+
+def _cred_expand(value, blobs):
+    """Append every text view of `value` that a secret could hide in: the string
+    itself, and - since arguments can be a JSON string and a result wraps a JSON body -
+    a further decode of any JSON-string leaf. dict/list values are dumped so a positional
+    "key":"value" rule can see them, then walked so nested strings are decoded too."""
+    if isinstance(value, str):
+        blobs.append(value)
+        try:
+            inner = json.loads(value)
+        except ValueError:
+            return
+        if isinstance(inner, (dict, list, str)):
+            _cred_expand(inner, blobs)
+    elif isinstance(value, dict):
+        blobs.append(json.dumps(value))
+        for v in value.values():
+            _cred_expand(v, blobs)
+    elif isinstance(value, list):
+        blobs.append(json.dumps(value))
+        for v in value:
+            _cred_expand(v, blobs)
+
+
+def _cred_blobs(records, raw_lines):
+    """Every text unit to scan: the raw physical lines (including a tolerated trailing
+    partial that never parsed into a record, so it cannot evade the scan) plus each
+    record's arguments and result, recursively expanded and JSON-double-decoded."""
+    blobs = [ln for ln in raw_lines if isinstance(ln, str)]
+    for rec in records:
+        if isinstance(rec, dict):
+            _cred_expand(rec.get("arguments"), blobs)
+            _cred_expand(rec.get("result"), blobs)
+    return blobs
+
+
 def credential_prepass(records, raw_lines, live_secrets_path):
-    """Stub: a later task scans the audit for live secret material that reached the
-    wire, using the out-of-band secrets in `live_secrets_path` and the raw log bytes.
-    A no-op for now so the wiring (the --live-secrets seam and the raw_lines flow) is in
-    place; it must never relax a verdict, only add a fail-closed one."""
+    """Fail closed (4) when known live credential bytes or production-recognized
+    credential material appear in the recorded audit. Runs before every mode assertion,
+    over both `arguments` (written verbatim for approval-gated I/O) and `result`
+    (redacted at source) of every record, plus the raw physical bytes. Three value-based
+    classes: class-1 exact live-secret values (literal AND percent-encoded); class-2
+    whole-content secret shapes; class-3 positional credential fields and signing/session
+    params. Every string is scanned in both its literal and its percent-decoded form, so
+    a secret url-encoded on the wire cannot slip through. It only ever ADDS a fail-closed
+    verdict; it never relaxes one. Diagnostics name the family only, never the bytes."""
+    secrets = _read_live_secrets(live_secrets_path)
+    for blob in _cred_blobs(records, raw_lines):
+        if not blob:
+            continue
+        decoded = unquote_plus(blob)
+        texts = (blob, decoded) if decoded != blob else (blob,)
+        for text in texts:
+            # class-1: exact live-secret bytes, matched literally or percent-encoded.
+            for secret in secrets:
+                if secret in text or quote_plus(secret) in text:
+                    insecure("credential prepass: a live secret value appears in the audit - failing closed")
+            # class-2: whole-content production secret shapes (keyword-pre-gated).
+            for keywords, rx, label in _CONTENT_RULES:
+                if any(k in text for k in keywords) and rx.search(text):
+                    insecure("credential prepass: a %s shape appears in the audit - failing closed" % label)
+            # class-3: positional credential fields and signing/session params; a
+            # "[REDACTED..." value is the redactor having fired, so it is accepted.
+            for rx, label in _POSITIONAL_RULES:
+                for m in rx.finditer(text):
+                    val = m.group(1)
+                    if val and not val.startswith("[REDACTED"):
+                        insecure("credential prepass: a %s value appears in the audit - failing closed" % label)
     return None
 
 
@@ -839,6 +970,68 @@ def _shared_selftest():
                        "run_id": "r", "call_id": "c1",
                        "arguments": {"auth_provider": "gcp", "url": url, "method": "PATCH"}}]
 
+        # credential_prepass fixtures (#56). Each drives the prepass directly through
+        # _guard: a clean scan returns None (0), a hit calls insecure (4). The live
+        # secrets are neutral-shaped values (no production shape of their own), so only
+        # the class-1 exact-value scan can catch them; enc_secret carries the url-unsafe
+        # bytes that pin the percent-encoding path.
+        live_secret = "s3cr3t-ambient-value-xyz0"
+        enc_secret = "aa/bb+cc=dd-EE"
+        p_secrets = _write(tmp, live_secret + "\n" + enc_secret + "\n")
+
+        def cp(lines, secrets=None):
+            recs = []
+            for ln in lines:
+                try:
+                    recs.append(json.loads(ln))
+                except ValueError:
+                    pass
+            credential_prepass(recs, lines, secrets)
+
+        # class-2: an AKIA-shaped access key sitting in verbatim (unredacted) arguments.
+        akia_line = _jline("c1", "attempt", {
+            "method": "GET", "url": "https://iam.amazonaws.com/", "auth_provider": "aws",
+            "body": "x=AKIAIOSFODNN7EXAMPLE"})
+        # class-2: an unredacted PEM private key in a direct-path result dump.
+        pem_result = ("HTTP/1.1 200 OK\r\n\r\n-----BEGIN PRIVATE KEY-----"
+                      "MIIBVQIBADANBgkqhkiG9w0BAQEFAASCAT8wggE7-----END PRIVATE KEY-----")
+        pem_line = _jline("c1", "result",
+                          {"method": "GET", "url": "https://iam.amazonaws.com/", "auth_provider": "aws"},
+                          result=pem_result, outcome="ok")
+        # raw_lines scan: a credential in a tolerated malformed FINAL line that never
+        # parses into a record, so only the physical-byte scan can see it.
+        clean_line = _jline("c1", "attempt", read_args)
+        partial_secret_line = '{"result":"leak AKIAIOSFODNN7EXAMPLE'
+        # class-1: a header value equal to a live secret (needs the fixture file).
+        hdr_secret_line = _jline("c1", "attempt", {
+            "method": "GET", "url": "https://api.github.com/", "auth_provider": "github",
+            "headers": [{"key": "X-Custom", "value": live_secret}]})
+        # class-2 via userinfo: a real github-token-shaped secret as the URL password.
+        ui_secret_line = _jline("c1", "attempt", {
+            "method": "GET", "url": "https://x:ghp_" + ("0" * 40) + "@api.github.com/",
+            "auth_provider": "github"})
+        # value-gated userinfo: u:p is no secret, so it stays a canary defect, not a leak.
+        ui_plain_line = _jline("c1", "attempt", {
+            "method": "POST", "url": "https://u:p@iam.amazonaws.com:444/", "auth_provider": "aws"})
+        # value-gated header: Authorization: Bearer x carries no secret value.
+        authhdr_line = _jline("c1", "attempt", {
+            "method": "PATCH", "url": "https://api.github.com/repos/x/y", "auth_provider": "github",
+            "headers": [{"key": "Authorization", "value": "Bearer x"}]})
+        # an exact placeholder is the redactor having done its job: accepted.
+        redacted_line = _jline("c1", "result",
+                               {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
+                               result="response body: [REDACTED:jwt] ok", outcome="ok")
+        # the non-secret witness fact (a project number) must not be mistaken for a leak.
+        witness_line = _jline("c1", "result", {
+            "method": "GET",
+            "url": "https://cloudresourcemanager.googleapis.com/v1/projects/demo",
+            "auth_provider": "gcp"}, result=_sres(
+                200, json.dumps({"projectId": "demo", "projectNumber": "123456789012"})), outcome="ok")
+        # class-1 under percent-encoding: the live secret url-encoded in a query.
+        enc_line = _jline("c1", "attempt", {
+            "method": "GET", "url": "https://iam.amazonaws.com/?token=aa%2Fbb%2Bcc%3Ddd-EE",
+            "auth_provider": "aws"})
+
         cases = [
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
             ("nonutf8", 4, lambda: _guard(lambda: load_records(p_nonutf8))),
@@ -862,6 +1055,16 @@ def _shared_selftest():
             ("entry_import_sysexit", 4, lambda: _run_entry_with_broken_engine(
                 "raise SystemExit(1)", ["enginetest", "read", p_unreadable, target, expect])),
             ("differential_runs", 0, _diff_smoke),
+            ("cred_akia_in_args", 4, lambda: _guard(lambda: cp([akia_line]))),
+            ("cred_pem_in_result", 4, lambda: _guard(lambda: cp([pem_line]))),
+            ("cred_trailing_partial", 4, lambda: _guard(lambda: cp([clean_line, partial_secret_line]))),
+            ("cred_header_eq_live_secret", 4, lambda: _guard(lambda: cp([hdr_secret_line], p_secrets))),
+            ("cred_userinfo_real_secret", 4, lambda: _guard(lambda: cp([ui_secret_line]))),
+            ("cred_userinfo_nonsecret_ok", 0, lambda: _guard(lambda: cp([ui_plain_line]))),
+            ("cred_authhdr_bearer_ok", 0, lambda: _guard(lambda: cp([authhdr_line]))),
+            ("cred_redacted_placeholder_ok", 0, lambda: _guard(lambda: cp([redacted_line]))),
+            ("cred_witness_fact_ok", 0, lambda: _guard(lambda: cp([witness_line]))),
+            ("cred_percent_encoded_secret", 4, lambda: _guard(lambda: cp([enc_line], p_secrets))),
         ]
 
         failures = 0

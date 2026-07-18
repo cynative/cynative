@@ -103,9 +103,16 @@ case "${GCP_E2E_CANARY:-1}" in
 esac
 
 workdir=$(mktemp -d)
+# secret_file holds the out-of-band class-1 live secrets for the credential prepass. It
+# is defined empty up front so cleanup can shred it (rm -f tolerates the empty path)
+# even on an early exit; the real mktemp path is minted below.
+secret_file=""
 # GCP_E2E_KEEP_WORKDIR=1 preserves the parser and the per-phase audit logs, so a
-# failure can be re-examined by hand instead of re-run blind.
+# failure can be re-examined by hand instead of re-run blind. The live-secret file is
+# shredded unconditionally, before the keep-check: KEEP preserves the workdir, never
+# the secret material.
 cleanup() {
+	rm -f "$secret_file"
 	if [ "${GCP_E2E_KEEP_WORKDIR:-}" = "1" ]; then
 		printf 'workdir kept: %s\n' "$workdir" >&2
 		return 0
@@ -151,9 +158,14 @@ snapshot_parser "$workdir"
 
 timeout_s="$E2E_RUN_TIMEOUT"
 attempts="${GCP_E2E_ATTEMPTS:-2}"
-# Populated by a live-secrets scan in a later task; connector_run_phase only passes
-# --live-secrets through when this is non-empty.
-secret_file=""
+# The out-of-band class-1 live-secret file for the credential prepass: the enumerable
+# env-var credentials this suite can name, one per line, mode 0600, in its own mktemp
+# OUTSIDE the workdir so cleanup shreds it even under GCP_E2E_KEEP_WORKDIR. GCP reads
+# ambient ADC, so the only enumerable secret is the LLM driver's api key when the run
+# supplies one; an ambient LLM (Bedrock/Vertex) leaves the file empty, which is valid -
+# the class-2/class-3 SHAPE families cover any leaked shaped key.
+secret_file=$(mktemp)
+e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY
 
 # assert_gcp_posture ERR - the gcp connector must be registered live under the
 # read-only roles/viewer role (this suite runs on the default config, so a widened

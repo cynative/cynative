@@ -105,9 +105,16 @@ e2e_require_cmd timeout || exit 1
 e2e_require_cmd python3 "needed to parse the audit log" || exit 1
 
 workdir=$(mktemp -d)
+# secret_file holds the out-of-band class-1 live secrets for the credential prepass. It
+# is defined empty up front so cleanup can shred it (rm -f tolerates the empty path)
+# even on an early exit; the real mktemp path is minted below.
+secret_file=""
 # AWS_E2E_KEEP_WORKDIR=1 preserves the parser and the per-phase audit logs, so a
-# failure can be re-examined by hand instead of re-run blind.
+# failure can be re-examined by hand instead of re-run blind. The live-secret file is
+# shredded unconditionally, before the keep-check: KEEP preserves the workdir, never
+# the secret material.
 cleanup() {
+	rm -f "$secret_file"
 	if [ "${AWS_E2E_KEEP_WORKDIR:-}" = "1" ]; then
 		printf 'workdir kept: %s\n' "$workdir" >&2
 		return 0
@@ -148,9 +155,16 @@ snapshot_parser "$workdir"
 
 timeout_s="$E2E_RUN_TIMEOUT"
 attempts="${AWS_E2E_ATTEMPTS:-2}"
-# Populated by a live-secrets scan in a later task; connector_run_phase only passes
-# --live-secrets through when this is non-empty.
-secret_file=""
+# The out-of-band class-1 live-secret file for the credential prepass: the enumerable
+# env-var credentials this suite can name, one per line, mode 0600, in its own mktemp
+# OUTSIDE the workdir so cleanup shreds it even under AWS_E2E_KEEP_WORKDIR. The AWS
+# static-credential env vars are written only when set (an instance role or profile run
+# leaves them unset), plus the LLM driver's api key when the run supplies one; an
+# ambient LLM (Bedrock) leaves those unset, which is valid - the class-2/class-3 SHAPE
+# families cover any leaked shaped key.
+secret_file=$(mktemp)
+e2e_write_live_secrets "$secret_file" \
+	AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN CYNATIVE_LLM_API_KEY
 
 # assert_aws_posture ERR - the aws connector must be registered live, under the
 # read-only policy, on the expected account, at the expected enforcement level.

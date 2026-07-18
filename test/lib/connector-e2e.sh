@@ -112,3 +112,28 @@ e2e_pin_audit_size() {
 	export CYNATIVE_AUDIT_RETENTION_DAYS=3650
 	export CYNATIVE_AUDIT_COMPRESS=false
 }
+
+# e2e_write_live_secrets DEST VAR... - build the out-of-band class-1 live-secret file
+# the credential prepass reads via --live-secrets. Writes each SET and NON-EMPTY named
+# env var's value, one per line, to DEST at mode 0600; the values never touch argv or a
+# diagnostic. DEST must be its OWN mktemp path OUTSIDE the retained workdir, and its
+# removal must be composed into the suite's existing cleanup() (rm -f "$secret_file"),
+# never a competing `trap ... EXIT INT TERM` - which in POSIX sh would REPLACE the
+# suite's signal handlers and break the EXIT-cleanup + INT/TERM-exit-130/143 discipline.
+# The file MAY be empty: ambient-credential runs (AWS profiles/instance roles, GCP ADC,
+# Bedrock/Vertex chains) enumerate no env secret and are covered by the class-2/class-3
+# SHAPE families, so an empty file is valid and must not fail. The var value is read
+# through eval on the caller-supplied name (POSIX sh has no other portable indirection),
+# the same seam e2e_require_env uses; the names are compile-time literals in the suites.
+e2e_write_live_secrets() {
+	_dest=$1
+	shift
+	: > "$_dest"
+	chmod 600 "$_dest"
+	for _var in "$@"; do
+		eval "_val=\${$_var:-}"
+		if [ -n "$_val" ]; then
+			printf '%s\n' "$_val" >> "$_dest"
+		fi
+	done
+}
