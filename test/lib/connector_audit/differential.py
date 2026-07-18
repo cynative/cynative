@@ -102,3 +102,18 @@ def compare(old_parser_path, provider, corpus_dir):
             print("differential MISMATCH %s: old=%d new=%d want=%d" % (name, old_rc, new_rc, want))
     print("equivalent: %d/%d" % (equivalent, total))
     return equivalent, total
+
+
+if __name__ == "__main__":
+    import argparse
+
+    _parser = argparse.ArgumentParser(
+        description="Replay a provider's frozen differential corpus against the pre-extraction "
+                    "embedded parser and the shared entrypoint, and assert the two agree.")
+    _parser.add_argument("--old", required=True, metavar="PATH",
+                         help="path to the extracted pre-extraction embedded parser")
+    _parser.add_argument("provider", help="provider token (e.g. aws, gcp, github)")
+    _parser.add_argument("corpus_dir", help="frozen corpus directory, e.g. testdata/<provider>")
+    _args = _parser.parse_args()
+    _equivalent, _total = compare(_args.old, _args.provider, _args.corpus_dir)
+    sys.exit(0 if _equivalent == _total else 1)

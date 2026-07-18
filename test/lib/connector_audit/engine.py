@@ -371,7 +371,12 @@ class ProviderSpec:
     canaries:           the boundary-probe modes for this provider.
     selftest_target:    the target argv value the per-provider selftest passes.
     selftest_cases:     frozen (name, code, mode, lines, *rest) tuples the per-provider
-                        selftest and --dump-names replay; empty until a spec fills it."""
+                        selftest and --dump-names replay; empty until a spec fills it.
+                        lines is normally a list of JSONL strings (joined with a
+                        newline and written as text); it may also be `bytes` (written
+                        verbatim, for a case that needs invalid UTF-8) or `None` (the
+                        case's audit path must not exist, e.g. AWS's frozen
+                        read_unreadable)."""
 
     name: str
     blocked_word: str
@@ -389,8 +394,9 @@ class ProviderSpec:
 # one line per provider in the extraction tasks; an unknown provider fails closed.
 REGISTRY: "dict[str, ProviderSpec]" = {}
 
-from .specs import gcp  # noqa: E402 - registered after ProviderSpec is defined.
+from .specs import aws, gcp  # noqa: E402 - registered after ProviderSpec is defined.
 
+REGISTRY["aws"] = aws.SPEC
 REGISTRY["gcp"] = gcp.SPEC
 
 
@@ -600,19 +606,37 @@ def _run_case(provider, mode, path, target, rest):
 
 
 def _provider_selftest(provider):
+    import shutil
     import tempfile
     spec = resolve(provider)
     failures = 0
     observed = []
     for name, want, mode, lines, *rest in spec.selftest_cases:
-        fd, path = tempfile.mkstemp(suffix=".log")
-        with os.fdopen(fd, "w") as fh:
-            fh.write("\n".join(lines) + "\n")
+        tmpdir = None
+        if lines is None:
+            # A case whose audit path must not exist (e.g. AWS's frozen
+            # read_unreadable): allocate a path inside a fresh, otherwise-empty temp
+            # dir, but never create the file there.
+            tmpdir = tempfile.mkdtemp()
+            path = os.path.join(tmpdir, "missing.audit.log")
+        elif isinstance(lines, bytes):
+            # Raw file content, verbatim (e.g. a case needing invalid UTF-8 that no
+            # Python str can carry through a plain text write).
+            fd, path = tempfile.mkstemp(suffix=".log")
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(lines)
+        else:
+            fd, path = tempfile.mkstemp(suffix=".log")
+            with os.fdopen(fd, "w") as fh:
+                fh.write("\n".join(lines) + "\n")
         observed.append("%s %d" % (name, want))
         try:
             got = _run_case(provider, mode, path, spec.selftest_target, rest)
         finally:
-            os.unlink(path)
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            else:
+                os.unlink(path)
         if got != want:
             failures += 1
             print("selftest FAIL %s: want %d got %d" % (name, want, got))
