@@ -389,6 +389,10 @@ class ProviderSpec:
 # one line per provider in the extraction tasks; an unknown provider fails closed.
 REGISTRY: "dict[str, ProviderSpec]" = {}
 
+from .specs import gcp  # noqa: E402 - registered after ProviderSpec is defined.
+
+REGISTRY["gcp"] = gcp.SPEC
+
 
 def resolve(provider):
     """The ProviderSpec for `provider`, or fail closed to 4. An unknown provider, an
