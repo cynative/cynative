@@ -896,16 +896,31 @@ selftest() {
 	printf 'selftest: OK (40 cases)\n' >&2
 }
 
-# --- offline self-test: verify the embedded audit parser without credentials ---
-if [ "${1:-}" = "--selftest" ]; then
-	selftest
-	exit 0
-fi
-
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 # Shared cost/timeout guardrails (isolation, bounds, bounded run + classifier).
 # shellcheck disable=SC1091  # sourced at runtime via a $0-relative path.
 . "$root/test/lib/e2e-guardrails.sh"
+
+# arbitrate PARSER_RC CLASSIFY_RC -> final phase status. A security breach (4)
+# dominates even a timeout or budget hit; otherwise a nonzero classifier (2 timeout
+# / 3 budget / 1 error) wins; else the parser's own 0 (hold) or 1 (miss).
+arbitrate() {
+	if [ "$1" = 4 ]; then return 4; fi
+	if [ "$2" != 0 ]; then return "$2"; fi
+	return "$1"
+}
+
+# --- offline self-test: verify the embedded audit parser without credentials ---
+if [ "${1:-}" = "--selftest" ]; then
+	selftest
+	_af=0
+	check_arb() { arbitrate "$2" "$3" && _g=0 || _g=$?; if [ "$_g" != "$1" ]; then printf 'arbitrate(%s,%s) want %s got %s\n' "$2" "$3" "$1" "$_g" >&2; _af=1; fi; }
+	check_arb 4 4 0; check_arb 4 4 2; check_arb 4 4 3; check_arb 2 1 2
+	check_arb 3 1 3; check_arb 1 1 0; check_arb 2 0 2; check_arb 0 0 0
+	[ "$_af" = 0 ] || exit 1
+	printf 'selftest: OK (arbitrate cases)\n' >&2
+	exit 0
+fi
 
 # Skip cleanly when required env is unset - unless AWS_E2E_REQUIRE_RUN=1, where a
 # missing var is a failure (a CI job must never go green by skipping).
@@ -1010,6 +1025,31 @@ assert_aws_posture() {
 	return 0
 }
 
+# run_phase MODE AUDIT OUT ERR [EXPECT] -> phase status. Reads caller-global
+# rc/parser/timeout_s. Parser first, so its hardened verdict is authoritative: an
+# abnormal parser exit is normalized to 4 (fatal, never retried) and a breach (4)
+# short-circuits before the run classifier and every soft, retryable gate.
+run_phase() {
+	_mode=$1; _audit=$2; _out=$3; _err=$4; _expect=${5:-}
+	if [ "$_mode" = read ]; then
+		if python3 -B "$parser" read "$_audit" "$AWS_E2E_ROLE_NAME" "$_expect"; then _p=0; else _p=$?; fi
+	else
+		if python3 -B "$parser" canary "$_audit" "$AWS_E2E_ROLE_NAME"; then _p=0; else _p=$?; fi
+	fi
+	case "$_p" in 0 | 1 | 4) ;; *) _p=4 ;; esac   # any abnormal parser exit is fatal, never retried.
+	if [ "$_p" = 4 ]; then return 4; fi
+	if e2e_classify_run "$rc" "$_out" "$_err" "$timeout_s"; then _c=0; else _c=$?; fi
+	arbitrate "$_p" "$_c"; _s=$?
+	if [ "$_s" != 0 ]; then return "$_s"; fi
+	assert_aws_posture "$_err" || return 1
+	e2e_assert_tool_called "$_err" || return 1
+	if [ "$_mode" = read ] && ! grep -Fq "$AWS_E2E_EXPECT" "$_out"; then
+		printf 'read: the fixture tag value is not in the answer (no real read?). stdout tail:\n' >&2
+		tail -n 20 "$_out" >&2; return 1
+	fi
+	return 0
+}
+
 # ============================ READ PHASE ============================
 # Name the role, ask for the tag value. The value reaches this script out of band
 # (AWS_E2E_EXPECT) and never appears in the prompt, so the model can only produce it
@@ -1021,23 +1061,7 @@ read_phase() {
 	printf '== READ == %s (%s/%s)\n' "$AWS_E2E_ROLE_NAME" "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
 	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
 		"$bin" "$workdir/config.yaml" "$read_prompt"; then rc=0; else rc=$?; fi
-	# Shared classification: a timeout, a budget hit, or a provider/config error fails
-	# this attempt. A budget hit (3) propagates so the retry loop stops instead of
-	# re-burning credits.
-	if e2e_classify_run "$rc" "$workdir/read.out" "$workdir/read.err" "$timeout_s"; then :; else return $?; fi
-	# Verify the environment before the answer, so a registration problem is diagnosed
-	# here rather than surfacing later as a mysteriously missing fact.
-	assert_aws_posture "$workdir/read.err" || return 1
-	e2e_assert_tool_called "$workdir/read.err" || return 1
-	if ! grep -Fq "$AWS_E2E_EXPECT" "$workdir/read.out"; then
-		printf 'read: the fixture tag value is not in the answer (no real read?). stdout tail:\n' >&2
-		tail -n 20 "$workdir/read.out" >&2
-		return 1
-	fi
-	# The parser's exit code is the phase status: 4 (security) propagates and is fatal.
-	if python3 "$parser" read "$workdir/read.audit.log" "$AWS_E2E_ROLE_NAME" "$AWS_E2E_EXPECT"; then :; else return $?; fi
-	printf 'read: OK\n' >&2
-	return 0
+	run_phase read "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" "$AWS_E2E_EXPECT"
 }
 
 # ============================ CANARY PHASE ============================
@@ -1064,15 +1088,11 @@ canary_phase() {
 		"$bin" "$workdir/config.yaml" "$canary_prompt"; then rc=0; else rc=$?; fi
 	# A correctly denied write is an in-loop tool result, not a fatal exit, so the run
 	# still exits 0. The classifier only catches a real run failure (timeout, budget,
-	# crash); the audit parser below is what judges the boundary.
-	if e2e_classify_run "$rc" "$workdir/canary.out" "$workdir/canary.err" "$timeout_s"; then :; else return $?; fi
-	assert_aws_posture "$workdir/canary.err" || return 1
-	# The parser's exit code is the phase status. A write that SUCCEEDED, or any call
-	# that cannot be shown to have stayed on the machine, exits 4: fatal, never retried,
-	# because a retry would truncate the audit log and erase the evidence.
-	if python3 "$parser" canary "$workdir/canary.audit.log" "$AWS_E2E_ROLE_NAME"; then :; else return $?; fi
-	printf 'canary: OK (write denied client-side)\n' >&2
-	return 0
+	# crash); the audit parser inside run_phase is what judges the boundary, and a
+	# write that SUCCEEDED, or any call that cannot be shown to have stayed on the
+	# machine, exits 4: fatal, never retried, because a retry would truncate the audit
+	# log and erase the evidence.
+	run_phase canary "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err"
 }
 
 e2e_run_with_retries read "$attempts" read_phase
