@@ -18,6 +18,7 @@ three pre-extraction suites) and generalized over the provider spec. Anything th
 cannot express (unknown provider, unknown mode, an incomplete spec, a missing hook, or
 a hook that raises) fails closed to 4 through ``resolve`` and the entrypoint guard.
 """
+import base64
 import glob
 import json
 import os
@@ -563,13 +564,15 @@ _POSITIONAL_RULES = (
 
 
 def _read_live_secrets(path):
-    """The out-of-band live secret values, one per line, blanks dropped. The suites
-    always pass the flag, so a MISSING/UNREADABLE file is a wiring bug and fails closed
-    (4). An EMPTY file is legitimate: ambient-credential runs (AWS profiles/instance
-    roles, GCP ADC, Bedrock/Vertex chains) enumerate no env secret and rely on the
-    class-2/class-3 SHAPE families, so an empty file must not fail. path is None only on
-    the offline replay that passes no flag; class-1 is then skipped, never fatal, so the
-    frozen corpus stays inert."""
+    """The out-of-band live secret values, one BASE64-encoded value per line, blanks
+    dropped. Encoding keeps a multi-line credential (a JSON key blob) as a single exact
+    needle rather than per-line needles that false-positive against an audit. The suites
+    always pass the flag, so a MISSING/UNREADABLE file, or a non-base64 line, is a wiring
+    bug and fails closed (4). An EMPTY file is legitimate: ambient-credential runs (AWS
+    profiles/instance roles, GCP ADC, Bedrock/Vertex chains) enumerate no env secret and
+    rely on the class-2/class-3 SHAPE families, so an empty file must not fail. path is
+    None only on the offline replay that passes no flag; class-1 is then skipped, never
+    fatal, so the frozen corpus stays inert."""
     if path is None:
         return []
     text = None
@@ -579,7 +582,16 @@ def _read_live_secrets(path):
         insecure("credential prepass: cannot read live-secrets file %s: %s - failing closed" % (path, e))
     except UnicodeDecodeError:
         insecure("credential prepass: live-secrets file is not valid UTF-8 - failing closed")
-    return [s for s in (line.strip() for line in text.splitlines()) if s]
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(base64.b64decode(line, validate=True).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            insecure("credential prepass: live-secrets file has a non-base64 line - failing closed")
+    return out
 
 
 def _cred_expand(value, blobs):
@@ -981,7 +993,17 @@ def _shared_selftest():
         # bytes that pin the percent-encoding path.
         live_secret = "s3cr3t-ambient-value-xyz0"
         enc_secret = "aa/bb+cc=dd-EE"
-        p_secrets = _write(tmp, live_secret + "\n" + enc_secret + "\n")
+
+        def _b64line(s):
+            return base64.b64encode(s.encode("utf-8")).decode("ascii") + "\n"
+
+        # The live-secrets file is base64-encoded, one value per line (see
+        # _read_live_secrets), so a multi-line credential stays a single exact needle.
+        p_secrets = _write(tmp, _b64line(live_secret) + _b64line(enc_secret))
+        # A multi-line credential blob whose non-secret lines ("{", a project id) must
+        # NOT false-positive on their own, while a verbatim leak of the whole blob does.
+        multi_secret = '{\n  "project_id": "cynative-cli-ci",\n  "token_url": "x"\n}'
+        p_secrets_multi = _write(tmp, _b64line(multi_secret))
 
         def cp(lines, secrets=None):
             recs = []
@@ -1052,6 +1074,14 @@ def _shared_selftest():
         # is a wiring bug that fails closed.
         p_empty_secrets = _write(tmp, "")
         p_missing_secrets = os.path.join(tmp, "no-such-secrets.txt")
+        # class-1 multi-line: a verbatim leak of the WHOLE credential blob is caught, but a
+        # benign audit carrying only its non-secret fragments ("{", the project id) must
+        # NOT false-positive - the regression the base64 exact-value encoding closes.
+        multi_leak_line = _jline("c1", "result", read_args,
+                                 result="HTTP/1.1 200 OK\r\n\r\n" + multi_secret, outcome="ok")
+        multi_benign_line = _jline("c1", "result", read_args,
+                                   result='HTTP/1.1 200 OK\r\n\r\n{"projectId":"cynative-cli-ci"}',
+                                   outcome="ok")
 
         cases = [
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
@@ -1085,6 +1115,8 @@ def _shared_selftest():
             ("cred_redacted_placeholder_ok", 0, lambda: _guard(lambda: cp([redacted_line]))),
             ("cred_witness_fact_ok", 0, lambda: _guard(lambda: cp([witness_line]))),
             ("cred_percent_encoded_secret", 4, lambda: _guard(lambda: cp([enc_line], p_secrets))),
+            ("cred_multiline_blob_leaked", 4, lambda: _guard(lambda: cp([multi_leak_line], p_secrets_multi))),
+            ("cred_multiline_no_false_positive", 0, lambda: _guard(lambda: cp([multi_benign_line], p_secrets_multi))),
             # class-3 new rules: a credential-named YAML/env line leaks its value.
             ("cred_yaml_credential_field", 4, lambda: _guard(lambda: cp([yaml_cred_line]))),
             ("cred_env_credential_field", 4, lambda: _guard(lambda: cp([env_cred_line]))),

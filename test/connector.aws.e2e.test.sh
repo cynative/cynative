@@ -110,6 +110,7 @@ e2e_require_env connector.aws.e2e "${AWS_E2E_REQUIRE_RUN:-}" \
 e2e_require_cmd go "needed to build cynative" || exit 1
 e2e_require_cmd timeout || exit 1
 e2e_require_cmd python3 "needed to parse the audit log" || exit 1
+e2e_require_cmd base64 "needed to encode the live-secret sweep" || exit 1
 
 workdir=$(mktemp -d)
 # secret_file holds the out-of-band class-1 live secrets for the credential prepass. It

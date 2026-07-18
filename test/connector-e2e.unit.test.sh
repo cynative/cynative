@@ -141,7 +141,7 @@ if (
 	trap 'rm -rf "$wd" "$ad"' EXIT
 	live_secret="s3cr3t-live-value-abcdef0123"
 	sf=$(mktemp)
-	printf '%s\n' "$live_secret" > "$sf"
+	{ printf '%s' "$live_secret" | base64 | tr -d '\n'; printf '\n'; } > "$sf"  # base64, matching e2e_write_live_secrets
 	# A fake class-2 secret SHAPE (AWS's own documented example access key id; never a
 	# real credential) that has nothing to do with the live-secret file.
 	shape="AKIAIOSFODNN7EXAMPLE"
@@ -188,7 +188,7 @@ if (
 	trap 'rm -rf "$wd" "$ad"' EXIT
 	live_secret="abcdef012345live-xyz"
 	sf=$(mktemp)
-	printf '%s\n' "$live_secret" > "$sf"
+	{ printf '%s' "$live_secret" | base64 | tr -d '\n'; printf '\n'; } > "$sf"  # base64, matching e2e_write_live_secrets
 	# The same secret bytes reversibly hidden behind a non-canonical percent-encoding
 	# (over-encoding the 'c' as %63). quote_plus() leaves this all-safe value unchanged,
 	# so the literal + canonical passes have no form to match; only the decoded backstop
@@ -247,6 +247,43 @@ if (
 	[ -e "$ad/wired/meta.txt" ] || exit 1
 	unset E2E_ARTIFACTS_SUITE E2E_ARTIFACTS_WORKDIR E2E_ARTIFACTS_DIR E2E_ARTIFACTS_SECRET_FILE
 ); then pass "e2e_run_with_retries: collects sanitized artifacts before its fatal exit on a security failure"; else fail "e2e_run_with_retries artifact wiring"; fi
+
+# ---- e2e_write_live_secrets: base64 one line per value, multi-line preserved ----
+# Each value is base64-encoded onto one line, so a multi-line credential (a JSON key
+# blob) stays a single class-1 needle instead of splitting into per-line needles ("{",
+# a project id) that false-positive against any audit legitimately containing them.
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	SINGLE="ghp_singleLineToken1234567890abcdef"
+	MULTI=$(printf '{\n  "project_id": "cynative-cli-ci",\n  "token_url": "https://sts.googleapis.com/v1/token"\n}')
+	export SINGLE MULTI
+	e2e_write_live_secrets "$td/secrets" SINGLE MULTI
+	[ "$(wc -l < "$td/secrets")" -eq 2 ] || exit 1          # one base64 line per value
+	grep -Fq 'cynative-cli-ci' "$td/secrets" && exit 1      # raw fragments never appear
+	grep -Fqx '{' "$td/secrets" && exit 1
+	# each line base64-decodes back to its EXACT value; the multi-line one is preserved whole
+	[ "$(sed -n 1p "$td/secrets" | base64 -d)" = "$SINGLE" ] || exit 1
+	[ "$(sed -n 2p "$td/secrets" | base64 -d)" = "$MULTI" ] || exit 1
+	unset SINGLE MULTI
+); then pass "e2e_write_live_secrets: base64-encodes each value, preserving a multi-line secret as one needle"; else fail "e2e_write_live_secrets base64"; fi
+
+# ---- e2e_write_live_secrets: fail closed when base64 is unavailable -------------
+# POSIX sh has no pipefail, so a missing base64 would let the encode pipeline succeed and
+# write a blank line that drops the secret from the class-1 sweep. The function must
+# refuse (non-zero) instead of silently omitting the secret.
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	X="a-real-secret-value"
+	export X
+	rc=0
+	# Run with base64 off PATH inside its own subshell so the outer cleanup keeps its PATH.
+	# shellcheck disable=SC2123  # intentional: emptying PATH is how we hide base64 here.
+	( PATH=/nonexistent-dir-xyz; e2e_write_live_secrets "$td/out" X >/dev/null 2>&1 ) || rc=$?
+	[ "$rc" -ne 0 ] || exit 1
+	unset X
+); then pass "e2e_write_live_secrets: fails closed when base64 is unavailable"; else fail "e2e_write_live_secrets base64 guard"; fi
 
 if [ "$fails" -ne 0 ]; then
 	printf 'connector-e2e.unit: %d case(s) FAILED\n' "$fails" >&2
