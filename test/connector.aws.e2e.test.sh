@@ -258,22 +258,19 @@ read_phase() {
 # network dispatch, and the parser proves that (an aws_hardening policy denial can
 # only be raised before the request is sent).
 #
-# The call is spelled out because a task-framed imperative is unreliable: a capable
-# model predicts the read-only denial and declines to spend the call (Opus refused the
-# GCP equivalent). Giving the exact request makes it an instruction-following task
-# while the gate still does the deciding.
-#
-# The body is one line on purpose. If it wrapped, the newline and indent would become
-# part of RoleName and the suite could go green for the wrong reason: cynative's
-# classifier consumes only Action, so it would emit an identical denial for a request
-# AWS itself would have rejected as malformed. The parser's full-shape validation is
-# the backstop, but it should never be handed a malformed request in the first place.
-canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL response to a write, not a prediction. Make exactly this call now using the http_request tool and then paste the connector's verbatim response: method=POST, url=https://iam.amazonaws.com/, auth_provider=aws, aws_auth={service: iam}, headers=[{key: Content-Type, value: application/x-www-form-urlencoded}], body=Action=TagRole&Version=2010-05-08&RoleName=$AWS_E2E_ROLE_NAME&Tags.member.1.Key=cynative-e2e&Tags.member.1.Value=canary . Issue the request; do not skip, simulate, or answer from prediction. I expect it to be denied - I need to see the actual denial."
-
+# The exact request is spelled out and wrapped in the shared, empirically-tuned canary
+# framing (e2e_canary_prompt; cynative#158): that makes it an instruction-following task
+# the gate still gets to deny, instead of one a cautious driver refuses on the gate's
+# behalf. The _call MUST stay one line - a wrapped body would fold a newline+indent into
+# RoleName and the suite could go green for the wrong reason: cynative's classifier
+# consumes only Action, so it would emit an identical denial for a request AWS itself
+# would have rejected as malformed. The parser's full-shape validation is the backstop,
+# but it should never be handed a malformed request in the first place.
 canary_phase() {
 	printf '== CANARY == attempting a denied write on %s\n' "$AWS_E2E_ROLE_NAME" >&2
+	_call="method=POST, url=https://iam.amazonaws.com/, auth_provider=aws, aws_auth={service: iam}, headers=[{key: Content-Type, value: application/x-www-form-urlencoded}], body=Action=TagRole&Version=2010-05-08&RoleName=$AWS_E2E_ROLE_NAME&Tags.member.1.Key=cynative-e2e&Tags.member.1.Value=canary"
 	if e2e_run_bounded "$timeout_s" "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err" \
-		"$bin" "$workdir/config.yaml" "$canary_prompt"; then _rc=0; else _rc=$?; fi
+		"$bin" "$workdir/config.yaml" "$(e2e_canary_prompt "$_call")"; then _rc=0; else _rc=$?; fi
 	# A correctly denied write is an in-loop tool result, not a fatal exit, so the run
 	# still exits 0. The classifier only catches a real run failure (timeout, budget,
 	# crash); the audit parser inside connector_run_phase is what judges the boundary,

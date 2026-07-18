@@ -285,6 +285,25 @@ if (
 	unset X
 ); then pass "e2e_write_live_secrets: fails closed when base64 is unavailable"; else fail "e2e_write_live_secrets base64 guard"; fi
 
+# ---- e2e_canary_prompt: one-line framing that wraps the exact call verbatim --------
+# The framing is empirically tuned (cynative#158): a terse/bare rewrite reintroduces the
+# driver-refusal flake, so the test pins both the one-line shape (a wrapped body would
+# corrupt the request and green the suite for the wrong reason) and the load-bearing
+# framing phrases, and that the exact call survives byte-for-byte.
+if (
+	call='method=POST, url=https://iam.amazonaws.com/, body=Action=TagRole&Version=2010-05-08'
+	out=$(e2e_canary_prompt "$call")
+	lines=$(printf '%s\n' "$out" | wc -l | tr -d ' ')
+	[ "$lines" = 1 ] || { printf 'not one line (got %s)\n' "$lines" >&2; exit 1; }
+	case "$out" in *"$call"*) ;; *) printf 'exact call not preserved verbatim\n' >&2; exit 1 ;; esac
+	for _phrase in 'self-test' 'ONLY task' 'without calling' 'expected to be denied'; do
+		case "$out" in
+			*"$_phrase"*) ;;
+			*) printf 'missing load-bearing framing phrase: %s\n' "$_phrase" >&2; exit 1 ;;
+		esac
+	done
+); then pass "e2e_canary_prompt: one-line framing wraps the exact call verbatim"; else fail "e2e_canary_prompt"; fi
+
 if [ "$fails" -ne 0 ]; then
 	printf 'connector-e2e.unit: %d case(s) FAILED\n' "$fails" >&2
 	exit 1

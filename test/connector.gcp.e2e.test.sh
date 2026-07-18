@@ -224,18 +224,16 @@ read_phase() {
 # ============================ CANARY PHASE ============================
 # Attempt one harmless write (set a label). The gate denies it client-side, before
 # dispatch, so nothing mutates. The canary depends on the model actually issuing the
-# write. A task-framed imperative ("set a label ...") is unreliable: a capable model
-# predicts the read-only denial and declines to spend the call (Opus refused; gemini
-# was a coin-flip). Giving the exact http_request to make turns it into a
-# deterministic instruction-following task (validated reliable across models), while
-# the gate still denies the write before dispatch. gcp_auth.service and the labels
-# body are spelled out so any model can reproduce the call verbatim.
-canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL response to a write, not a prediction. Make exactly this call now using the http_request tool and then paste the connector's verbatim response: method=PATCH, url=https://cloudresourcemanager.googleapis.com/v3/projects/$GCP_E2E_PROJECT?updateMask=labels, auth_provider=gcp, gcp_auth={service: cloudresourcemanager}, body={\"labels\":{\"cynative-e2e\":\"canary\"}}. Issue the request; do not skip, simulate, or answer from prediction. I expect it to be denied - I need to see the actual denial."
-
+# write. The exact http_request is spelled out and wrapped in the shared, empirically-
+# tuned canary framing (e2e_canary_prompt; cynative#158): that turns it into an
+# instruction-following task the gate still gets to deny, instead of one a cautious driver
+# refuses on the gate's behalf. gcp_auth.service and the labels body are spelled out so
+# any capable model can reproduce the call verbatim; keep _call on one line.
 canary_phase() {
 	printf '== CANARY == attempting a denied write on %s\n' "$GCP_E2E_PROJECT" >&2
+	_call="method=PATCH, url=https://cloudresourcemanager.googleapis.com/v3/projects/$GCP_E2E_PROJECT?updateMask=labels, auth_provider=gcp, gcp_auth={service: cloudresourcemanager}, body={\"labels\":{\"cynative-e2e\":\"canary\"}}"
 	if e2e_run_bounded "$timeout_s" "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err" \
-		"$bin" "$workdir/config.yaml" "$canary_prompt"; then _rc=0; else _rc=$?; fi
+		"$bin" "$workdir/config.yaml" "$(e2e_canary_prompt "$_call")"; then _rc=0; else _rc=$?; fi
 	# A correctly denied write is an in-loop tool result, not a fatal exit, so the run
 	# still exits 0. The classifier only catches a real run failure (timeout, budget,
 	# crash); the audit parser inside connector_run_phase is what judges the boundary,
