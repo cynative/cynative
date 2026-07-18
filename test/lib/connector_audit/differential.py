@@ -8,6 +8,12 @@ old embedded parser and the new standalone entrypoint, and asserting the two exi
 agree with each other AND with the case's frozen code. Replaying the original bytes (not
 the newly ported selftest cases) is what makes a byte or argv altered during the port
 fail rather than fake-pass; the names.txt name+code pin is the completeness half.
+
+`compare` is a one-time extraction-equivalence proof: run by hand against a provider's
+frozen corpus during that provider's migration onto this shared engine, comparing it
+against the old, since-deleted embedded parser. It is not re-run by make sh-test.
+Ongoing protection is each provider's --selftest, which replays the ported cases, plus
+the names.txt name+code pin.
 """
 import os
 import subprocess
