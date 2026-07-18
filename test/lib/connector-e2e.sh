@@ -297,8 +297,13 @@ e2e_collect_artifacts() {
 
 # e2e_write_live_secrets DEST VAR... - build the out-of-band class-1 live-secret file
 # the credential prepass reads via --live-secrets. Writes each SET and NON-EMPTY named
-# env var's value, one per line, to DEST at mode 0600; the values never touch argv or a
-# diagnostic. DEST must be its OWN mktemp path OUTSIDE the retained workdir, and its
+# env var's value, base64-encoded onto ONE line, to DEST at mode 0600; the values never
+# touch argv or a diagnostic. The encoding keeps the WHOLE value as a single exact-value
+# class-1 needle: a multi-line credential (a JSON key blob, a PEM) written raw would be
+# split into per-line needles - "{", "}", URLs, project ids - that false-positive against
+# any audit legitimately containing them, whereas the encoded whole value only matches an
+# actual verbatim leak of the credential. _read_live_secrets base64-decodes each line back
+# to the exact value. DEST must be its OWN mktemp path OUTSIDE the retained workdir, and its
 # removal must be composed into the suite's existing cleanup() (rm -f "$secret_file"),
 # never a competing `trap ... EXIT INT TERM` - which in POSIX sh would REPLACE the
 # suite's signal handlers and break the EXIT-cleanup + INT/TERM-exit-130/143 discipline.
@@ -310,12 +315,20 @@ e2e_collect_artifacts() {
 e2e_write_live_secrets() {
 	_dest=$1
 	shift
+	# Fail closed if base64 is missing. POSIX sh has no pipefail, so a missing base64
+	# would let `printf | base64 | tr` still succeed via tr and write a blank line that
+	# _read_live_secrets drops - silently omitting every class-1 secret. Refuse instead.
+	command -v base64 >/dev/null 2>&1 || {
+		printf 'FAIL: base64 not found - refusing to run without class-1 live-secret detection\n' >&2
+		return 1
+	}
 	: > "$_dest"
 	chmod 600 "$_dest"
 	for _var in "$@"; do
 		eval "_val=\${$_var:-}"
-		if [ -n "$_val" ]; then
-			printf '%s\n' "$_val" >> "$_dest"
-		fi
+		[ -n "$_val" ] || continue
+		# Base64-encode the whole value onto one line (tr collapses base64's own line
+		# wrapping) so a multi-line value stays a single class-1 needle. See the header.
+		{ printf '%s' "$_val" | base64 | tr -d '\n'; printf '\n'; } >> "$_dest"
 	done
 }
