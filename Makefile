@@ -103,12 +103,18 @@ pwsh-test:
 
 # sh-test: POSIX install.sh unit + loopback smoke tests, the live-e2e guardrails
 # library unit tests (test/lib/e2e-guardrails.sh), the per-package changelog
-# override renderer unit tests (test/dependabot-override.unit.test.sh), and all
-# three connector suites' offline audit-parser selftests (--selftest). All
-# hermetic: no network, no credentials. The parsers are the security boundary of
-# the live connector e2es, so they are gated here rather than only exercised on a
-# live run. Presence-check python3 (the smoke test's loopback fixture server)
-# with an install hint, mirroring the shellcheck/pwsh install-free pattern.
+# override renderer unit tests (test/dependabot-override.unit.test.sh), an AST
+# syntax check of every file in the shared connector audit-parser package
+# (test/lib/connector-audit-parser.py, test/lib/connector_audit/*.py, and its
+# specs/), and all three connector suites' offline audit-parser selftests
+# (--selftest). All hermetic: no network, no credentials. The parsers are the
+# security boundary of the live connector e2es, so they are gated here rather
+# than only exercised on a live run. The syntax check runs under
+# PYTHONDONTWRITEBYTECODE=1 with python3 -B so it leaves no __pycache__; it uses
+# ast.parse rather than py_compile for the same reason, and it covers
+# differential.py, which --selftest alone does not exercise. Presence-check
+# python3 (the smoke test's loopback fixture server) with an install hint,
+# mirroring the shellcheck/pwsh install-free pattern.
 sh-test:
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found — needed by the install.sh loopback smoke test (test/install.smoke.test.sh)."; exit 1; }
 	@sh test/install.unit.test.sh
@@ -116,10 +122,11 @@ sh-test:
 	@sh test/e2e-guardrails.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
+	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + render-scoop unit + dependabot-override unit + connector audit parsers)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + render-scoop unit + dependabot-override unit + python syntax gate + connector audit parsers)"
 
 SHELL_COMPLEXITY_MAX := 6
 
