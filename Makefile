@@ -102,15 +102,16 @@ pwsh-test:
 	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
 
 # sh-test: POSIX install.sh unit + loopback smoke tests, the live-e2e guardrails
-# library unit tests (test/lib/e2e-guardrails.sh), the per-package changelog
-# override renderer unit tests (test/dependabot-override.unit.test.sh), an AST
-# syntax check of every file in the shared connector audit-parser package
-# (test/lib/connector-audit-parser.py, test/lib/connector_audit/*.py, and its
-# specs/), and all three connector suites' offline audit-parser selftests
-# (--selftest). All hermetic: no network, no credentials. The parsers are the
-# security boundary of the live connector e2es, so they are gated here rather
-# than only exercised on a live run. The syntax check runs under
-# PYTHONDONTWRITEBYTECODE=1 with python3 -B so it leaves no __pycache__; it uses
+# library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
+# orchestration unit tests (test/lib/connector-e2e.sh: arbitrate + connector_run_phase
+# + e2e_pin_audit_size), the per-package changelog override renderer unit tests
+# (test/dependabot-override.unit.test.sh), an AST syntax check of every file in the
+# shared connector audit-parser package (test/lib/connector-audit-parser.py,
+# test/lib/connector_audit/*.py, and its specs/), and all three connector suites'
+# offline audit-parser selftests (--selftest). All hermetic: no network, no
+# credentials. The parsers are the security boundary of the live connector e2es, so
+# they are gated here rather than only exercised on a live run. The syntax check runs
+# under PYTHONDONTWRITEBYTECODE=1 with python3 -B so it leaves no __pycache__; it uses
 # ast.parse rather than py_compile for the same reason, and it covers
 # differential.py, which --selftest alone does not exercise. Presence-check
 # python3 (the smoke test's loopback fixture server) with an install hint,
@@ -120,13 +121,14 @@ sh-test:
 	@sh test/install.unit.test.sh
 	@sh test/install.smoke.test.sh
 	@sh test/e2e-guardrails.unit.test.sh
+	@sh test/connector-e2e.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + render-scoop unit + dependabot-override unit + python syntax gate + connector audit parsers)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + python syntax gate + connector audit parsers)"
 
 SHELL_COMPLEXITY_MAX := 6
 

@@ -73,18 +73,10 @@ snapshot_parser() {
 }
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
-# Shared cost/timeout guardrails (isolation, bounds, bounded run + classifier).
+# Shared shell orchestration (arbitrate + connector_run_phase), which itself sources
+# the cost/timeout guardrails (isolation, bounds, bounded run + classifier).
 # shellcheck disable=SC1091  # sourced at runtime via a $0-relative path.
-. "$root/test/lib/e2e-guardrails.sh"
-
-# arbitrate PARSER_RC CLASSIFY_RC -> final phase status. A security breach (4)
-# dominates even a timeout or budget hit; otherwise a nonzero classifier (2 timeout
-# / 3 budget / 1 error) wins; else the parser's own 0 (hold) or 1 (miss).
-arbitrate() {
-	if [ "$1" = 4 ]; then return 4; fi
-	if [ "$2" != 0 ]; then return "$2"; fi
-	return "$1"
-}
+. "$root/test/lib/connector-e2e.sh"
 
 # --- offline self-test: verify the shared audit parser without credentials ---
 if [ "${1:-}" = "--selftest" ]; then
@@ -147,12 +139,18 @@ export E2E_MAX_TOKENS="${AWS_E2E_MAX_TOKENS:-32000}"
 # archive from codeload.github.com. Hence a larger default than the GCP suite.
 export E2E_RUN_TIMEOUT="${AWS_E2E_TIMEOUT:-240}"
 e2e_apply_bounds
+# No rotation may fire mid-run: a rotated-away audit file would hide early records
+# from the parser reading the active path.
+e2e_pin_audit_size
 
 # Snapshot the shared audit parser once; both phases invoke it.
 snapshot_parser "$workdir"
 
 timeout_s="$E2E_RUN_TIMEOUT"
 attempts="${AWS_E2E_ATTEMPTS:-2}"
+# Populated by a live-secrets scan in a later task; connector_run_phase only passes
+# --live-secrets through when this is non-empty.
+secret_file=""
 
 # assert_aws_posture ERR - the aws connector must be registered live, under the
 # read-only policy, on the expected account, at the expected enforcement level.
@@ -205,31 +203,6 @@ assert_aws_posture() {
 	return 0
 }
 
-# run_phase MODE AUDIT OUT ERR [EXPECT] -> phase status. Reads caller-global
-# rc/parser/timeout_s. Parser first, so its hardened verdict is authoritative: an
-# abnormal parser exit is normalized to 4 (fatal, never retried) and a breach (4)
-# short-circuits before the run classifier and every soft, retryable gate.
-run_phase() {
-	_mode=$1; _audit=$2; _out=$3; _err=$4; _expect=${5:-}
-	if [ "$_mode" = read ]; then
-		if python3 -B "$parser" aws read "$_audit" "$AWS_E2E_ROLE_NAME" "$_expect"; then _p=0; else _p=$?; fi
-	else
-		if python3 -B "$parser" aws canary "$_audit" "$AWS_E2E_ROLE_NAME"; then _p=0; else _p=$?; fi
-	fi
-	case "$_p" in 0 | 1 | 4) ;; *) _p=4 ;; esac   # any abnormal parser exit is fatal, never retried.
-	if [ "$_p" = 4 ]; then return 4; fi
-	if e2e_classify_run "$rc" "$_out" "$_err" "$timeout_s"; then _c=0; else _c=$?; fi
-	arbitrate "$_p" "$_c"; _s=$?
-	if [ "$_s" != 0 ]; then return "$_s"; fi
-	assert_aws_posture "$_err" || return 1
-	e2e_assert_tool_called "$_err" || return 1
-	if [ "$_mode" = read ] && ! grep -Fq "$AWS_E2E_EXPECT" "$_out"; then
-		printf 'read: the fixture tag value is not in the answer (no real read?). stdout tail:\n' >&2
-		tail -n 20 "$_out" >&2; return 1
-	fi
-	return 0
-}
-
 # ============================ READ PHASE ============================
 # Name the role, ask for the tag value. The value reaches this script out of band
 # (AWS_E2E_EXPECT) and never appears in the prompt, so the model can only produce it
@@ -240,8 +213,9 @@ read_prompt="Use the aws connector to read the IAM role \"$AWS_E2E_ROLE_NAME\" a
 read_phase() {
 	printf '== READ == %s (%s/%s)\n' "$AWS_E2E_ROLE_NAME" "$CYNATIVE_LLM_PROVIDER" "$CYNATIVE_LLM_MODEL" >&2
 	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
-		"$bin" "$workdir/config.yaml" "$read_prompt"; then rc=0; else rc=$?; fi
-	run_phase read "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" "$AWS_E2E_EXPECT"
+		"$bin" "$workdir/config.yaml" "$read_prompt"; then _rc=0; else _rc=$?; fi
+	connector_run_phase aws read "$parser" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
+		"$_rc" "$timeout_s" assert_aws_posture "$AWS_E2E_ROLE_NAME" "$AWS_E2E_EXPECT" "$secret_file"
 }
 
 # ============================ CANARY PHASE ============================
@@ -265,14 +239,15 @@ canary_prompt="Authorized read-only-gate self-test - I need the connector's REAL
 canary_phase() {
 	printf '== CANARY == attempting a denied write on %s\n' "$AWS_E2E_ROLE_NAME" >&2
 	if e2e_run_bounded "$timeout_s" "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err" \
-		"$bin" "$workdir/config.yaml" "$canary_prompt"; then rc=0; else rc=$?; fi
+		"$bin" "$workdir/config.yaml" "$canary_prompt"; then _rc=0; else _rc=$?; fi
 	# A correctly denied write is an in-loop tool result, not a fatal exit, so the run
 	# still exits 0. The classifier only catches a real run failure (timeout, budget,
-	# crash); the audit parser inside run_phase is what judges the boundary, and a
-	# write that SUCCEEDED, or any call that cannot be shown to have stayed on the
+	# crash); the audit parser inside connector_run_phase is what judges the boundary,
+	# and a write that SUCCEEDED, or any call that cannot be shown to have stayed on the
 	# machine, exits 4: fatal, never retried, because a retry would truncate the audit
 	# log and erase the evidence.
-	run_phase canary "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err"
+	connector_run_phase aws canary "$parser" "$workdir/canary.audit.log" "$workdir/canary.out" \
+		"$workdir/canary.err" "$_rc" "$timeout_s" assert_aws_posture "$AWS_E2E_ROLE_NAME" "" "$secret_file"
 }
 
 e2e_run_with_retries read "$attempts" read_phase
