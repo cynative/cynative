@@ -19,7 +19,9 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   `test/archive.smoke.test.ps1` + Pester unit tests +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
-  live-e2e guardrails unit tests, and all three connector suites' offline audit-parser selftests).
+  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the shared
+  audit-parser python syntax gate, all three connector suites' offline audit-parser selftests, and
+  the shared-machinery selftest).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
   otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
@@ -74,11 +76,18 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   binds it to the bytes GitHub returned, requiring a private 200 so the read also proves credential
   injection) plus a `PATCH` write canary and a secret-scanning-read canary, each denied before the
   request leaves the machine, and skipping cleanly when `GH_E2E_*`/creds are unset (the script
-  header documents its env and knobs). All three connector
-  parsers carry an offline `--selftest` that `make sh-test` gates: the parser is what stops a
-  suite going green while the read-only boundary is broken. All three parsers make the
-  parser's exit code the phase status (1 = retryable miss, 4 = boundary failure, never retried,
-  since the per-attempt audit truncation would erase the evidence). `make homebrew-smoke`: standalone post-release
+  header documents its env and knobs). The three suites share one audit parser, the importable
+  Python package `test/lib/connector_audit/` (engine plus a per-provider spec in
+  `connector_audit/specs/<provider>.py` and a runnable `connector-audit-parser.py` entrypoint), and
+  one shell orchestration library `test/lib/connector-e2e.sh` (sourcing the generic
+  `e2e-guardrails.sh`); each suite is a thin delta of knobs, fixtures, prompts, and posture asserts.
+  The parser is what stops a suite going green while the read-only boundary is broken: its exit code
+  is the phase status (1 = retryable miss, 4 = boundary failure, never retried, since the per-attempt
+  audit truncation would erase the evidence), and a first-line credential prepass fails closed (4) if
+  credential material was logged. `make sh-test` gates the parser: each suite's offline `--selftest`
+  drives it and pins the suite's frozen case-name/code set (`connector_audit/testdata/`), plus a
+  shared-machinery `--selftest` that exercises the engine's own fail-closed and prepass cases; the
+  frozen corpus doubles as a byte-exact differential when the parser changes. `make homebrew-smoke`: standalone post-release
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
   documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
   release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone
