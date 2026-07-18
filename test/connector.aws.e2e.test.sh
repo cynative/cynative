@@ -86,6 +86,11 @@ TAG_READS = {"GetRole", "ListRoleTags"}
 CANARY_FORM_KEYS = {"Action", "Version", "RoleName", "Tags.member.1.Key", "Tags.member.1.Value"}
 
 
+class DuplicateKeyError(ValueError):
+    """Raised by the object hook on a duplicate JSON key. Distinct from a plain
+    JSONDecodeError so a duplicate key is ALWAYS fatal, even on the final line."""
+
+
 def die(msg, code=NOT_PROVEN):
     print(msg)
     sys.exit(code)
@@ -95,35 +100,57 @@ def insecure(msg):
     die("SECURITY: " + msg, SECURITY)
 
 
+def _no_dup_keys(pairs):
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise DuplicateKeyError("duplicate key %r" % k)
+        d[k] = v
+    return d
+
+
+def _loads(s):
+    """json.loads with duplicate-key rejection. DuplicateKeyError propagates."""
+    return json.loads(s, object_pairs_hook=_no_dup_keys)
+
+
 def load_records(path):
     """Every JSON object record in the audit log, attempt and result phases alike
-    (both are needed to pair a call). Fails closed on any malformed or non-object
-    line.
+    (both are needed to pair a call).
 
-    Kept intentionally minimal for this pass: unlike the shared loader, a malformed
-    line here is fatal wherever it falls (no tolerated final line) and duplicate JSON
-    keys are not separately detected. Full tolerance (a survivable final line, UTF-8
-    repair, duplicate-key rejection) lands with the shared loader in a later
-    hardening pass; a corrupt line proves nothing about a breach on its own, so it
-    stays a plain, retryable NOT_PROVEN.
+    Fails closed on almost everything: an unreadable or missing file, non-UTF-8
+    bytes, a duplicate JSON key (even on the final line - a repeated key is
+    ambiguous, never a mere write artifact), and a malformed line anywhere but the
+    last. A single malformed FINAL physical line is tolerated: it is a probable
+    kill-during-write artifact, and every record that DID fully parse is still swept
+    below, so tolerating it can never hide a breach, only a genuine evidence gap,
+    which then surfaces as a retryable "not proven" from the caller.
     """
     try:
-        fh = open(path)
+        raw = open(path, encoding="utf-8").read()
     except OSError as e:
-        die("audit: cannot read %s: %s" % (path, e))
+        insecure("audit: cannot read %s: %s" % (path, e))
+    except UnicodeDecodeError:
+        insecure("audit: log is not valid UTF-8 - failing closed")
+    lines = raw.splitlines()
     recs = []
-    with fh:
-        for n, line in enumerate(fh, 1):
-            line = line.strip()
-            if not line:
+    for n, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            rec = _loads(stripped)
+        except DuplicateKeyError:
+            insecure("duplicate JSON key at line %d - failing closed" % n)
+        except ValueError:
+            if n == len(lines):
+                # A single malformed FINAL line is tolerated; every record that DID
+                # parse is still classified below.
                 continue
-            try:
-                rec = json.loads(line)
-            except ValueError:
-                die("audit: malformed JSONL at line %d - failing closed" % n)
-            if not isinstance(rec, dict):
-                die("audit: line %d is not a JSON object - failing closed" % n)
-            recs.append(rec)
+            insecure("malformed JSONL at line %d (not final) - failing closed" % n)
+        if not isinstance(rec, dict):
+            insecure("line %d is not a JSON object - failing closed" % n)
+        recs.append(rec)
     return recs
 
 
@@ -326,9 +353,13 @@ def is_allowed_read(rec):
     return action_of(rec) in READ_ACTIONS
 
 
-def canary_defects(rec, role):
-    """Everything wrong with rec as THE sanctioned canary, or [] when it is exactly
-    the sanctioned canary AND was denied by the policy gate before dispatch.
+def canary_shape_defects(rec, role):
+    """Everything wrong with rec as the sanctioned canary's INTENDED request shape,
+    ignoring the fields only a RESULT can carry (outcome, denial text, HTTP status).
+
+    Used to classify an ATTEMPT with no result: an exact shape match means the write
+    is indistinguishable from the sanctioned canary, so its fate is unknown and must
+    fail closed rather than wait on a result that may never arrive.
 
     The full shape matters because cynative's classifier reads only the Action field:
     a TagRole aimed at a different role, or carrying different tags, produces a
@@ -368,6 +399,13 @@ def canary_defects(rec, role):
         got = one(f, key)
         if got != want:
             bad.append("%s=%r, want %r" % (key, got, want))
+    return bad
+
+
+def canary_defects(rec, role):
+    """Everything wrong with rec as THE sanctioned canary, or [] when it is exactly
+    the sanctioned canary AND was denied by the policy gate before dispatch."""
+    bad = canary_shape_defects(rec, role)
     if rec.get("outcome") != "error":
         bad.append("outcome=%r, want error" % rec.get("outcome"))
     if DENIAL not in result_of(rec) or "iam:TagRole" not in result_of(rec):
@@ -389,12 +427,16 @@ def check_calls(calls, role, allow_canary):
     A dispatched, non-sanctioned call is a security breach and exits immediately (a
     breach dominates and further sweeping cannot change that). A call this suite
     cannot show was blocked pre-dispatch, or one that was attempted but never
-    adjudicated at all, is a retryable miss: remembered and reported only after every
-    call has been swept, so an early miss can never mask a later breach. Checking
-    only the canary would pass a run where the canary was denied and an UNMARKED
-    write succeeded beside it; a call with no result cannot be waved through as
-    harmless either, since only an aws_hardening error proves it never left the
-    machine.
+    adjudicated at all, is normally a retryable miss: remembered and reported only
+    after every call has been swept, so an early miss can never mask a later breach.
+    The one exception is an ATTEMPT-only call whose shape is an exact match for the
+    sanctioned canary write: with no result to point to an aws_hardening denial, its
+    fate is genuinely unknown, so it is a security failure rather than a mere miss -
+    a differently-shaped fumbled attempt never gets this treatment, since it could
+    not have been the sanctioned write in the first place. Checking only the canary
+    would pass a run where the canary was denied and an UNMARKED write succeeded
+    beside it; a call with no result cannot be waved through as harmless either,
+    since only an aws_hardening error proves it never left the machine.
     """
     miss = None
     for _key, slot in calls:
@@ -409,6 +451,9 @@ def check_calls(calls, role, allow_canary):
             a.get("auth_provider"), (a.get("method") or "?").upper(),
             a.get("url"), action_of(rec))
         if result is None:
+            if allow_canary and not canary_shape_defects(rec, role):
+                insecure("the sanctioned-canary write was attempted but never "
+                         "adjudicated, cannot prove it stayed on the machine (%s)" % desc)
             miss = miss or ("a call outside the allow-list was attempted but never "
                              "adjudicated, cannot prove it stayed on the machine (%s)" % desc)
             continue
@@ -485,25 +530,35 @@ def mode_canary(recs, role):
           % len(candidates))
 
 
-if len(sys.argv) < 4:
-    print("usage: audit_check.py read AUDIT ROLE NONCE | canary AUDIT ROLE")
+def main():
+    if len(sys.argv) < 4:
+        print("usage: audit_check.py read AUDIT ROLE NONCE | canary AUDIT ROLE")
+        sys.exit(2)
+
+    mode = sys.argv[1]
+    records = load_records(sys.argv[2])
+
+    if mode == "read":
+        if len(sys.argv) < 5:
+            print("usage: audit_check.py read AUDIT ROLE NONCE")
+            sys.exit(2)
+        mode_read(records, sys.argv[3], sys.argv[4])
+        sys.exit(0)
+    if mode == "canary":
+        mode_canary(records, sys.argv[3])
+        sys.exit(0)
+
+    print("audit: unknown mode %r" % mode)
     sys.exit(2)
 
-mode = sys.argv[1]
-records = load_records(sys.argv[2])
 
-if mode == "read":
-    if len(sys.argv) < 5:
-        print("usage: audit_check.py read AUDIT ROLE NONCE")
-        sys.exit(2)
-    mode_read(records, sys.argv[3], sys.argv[4])
-    sys.exit(0)
-if mode == "canary":
-    mode_canary(records, sys.argv[3])
-    sys.exit(0)
-
-print("audit: unknown mode %r" % mode)
-sys.exit(2)
+if __name__ == "__main__":
+    try:
+        main()
+    except SystemExit:
+        raise
+    except BaseException as e:  # noqa: BLE001 - any parser crash must be fatal, never retried.
+        insecure("parser crashed (%s: %s) - failing closed" % (type(e).__name__, e))
 PY
 }
 
@@ -596,11 +651,38 @@ selftest() {
 		pair c1 "$rargs" "$ok200"
 		pair c2 "$fargs" "HTTP/1.1 200 OK\\r\\n\\r\\n$nonce"
 	} >"$td/read_foreign.log"
-	# A malformed line must fail closed, never be skipped: it could be the disallowed one.
+	# A malformed line BEFORE a later valid line must fail closed, never be skipped:
+	# it could be hiding the disallowed call.
+	{
+		printf '%s\n' '{not json'
+		pair c1 "$rargs" "$ok200"
+	} >"$td/read_malformed_mid.log"
+	# A single malformed FINAL line is tolerated (a probable kill-during-write
+	# artifact); the preceding valid witness still holds, so the read passes.
 	{
 		pair c1 "$rargs" "$ok200"
 		printf '%s\n' '{not json'
-	} >"$td/read_malformed.log"
+	} >"$td/read_malformed_trailing.log"
+	# A malformed FINAL line tolerated, but among the records that DID parse there is
+	# no valid witness for the tag: still not proven, and retryable.
+	{
+		pair c1 "$rargs" "HTTP/1.1 200 OK\\r\\n\\r\\n<Tags></Tags>"
+		printf '%s\n' '{not json'
+	} >"$td/read_malformed_final_nowitness.log"
+	# A duplicate JSON key is ambiguous, never a mere write artifact, so it fails
+	# closed even on the final line, unlike a merely malformed line.
+	{
+		pair c1 "$rargs" "$ok200"
+		printf '%s\n' '{"call_id":"c2","call_id":"c2","tool":"http_request","phase":"attempt","session_id":"s","run_id":"r","arguments":{}}'
+	} >"$td/read_dupkey.log"
+	# Invalid UTF-8 anywhere in the log fails closed: the whole file is decoded as one
+	# unit, so a single bad byte poisons every record, even ones that parsed before it.
+	{
+		pair c1 "$rargs" "$ok200"
+		printf '\377\n'
+	} >"$td/read_nonutf8.log"
+	# read_unreadable (below, in the expect_code table) targets a path that is never
+	# created: the audit log is simply missing.
 	# A read whose method key is miscased: Go binds "METHOD" to the method field and
 	# sends the GET, so the parser must fold keys the same way to see the sanctioned read.
 	fmargs="{\"METHOD\":\"GET\",\"url\":\"$gurl\",\"auth_provider\":\"aws\",\"aws_auth\":{\"service\":\"iam\"}}"
@@ -652,7 +734,9 @@ selftest() {
 	# Denied, but the Content-Type only PREFIX-matches the form media type.
 	xargs="{\"method\":\"POST\",\"url\":\"https://iam.amazonaws.com/\",\"auth_provider\":\"aws\",\"aws_auth\":{\"service\":\"iam\"},\"headers\":[{\"key\":\"Content-Type\",\"value\":\"application/x-www-form-urlencoded-evil\"}],\"body\":\"$cbody\"}"
 	pair c1 "$xargs" "$denial" error >"$td/canary_ct.log"
-	# The marker appears only on an ATTEMPT record: the write was never adjudicated.
+	# The sanctioned canary's exact shape, but only an ATTEMPT record: the write was
+	# never adjudicated. Its fate is unknown - only a result carrying the
+	# aws_hardening denial can prove it stayed on the machine - so this fails closed.
 	jattempt c1 "$cargs" >"$td/canary_attemptonly.log"
 	# A sanctioned canary beside an UNMARKED write that SUCCEEDED.
 	{
@@ -713,7 +797,12 @@ selftest() {
 	expect_code 1 read   "$td/read_header.log"        "$role" "$nonce"
 	expect_code 1 read   "$td/read_notag.log"         "$role" "$nonce"
 	expect_code 4 read   "$td/read_foreign.log"       "$role" "$nonce"
-	expect_code 1 read   "$td/read_malformed.log"     "$role" "$nonce"
+	expect_code 4 read   "$td/read_malformed_mid.log" "$role" "$nonce"
+	expect_code 0 read   "$td/read_malformed_trailing.log" "$role" "$nonce"
+	expect_code 1 read   "$td/read_malformed_final_nowitness.log" "$role" "$nonce"
+	expect_code 4 read   "$td/read_unreadable.log"    "$role" "$nonce"
+	expect_code 4 read   "$td/read_dupkey.log"        "$role" "$nonce"
+	expect_code 4 read   "$td/read_nonutf8.log"       "$role" "$nonce"
 	expect_code 0 read   "$td/read_folded_method.log" "$role" "$nonce"
 	expect_code 4 read   "$td/read_fold_collision.log" "$role" "$nonce"
 	expect_code 4 read   "$td/read_orphan_result.log" "$role" "$nonce"
@@ -732,7 +821,7 @@ selftest() {
 	expect_code 1 canary "$td/canary_extratag.log"    "$role"
 	expect_code 1 canary "$td/canary_url.log"         "$role"
 	expect_code 1 canary "$td/canary_ct.log"          "$role"
-	expect_code 1 canary "$td/canary_attemptonly.log" "$role"
+	expect_code 4 canary "$td/canary_attemptonly.log" "$role"
 	expect_code 4 canary "$td/canary_sneak.log"       "$role"
 	expect_code 4 canary "$td/canary_dispatched.log"  "$role"
 	expect_code 4 canary "$td/canary_bodyfail.log"    "$role"
@@ -744,7 +833,7 @@ selftest() {
 		printf 'selftest: %d case(s) FAILED\n' "$fails" >&2
 		exit 1
 	fi
-	printf 'selftest: OK (30 cases)\n' >&2
+	printf 'selftest: OK (35 cases)\n' >&2
 }
 
 # --- offline self-test: verify the embedded audit parser without credentials ---
