@@ -394,10 +394,11 @@ class ProviderSpec:
 # one line per provider in the extraction tasks; an unknown provider fails closed.
 REGISTRY: "dict[str, ProviderSpec]" = {}
 
-from .specs import aws, gcp  # noqa: E402 - registered after ProviderSpec is defined.
+from .specs import aws, gcp, github  # noqa: E402 - registered after ProviderSpec is defined.
 
 REGISTRY["aws"] = aws.SPEC
 REGISTRY["gcp"] = gcp.SPEC
+REGISTRY["github"] = github.SPEC
 
 
 def resolve(provider):
