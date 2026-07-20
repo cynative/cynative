@@ -187,8 +187,15 @@ Generate a completion script (no config or credentials required):
 ```bash
 # current session
 source <(cynative completion bash)   # bash
-source <(cynative completion zsh)    # zsh
+# zsh needs compinit before the script's compdef calls (skip if already enabled)
+autoload -U compinit && compinit
+source <(cynative completion zsh)
 cynative completion fish | source    # fish
+```
+
+```powershell
+# current session (PowerShell)
+cynative completion powershell | Out-String | Invoke-Expression
 ```
 
 Install for every new session (examples):
@@ -199,16 +206,20 @@ cynative completion bash > /etc/bash_completion.d/cynative
 # bash (macOS Homebrew)
 cynative completion bash > "$(brew --prefix)/etc/bash_completion.d/cynative"
 
-# zsh (Linux)
+# zsh (Linux) — also ensure compinit is enabled in ~/.zshrc if needed:
+#   echo "autoload -U compinit; compinit" >> ~/.zshrc
 cynative completion zsh > "${fpath[1]}/_cynative"
 # zsh (macOS Homebrew)
 cynative completion zsh > "$(brew --prefix)/share/zsh/site-functions/_cynative"
 
 # fish
 cynative completion fish > ~/.config/fish/completions/cynative.fish
+```
 
-# powershell
-cynative completion powershell | Out-String | Invoke-Expression
+```powershell
+# PowerShell — append to your profile so every new session loads completions:
+#   if (!(Test-Path $PROFILE)) { New-Item -Path $PROFILE -Type File -Force }
+Add-Content -Path $PROFILE -Value 'cynative completion powershell | Out-String | Invoke-Expression'
 ```
 
 See `cynative completion <shell> --help` for the full install notes for each shell.
