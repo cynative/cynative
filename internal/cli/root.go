@@ -30,8 +30,17 @@ Reasons about exploit paths, and drafts remediations.
 
 Run "cynative" with no arguments to start an interactive session, or pass a task
 to seed it. Use -p/--print to run a single task non-interactively and exit
-(pipe input with "cat file | cynative -p \"...\"").`,
-		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
+(pipe input with "cat file | cynative -p \"...\"").
+
+Shell completions: "cynative completion bash|zsh|fish|powershell" prints a script
+(no config required; see each subcommand's --help for install instructions).`,
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			// completion / __complete must work on a fresh install before any
+			// config exists — same short-circuit spirit as --version/--help.
+			if skipsConfigLoad(cmd) {
+				return nil
+			}
+
 			cfg, err := d.loadConfig(cfgFile)
 			if err != nil {
 				return err
@@ -72,6 +81,20 @@ func silenceGracefulStop(cmd *cobra.Command, err error) error {
 	}
 
 	return err
+}
+
+// skipsConfigLoad reports whether cmd is under Cobra's completion tree
+// (`completion` or the hidden `__complete` / `__completeNoDesc` request
+// commands). Those paths must not touch config or credentials.
+func skipsConfigLoad(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+			return true
+		}
+	}
+
+	return false
 }
 
 // Execute wires the production dependencies and runs the root command.

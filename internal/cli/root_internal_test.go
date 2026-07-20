@@ -268,3 +268,117 @@ func TestNewRootCmd_VerboseShorthandWinsOverVersion(t *testing.T) {
 		t.Errorf("--version must carry no shorthand, got -%s", vf.Shorthand)
 	}
 }
+
+func TestSkipsConfigLoad(t *testing.T) {
+	t.Parallel()
+
+	root := &cobra.Command{Use: "cynative"}                                //nolint:exhaustruct // name only
+	completion := &cobra.Command{Use: "completion"}                        //nolint:exhaustruct // name only
+	bash := &cobra.Command{Use: "bash"}                                    //nolint:exhaustruct // name only
+	complete := &cobra.Command{Use: cobra.ShellCompRequestCmd}             //nolint:exhaustruct // name only
+	completeNoDesc := &cobra.Command{Use: cobra.ShellCompNoDescRequestCmd} //nolint:exhaustruct // name only
+	research := &cobra.Command{Use: "research"}                            //nolint:exhaustruct // unrelated name
+
+	root.AddCommand(completion, complete, completeNoDesc, research)
+	completion.AddCommand(bash)
+
+	cases := []struct {
+		name string
+		cmd  *cobra.Command
+		want bool
+	}{
+		{"root", root, false},
+		{"unrelated", research, false},
+		{"completion", completion, true},
+		{"completion bash", bash, true},
+		{"__complete", complete, true},
+		{"__completeNoDesc", completeNoDesc, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := skipsConfigLoad(tc.cmd); got != tc.want {
+				t.Errorf("skipsConfigLoad(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewRootCmd_CompletionSkipsConfigLoad(t *testing.T) {
+	t.Parallel()
+
+	shells := []struct {
+		name    string
+		args    []string
+		markers []string
+	}{
+		{"bash", []string{"completion", "bash"}, []string{"bash", "cynative"}},
+		{"zsh", []string{"completion", "zsh"}, []string{"compdef", "cynative"}},
+		{"fish", []string{"completion", "fish"}, []string{"complete", "cynative"}},
+		{"powershell", []string{"completion", "powershell"}, []string{"Register-ArgumentCompleter", "cynative"}},
+	}
+
+	for _, shell := range shells {
+		t.Run(shell.name, func(t *testing.T) {
+			t.Parallel()
+
+			configLoaded := false
+			d := testDeps()
+			d.loadConfig = func(string) (config.Config, error) {
+				configLoaded = true
+
+				return config.Config{}, errors.New(
+					"config must not load for completion",
+				) //nolint:exhaustruct // error path
+			}
+
+			buf, err := runWithArgs(t, d, shell.args)
+			if err != nil {
+				t.Fatalf("completion %s: %v", shell.name, err)
+			}
+			if configLoaded {
+				t.Fatalf("completion %s must not call loadConfig", shell.name)
+			}
+
+			out := buf.String()
+			if out == "" {
+				t.Fatalf("completion %s produced empty script", shell.name)
+			}
+			for _, marker := range shell.markers {
+				if !strings.Contains(out, marker) {
+					t.Errorf("completion %s script missing %q; got %d bytes", shell.name, marker, len(out))
+				}
+			}
+		})
+	}
+}
+
+func TestNewRootCmd_CompletionHelpListsShells(t *testing.T) {
+	t.Parallel()
+
+	configLoaded := false
+	d := testDeps()
+	d.loadConfig = func(string) (config.Config, error) {
+		configLoaded = true
+
+		return config.Config{}, errors.New(
+			"config must not load for completion help",
+		) //nolint:exhaustruct // error path
+	}
+
+	buf, err := runWithArgs(t, d, []string{"completion", "--help"})
+	if err != nil {
+		t.Fatalf("completion --help: %v", err)
+	}
+	if configLoaded {
+		t.Fatal("completion --help must not call loadConfig")
+	}
+
+	out := buf.String()
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		if !strings.Contains(out, shell) {
+			t.Errorf("completion help missing %q; got:\n%s", shell, out)
+		}
+	}
+}
