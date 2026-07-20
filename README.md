@@ -171,6 +171,8 @@ configuration reference.
 
 `cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
 
+`cynative doctor` validates configuration and connector readiness without starting a research session: it prints the same stderr startup inventory (banner, connectors, LLM structural status) and exits `0` when the LLM block is valid (or `1` on config / `ValidateLLM` failure). It does not call the LLM or run tools. Use `-v` to also show normally-hidden skipped connectors.
+
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 
 **Approvals:** each tool call waits for a single keystroke: `y` runs it once, `a` clears every later call to *that tool* for the session (scripts still print before running), any other key denies. With no controlling terminal, use `--auto-approve`.

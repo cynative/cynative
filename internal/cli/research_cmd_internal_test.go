@@ -205,16 +205,13 @@ func TestRootCmd_HelpShowsPrintFlag(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"--print", "-p", "--auto-approve", "--verbose"} {
+	for _, want := range []string{"--print", "-p", "--auto-approve", "--verbose", "Available Commands", "doctor"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help should mention %q, got:\n%s", want, out)
 		}
 	}
-	// The removed -i flag and the subcommand list must be gone. (The word
-	// "research" still appears in the description, so do not assert on it.)
-	for _, absent := range []string{"--interactive", "Available Commands"} {
-		if strings.Contains(out, absent) {
-			t.Errorf("help should not contain %q, got:\n%s", absent, out)
-		}
+	// The removed -i flag must stay gone.
+	if strings.Contains(out, "--interactive") {
+		t.Errorf("help should not contain --interactive, got:\n%s", out)
 	}
 }

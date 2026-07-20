@@ -33,7 +33,10 @@ to seed it. Use -p/--print to run a single task non-interactively and exit
 (pipe input with "cat file | cynative -p \"...\"").
 
 Shell completions: "cynative completion bash|zsh|fish|powershell" prints a script
-(no config required; see each subcommand's --help for install instructions).`,
+(no config required; see each subcommand's --help for install instructions).
+
+Use "cynative doctor" to validate configuration and connector readiness without
+starting a research session.`,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			// completion / __complete must work on a fresh install before any
 			// config exists — same short-circuit spirit as --version/--help.
@@ -68,6 +71,8 @@ Shell completions: "cynative completion bash|zsh|fish|powershell" prints a scrip
 	// Execute) the -v shorthand is taken and --version gets none (we add no -V).
 	rootCmd.Version = d.version
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
+
+	rootCmd.AddCommand(newDoctorCmd(d))
 
 	return rootCmd
 }
