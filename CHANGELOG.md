@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/cynative/cynative/compare/v1.5.5...v1.6.0) (2026-07-20)
+
+
+### Features
+
+* add shell completions for bash, zsh, fish, and powershell ([#167](https://github.com/cynative/cynative/issues/167)) ([101ecab](https://github.com/cynative/cynative/commit/101ecabf3e5701e5820ffaf804ad1bcaa9861b30))
+
+
+### Dependencies
+
+* bump the all-dependencies group with 19 updates ([#164](https://github.com/cynative/cynative/issues/164)) ([fb335e7](https://github.com/cynative/cynative/commit/fb335e7544b81f78c42dbf213b428a7e857ebaf7))
+
 ## [1.5.5](https://github.com/cynative/cynative/compare/v1.5.4...v1.5.5) (2026-07-18)
 
 
