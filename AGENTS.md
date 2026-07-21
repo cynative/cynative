@@ -19,9 +19,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   `test/archive.smoke.test.ps1` + Pester unit tests +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
-  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the shared
-  audit-parser python syntax gate, all three connector suites' offline audit-parser selftests, and
-  the shared-machinery selftest).
+  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the connector-e2e
+  invocation-contract unit tests, the connector-e2e gate-assert unit tests, the connector-e2e
+  trusted-caller pin check, the shared audit-parser python syntax gate, all three connector
+  suites' offline audit-parser selftests, and the shared-machinery selftest).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
   otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
@@ -715,29 +716,52 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `test/archive.smoke.test.ps1` (Windows PowerShell 5.1) against each Linux tar and Windows zip
   on its native arch (sha256 vs manifest, checksums.txt row cross-check, exact-member tar
   extraction on Linux, `Expand-Archive` with a root-layout check on Windows, executable bit on
-  Linux, PE machine arch on Windows, exact `--version`); the `connector-gcp-e2e`,
-  `connector-aws-e2e`, and `connector-github-e2e` jobs call the three live connector suites as
-  reusable workflows
-  (`workflow_call` with `gate: true` and `ref: <release SHA>`) against the real GCP, AWS, and
-  GitHub fixture accounts, so a release whose connector cannot authenticate, cannot read, or
-  **fails to deny a write** cannot publish. The github one additionally receives the fixture App's
-  private key through a declared `workflow_call` secret (never `secrets: inherit`). They exercise the source at the **release** SHA, not the
-  triggering SHA (release-please re-derives its work from repository state, so the two can
-  diverge, and a gate that tested the wrong commit would be worthless) and not the built
-  artifacts, so they need no `release-artifacts` hand-off and run in parallel with the install
-  smokes; the calling job must raise the token ceiling to `id-token: write`, since a reusable
-  workflow can never exceed its caller's grant.
-  **The gate's danger is fail-OPEN, and two things close it.** A called workflow inherits the
-  *caller's* event (`push`), so the connector workflows' own event-based gating would skip the
-  live job - and GitHub reports a conditionally **skipped job as a SUCCESS** to its caller, so
-  publish's `result == 'success'` would be satisfied and the release would ship having tested
-  nothing. Hence (1) `gate: true`, which is what makes the live job run on the call path, and
-  (2) a `gate-assert` job at the end of each connector workflow that hard-fails unless the live
-  job actually **succeeded**. Do not assume a skipped inner job blocks anything; it does the
-  opposite. All three connector workflows also carry an explicit `github.repository` guard on the live
-  job: they are **public** reusable workflows, so any public repo may call them with `gate: true`
-  and `id-token: write` (cloud trust would still refuse to mint credentials, but the guard is what
-  makes "a fork never reaches the credential step" true rather than merely survivable). The
+  Linux, PE machine arch on Windows, exact `--version`); the `connector-e2e` job calls
+  `.github/workflows/connector-e2e.yaml` (`workflow_call` with `ref: <release SHA>`) against the
+  real GCP, AWS, and GitHub fixture accounts, so a release whose connector cannot authenticate,
+  cannot read, or **fails to deny a write** cannot publish. One workflow now covers what used to
+  be three separate per-connector reusable workflows; it still receives the fixture App's private
+  key through a declared `workflow_call` secret (never `secrets: inherit`). It exercises the
+  source at the **release** SHA, not the triggering SHA (release-please re-derives its work from
+  repository state, so the two can diverge, and a gate that tested the wrong commit would be
+  worthless) and not the built artifacts, so it needs no `release-artifacts` hand-off and runs in
+  parallel with the install smokes; the calling job must raise the token ceiling to
+  `id-token: write`, since a reusable workflow can never exceed its caller's grant.
+  **The gate's danger is fail-OPEN, and this is still why the machinery exists.** GitHub reports a
+  conditionally **skipped job as a SUCCESS** to its caller, and a workflow run concludes success
+  once at least one job has succeeded and none has failed, so a gate whose live connector jobs all
+  skipped, sitting next to one cheap job that passed, would read GREEN. `connector-e2e.yaml` has
+  two entry points: `workflow_call`, which is always the full gate, and `workflow_dispatch`, which
+  adds a connector filter so a maintainer can rerun one suite. There is no `pull_request` trigger
+  and no `detect` job any more, so the connector e2es no longer run on release-please PRs; a
+  broken connector now surfaces for the first time at this pre-publish gate, while the draft is
+  still unpublished. There is also deliberately no `gate:` input: the old per-suite workflows took
+  one, and a caller passing `gate: false` got a green result from a run that tested nothing. Every
+  `workflow_call` IS the full gate now, and the contract script
+  (`scripts/ci/connector-e2e-contract.sh`) rejects a call that carries a connector filter, so
+  narrowing the roster exists only on the manual-dispatch side. Because a called workflow sees the
+  *caller's* event (`push` on the release path), `github.event_name` cannot identify the release
+  call; the discriminator is structural instead: `github.workflow_ref` names the caller's workflow
+  file, `job.workflow_ref` names the file defining the current job, and equal-vs-different means
+  direct-dispatch-vs-reusable-call. On the reusable-call path the caller is then pinned to the
+  exact string `cynative/cynative/.github/workflows/release.yaml@refs/heads/main`. One job now
+  covers each credential family rather than each connector: `gcp-wif` and `aws-oidc` are
+  single-row matrices today (GKE #117 and EKS #116 reuse the same federation, so onboarding them
+  is a data change, not a new job), and `github-app` is a static singleton; each family job still
+  carries an explicit `github.repository` guard, since these are **public** reusable workflows and
+  cloud trust alone does not prove a fork never reaches the credential step. Each leg's sentinel
+  step asserts `steps.e2e.outcome`, the value from before `continue-on-error` is applied so it
+  catches a skipped or merely tolerated step, and emits a connector-specific proof output; a
+  closing `gate-assert` job runs under a bare `always()` and requires the full connector roster,
+  cross-checking that roster against the job's actual `needs` set so a family dropped from `needs`
+  (or never added to the roster) cannot silently disappear. `publish` then gates on a single
+  `== 'success'` term for the whole `connector-e2e` job plus a `gate_sha` equality check, so a
+  fan-in that is removed, skipped, or short one connector returns an empty proof and blocks the
+  release rather than waving it through. The fail-closed logic, the invocation contract and the
+  roster assertion, lives in `scripts/ci/connector-e2e-contract.sh` and
+  `scripts/ci/connector-e2e-gate-assert.sh`, each with offline unit tests gated by `make sh-test`,
+  so it is exercised on every PR rather than only on a live release run; `make sh-test` also
+  asserts the trusted-caller pin in `connector-e2e.yaml` directly. The
   `publish` job re-asserts the
   still-editable draft (same id,
   same exact asset set) immediately before publishing, then verifies and pushes the tap; a
@@ -748,8 +772,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`
   job); any pre-publish failure leaves the draft intact. Publish requires
   `result == 'success'` from every gate job (not `!= 'failure'`), so a cancelled gate blocks the
-  publish; that is also why the connector workflows scope `cancel-in-progress` to `pull_request`
-  runs and give the gate path its own run-id concurrency group (a called workflow's concurrency
+  publish; that is also why `connector-e2e.yaml` scopes `cancel-in-progress` to `workflow_dispatch`
+  runs and gives the gate path its own run-id concurrency group (a called workflow's concurrency
   group is evaluated in the caller's context, so it would otherwise collide with a standalone run
   on the same ref). After the tap push, the pipeline calls
   the reusable `.github/workflows/homebrew-smoke.yaml`
