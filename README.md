@@ -31,7 +31,7 @@ Install and set an LLM:
 brew install cynative/tap/cynative
 
 export CYNATIVE_LLM_PROVIDER=anthropic
-export CYNATIVE_LLM_MODEL=claude-opus-4-8
+export CYNATIVE_LLM_MODEL=claude-fable-5
 export ANTHROPIC_API_KEY=...
 
 ```
@@ -67,7 +67,7 @@ cynative "live cloud resources absent from IaC - drift" # starts an interactive 
 | Supply chain | Third-party MCPs and skills running with your creds | One open-source binary, connectors built in |
 | Audit trail | Scattered session logs, best effort | Fail-closed JSONL log of every tool call - if it can't record, it aborts |
 
-## How to install
+## Installation
 
 **Homebrew** (macOS / Linux - recommended):
 ```bash
@@ -120,7 +120,7 @@ export CYNATIVE_LLM_VERTEX_REGION=global
 
 # OpenAI
 export CYNATIVE_LLM_PROVIDER=openai
-export CYNATIVE_LLM_MODEL=gpt-5.5
+export CYNATIVE_LLM_MODEL=gpt-5.6-sol
 export OPENAI_API_KEY=sk-...
 
 # Amazon Bedrock - AWS credential chain
@@ -130,7 +130,7 @@ export CYNATIVE_LLM_BEDROCK_REGION=us-east-1
 
 # Azure OpenAI - endpoint via env, no YAML needed
 export CYNATIVE_LLM_PROVIDER=azure
-export CYNATIVE_LLM_MODEL=my-gpt-5.5-prod-deployment
+export CYNATIVE_LLM_MODEL=my-gpt-5.6-sol
 export AZURE_OPENAI_API_KEY=...
 export CYNATIVE_LLM_AZURE_ENDPOINT=https://my-resource.openai.azure.com
 
@@ -177,53 +177,9 @@ Cynative calls your stack using the credentials already in your shell - it keeps
 
 **Stopping mid-task:** while a task is running, press **Esc** or **Ctrl-C** once to gracefully stop it (the agent finishes any already-running call, then stops and prints `⏸ Stopped`). When the agent hits repeated tool errors or rejections it stops automatically, summarizes what it is blocked on, and asks for the missing information.
 
+**Bash Completion:** See `cynative completion <shell> --help` for the full install notes for each shell.
+
 Cynative prints a short operational footer (timing, token usage) to **stderr** - redirecting stdout (`cynative -p "..." > out.txt`) keeps the captured answer clean. `--version` prints version, commit, build date, Go version, and platform.
-
-<details>
-<summary><strong>Shell completions</strong></summary>
-
-Generate a completion script (no config or credentials required):
-
-```bash
-# current session
-source <(cynative completion bash)   # bash
-# zsh needs compinit before the script's compdef calls (skip if already enabled)
-autoload -U compinit && compinit
-source <(cynative completion zsh)
-cynative completion fish | source    # fish
-```
-
-```powershell
-# current session (PowerShell)
-cynative completion powershell | Out-String | Invoke-Expression
-```
-
-Install for every new session (examples):
-
-```bash
-# bash (Linux)
-cynative completion bash > /etc/bash_completion.d/cynative
-# bash (macOS Homebrew)
-cynative completion bash > "$(brew --prefix)/etc/bash_completion.d/cynative"
-
-# zsh (Linux) — also ensure compinit is enabled in ~/.zshrc if needed:
-#   echo "autoload -U compinit; compinit" >> ~/.zshrc
-cynative completion zsh > "${fpath[1]}/_cynative"
-# zsh (macOS Homebrew)
-cynative completion zsh > "$(brew --prefix)/share/zsh/site-functions/_cynative"
-
-# fish
-cynative completion fish > ~/.config/fish/completions/cynative.fish
-```
-
-```powershell
-# PowerShell — append to your profile so every new session loads completions:
-#   if (!(Test-Path $PROFILE)) { New-Item -Path $PROFILE -Type File -Force }
-Add-Content -Path $PROFILE -Value 'cynative completion powershell | Out-String | Invoke-Expression'
-```
-
-See `cynative completion <shell> --help` for the full install notes for each shell.
-</details>
 
 <details>
 <summary><strong>Resource &amp; cost controls for unattended runs</strong></summary>
