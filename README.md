@@ -197,6 +197,8 @@ Cynative prints a short operational footer (timing, token usage) to **stderr** -
 Finding verification (`verify_findings` tool) makes extra model calls - budget for them on any run that produces findings.
 </details>
 
+`cynative doctor` validates configuration and connector readiness without starting a research session.
+
 ## Connectors
 
 On top of the credentials in your shell, Cynative enforces read-only at three layers:

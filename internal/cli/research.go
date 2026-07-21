@@ -36,6 +36,10 @@ var (
 	// cause, so the root command silences cobra's duplicate Error line; ExitCodeFor
 	// maps it to 1.
 	ErrLLMUnavailable = errors.New("llm unavailable")
+	// ErrDoctorNotReady is returned by cynative doctor when an actionable connector
+	// readiness failure is present (structural or explicitly configured). The
+	// inventory and Doctor: not ready line already explained the cause.
+	ErrDoctorNotReady = errors.New("doctor: not ready")
 )
 
 // stdinTruncationMarker is appended (outside any <piped_input> fence) when piped
@@ -448,13 +452,15 @@ func modelResponded(acc *metrics.Accumulator, respBefore int) bool {
 func statusToView(s auth.ConnectorStatus) ui.ConnectorView {
 	switch {
 	case !s.Available:
-		return ui.ConnectorView{State: ui.ConnectorError, Name: s.Name, Posture: s.Reason, Identity: "", Managed: ""}
+		return ui.ConnectorView{ //nolint:exhaustruct // error line: Identity empty.
+			State: ui.ConnectorError, Name: s.Name, Posture: s.Reason, Actionable: s.Actionable,
+		}
 	case s.Warn:
-		return ui.ConnectorView{
+		return ui.ConnectorView{ //nolint:exhaustruct // warn: Actionable unused.
 			State: ui.ConnectorWarn, Name: s.Name, Posture: s.Posture, Identity: s.Identity, Managed: s.Managed,
 		}
 	default:
-		return ui.ConnectorView{
+		return ui.ConnectorView{ //nolint:exhaustruct // ok: Actionable unused.
 			State: ui.ConnectorOK, Name: s.Name, Posture: s.Posture, Identity: s.Identity, Managed: s.Managed,
 		}
 	}

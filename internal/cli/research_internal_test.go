@@ -275,10 +275,14 @@ func TestStatusToView(t *testing.T) {
 	t.Parallel()
 
 	if v := statusToView(
-		auth.ConnectorStatus{Name: "azure", Reason: "boom"},
-	); v.State != ui.ConnectorError ||
-		v.Posture != "boom" { //nolint:exhaustruct // skip.
+		auth.ConnectorStatus{Name: "azure", Reason: "boom", Actionable: true}, //nolint:exhaustruct // skip.
+	); v.State != ui.ConnectorError || v.Posture != "boom" || !v.Actionable {
 		t.Errorf("error mapping wrong: %+v", v)
+	}
+	if v := statusToView(
+		auth.ConnectorStatus{Name: "gcp", Reason: "no creds", Actionable: false}, //nolint:exhaustruct // ambient.
+	); v.State != ui.ConnectorError || v.Actionable {
+		t.Errorf("ambient error must keep Actionable=false: %+v", v)
 	}
 	if v := statusToView(
 		auth.ConnectorStatus{Name: "github", Available: true, Warn: true, Posture: "default=write", Identity: "@me"},

@@ -491,7 +491,8 @@ const (
 )
 
 // ConnectorView is one rendered inventory line. For ConnectorError, Posture holds
-// the skip/error reason and Identity is empty.
+// the skip/error reason and Identity is empty. Actionable mirrors auth's health
+// flag for unavailable connectors (see auth.ConnectorStatus.Actionable).
 type ConnectorView struct {
 	State    ConnectorState
 	Name     string
@@ -500,6 +501,8 @@ type ConnectorView struct {
 	// Managed is a managed sub-connector folded onto this line (e.g. "eks"),
 	// rendered as a "(+eks)" suffix; empty when none.
 	Managed string
+	// Actionable marks an error line that should fail doctor/health checks.
+	Actionable bool
 }
 
 // connectorGlyph maps a state to its leading glyph.
