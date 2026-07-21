@@ -73,12 +73,16 @@ const identityProbeTimeout = credentialProbeTimeout
 
 // skipOutcome builds a single-status outcome for a skipped connector, computing
 // visibility from the (already-escalated) policy via the same shouldEmit primitive
-// the prior emit path used — preserving ambient-quiet.
+// the prior emit path used — preserving ambient-quiet. Actionable mirrors
+// visibility at verbose=false so health checks ignore ambient absences even when
+// --verbose surfaces them in the inventory.
 func skipOutcome(name string, explicit, verbose bool, policy emitPolicy, reason string) connectorOutcome {
 	return connectorOutcome{
 		providers: nil,
-		statuses:  []ConnectorStatus{{Name: name, Reason: reason}}, //nolint:exhaustruct // skip: Available=false.
-		visible:   []bool{shouldEmit(policy, explicit, verbose)},
+		statuses: []ConnectorStatus{{ //nolint:exhaustruct // skip: Available=false.
+			Name: name, Reason: reason, Actionable: shouldEmit(policy, explicit, false),
+		}},
+		visible: []bool{shouldEmit(policy, explicit, verbose)},
 	}
 }
 

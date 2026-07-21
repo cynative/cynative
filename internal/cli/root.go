@@ -81,7 +81,8 @@ starting a research session.`,
 // operator interrupt — the agent already rendered the stop notice — while still
 // returning the error so ExitCodeFor maps it to 130. Any other error prints as usual.
 func silenceGracefulStop(cmd *cobra.Command, err error) error {
-	if errors.Is(err, agent.ErrInterrupted) || errors.Is(err, ErrLLMUnavailable) {
+	if errors.Is(err, agent.ErrInterrupted) || errors.Is(err, ErrLLMUnavailable) ||
+		errors.Is(err, ErrDoctorNotReady) {
 		cmd.SilenceErrors = true
 	}
 

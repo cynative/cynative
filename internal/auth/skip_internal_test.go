@@ -176,3 +176,38 @@ func TestKubeSkipResult(t *testing.T) {
 		}
 	})
 }
+
+func TestSkipOutcome_ActionableIndependentOfVerbose(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name              string
+		explicit, verbose bool
+		policy            emitPolicy
+		wantActionable    bool
+		wantVisible       bool
+	}{
+		{"structural always loud", false, false, emitAlways, true, true},
+		{"structural verbose", false, true, emitAlways, true, true},
+		{"ambient quiet", false, false, emitWhenExplicitOrVerbose, false, false},
+		{"ambient verbose surfaces but not actionable", false, true, emitWhenExplicitOrVerbose, false, true},
+		{"explicit quiet", true, false, emitWhenExplicitOrVerbose, true, true},
+		{"explicit verbose", true, true, emitWhenExplicitOrVerbose, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			out := skipOutcome("aws", tc.explicit, tc.verbose, tc.policy, "reason")
+			if len(out.statuses) != 1 || len(out.visible) != 1 {
+				t.Fatalf("statuses/visible len = %d/%d", len(out.statuses), len(out.visible))
+			}
+			if out.statuses[0].Actionable != tc.wantActionable {
+				t.Errorf("Actionable = %v, want %v", out.statuses[0].Actionable, tc.wantActionable)
+			}
+			if out.visible[0] != tc.wantVisible {
+				t.Errorf("visible = %v, want %v", out.visible[0], tc.wantVisible)
+			}
+		})
+	}
+}

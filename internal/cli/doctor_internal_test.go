@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/config"
 	"github.com/cynative/cynative/internal/schema"
@@ -47,8 +49,15 @@ func TestDoctor_OK(t *testing.T) {
 	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorOK {
 		t.Errorf("llmStatuses = %+v, want one OK status", u.llmStatuses)
 	}
-	if !strings.Contains(errBuf.String(), "Doctor: ready") {
-		t.Errorf("stderr missing Doctor: ready; got %q", errBuf.String())
+	if got := u.llmStatuses[0].Reason; got != "configuration valid; connectivity not tested" {
+		t.Errorf("LLM Reason = %q, want connectivity-not-tested wording", got)
+	}
+	out := errBuf.String()
+	if !strings.Contains(out, "Doctor: ready") {
+		t.Errorf("stderr missing Doctor: ready; got %q", out)
+	}
+	if !strings.Contains(out, "live read-only network calls") {
+		t.Errorf("stderr missing live-network note; got %q", out)
 	}
 }
 
@@ -110,8 +119,92 @@ func TestDoctor_NoConnectors(t *testing.T) {
 	if !strings.Contains(errBuf.String(), "Doctor: ready") {
 		t.Errorf("stderr missing Doctor: ready; got %q", errBuf.String())
 	}
-	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorOK {
-		t.Errorf("llmStatuses = %+v, want OK", u.llmStatuses)
+}
+
+func TestDoctor_ActionableConnectorFailure(t *testing.T) {
+	t.Parallel()
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.getProviders = func(_ auth.HardeningConfig, _ bool, onStatus func(auth.ConnectorStatus)) []auth.Provider {
+		onStatus(auth.ConnectorStatus{ //nolint:exhaustruct // actionable skip.
+			Name: "aws", Reason: "aws_hardening: skipped (config load failed): boom", Actionable: true,
+		})
+		onStatus(auth.ConnectorStatus{ //nolint:exhaustruct // healthy connector.
+			Name: "github", Available: true, Identity: "@me",
+		})
+
+		return nil
+	}
+
+	var errBuf bytes.Buffer
+
+	d.errOut = &errBuf
+
+	_, err := runWithArgs(t, d, []string{"doctor"})
+	if !errors.Is(err, ErrDoctorNotReady) {
+		t.Fatalf("err = %v, want ErrDoctorNotReady", err)
+	}
+	if ExitCodeFor(err) != 1 {
+		t.Errorf("ExitCodeFor = %d, want 1", ExitCodeFor(err))
+	}
+	out := errBuf.String()
+	if !strings.Contains(out, "Doctor: not ready (connector failures: aws)") {
+		t.Errorf("stderr missing actionable failure summary; got %q", out)
+	}
+	if strings.Contains(out, "Doctor: ready\n") {
+		t.Errorf("must not print Doctor: ready on actionable failure; got %q", out)
+	}
+}
+
+func TestDoctor_AmbientSkipDoesNotFailEvenWhenVerbose(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{{"doctor"}, {"doctor", "-v"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			t.Parallel()
+
+			d := testDeps()
+			d.getProviders = func(_ auth.HardeningConfig, _ bool, onStatus func(auth.ConnectorStatus)) []auth.Provider {
+				// Ambient absence: shown under -v, but Actionable=false so readiness
+				// must stay green either way.
+				onStatus(auth.ConnectorStatus{ //nolint:exhaustruct // ambient skip.
+					Name: "gcp", Reason: "gcp_hardening: skipped (no usable credentials)", Actionable: false,
+				})
+
+				return nil
+			}
+
+			var errBuf bytes.Buffer
+
+			d.errOut = &errBuf
+
+			_, err := runWithArgs(t, d, args)
+			if err != nil {
+				t.Fatalf("%v: %v", args, err)
+			}
+			if !strings.Contains(errBuf.String(), "Doctor: ready") {
+				t.Errorf("%v: want Doctor: ready; got %q", args, errBuf.String())
+			}
+		})
+	}
+}
+
+func TestConnectorHealthFromViews(t *testing.T) {
+	t.Parallel()
+
+	h := connectorHealthFromViews([]ui.ConnectorView{
+		{State: ui.ConnectorOK, Name: "github"},                    //nolint:exhaustruct // ok line
+		{State: ui.ConnectorError, Name: "gcp", Actionable: false}, //nolint:exhaustruct // ambient
+		{State: ui.ConnectorError, Name: "aws", Actionable: true},  //nolint:exhaustruct // fail
+		{State: ui.ConnectorWarn, Name: "gitlab"},                  //nolint:exhaustruct // warn ok
+	})
+	if h.ok() {
+		t.Fatal("health with actionable failure must not be ok")
+	}
+	if got, want := strings.Join(h.actionableFailures, ","), "aws"; got != want {
+		t.Errorf("actionableFailures = %q, want %q", got, want)
 	}
 }
 
@@ -148,7 +241,7 @@ func TestDoctor_Help(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"Validate configuration", "connector", "verbose"} {
+	for _, want := range []string{"Validate configuration", "connector", "verbose", "live read-only"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor help missing %q; got:\n%s", want, out)
 		}
@@ -172,5 +265,18 @@ func TestDoctor_DoesNotCallChatModel(t *testing.T) {
 	}
 	if called {
 		t.Fatal("doctor must not construct a chat model")
+	}
+}
+
+func TestSilenceGracefulStop_DoctorNotReady(t *testing.T) {
+	t.Parallel()
+
+	cmd := &cobra.Command{} //nolint:exhaustruct // SilenceErrors only
+	err := silenceGracefulStop(cmd, ErrDoctorNotReady)
+	if !errors.Is(err, ErrDoctorNotReady) {
+		t.Fatalf("err = %v", err)
+	}
+	if !cmd.SilenceErrors {
+		t.Error("SilenceErrors should be set for ErrDoctorNotReady")
 	}
 }
