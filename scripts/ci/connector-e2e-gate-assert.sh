@@ -81,6 +81,11 @@ EOF
 # FAMILIES is the set of jobs this job actually depends on (minus the always-present
 # prepare); ROSTER_FAMILIES is what the hand-maintained ROSTER claims to cover. They
 # must be the same set in both directions, or a connector can go silently ungated.
+#
+# Residual: this check can only compare needs against ROSTER, so a family job added to
+# neither is still invisible and still ungated. needs is the anchor because it is the
+# actual dependency graph, so needs must list every family job for this check to be
+# exhaustive.
 if families_from_needs=$(python3 -c '
 import json
 import os
@@ -109,10 +114,16 @@ for pair in $ROSTER; do
 done
 
 if [ "$needs_parse_ok" -eq 1 ]; then
+	# families_from_needs is a deliberately space-separated word list meant to be split on
+	# iteration, so it is intentionally unquoted here; set -f disables globbing for the
+	# duration so a family name containing a glob character expands to nothing but itself,
+	# never to filenames in the working directory.
+	set -f
 	for family in $families_from_needs; do
 		contains_word "$roster_families" "$family" ||
 			fail "family '$family' is a dependency in needs but missing from ROSTER, so it would never be gated"
 	done
+	set +f
 	for family in $roster_families; do
 		contains_word "$families_from_needs" "$family" ||
 			fail "family '$family' is in ROSTER but nothing in needs depends on it"

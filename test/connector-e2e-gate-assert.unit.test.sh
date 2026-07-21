@@ -154,6 +154,27 @@ NEEDS_MISSING_FAMILY='{"prepare":{"result":"success"},"gcp-wif":{"result":"succe
 "aws-oidc":{"result":"success"}}'
 case_ 1 "a family in ROSTER but missing from needs fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_MISSING_FAMILY"
 
+# contains_word must match whole tokens, not substrings. A plain substring test (e.g. a
+# case pattern of *"$2"* with no space padding) would let "aws" silently match inside
+# "aws-oidc" and pass both directions below; that is the exact false pass this pair of
+# cases pins shut.
+NEEDS_SUBSTRING_OF_ROSTER='{"prepare":{"result":"success"},"gcp-wif":{"result":"success"},
+"aws-oidc":{"result":"success"},"github-app":{"result":"success"},"aws":{"result":"success"}}'
+case_ 1 "a needs family that is a strict substring of a ROSTER family fails" "" \
+	"$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_SUBSTRING_OF_ROSTER"
+
+ROSTER_SUBSTRING_FAMILY='gcp:gcp-wif aws:aws-oidc github:github-app awsx:aws'
+case_ 1 "a ROSTER family that is a strict substring of a needs family fails" "" \
+	'gcp-wif=success
+aws-oidc=success
+github-app=success
+aws=success' \
+	'gcp=success
+aws=success
+github=success
+awsx=success' \
+	"$ROSTER_SUBSTRING_FAMILY" "$NEEDS_JSON_DEFAULT"
+
 case_ 1 "malformed NEEDS_JSON fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" 'not json'
 
 case_ 1 "a NEEDS_JSON that is valid JSON but not an object fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" '["prepare"]'
