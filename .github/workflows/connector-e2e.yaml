@@ -44,9 +44,15 @@ permissions: {}
 # evaluated in the CALLER's context, so a ref-based group would let a standalone run
 # cancel a release gate, and a cancelled gate fails the fan-in below, blocking a release
 # for a reason that has nothing to do with the release.
+#
+# The discriminator is `inputs.ref`, which is declared only under workflow_call and so is
+# empty on every dispatch. Do NOT key this on github.event_name: a called workflow sees
+# the CALLER's event, so it reads `push` on the release path today only because
+# release.yaml is push-only. If release.yaml ever gained a workflow_dispatch trigger, an
+# event-keyed group would silently move the release gate into the cancellable ref group.
 concurrency:
-  group: connector-e2e-${{ github.event_name == 'workflow_dispatch' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+  group: connector-e2e-${{ inputs.ref && github.run_id || github.ref }}
+  cancel-in-progress: ${{ !inputs.ref }}
 
 jobs:
   # ---- The invocation contract ---------------------------------------------
