@@ -1,0 +1,536 @@
+name: Live connector e2e
+
+# The live connector e2es against the real GCP, AWS, and GitHub fixture accounts: a
+# read of a fact that only the real provider can supply, plus a write canary denied
+# before the request leaves the machine, proving read-only enforcement end to end.
+#
+# Two entry points. The Release Pipeline calls it as a PRE-PUBLISH GATE, and maintainers
+# can dispatch it manually with an optional connector filter.
+#
+# There is deliberately no `gate:` input. Every workflow_call IS the full gate, so a
+# caller cannot weaken it; the filter exists only on the dispatch path, and the contract
+# script rejects a call that carries one.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Exact 40-hex commit to test. The Release Pipeline passes the SHA the release
+          was TAGGED at, which is not necessarily the SHA that triggered the pipeline:
+          release-please re-derives its work from repository state, so main can advance
+          in between.
+        type: string
+        required: true
+    secrets:
+      GH_E2E_APP_PRIVATE_KEY:
+        description: Private key of the dedicated metadata-read fixture App.
+        required: true
+    outputs:
+      gate_sha:
+        description: The SHA for which the full connector gate succeeded. Empty means it did not.
+        value: ${{ jobs.gate-assert.outputs.gate_sha }}
+  workflow_dispatch:
+    inputs:
+      connector:
+        description: Connector to rerun, or all.
+        type: choice
+        required: true
+        default: all
+        options: [all, gcp, aws, github]
+
+permissions: {}
+
+# The gate path is keyed on the run id. A called workflow's concurrency group is
+# evaluated in the CALLER's context, so a ref-based group would let a standalone run
+# cancel a release gate, and a cancelled gate fails the fan-in below, blocking a release
+# for a reason that has nothing to do with the release.
+concurrency:
+  group: connector-e2e-${{ github.event_name == 'workflow_dispatch' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+
+jobs:
+  # ---- The invocation contract ---------------------------------------------
+  # Credential-free and unconditional, so a foreign caller hard-fails here before any
+  # credential-bearing job schedules. The logic lives in a script with offline unit
+  # tests under `make sh-test`, not inline, so it is exercised on every PR rather than
+  # only on a live release run.
+  prepare:
+    name: Validate invocation contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.contract.outputs.mode }}
+      selector: ${{ steps.contract.outputs.selector }}
+      checkout_sha: ${{ steps.contract.outputs.checkout_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Resolve and validate the invocation contract
+        id: contract
+        env:
+          REPOSITORY: ${{ github.repository }}
+          EXPECTED_REPOSITORY: cynative/cynative
+          EVENT: ${{ github.event_name }}
+          # github.workflow_ref names the CALLER's workflow; job.workflow_ref names the
+          # file defining this job. Equal means a direct dispatch, different means a
+          # reusable call. A called workflow's github context is the caller's, so
+          # github.event_name cannot make this distinction.
+          CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          JOB_WORKFLOW_REF: ${{ job.workflow_ref }}
+          EXPECTED_CALLER: cynative/cynative/.github/workflows/release.yaml@refs/heads/main
+          CALL_REF: ${{ inputs.ref }}
+          TRIGGER_SHA: ${{ github.sha }}
+          SELECTOR: ${{ inputs.connector }}
+          CONNECTORS: gcp aws github
+        run: sh scripts/ci/connector-e2e-contract.sh >>"$GITHUB_OUTPUT"
+
+  # ---- gcp-wif family ------------------------------------------------------
+  # One row today. The matrix is deliberate: GKE (#117) reuses this same Workload
+  # Identity Federation, so onboarding it later is a data change rather than a change
+  # to job topology, filter behavior, and the release fan-in all at once.
+  gcp-wif:
+    name: GCP connector read + canary
+    needs: prepare
+    # Filtering happens at JOB level. A job-level if cannot read the matrix context, but
+    # it can read needs, and family membership is a static literal. This matters: an
+    # excluded family then reports a genuine `skipped`, which is the state the fan-in
+    # reasons about. Filtering by skipping STEPS instead would leave a leg whose steps
+    # all skipped, and that is a SUCCEEDING job.
+    # Exact comparison, never contains(). contains('gcp gke', x) is SUBSTRING matching,
+    # so a selector of 'gk' would match. The contract script's allowlist already blocks
+    # that, but the safe form costs nothing and does not teach a hazardous pattern: a
+    # two-row family spells it `selector == 'gcp' || selector == 'gke'`.
+    if: >-
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.selector == '' ||
+       needs.prepare.outputs.selector == 'gcp')
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for Workload Identity Federation
+    outputs:
+      proof_gcp: ${{ steps.sentinel.outputs.proof_gcp }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - connector: gcp
+            timeout: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
+            exit 1
+          fi
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Fail loudly on a missing or renamed variable. The suite's own REQUIRE_RUN check
+      # covers only the vars it lists; these are consumed by the auth action before the
+      # suite ever runs. GCP had no preflight before consolidation.
+      - name: Preflight the required repo variables
+        env:
+          PROJECT: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          WIF_PROVIDER: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
+          SA: ${{ vars.CYNATIVE_CLI_CI_SA }}
+          VERTEX_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
+          E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+          E2E_EXPECT: ${{ vars.GCP_E2E_EXPECT }}
+        run: |
+          missing=
+          [ -n "${PROJECT}" ]       || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
+          [ -n "${WIF_PROVIDER}" ]  || missing="${missing} CYNATIVE_CLI_CI_WIF_PROVIDER"
+          [ -n "${SA}" ]            || missing="${missing} CYNATIVE_CLI_CI_SA"
+          [ -n "${VERTEX_MODEL}" ]  || missing="${missing} CYNATIVE_CLI_CI_VERTEX_MODEL"
+          [ -n "${VERTEX_REGION}" ] || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
+          [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
+          [ -n "${E2E_EXPECT}" ]    || missing="${missing} GCP_E2E_EXPECT"
+          if [ -n "${missing}" ]; then
+            echo "::error::missing repo variables:${missing}"
+            exit 1
+          fi
+      # Keyless WIF into cynative-cli-ci. Unlike the llm smoke,
+      # GOOGLE_APPLICATION_CREDENTIALS IS exported downstream so the gcp connector
+      # registers and the run has something to gate.
+      - name: Authenticate to GCP (Workload Identity Federation)
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          workload_identity_provider: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
+          service_account: ${{ vars.CYNATIVE_CLI_CI_SA }}
+          create_credentials_file: true
+          export_environment_variables: false
+      # The auth action writes an external_account creds file with no quota_project_id,
+      # so cynative's ADC project resolution would find no project for its permission
+      # catalog. Inject the fixture project as quota_project_id, the field cynative reads
+      # as its fallback. Keeps the run keyless.
+      - name: Add quota project to the WIF credentials file
+        env:
+          CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+          QUOTA_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+        run: |
+          tmp="$(mktemp)"
+          jq --arg p "$QUOTA_PROJECT" '. + {quota_project_id: $p}' "$CREDS_FILE" >"$tmp"
+          mv "$tmp" "$CREDS_FILE"
+      # The selection condition is required on the e2e step, not just the sentinel. A
+      # job-level if cannot filter matrix legs: the whole family job runs when ANY of its
+      # connectors is selected, and every row still materializes. Without this, a future
+      # `gcp gke` family asked for gcp alone would still run the gke suite. It is inert
+      # today with one row (the job only runs when that row is selected), and the fan-in
+      # already requires no proof from an unselected connector.
+      - name: Run the connector e2e
+        id: e2e
+        if: ${{ needs.prepare.outputs.selector == '' || needs.prepare.outputs.selector == matrix.connector }}
+        env:
+          # Vertex drives the loop; fed inline so it does not depend on ADC fallback,
+          # while GOOGLE_APPLICATION_CREDENTIALS lights the gcp connector.
+          CYNATIVE_LLM_PROVIDER: vertex
+          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
+          GCP_E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+          GCP_E2E_EXPECT: ${{ vars.GCP_E2E_EXPECT }}
+          # Generous per-phase limits (a tool-driven run needs more than the no-tool
+          # defaults); the job timeout bounds the whole run.
+          GCP_E2E_TIMEOUT: "180"
+          GCP_E2E_MAX_TOKENS: "100000"
+          # The harness treats only the exact string 1 as required. Anything else lets
+          # the suite skip green on a renamed variable.
+          GCP_E2E_REQUIRE_RUN: "1"
+          CONNECTOR: ${{ matrix.connector }}
+          CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"
+          CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")"
+          export CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS
+          make "connector-${CONNECTOR}-e2e"
+      # The per-leg proof. strategy.job-total catches a dropped, duplicated, or extra
+      # matrix row; the allowlist case catches a substituted one; the connector-specific
+      # output name is what lets the fan-in tell which legs actually ran (matrix outputs
+      # with IDENTICAL names race, distinct names combine).
+      #
+      # It asserts steps.e2e.OUTCOME, never .conclusion: outcome is the value before
+      # continue-on-error is applied, so it catches a tolerated step, a step skipped by a
+      # false condition, a step skipped because setup failed, and a renamed e2e step.
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() && (needs.prepare.outputs.selector == '' || needs.prepare.outputs.selector == matrix.connector) }}
+        env:
+          CONNECTOR: ${{ matrix.connector }}
+          ACTUAL_TOTAL: ${{ strategy.job-total }}
+          EXPECTED_TOTAL: "1"
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+        run: |
+          if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
+            echo "::error::gcp-wif realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"
+            exit 1
+          fi
+          if [ "$E2E_OUTCOME" != success ]; then
+            echo "::error::connector $CONNECTOR e2e outcome=$E2E_OUTCOME"
+            exit 1
+          fi
+          case "$CONNECTOR" in
+          gcp) key=proof_gcp ;;
+          *) echo "::error::connector $CONNECTOR is not in the gcp-wif allowlist"; exit 1 ;;
+          esac
+          printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
+
+  # ---- aws-oidc family -----------------------------------------------------
+  # One row today; EKS (#116) reuses this same aws-ci OIDC environment.
+  aws-oidc:
+    name: AWS connector read + canary
+    needs: prepare
+    # Exact comparison, never contains(); see the note on gcp-wif above.
+    if: >-
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.selector == '' ||
+       needs.prepare.outputs.selector == 'aws')
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    # Static, so the OIDC subject stays repo:cynative/cynative:environment:aws-ci
+    # regardless of branch or event.
+    environment: aws-ci
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for the AWS role assumption
+    outputs:
+      proof_aws: ${{ steps.sentinel.outputs.proof_aws }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - connector: aws
+            timeout: 25
+            # Explicit, never a relied-upon default: this family EXPORTS AWS_* so the
+            # aws connector registers, while github-app below sets false so it stays
+            # dark. Co-locating the two families makes that inversion easy to copy
+            # wrongly, so it is data.
+            output_env_credentials: "true"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
+            exit 1
+          fi
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Preflight the required repo variables
+        env:
+          ROLE: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+          ROLE_NAME: ${{ vars.AWS_E2E_ROLE_NAME }}
+          EXPECT: ${{ vars.AWS_E2E_EXPECT }}
+          ACCOUNT: ${{ vars.AWS_E2E_ACCOUNT }}
+        run: |
+          missing=
+          [ -n "${ROLE}" ]      || missing="${missing} CYNATIVE_CLI_CI_AWS_ROLE"
+          [ -n "${REGION}" ]    || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_REGION"
+          [ -n "${MODEL}" ]     || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_MODEL"
+          [ -n "${ROLE_NAME}" ] || missing="${missing} AWS_E2E_ROLE_NAME"
+          [ -n "${EXPECT}" ]    || missing="${missing} AWS_E2E_EXPECT"
+          [ -n "${ACCOUNT}" ]   || missing="${missing} AWS_E2E_ACCOUNT"
+          if [ -n "${missing}" ]; then
+            echo "::error::missing repo variables:${missing}"
+            exit 1
+          fi
+      # AWS_* IS exported downstream (unlike the bedrock smoke), so the aws connector
+      # registers. output-credentials also emits the three credential outputs, which feed
+      # Bedrock inline so the LLM path does not depend on the connector's scoped chain.
+      - name: Authenticate to AWS (GitHub OIDC)
+        id: aws
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
+        with:
+          role-to-assume: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          aws-region: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          output-env-credentials: ${{ matrix.output_env_credentials }}
+          output-credentials: true
+      # Selection condition required on the e2e step; see the note on gcp-wif above.
+      - name: Run the connector e2e
+        id: e2e
+        if: ${{ needs.prepare.outputs.selector == '' || needs.prepare.outputs.selector == matrix.connector }}
+        env:
+          CYNATIVE_LLM_PROVIDER: bedrock
+          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+          CYNATIVE_LLM_BEDROCK_REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          CYNATIVE_LLM_BEDROCK_ACCESS_KEY: ${{ steps.aws.outputs.aws-access-key-id }}
+          CYNATIVE_LLM_BEDROCK_SECRET_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          CYNATIVE_LLM_BEDROCK_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          AWS_E2E_ROLE_NAME: ${{ vars.AWS_E2E_ROLE_NAME }}
+          AWS_E2E_EXPECT: ${{ vars.AWS_E2E_EXPECT }}
+          AWS_E2E_ACCOUNT: ${{ vars.AWS_E2E_ACCOUNT }}
+          # CI's principal is an assumed role, so cynative's credential scoping engages
+          # and the posture must read client+aws exactly. A degrade to `client` means the
+          # self-assume trust statement on the CI role is gone, and the run is only
+          # client-gated; the suite fails rather than quietly accepting that.
+          AWS_E2E_ENFORCED: client+aws
+          AWS_E2E_TIMEOUT: "240"
+          AWS_E2E_MAX_TOKENS: "100000"
+          AWS_E2E_REQUIRE_RUN: "1"
+          CONNECTOR: ${{ matrix.connector }}
+        run: make "connector-${CONNECTOR}-e2e"
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() && (needs.prepare.outputs.selector == '' || needs.prepare.outputs.selector == matrix.connector) }}
+        env:
+          CONNECTOR: ${{ matrix.connector }}
+          ACTUAL_TOTAL: ${{ strategy.job-total }}
+          EXPECTED_TOTAL: "1"
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+        run: |
+          if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
+            echo "::error::aws-oidc realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"
+            exit 1
+          fi
+          if [ "$E2E_OUTCOME" != success ]; then
+            echo "::error::connector $CONNECTOR e2e outcome=$E2E_OUTCOME"
+            exit 1
+          fi
+          case "$CONNECTOR" in
+          aws) key=proof_aws ;;
+          *) echo "::error::connector $CONNECTOR is not in the aws-oidc allowlist"; exit 1 ;;
+          esac
+          printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
+
+  # ---- github-app family ---------------------------------------------------
+  # A static job, not a matrix: github is a genuine singleton (gitlab #114 is a separate
+  # declared-token family, and the kubernetes suites are their own families).
+  github-app:
+    name: GitHub connector read + canaries
+    needs: prepare
+    if: >-
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.selector == '' ||
+       needs.prepare.outputs.selector == 'github')
+    runs-on: ubuntu-latest
+    # Headroom for three phases, each retried once, plus the build and the first-request
+    # OpenAPI table fetch. Well under the App token's 1h.
+    timeout-minutes: 35
+    # Bedrock drives the LLM, so the OIDC subject must stay on aws-ci.
+    environment: aws-ci
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for the Bedrock role assumption
+    outputs:
+      proof_github: ${{ steps.sentinel.outputs.proof_github }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
+            exit 1
+          fi
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Preflight the required repo variables and secret
+        env:
+          REPO: ${{ vars.GH_E2E_REPO }}
+          EXPECT: ${{ vars.GH_E2E_EXPECT }}
+          CLIENT_ID: ${{ vars.GH_E2E_APP_CLIENT_ID }}
+          APP_KEY: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
+          ROLE: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+        run: |
+          missing=
+          [ -n "${REPO}" ]      || missing="${missing} GH_E2E_REPO"
+          [ -n "${EXPECT}" ]    || missing="${missing} GH_E2E_EXPECT"
+          [ -n "${CLIENT_ID}" ] || missing="${missing} GH_E2E_APP_CLIENT_ID"
+          [ -n "${APP_KEY}" ]   || missing="${missing} GH_E2E_APP_PRIVATE_KEY(secret)"
+          [ -n "${ROLE}" ]      || missing="${missing} CYNATIVE_CLI_CI_AWS_ROLE"
+          [ -n "${REGION}" ]    || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_REGION"
+          [ -n "${MODEL}" ]     || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_MODEL"
+          if [ -n "${missing}" ]; then
+            echo "::error::missing repo variables/secret:${missing}"
+            exit 1
+          fi
+      # Bedrock creds for the LLM only. output-env-credentials: false keeps AWS_* OUT of
+      # the env so the aws connector never registers (the suite asserts that); the three
+      # credential outputs feed Bedrock inline instead.
+      - name: Authenticate to AWS for Bedrock (GitHub OIDC)
+        id: aws
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d # v6.2.2
+        with:
+          role-to-assume: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          aws-region: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          role-session-name: cynative-github-connector-e2e
+          output-env-credentials: false
+          output-credentials: true
+      # Short-lived installation token scoped to metadata:read on the fixture repo only.
+      # NOTE: v3.2.0 takes a Client ID via `client-id`, not `app-id`.
+      - name: Mint the read-only fixture App token
+        id: apptoken
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.GH_E2E_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
+          owner: cynative
+          repositories: connector-e2e-fixture
+          permission-metadata: read
+      - name: Run the connector e2e
+        id: e2e
+        env:
+          CYNATIVE_LLM_PROVIDER: bedrock
+          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+          CYNATIVE_LLM_BEDROCK_REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+          CYNATIVE_LLM_BEDROCK_ACCESS_KEY: ${{ steps.aws.outputs.aws-access-key-id }}
+          CYNATIVE_LLM_BEDROCK_SECRET_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          CYNATIVE_LLM_BEDROCK_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+          GH_E2E_REPO: ${{ vars.GH_E2E_REPO }}
+          GH_E2E_EXPECT: ${{ vars.GH_E2E_EXPECT }}
+          GH_E2E_TOKEN: ${{ steps.apptoken.outputs.token }}
+          # CI keeps the aws connector dark; assert it did not register.
+          GH_E2E_EXPECT_NO_AWS: "1"
+          GH_E2E_TIMEOUT: "240"
+          GH_E2E_MAX_TOKENS: "100000"
+          GH_E2E_REQUIRE_RUN: "1"
+        run: make connector-github-e2e
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() }}
+        env:
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+        run: |
+          if [ "$E2E_OUTCOME" != success ]; then
+            echo "::error::connector github e2e outcome=$E2E_OUTCOME"
+            exit 1
+          fi
+          printf 'proof_github=success\n' >>"$GITHUB_OUTPUT"
+
+  # ---- The gate's fail-closed assertion ------------------------------------
+  # The `if:` is bare always() with ZERO conjuncts. The old per-suite version was
+  # `always() && inputs.gate`, safe only because gate was mandatory on the call path.
+  # With gate removed, any conjunct here would reintroduce the skip-is-success hole, so
+  # every path decision lives in the script where a wrong branch is exit 1 rather than a
+  # skipped job.
+  gate-assert:
+    name: Assert the gate actually ran
+    needs: [prepare, gcp-wif, aws-oidc, github-app]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      gate_sha: ${{ steps.assert.outputs.gate_sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Every connector in the roster must have run and passed
+        id: assert
+        env:
+          SELECTOR: ${{ needs.prepare.outputs.selector }}
+          ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app
+          RESULTS: |
+            gcp-wif=${{ needs.gcp-wif.result }}
+            aws-oidc=${{ needs.aws-oidc.result }}
+            github-app=${{ needs.github-app.result }}
+          PROOFS: |
+            gcp=${{ needs.gcp-wif.outputs.proof_gcp }}
+            aws=${{ needs.aws-oidc.outputs.proof_aws }}
+            github=${{ needs.github-app.outputs.proof_github }}
+          CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          sh scripts/ci/connector-e2e-gate-assert.sh
+          # Emitted only on the success path. publish requires this to equal the SHA it
+          # asked for, so removing or skipping this job yields an empty proof and blocks
+          # the release rather than waving it through.
+          printf 'gate_sha=%s\n' "$CHECKOUT_SHA" >>"$GITHUB_OUTPUT"
