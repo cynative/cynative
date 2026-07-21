@@ -127,12 +127,13 @@ sh-test:
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
 	@sh test/connector-e2e-contract.unit.test.sh
+	@sh test/connector-e2e-gate-assert.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + connector-e2e-contract unit + python syntax gate + connector audit parsers + shared-machinery selftest)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + connector-e2e-contract unit + connector-e2e-gate-assert unit + python syntax gate + connector audit parsers + shared-machinery selftest)"
 
 SHELL_COMPLEXITY_MAX := 6
 
