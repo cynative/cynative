@@ -171,8 +171,6 @@ configuration reference.
 
 `cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
 
-`cynative doctor` validates configuration and connector readiness without starting a research session: it prints the same stderr startup inventory (banner, connectors, LLM structural status). The LLM check is configuration-only (`configuration valid; connectivity not tested`); connector checks may perform live read-only network calls. Exit `0` / `Doctor: ready` only when the LLM block is valid **and** there are no actionable connector failures (structural errors or explicitly configured connectors that failed readiness). Ambient “no credentials” skips shown only under `-v` do not change the result. Exit `1` on config / `ValidateLLM` / actionable connector failure. It does not call the LLM or run tools.
-
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 
 **Approvals:** each tool call waits for a single keystroke: `y` runs it once, `a` clears every later call to *that tool* for the session (scripts still print before running), any other key denies. With no controlling terminal, use `--auto-approve`.
@@ -242,6 +240,8 @@ See `cynative completion <shell> --help` for the full install notes for each she
 
 Finding verification (`verify_findings` tool) makes extra model calls - budget for them on any run that produces findings.
 </details>
+
+`cynative doctor` validates configuration and connector readiness without starting a research session.
 
 ## Connectors
 
