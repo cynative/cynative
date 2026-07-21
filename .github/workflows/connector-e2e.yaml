@@ -90,7 +90,14 @@ jobs:
           # github.event_name cannot make this distinction.
           CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
           JOB_WORKFLOW_REF: ${{ job.workflow_ref }}
-          EXPECTED_CALLER: cynative/cynative/.github/workflows/release.yaml@refs/heads/main
+          # TEMPORARY VALIDATION OVERRIDE - MUST BE REVERTED BEFORE MERGE.
+          # The shipped value is:
+          #   cynative/cynative/.github/workflows/release.yaml@refs/heads/main
+          # Pre-merge, release.yaml cannot drive this gate (its connector jobs only run
+          # when release_created is true), so the temporary harness stands in to prove the
+          # three live suites. The caller pin itself is already proven: run 29845503253
+          # rejected this exact harness against the real value.
+          EXPECTED_CALLER: cynative/cynative/.github/workflows/tmp-connector-e2e-harness.yaml@refs/heads/refactor/consolidate-connector-e2e-workflows
           CALL_REF: ${{ inputs.ref }}
           TRIGGER_SHA: ${{ github.sha }}
           SELECTOR: ${{ inputs.connector }}
