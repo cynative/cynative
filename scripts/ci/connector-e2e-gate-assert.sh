@@ -11,15 +11,25 @@
 # produces no leg and therefore no sentinel, so the family job stays green with one
 # fewer connector tested. Requiring a per-connector proof makes that visible.
 #
+# It also closes a second roster hole: ROSTER, RESULTS, and PROOFS are hand-maintained
+# alongside the workflow's needs: list, and nothing binds them together. If a family job
+# is added to needs but ROSTER is not updated to match (or the other way around), that
+# connector can go silently ungated while the gate stays green. NEEDS_JSON carries the
+# actual dependency set (toJSON(needs), which cannot be forged by forgetting to edit a
+# second place) so this script cross-checks it against ROSTER before trusting either.
+#
 # Inputs (env):
-#   SELECTOR - empty means every connector; otherwise the single selected connector.
-#   ROSTER   - space-separated connector:family pairs, a static literal in the workflow.
-#   RESULTS  - newline-separated family=result pairs from the needs context.
-#   PROOFS   - newline-separated connector=proof pairs from the family job outputs.
+#   SELECTOR   - empty means every connector; otherwise the single selected connector.
+#   ROSTER     - space-separated connector:family pairs, a static literal in the workflow.
+#   RESULTS    - newline-separated family=result pairs from the needs context.
+#   PROOFS     - newline-separated connector=proof pairs from the family job outputs.
+#   NEEDS_JSON - JSON object from toJSON(needs); its top-level keys are the jobs this
+#                job actually depends on.
 set -eu
 
 : "${ROSTER:?ROSTER is required}"
 : "${RESULTS:?RESULTS is required}"
+: "${NEEDS_JSON:?NEEDS_JSON is required}"
 SELECTOR=${SELECTOR:-}
 PROOFS=${PROOFS:-}
 
@@ -28,6 +38,16 @@ fails=0
 fail() {
 	printf '::error::connector-e2e gate: %s\n' "$*" >&2
 	fails=1
+}
+
+# contains_word HAYSTACK WORD - true if WORD appears as a whole space-separated token in
+# HAYSTACK. Padding both sides with spaces turns a plain substring test into a
+# word-boundary test, so "gcp" does not match inside "gcp-wif".
+contains_word() {
+	case " $1 " in
+	*" $2 "*) return 0 ;;
+	*) return 1 ;;
+	esac
 }
 
 # lookup HAYSTACK KEY - echo the value of the sole "KEY=" line in a newline-separated
@@ -56,6 +76,48 @@ EOF
 	[ "$_n" -eq 1 ] || return 1
 	printf '%s' "$_val"
 }
+
+# ---- roster / job-graph cross-check ---------------------------------------
+# FAMILIES is the set of jobs this job actually depends on (minus the always-present
+# prepare); ROSTER_FAMILIES is what the hand-maintained ROSTER claims to cover. They
+# must be the same set in both directions, or a connector can go silently ungated.
+if families_from_needs=$(python3 -c '
+import json
+import os
+import sys
+
+try:
+    needs = json.loads(os.environ["NEEDS_JSON"])
+except (KeyError, ValueError):
+    sys.exit(1)
+if not isinstance(needs, dict) or not needs:
+    sys.exit(1)
+families = sorted(key for key in needs if key != "prepare")
+print(" ".join(families))
+'); then
+	needs_parse_ok=1
+else
+	needs_parse_ok=0
+	families_from_needs=
+	fail "NEEDS_JSON is missing, empty, or not a JSON object; cannot verify ROSTER against the actual job graph"
+fi
+
+roster_families=
+for pair in $ROSTER; do
+	family=${pair##*:}
+	contains_word "$roster_families" "$family" || roster_families="$roster_families $family"
+done
+
+if [ "$needs_parse_ok" -eq 1 ]; then
+	for family in $families_from_needs; do
+		contains_word "$roster_families" "$family" ||
+			fail "family '$family' is a dependency in needs but missing from ROSTER, so it would never be gated"
+	done
+	for family in $roster_families; do
+		contains_word "$families_from_needs" "$family" ||
+			fail "family '$family' is in ROSTER but nothing in needs depends on it"
+	done
+fi
 
 for pair in $ROSTER; do
 	connector=${pair%%:*}

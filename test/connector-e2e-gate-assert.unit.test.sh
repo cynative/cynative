@@ -12,14 +12,31 @@ fails=0
 
 ROSTER='gcp:gcp-wif aws:aws-oidc github:github-app'
 
-# case_ WANT DESC SELECTOR RESULTS PROOFS [ROSTER]
+# needs_json ROSTER - build a NEEDS_JSON (the toJSON(needs) shape) whose family keys
+# match ROSTER's family names exactly, plus the always-present prepare. Used as the
+# default so most cases exercise only the thing they name, not the roster/needs
+# cross-check; the cross-check's own tests build NEEDS_JSON by hand instead.
+needs_json() {
+	_out='{"prepare":{"result":"success"}'
+	for _pair in $1; do
+		_family=${_pair##*:}
+		_out="$_out,\"$_family\":{\"result\":\"success\"}"
+	done
+	printf '%s}' "$_out"
+}
+NEEDS_JSON_DEFAULT=$(needs_json "$ROSTER")
+
+# case_ WANT DESC SELECTOR RESULTS PROOFS [ROSTER] [NEEDS_JSON]
 # ROSTER defaults to the shared roster above; pass it to exercise a roster with a
-# connector or family name the shared one does not have.
+# connector or family name the shared one does not have. NEEDS_JSON defaults to a set
+# matching that roster; pass it (including an empty string) to exercise the roster/needs
+# cross-check itself.
 case_() {
 	_want=$1
 	_desc=$2
 	_roster=${6:-$ROSTER}
-	if ( SELECTOR="$3" ROSTER="$_roster" RESULTS="$4" PROOFS="$5" \
+	_needs=${7-$NEEDS_JSON_DEFAULT}
+	if ( SELECTOR="$3" ROSTER="$_roster" RESULTS="$4" PROOFS="$5" NEEDS_JSON="$_needs" \
 		sh "$script" >/tmp/ga_out 2>/tmp/ga_err ); then
 		_got=0
 	else
@@ -122,7 +139,30 @@ github=success'
 META_ROSTER='gcp:gcp.wif aws:aws-oidc github:github-app'
 case_ 1 "a metacharacter family name does not wildcard-match a different line" "" 'gcpXwif=success
 aws-oidc=success
-github-app=success' "$ALL_PROOF" "$META_ROSTER"
+github-app=success' "$ALL_PROOF" "$META_ROSTER" "$(needs_json "$META_ROSTER")"
+
+# ---- roster vs job-graph cross-check ---------------------------------------
+# needs is the actual dependency graph (toJSON(needs)); ROSTER is a hand-maintained
+# parallel list. Nothing else binds them, so a family added to one and forgotten in the
+# other must fail closed rather than silently leave a connector ungated.
+NEEDS_EXTRA_FAMILY='{"prepare":{"result":"success"},"gcp-wif":{"result":"success"},
+"aws-oidc":{"result":"success"},"github-app":{"result":"success"},
+"gitlab-token":{"result":"success"}}'
+case_ 1 "a family in needs but missing from ROSTER fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_EXTRA_FAMILY"
+
+NEEDS_MISSING_FAMILY='{"prepare":{"result":"success"},"gcp-wif":{"result":"success"},
+"aws-oidc":{"result":"success"}}'
+case_ 1 "a family in ROSTER but missing from needs fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_MISSING_FAMILY"
+
+case_ 1 "malformed NEEDS_JSON fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" 'not json'
+
+case_ 1 "a NEEDS_JSON that is valid JSON but not an object fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" '["prepare"]'
+
+# NEEDS_JSON is a required env var (a fatal shell parameter-expansion error, exit 2),
+# so an empty value fails closed before the cross-check even runs.
+case_ 2 "an empty NEEDS_JSON fails closed" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" ""
+
+case_ 0 "matching needs and ROSTER still passes" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_JSON_DEFAULT"
 
 rm -f /tmp/ga_out /tmp/ga_err
 [ "$fails" = 0 ] || exit 1

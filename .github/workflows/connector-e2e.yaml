@@ -50,8 +50,13 @@ concurrency:
 
 jobs:
   # ---- The invocation contract ---------------------------------------------
-  # Credential-free and unconditional, so a foreign caller hard-fails here before any
-  # credential-bearing job schedules. The logic lives in a script with offline unit
+  # Resolves the call's mode/selector/checkout SHA. This job's own checkout is pinned to
+  # this workflow's own repository and commit (see below), so it always runs cynative's
+  # own contract script, never a foreign caller's copy. The actual defense that keeps a
+  # foreign caller off a credential-bearing job is the per-job
+  # `if: github.repository == 'cynative/cynative'` guard on gcp-wif, aws-oidc, and
+  # github-app below; this job is not a substitute for those guards, and they must not
+  # be removed as redundant. The contract logic lives in a script with offline unit
   # tests under `make sh-test`, not inline, so it is exercised on every PR rather than
   # only on a live release run.
   prepare:
@@ -67,6 +72,11 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # A called workflow's checkout defaults to the CALLER's repo and commit, which
+          # would run a caller's copy of the scripts below. Pin to the repository and
+          # commit that define this workflow so the contract is always ours.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
       - name: Resolve and validate the invocation contract
         id: contract
@@ -513,12 +523,20 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # A called workflow's checkout defaults to the CALLER's repo and commit, which
+          # would run a caller's copy of the scripts below. Pin to the repository and
+          # commit that define this workflow so the contract is always ours.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           persist-credentials: false
       - name: Every connector in the roster must have run and passed
         id: assert
         env:
           SELECTOR: ${{ needs.prepare.outputs.selector }}
           ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app
+          # The actual dependency set this job waits on, so the script can catch a
+          # family that was added to needs but never added to ROSTER (or vice versa).
+          NEEDS_JSON: ${{ toJSON(needs) }}
           RESULTS: |
             gcp-wif=${{ needs.gcp-wif.result }}
             aws-oidc=${{ needs.aws-oidc.result }}
@@ -529,8 +547,10 @@ jobs:
             github=${{ needs.github-app.outputs.proof_github }}
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
-          sh scripts/ci/connector-e2e-gate-assert.sh
-          # Emitted only on the success path. publish requires this to equal the SHA it
-          # asked for, so removing or skipping this job yields an empty proof and blocks
-          # the release rather than waving it through.
-          printf 'gate_sha=%s\n' "$CHECKOUT_SHA" >>"$GITHUB_OUTPUT"
+          sh scripts/ci/connector-e2e-gate-assert.sh &&
+            # Emitted only on the success path. publish requires this to equal the SHA
+            # it asked for, so removing or skipping this job yields an empty proof and
+            # blocks the release rather than waving it through. Joined with && (not
+            # relying on the default shell's -e) so this provably never runs when the
+            # assert script fails.
+            printf 'gate_sha=%s\n' "$CHECKOUT_SHA" >>"$GITHUB_OUTPUT"
