@@ -1,4 +1,11 @@
-# Cynative - deep research agent for your infrastructure
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo.png" alt="cynative" width="300">
+  </picture>
+  <br>
+  Deep research for your infrastructure
+</h1>
 
 [![CI](https://github.com/cynative/cynative/actions/workflows/ci.yaml/badge.svg)](https://github.com/cynative/cynative/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/cynative/cynative)](https://github.com/cynative/cynative/releases/latest)
