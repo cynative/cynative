@@ -12,11 +12,14 @@ fails=0
 
 ROSTER='gcp:gcp-wif aws:aws-oidc github:github-app'
 
-# case_ WANT DESC SELECTOR RESULTS PROOFS
+# case_ WANT DESC SELECTOR RESULTS PROOFS [ROSTER]
+# ROSTER defaults to the shared roster above; pass it to exercise a roster with a
+# connector or family name the shared one does not have.
 case_() {
 	_want=$1
 	_desc=$2
-	if ( SELECTOR="$3" ROSTER="$ROSTER" RESULTS="$4" PROOFS="$5" \
+	_roster=${6:-$ROSTER}
+	if ( SELECTOR="$3" ROSTER="$_roster" RESULTS="$4" PROOFS="$5" \
 		sh "$script" >/tmp/ga_out 2>/tmp/ga_err ); then
 		_got=0
 	else
@@ -96,6 +99,30 @@ aws-oidc=skipped
 github-app=skipped' 'gcp=
 aws=
 github='
+
+# ---- duplicate-key and metacharacter safety --------------------------------
+# A script whose whole purpose is fail-closed must not agree with a result it only
+# partly read. A duplicate key must be a hard failure, not a silent first-match. Both
+# duplicate lines below agree ("success"), so a lookup that merely tolerated the
+# duplicate (rather than rejecting it) would let this whole case pass; only an
+# explicit duplicate check catches it.
+case_ 1 "a duplicated family key in RESULTS fails" "" 'gcp-wif=success
+gcp-wif=success
+aws-oidc=success
+github-app=success' "$ALL_PROOF"
+
+case_ 1 "a duplicated connector key in PROOFS fails" "" "$ALL_OK" 'gcp=success
+gcp=success
+aws=success
+github=success'
+
+# A family name containing a regex metacharacter must match only its own literal
+# line, never wildcard onto an unrelated one (a "gcp.wif" family must not match a
+# "gcpXwif=success" line, which a sed/grep regex built from the key would allow).
+META_ROSTER='gcp:gcp.wif aws:aws-oidc github:github-app'
+case_ 1 "a metacharacter family name does not wildcard-match a different line" "" 'gcpXwif=success
+aws-oidc=success
+github-app=success' "$ALL_PROOF" "$META_ROSTER"
 
 rm -f /tmp/ga_out /tmp/ga_err
 [ "$fails" = 0 ] || exit 1

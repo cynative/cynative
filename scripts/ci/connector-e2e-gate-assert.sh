@@ -30,15 +30,31 @@ fail() {
 	fails=1
 }
 
-# lookup HAYSTACK KEY - echo the value of KEY= in a newline-separated key=value list.
+# lookup HAYSTACK KEY - echo the value of the sole "KEY=" line in a newline-separated
+# key=value list. Matches KEY literally (a case pattern, never a sed/grep regex), so a
+# regex metacharacter in KEY cannot wildcard onto an unrelated line. Returns 1 when KEY
+# is absent. Fails closed with exit 2 (after naming the duplicate on stderr) when KEY
+# appears more than once: a caller that only saw the first of two conflicting lines
+# would silently agree with whichever one happened to come first.
 lookup() {
-	printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -n 1
-}
-
-# has_key HAYSTACK KEY - true when KEY= appears at all, so a missing family is
-# distinguishable from one whose result is empty.
-has_key() {
-	printf '%s\n' "$1" | grep -q "^$2="
+	_val=
+	_n=0
+	while IFS= read -r _line || [ -n "$_line" ]; do
+		case "$_line" in
+		"$2="*)
+			_val=${_line#"$2="}
+			_n=$((_n + 1))
+			;;
+		esac
+	done <<EOF
+$1
+EOF
+	if [ "$_n" -gt 1 ]; then
+		printf '::error::connector-e2e gate: duplicate key %s\n' "$2" >&2
+		return 2
+	fi
+	[ "$_n" -eq 1 ] || return 1
+	printf '%s' "$_val"
 }
 
 for pair in $ROSTER; do
@@ -51,13 +67,28 @@ for pair in $ROSTER; do
 		selected=0
 	fi
 
-	if ! has_key "$RESULTS" "$family"; then
-		fail "family $family is missing from the results, so connector $connector was never gated"
+	if result=$(lookup "$RESULTS" "$family"); then
+		:
+	else
+		rc=$?
+		if [ "$rc" -eq 2 ]; then
+			fails=1
+		else
+			fail "family $family is missing from the results, so connector $connector was never gated"
+		fi
 		continue
 	fi
 
-	result=$(lookup "$RESULTS" "$family")
-	proof=$(lookup "$PROOFS" "$connector")
+	if proof=$(lookup "$PROOFS" "$connector"); then
+		:
+	else
+		rc=$?
+		if [ "$rc" -eq 2 ]; then
+			fails=1
+			continue
+		fi
+		proof=
+	fi
 
 	if [ "$selected" = 1 ]; then
 		# needs.<job>.result is one of success, failure, cancelled, skipped. Testing
