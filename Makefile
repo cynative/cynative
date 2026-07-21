@@ -136,8 +136,20 @@ sh-test:
 	@# The trusted-caller pin in connector-e2e.yaml is the only thing that stops an
 	@# arbitrary workflow from driving the release gate; without it, anything calling
 	@# the workflow would pass the contract check and reach the credentialed jobs. Fail
-	@# closed if that exact pinned value is ever missing or edited away.
-	@grep -qF 'EXPECTED_CALLER: cynative/cynative/.github/workflows/release.yaml@refs/heads/main' .github/workflows/connector-e2e.yaml || { echo "FAIL: connector-e2e.yaml is missing the release.yaml trusted-caller pin - this is what stops an arbitrary workflow from driving the release gate."; exit 1; }
+	@# closed if that exact pinned value is ever missing, edited away, duplicated (a
+	@# second EXPECTED_CALLER: line), or merely shadowed by a commented-out decoy -
+	@# require exactly one live EXPECTED_CALLER: line, and its value must match the
+	@# trusted caller exactly, not as a substring.
+	@count=$$(grep -cE '^[[:space:]]*EXPECTED_CALLER:' .github/workflows/connector-e2e.yaml); \
+	if [ "$$count" -ne 1 ]; then \
+		echo "FAIL: connector-e2e.yaml must have exactly one EXPECTED_CALLER: line (found $$count) - a missing or duplicated pin is what stops an arbitrary workflow from driving the release gate."; \
+		exit 1; \
+	fi; \
+	value=$$(grep -E '^[[:space:]]*EXPECTED_CALLER:' .github/workflows/connector-e2e.yaml | sed -E 's/^[[:space:]]*EXPECTED_CALLER:[[:space:]]*//'); \
+	if [ "$$value" != "cynative/cynative/.github/workflows/release.yaml@refs/heads/main" ]; then \
+		echo "FAIL: connector-e2e.yaml's EXPECTED_CALLER pin is '$$value', not the exact trusted caller - this pin is what stops an arbitrary workflow from driving the release gate."; \
+		exit 1; \
+	fi
 	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + connector-e2e-contract unit + connector-e2e-gate-assert unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
