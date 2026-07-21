@@ -491,57 +491,29 @@ jobs:
           exit $LASTEXITCODE
 
   # ---- Pre-publish read-only-boundary gate ------------------------------
-  # The live connector e2es (cynative#39, #52, #53) against the real GCP, AWS, and GitHub
-  # fixture accounts, between the draft build and publish: a release whose connector
-  # cannot authenticate, cannot read, or - above all - fails to DENY a write
-  # fails here while the release is still an editable draft (recovery notes
-  # above apply unchanged).
+  # The live connector e2es against the real GCP, AWS, and GitHub fixture accounts,
+  # between the draft build and publish: a release whose connector cannot authenticate,
+  # cannot read, or - above all - fails to DENY a write fails here while the release is
+  # still an editable draft (recovery notes above apply unchanged).
   #
-  # These exercise the SOURCE at this SHA, not the built artifacts, so they need
-  # no release-artifacts hand-off and run in parallel with the install smokes.
-  # They do need OIDC, and a reusable workflow can never exceed its caller's
-  # token grant, so the calling job raises the ceiling to id-token: write.
+  # These exercise the SOURCE at this SHA, not the built artifacts, so they need no
+  # release-artifacts hand-off and run in parallel with the install smokes. They do need
+  # OIDC, and a reusable workflow can never exceed its caller's token grant, so this job
+  # raises the ceiling to id-token: write.
   #
-  # `gate: true` is load-bearing, not decoration. A called workflow inherits the
-  # CALLER's event (push), so the connector workflows' own event-based gating
-  # would report "not a release-please PR" and skip the live job.
-  #
-  # That failure is fail-OPEN, which is why it matters so much: GitHub reports a
-  # conditionally skipped job as a SUCCESS to its caller, so `result == 'success'`
-  # below would be satisfied and the release would publish having tested nothing.
-  # Each called workflow therefore ends with a `gate-assert` job that hard-fails
-  # unless the live job actually SUCCEEDED, which is what makes this gate real.
-  connector-gcp-e2e:
-    name: Live GCP connector e2e
+  # There is no `gate:` input to pass. Every workflow_call IS the full gate: the callee's
+  # contract job rejects a call that tries to narrow the roster, and its gate-assert job
+  # hard-fails unless every connector actually ran and passed. That matters because
+  # GitHub reports a conditionally skipped job as SUCCESS to its caller, so the
+  # `== 'success'` check below would otherwise be satisfied by a gate that tested
+  # nothing. The gate_sha check is the second half: an absent or skipped fan-in returns
+  # an empty proof.
+  connector-e2e:
+    name: Live connector e2e
     needs: release
     if: ${{ needs.release.outputs.release_created == 'true' }}
-    uses: ./.github/workflows/connector-gcp-e2e.yaml
+    uses: ./.github/workflows/connector-e2e.yaml
     with:
-      gate: true
-      ref: ${{ needs.release.outputs.sha }}
-    permissions:
-      contents: read
-      id-token: write
-
-  connector-aws-e2e:
-    name: Live AWS connector e2e
-    needs: release
-    if: ${{ needs.release.outputs.release_created == 'true' }}
-    uses: ./.github/workflows/connector-aws-e2e.yaml
-    with:
-      gate: true
-      ref: ${{ needs.release.outputs.sha }}
-    permissions:
-      contents: read
-      id-token: write
-
-  connector-github-e2e:
-    name: Live GitHub connector e2e
-    needs: release
-    if: ${{ needs.release.outputs.release_created == 'true' }}
-    uses: ./.github/workflows/connector-github-e2e.yaml
-    with:
-      gate: true
       ref: ${{ needs.release.outputs.sha }}
     secrets:
       GH_E2E_APP_PRIVATE_KEY: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
@@ -562,8 +534,8 @@ jobs:
   # nothing more (cynative#140).
   publish:
     name: Publish release
-    needs: [release, macos-pkg-smoke, archive-smoke, connector-gcp-e2e, connector-aws-e2e, connector-github-e2e]
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-gcp-e2e.result == 'success' && needs.connector-aws-e2e.result == 'success' && needs.connector-github-e2e.result == 'success' }}
+    needs: [release, macos-pkg-smoke, archive-smoke, connector-e2e]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-e2e.result == 'success' && needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha }}
     runs-on: ubuntu-latest
     # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
     # plus every short step with slack, so the job limit can never fire

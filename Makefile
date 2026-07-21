@@ -133,7 +133,12 @@ sh-test:
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + connector-e2e-contract unit + connector-e2e-gate-assert unit + python syntax gate + connector audit parsers + shared-machinery selftest)"
+	@# The trusted-caller pin in connector-e2e.yaml is the only thing that stops an
+	@# arbitrary workflow from driving the release gate; without it, anything calling
+	@# the workflow would pass the contract check and reach the credentialed jobs. Fail
+	@# closed if that exact pinned value is ever missing or edited away.
+	@grep -qF 'EXPECTED_CALLER: cynative/cynative/.github/workflows/release.yaml@refs/heads/main' .github/workflows/connector-e2e.yaml || { echo "FAIL: connector-e2e.yaml is missing the release.yaml trusted-caller pin - this is what stops an arbitrary workflow from driving the release gate."; exit 1; }
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + connector-e2e-contract unit + connector-e2e-gate-assert unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
 
