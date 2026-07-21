@@ -1,4 +1,11 @@
-# Cynative - deep research agent for your infrastructure
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+    <img src="docs/assets/logo.png" alt="cynative" width="300">
+  </picture>
+  <br>
+  Deep research for your infrastructure
+</h1>
 
 [![CI](https://github.com/cynative/cynative/actions/workflows/ci.yaml/badge.svg)](https://github.com/cynative/cynative/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/cynative/cynative)](https://github.com/cynative/cynative/releases/latest)
@@ -181,6 +188,8 @@ Cynative calls your stack using the credentials already in your shell - it keeps
 
 Cynative prints a short operational footer (timing, token usage) to **stderr** - redirecting stdout (`cynative -p "..." > out.txt`) keeps the captured answer clean. `--version` prints version, commit, build date, Go version, and platform.
 
+`cynative doctor` validates configuration and connector readiness without starting a research session.
+
 <details>
 <summary><strong>Resource &amp; cost controls for unattended runs</strong></summary>
 
@@ -196,8 +205,6 @@ Cynative prints a short operational footer (timing, token usage) to **stderr** -
 
 Finding verification (`verify_findings` tool) makes extra model calls - budget for them on any run that produces findings.
 </details>
-
-`cynative doctor` validates configuration and connector readiness without starting a research session.
 
 ## Connectors
 
