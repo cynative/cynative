@@ -145,7 +145,15 @@ sh-test:
 	@# or merely shadowed by a commented-out decoy - require exactly one live
 	@# EXPECTED_CALLER: line per gate, and its value must match the trusted caller
 	@# exactly, not as a substring. Every gate workflow must be listed here.
+	@if [ -z "$(GATE_WORKFLOWS)" ]; then \
+		echo "FAIL: GATE_WORKFLOWS is empty - an empty list means the pin check covers nothing; every gate workflow must be listed."; \
+		exit 1; \
+	fi
 	@for wf in $(GATE_WORKFLOWS); do \
+		if [ ! -f "$$wf" ]; then \
+			echo "FAIL: $$wf listed in GATE_WORKFLOWS does not exist - fix the path or the workflow file."; \
+			exit 1; \
+		fi; \
 		count=$$(grep -cE '^[[:space:]]*EXPECTED_CALLER:' "$$wf"); \
 		if [ "$$count" -ne 1 ]; then \
 			echo "FAIL: $$wf must have exactly one EXPECTED_CALLER: line (found $$count) - a missing or duplicated pin is what stops an arbitrary workflow from driving the release gate."; \
