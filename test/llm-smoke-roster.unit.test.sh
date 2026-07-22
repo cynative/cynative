@@ -51,21 +51,31 @@ import sys
 
 lines = open(sys.argv[1]).read().splitlines()
 
-# Job headers sit at exactly two spaces of indentation.
+# Job headers sit at exactly two spaces of indentation, but only inside the top-level
+# `jobs:` block. `on:` has children (workflow_call, workflow_dispatch) at that same
+# two-space indentation, and without the in_jobs gate they would be misread as jobs.
+top_re = re.compile(r"^(\S.*):\s*$")
 job_re = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$")
 row_keys = ("leg", "family", "suite", "provider", "model_var", "model")
 
 rows = []
 problems = []
 job = None
+in_jobs = False
 i = 0
 declared = 0
 while i < len(lines):
-    m = job_re.match(lines[i])
-    if m:
-        job = m.group(1)
+    tm = top_re.match(lines[i])
+    if tm:
+        in_jobs = tm.group(1) == "jobs"
         i += 1
         continue
+    if in_jobs:
+        m = job_re.match(lines[i])
+        if m:
+            job = m.group(1)
+            i += 1
+            continue
     if re.match(r"^\s*- leg:", lines[i]):
         declared += 1
         block = lines[i:i + len(row_keys)]
@@ -80,6 +90,7 @@ while i < len(lines):
                 vals[key] = km.group(1)
         if not ok:
             problems.append("row near line %d is not leg/family/suite/provider/model_var/model in order" % (i + 1))
+            i += len(row_keys)
         else:
             want_model = "${{ vars.%s }}" % vals["model_var"]
             if vals["model"] != want_model:
@@ -88,7 +99,21 @@ while i < len(lines):
                     % (vals["leg"], vals["model"], want_model)
                 )
             rows.append("|".join([job or "<no-job>"] + [vals[k] for k in row_keys[:-1]]))
-        i += len(row_keys)
+            i += len(row_keys)
+            # The six known keys share one indentation level inside the row's mapping.
+            # Anything else at that same indentation before the next row, job, or dedent
+            # is a key the fixed-width window above would otherwise step over silently.
+            indent_m = re.match(r"^(\s*)family:", block[1])
+            indent = indent_m.group(1) if indent_m else None
+            if indent is not None:
+                while i < len(lines):
+                    sm = re.match(r"^%s([A-Za-z0-9_-]+):" % re.escape(indent), lines[i])
+                    if not sm:
+                        break
+                    problems.append(
+                        "leg %s has an unexpected key %r" % (vals["leg"], sm.group(1))
+                    )
+                    i += 1
         continue
     i += 1
 
