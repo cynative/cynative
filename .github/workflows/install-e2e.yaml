@@ -143,19 +143,38 @@ jobs:
           Copy-Item -Path (Join-Path $repo 'artifact\*') -Destination $srv -Force
           $portfile = Join-Path $env:RUNNER_TEMP 'port'
           if (Test-Path -LiteralPath $portfile) { Remove-Item -LiteralPath $portfile -Force }
+          # Capture the server's output: Start-Process discards it otherwise, leaving a
+          # startup failure with no evidence to debug from.
+          $serverOut = Join-Path $env:RUNNER_TEMP 'serve-fixture.out'
+          $serverErr = Join-Path $env:RUNNER_TEMP 'serve-fixture.err'
           $server = Start-Process python -PassThru `
+            -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr `
             -ArgumentList @((Join-Path $repo 'test\serve-fixture.py'), $srv, $portfile)
 
           $failed = 1
           try {
+            # 30s ceiling: spawning python on a cold Windows runner can outlast the old
+            # 10s window (run 29938300351 flaked exactly this way and passed on rerun,
+            # same image and source). Stop waiting early if the server process dies.
             $port = $null
-            foreach ($i in 1..100) {
+            foreach ($i in 1..300) {
               if ((Test-Path -LiteralPath $portfile) -and ((Get-Item -LiteralPath $portfile).Length -gt 0)) {
                 $port = (Get-Content -Raw -LiteralPath $portfile).Trim(); break
               }
+              if ($server.HasExited) { break }
               Start-Sleep -Milliseconds 100
             }
-            if (-not $port) { throw 'fixture server did not start' }
+            if (-not $port) {
+              if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+              $null = $server.WaitForExit(5000) # release the redirect file handles before reading
+              foreach ($f in @($serverOut, $serverErr)) {
+                if ((Test-Path -LiteralPath $f) -and ((Get-Item -LiteralPath $f).Length -gt 0)) {
+                  Write-Host "--- $(Split-Path -Leaf $f) ---"
+                  Get-Content -LiteralPath $f -ErrorAction SilentlyContinue | Write-Host
+                }
+              }
+              throw 'fixture server did not start'
+            }
 
             # Env for the installer and the Pester test. The base URL is overridden to the
             # loopback fixture, so CYNATIVE_VERSION only names the (unused) URL path; the
