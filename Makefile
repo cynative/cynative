@@ -14,7 +14,7 @@ PSSCRIPTANALYZER_VERSION := 1.25.0
 
 # Every workflow that is callable as a release gate. Each must carry exactly one
 # EXPECTED_CALLER pin naming TRUSTED_CALLER; sh-test enforces that.
-GATE_WORKFLOWS := .github/workflows/connector-e2e.yaml
+GATE_WORKFLOWS := .github/workflows/connector-e2e.yaml .github/workflows/llm-smoke.yaml
 TRUSTED_CALLER := cynative/cynative/.github/workflows/release.yaml@refs/heads/main
 
 # The single CI gate. Locally, the fast hermetic check-go is the pre-commit hook.
@@ -133,6 +133,7 @@ sh-test:
 	@sh test/dependabot-override.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
+	@sh test/llm-smoke-roster.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
@@ -165,7 +166,7 @@ sh-test:
 			exit 1; \
 		fi; \
 	done
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
 
