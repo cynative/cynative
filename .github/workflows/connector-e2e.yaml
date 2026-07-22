@@ -540,21 +540,23 @@ jobs:
         id: assert
         env:
           SELECTOR: ${{ needs.prepare.outputs.selector }}
+          MODE: ${{ needs.prepare.outputs.mode }}
           ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app
+          JOBS: gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always github-app:github-app:always
           # The actual dependency set this job waits on, so the script can catch a
-          # family that was added to needs but never added to ROSTER (or vice versa).
+          # job that was added to needs but never added to JOBS (or vice versa).
           NEEDS_JSON: ${{ toJSON(needs) }}
           RESULTS: |
             gcp-wif=${{ needs.gcp-wif.result }}
             aws-oidc=${{ needs.aws-oidc.result }}
             github-app=${{ needs.github-app.result }}
           PROOFS: |
-            gcp=${{ needs.gcp-wif.outputs.proof_gcp }}
-            aws=${{ needs.aws-oidc.outputs.proof_aws }}
-            github=${{ needs.github-app.outputs.proof_github }}
+            gcp-wif.gcp=${{ needs.gcp-wif.outputs.proof_gcp }}
+            aws-oidc.aws=${{ needs.aws-oidc.outputs.proof_aws }}
+            github-app.github=${{ needs.github-app.outputs.proof_github }}
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
-          sh scripts/ci/connector-e2e-gate-assert.sh &&
+          sh scripts/ci/ci-gate-assert.sh &&
             # Emitted only on the success path. publish requires this to equal the SHA
             # it asked for, so removing or skipping this job yields an empty proof and
             # blocks the release rather than waving it through. Joined with && (not
