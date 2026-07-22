@@ -55,11 +55,11 @@ cynative "live cloud resources absent from IaC - drift" # starts an interactive 
 
 ## What makes it special
 
-- **🔗 Code-to-runtime**: Reasons through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system
-- **🏠 Sovereign**: Runs locally with your own model, entirely in your environment
-- **🚦 Action-gate**: Authorizes every call against a read-only policy
-- **🧪 Sandbox**: Generates and runs code to research at scale
-- **✅ Evidence-backed**: Cross-checks and verifies every finding
+- **Code-to-runtime**: Reasons through AWS, GCP, Azure, any K8s, GitHub and GitLab
+- **Action-gate**: Authorizes every call against a read-only policy
+- **Sandbox**: Generates and runs code to research at scale
+- **Evidence-backed**: Cross-checks to verify every finding
+- **Sovereign**: One binary, your model, your data stays yours
 
 ## Can't a coding agent with MCPs do this?
 
@@ -112,7 +112,7 @@ scoop install cynative
 
 ## LLM providers
 
-Cynative talks to LLMs through the embedded [Bifrost](https://github.com/maximhq/bifrost) SDK and supports 23+ AI providers out of the box (OpenAI, Anthropic, Azure OpenAI, Amazon Bedrock, Google Vertex/Gemini, Cohere, Mistral, Groq, Ollama, vLLM and more). Pick one from [docs/providers/README.md](docs/providers/README.md) and follow that provider's guide.
+Cynative talks to LLMs through the embedded [Bifrost](https://github.com/maximhq/bifrost) SDK and supports almost any AI provider out of the box (OpenAI, Anthropic, Azure OpenAI, Amazon Bedrock, Google Vertex/Gemini, Cohere, Mistral, Groq, Ollama, vLLM and more). Pick one from [docs/providers/README.md](docs/providers/README.md) and follow that provider's guide.
 
 <details>
 <summary><strong>Quick examples</strong></summary>
