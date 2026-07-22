@@ -100,8 +100,9 @@ jobs:
           CALL_REF: ${{ inputs.ref }}
           TRIGGER_SHA: ${{ github.sha }}
           SELECTOR: ${{ inputs.connector }}
-          CONNECTORS: gcp aws github
-        run: sh scripts/ci/connector-e2e-contract.sh >>"$GITHUB_OUTPUT"
+          SELECTORS: gcp aws github
+          DISPATCH_POLICY: filtered
+        run: sh scripts/ci/ci-gate-contract.sh >>"$GITHUB_OUTPUT"
 
   # ---- gcp-wif family ------------------------------------------------------
   # One row today. The matrix is deliberate: GKE (#117) reuses this same Workload
