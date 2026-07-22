@@ -137,13 +137,21 @@ gcp-wif.gcp=success
 aws-oidc.aws=success
 github-app.github=success'
 
-# A family name containing a regex metacharacter must match only its own literal
-# line, never wildcard onto an unrelated one (a "gcp.wif" family must not match a
-# "gcpXwif=success" line, which a sed/grep regex built from the key would allow).
-META_ROSTER='gcp:gcp.wif aws:aws-oidc github:github-app'
-case_ 1 "a metacharacter family name does not wildcard-match a different line" "" 'gcpXwif=success
-aws-oidc=success
-github-app=success' "$ALL_PROOF" "$META_ROSTER" "$(needs_json "$META_ROSTER")"
+# A job name containing a shell glob character must match only its own literal line in
+# lookup(), never wildcard onto an unrelated one. JOBS/ROSTER/needs all declare the same
+# metacharacter-bearing family so the job reaches lookup() at all (a mismatched shape
+# dies earlier, at family coupling or active_job_for, without ever calling lookup()).
+# The decoy line "gcpXXXwif=success" does not literally start with "gcp*wif=", so a
+# correct literal-match lookup() ignores it and this case passes. A lookup() whose case
+# pattern loses its quoting treats the "*" in the key as a real wildcard, so the pattern
+# matches both the decoy line and the real one, lookup() reports a duplicate key, and
+# the case flips to a failure.
+META_JOBS='gcp*wif:gcp*wif:always'
+META_ROSTER='meta:gcp*wif'
+case_ 0 "a metacharacter-bearing key reaches lookup and matches only its literal line" "" \
+	'gcpXXXwif=success
+gcp*wif=success' 'gcp*wif.meta=success' \
+	"$META_ROSTER" "$(needs_json "$META_JOBS")" "$META_JOBS"
 
 # ---- roster vs job-graph cross-check ---------------------------------------
 # needs is the actual dependency graph (toJSON(needs)); JOBS is a hand-maintained
@@ -167,8 +175,15 @@ NEEDS_SUBSTRING_OF_ROSTER='{"prepare":{"result":"success"},"gcp-wif":{"result":"
 case_ 1 "a needs family that is a strict substring of a ROSTER family fails" "" \
 	"$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_SUBSTRING_OF_ROSTER"
 
-ROSTER_SUBSTRING_FAMILY='gcp:gcp-wif aws:aws-oidc github:github-app awsx:aws'
-case_ 1 "a ROSTER family that is a strict substring of a needs family fails" "" \
+# NOTE this does not exercise contains_word's word-boundary safety: JOBS has no "aws"
+# family at all (only "aws-oidc"), so the extra "awsx" leg below is rejected by
+# active_job_for's exact-string family compare (zero matching JOBS triples) regardless
+# of whether contains_word's word-boundary padding holds. The substring property itself
+# is pinned above by "a needs family that is a strict substring of a ROSTER family
+# fails". This case still pins a real property: a ROSTER leg naming a family with no
+# JOBS entry is rejected, just not via contains_word.
+ROSTER_ORPHAN_FAMILY='gcp:gcp-wif aws:aws-oidc github:github-app awsx:aws'
+case_ 1 "a ROSTER leg naming a family absent from JOBS fails" "" \
 	'gcp-wif=success
 aws-oidc=success
 github-app=success
@@ -177,7 +192,7 @@ aws=success' \
 aws-oidc.aws=success
 github-app.github=success
 aws.awsx=success' \
-	"$ROSTER_SUBSTRING_FAMILY" "$NEEDS_JSON_DEFAULT"
+	"$ROSTER_ORPHAN_FAMILY" "$NEEDS_JSON_DEFAULT"
 
 case_ 1 "malformed NEEDS_JSON fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" 'not json'
 
@@ -190,21 +205,12 @@ case_ 2 "an empty NEEDS_JSON fails closed" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" "
 case_ 0 "matching needs and ROSTER still passes" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" "$NEEDS_JSON_DEFAULT"
 
 # ---- MODE validation ------------------------------------------------------
-case_ 1 'unknown MODE is rejected' '' \
-	'gcp-wif=success
-aws-oidc=success
-github-app=success' \
-	'gcp=success
-aws=success
-github=success' \
+# PROOFS must be job-qualified ($ALL_PROOF), not the bare family form: every job here
+# is policy "always", so a bare-keyed PROOFS would still fail (on a missing proof)
+# even with the MODE case removed, and the test would never pin MODE at all.
+case_ 1 'unknown MODE is rejected' '' "$ALL_OK" "$ALL_PROOF" \
 	"$ROSTER" "$NEEDS_JSON_DEFAULT" "$JOBS" 'bogus'
-case_ 1 'empty MODE is rejected' '' \
-	'gcp-wif=success
-aws-oidc=success
-github-app=success' \
-	'gcp=success
-aws=success
-github=success' \
+case_ 1 'empty MODE is rejected' '' "$ALL_OK" "$ALL_PROOF" \
 	"$ROSTER" "$NEEDS_JSON_DEFAULT" "$JOBS" ''
 
 # ---- two mutually exclusive jobs serving one family -----------------------
@@ -225,6 +231,17 @@ LLM_PROOFS_MANUAL='gcp-wif.vertex-notool=success
 gcp-wif.vertex-tools=success
 aws-oidc.bedrock-notool=success
 aws-oidc.bedrock-tools=success
+api-key-manual.openai-tools=success
+api-key-manual.anthropic-tools=success'
+# Proofs for both api-key jobs. Needed only by "a family with two active jobs for this
+# mode is rejected": that case must fail on the active-job count itself, not on a
+# missing api-key-manual proof, so both jobs need a proof present.
+LLM_PROOFS_BOTH='gcp-wif.vertex-notool=success
+gcp-wif.vertex-tools=success
+aws-oidc.bedrock-notool=success
+aws-oidc.bedrock-tools=success
+api-key-release.openai-tools=success
+api-key-release.anthropic-tools=success
 api-key-manual.openai-tools=success
 api-key-manual.anthropic-tools=success'
 
@@ -286,23 +303,48 @@ api-key-manual=skipped' \
 	'gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always api-key-manual:api-key:manual' \
 	'release'
 
+# Both jobs need a real proof ($LLM_PROOFS_BOTH, not $LLM_PROOFS): with only the
+# release job's proof present, a count check loosened to "at least one" still picks a
+# job (the loop's last match, api-key-manual) and then fails on ITS missing proof, so
+# the case would still pass for the wrong reason and never pin the count itself.
 case_ 1 'a family with two active jobs for this mode is rejected' '' \
 	'gcp-wif=success
 aws-oidc=success
 api-key-release=success
 api-key-manual=success' \
-	"$LLM_PROOFS" "$LLM_ROSTER" "$LLM_NEEDS" \
+	"$LLM_PROOFS_BOTH" "$LLM_ROSTER" "$LLM_NEEDS" \
 	'gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always api-key-release:api-key:always api-key-manual:api-key:always' \
 	'release'
 
+# api-key-manual's policy is "always" (not "manual") and its RESULTS/PROOFS are the
+# active, successful leg, so it resolves cleanly and contributes no failure of its own.
+# api-key-release keeps the unknown policy but reports "skipped" (what the inactive-job
+# loop demands of any job that policy resolution does not recognize as active), so that
+# loop raises nothing either. With both of those neutralized, the only remaining
+# failure path is the policy validation itself. Reusing $LLM_PROOFS or $LLM_NEEDS here
+# would leave a real, independent failure standing (a missing manual-job proof, or an
+# unresolved active job), so this case builds its own consistent inputs instead.
 case_ 1 'unknown job policy is rejected' '' \
 	'gcp-wif=success
 aws-oidc=success
-api-key-release=success
-api-key-manual=skipped' \
-	"$LLM_PROOFS" "$LLM_ROSTER" "$LLM_NEEDS" \
-	'gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always api-key-release:api-key:sometimes api-key-manual:api-key:manual' \
+api-key-release=skipped
+api-key-manual=success' \
+	"$LLM_PROOFS_MANUAL" "$LLM_ROSTER" "$LLM_NEEDS" \
+	'gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always api-key-release:api-key:sometimes api-key-manual:api-key:always' \
 	'release'
+
+# ---- family coupling between JOBS and ROSTER -------------------------------
+# Every family named in JOBS must be gated by at least one ROSTER leg, and every family
+# a ROSTER leg names must have a job in JOBS ("a ROSTER leg naming a family absent from
+# JOBS fails", above, already pins that second direction). Without the first direction,
+# a job can be real (present in JOBS, active for the mode, a genuine dependency in
+# needs) yet belong to a family no ROSTER leg names, so no per-leg check ever looks at
+# it and it can report skipped, or anything else, without blocking the gate.
+JOBS_ORPHAN_FAMILY="$JOBS orphan-job:orphan-family:always"
+case_ 1 'a JOBS family with no ROSTER leg fails' '' \
+	"$ALL_OK
+orphan-job=success" "$ALL_PROOF" \
+	"$ROSTER" "$(needs_json "$JOBS_ORPHAN_FAMILY")" "$JOBS_ORPHAN_FAMILY"
 
 # ---- NEEDS_JSON is the union across modes, not the active subset ----------
 case_ 1 'a job in JOBS but absent from needs is rejected' '' \
