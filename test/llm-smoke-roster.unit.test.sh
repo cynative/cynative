@@ -45,7 +45,7 @@ EOF
 # It also asserts each row's OPERATIONAL model expression equals `${{ vars.<model_var> }}`
 # for that row's own model_var. Pinning model_var alone would leave the diagnostic label
 # canonical while the consumed expression pointed elsewhere.
-python3 - "$workflow" >"$tmp/actual" <<'PY'
+python3 - "$workflow" "$tmp/expected" >"$tmp/actual" <<'PY'
 import re
 import sys
 
@@ -116,6 +116,118 @@ while i < len(lines):
                     i += 1
         continue
     i += 1
+
+# ---- gate-assert fan-in literals -------------------------------------------
+# The canonical rows (argv[2]) are the anchor; the gate-assert env's ROSTER, JOBS,
+# and PROOFS are DERIVED from them plus this job->policy map and compared as sorted
+# multisets. The map is part of the anchor: policies are not derivable from the
+# matrix. A leg dropped from the fan-in is invisible to the runtime checks (the
+# remaining legs still pass), which is exactly why these literals need a golden.
+policy_map = {
+    "gcp-wif": "always",
+    "aws-oidc": "always",
+    "api-key-release": "release",
+    "api-key-manual": "manual",
+}
+
+canonical = []
+for raw in open(sys.argv[2]).read().splitlines():
+    if raw.strip():
+        canonical.append(raw.split("|"))
+for parts in canonical:
+    if len(parts) != 6:
+        problems.append(
+            "canonical row %r is not job|leg|family|suite|provider|model_var" % "|".join(parts)
+        )
+
+# Derivation self-guards: a stale policy map or an ambiguous family mapping must fail
+# the golden itself, not silently derive a wrong expectation.
+canonical_jobs = sorted({parts[0] for parts in canonical})
+if sorted(policy_map) != canonical_jobs:
+    problems.append(
+        "policy map keys %s do not equal the canonical job set %s"
+        % (sorted(policy_map), canonical_jobs)
+    )
+for what, idx in (("job", 0), ("leg", 1)):
+    fams = {}
+    for parts in canonical:
+        fams.setdefault(parts[idx], set()).add(parts[2])
+    for name, seen in sorted(fams.items()):
+        if len(seen) != 1:
+            problems.append("%s %s maps to multiple families %s" % (what, name, sorted(seen)))
+
+want_roster = sorted({parts[1] + ":" + parts[2] for parts in canonical})
+want_jobs = sorted(
+    {parts[0] + ":" + parts[2] + ":" + policy_map.get(parts[0], "<unmapped>") for parts in canonical}
+)
+want_proofs = sorted(
+    parts[0] + "." + parts[1] + "=${{ needs." + parts[0]
+    + ".outputs.proof_" + parts[1].replace("-", "_") + " }}"
+    for parts in canonical
+)
+
+def job_slice(name):
+    start = None
+    for i, line in enumerate(lines):
+        if line == "  %s:" % name:
+            start = i + 1
+            break
+    if start is None:
+        problems.append("job %s not found in the workflow" % name)
+        return []
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[i]) or re.match(r"^\S", lines[i]):
+            end = i
+            break
+    return lines[start:end]
+
+def scalars(chunk, key):
+    out = []
+    for line in chunk:
+        m = re.match(r"^\s*%s:\s*(.+?)\s*$" % re.escape(key), line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+def block(chunk, key):
+    out = []
+    starts = [i for i, l in enumerate(chunk) if re.match(r"^\s*%s:\s*\|\s*$" % re.escape(key), l)]
+    if len(starts) != 1:
+        problems.append("expected exactly one %s block in gate-assert, found %d" % (key, len(starts)))
+        return out
+    indent = len(chunk[starts[0]]) - len(chunk[starts[0]].lstrip())
+    for l in chunk[starts[0] + 1:]:
+        if l.strip() and (len(l) - len(l.lstrip())) <= indent:
+            break
+        if l.strip():
+            out.append(l.strip())
+    return out
+
+ga = job_slice("gate-assert")
+got_roster = scalars(ga, "ROSTER")
+got_jobs = scalars(ga, "JOBS")
+if len(got_roster) != 1:
+    problems.append("expected exactly one ROSTER scalar in gate-assert, found %d" % len(got_roster))
+if len(got_jobs) != 1:
+    problems.append("expected exactly one JOBS scalar in gate-assert, found %d" % len(got_jobs))
+got_proofs = block(ga, "PROOFS")
+
+if got_roster and sorted(got_roster[0].split()) != want_roster:
+    problems.append(
+        "gate-assert ROSTER %s does not match the derived %s"
+        % (sorted(got_roster[0].split()), want_roster)
+    )
+if got_jobs and sorted(got_jobs[0].split()) != want_jobs:
+    problems.append(
+        "gate-assert JOBS %s does not match the derived %s"
+        % (sorted(got_jobs[0].split()), want_jobs)
+    )
+if sorted(got_proofs) != want_proofs:
+    problems.append(
+        "gate-assert PROOFS do not match the derived lines:\n    got  %s\n    want %s"
+        % (sorted(got_proofs), want_proofs)
+    )
 
 if declared != len(rows) or problems:
     for p in problems:
