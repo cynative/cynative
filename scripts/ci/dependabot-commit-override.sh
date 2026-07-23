@@ -17,10 +17,14 @@
 #          any entry failed sanitization (the caller must then skip the edit;
 #          the squash title renders as before). Fail-safe: a complete accurate
 #          list or nothing, never a partial one.
+# stderr - when stdout is empty, a `skip: …` reason so the caller can distinguish
+#          "no metadata" from "override alone exceeds the body budget".
 #
 # MAX_BODY (default 60000) caps the assembled body under GitHub's 65536-char
-# limit; overflow collapses the tail into one "deps: bump N more dependencies"
-# entry so the count stays honest.
+# limit. The override is assembled first (as if the PR body were empty) so as
+# many packages as possible fit; an oversized Dependabot body is then truncated
+# to leave room for that override. Overflow of the package list itself still
+# collapses the tail into one "deps: bump N more dependencies" entry.
 set -eu
 
 [ "${1:-}" = "render" ] && [ -n "${2:-}" ] || {
@@ -120,7 +124,10 @@ parsed=$(awk '
 		printf "%s", out
 	}
 ')
-[ -n "$parsed" ] || exit 0
+if [ -z "$parsed" ]; then
+	echo "skip: no dependency metadata" >&2
+	exit 0
+fi
 
 # Pass 2: drop any previous override block from the body (replace, not append).
 stripped=$(awk '
@@ -128,13 +135,13 @@ stripped=$(awk '
 	skip == 0 { print }
 	index($0, "END_COMMIT_OVERRIDE") { skip = 0 }
 ' "$body_file")
-bodylen=$(printf '%s' "$stripped" | wc -c)
 
-# Pass 3: assemble the override block within the body budget. The first entry
-# sits directly after the marker; every further entry is a nested commit, which
-# is what release-please splits on (blank-line splitting does not recognize the
-# deps type).
-block=$(printf '%s' "$parsed" | awk -F '\t' -v bodylen="$bodylen" -v max="$max_body" '
+# Pass 3: assemble the override block under the body budget as if the PR body
+# were empty. That maximizes per-package entries; an oversized Dependabot body
+# (which routinely hits GitHub's 65536-char ceiling) is truncated afterward so
+# the override still fits. Raising MAX_BODY alone cannot fix that case: the
+# rendered override plus a full Dependabot body exceeds GitHub's hard limit.
+block=$(printf '%s' "$parsed" | awk -F '\t' -v max="$max_body" '
 	{
 		if ($2 != "" && $3 != "") l = "deps: bump " $1 " from " $2 " to " $3
 		else if ($3 != "") l = "deps: bump " $1 " to " $3
@@ -143,25 +150,20 @@ block=$(printf '%s' "$parsed" | awk -F '\t' -v bodylen="$bodylen" -v max="$max_b
 	}
 	END {
 		if (NR == 0) exit 0
+		# bodylen is fixed at 0 here; the "\n\n" separator is charged when the
+		# truncated body is non-empty (see keep calc below).
 		reserve = 80
 		tail = "\nEND_COMMIT_OVERRIDE"
-		# The first entry is admitted only if it fits the budget too; when even
-		# that does not fit, emit nothing so the caller skips the edit and the
-		# group title renders unchanged.
 		first = "BEGIN_COMMIT_OVERRIDE\n" lines[1]
 		r = (NR > 1) ? reserve : 0
-		if (bodylen + 2 + length(first) + length(tail) + r > max) exit 0
+		if (length(first) + length(tail) + r > max) exit 0
 		block = first
 		used = 1
 		for (i = 2; i <= NR; i++) {
 			add = "\nBEGIN_NESTED_COMMIT\n" lines[i] "\nEND_NESTED_COMMIT"
 			cand = block add
-			# Only a later entry could still force a summary, so the
-			# reserve is charged for every candidate except the last:
-			# a final entry that fits must not be collapsed into a
-			# "1 more dependencies" summary it does not need.
 			r2 = (i < NR) ? reserve : 0
-			if (bodylen + 2 + length(cand) + length(tail) + r2 > max) break
+			if (length(cand) + length(tail) + r2 > max) break
 			block = cand
 			used++
 		}
@@ -172,7 +174,38 @@ block=$(printf '%s' "$parsed" | awk -F '\t' -v bodylen="$bodylen" -v max="$max_b
 		printf "%s%s", block, tail
 	}
 ')
-[ -n "$block" ] || exit 0
+if [ -z "$block" ]; then
+	echo "skip: override exceeds body budget" >&2
+	exit 0
+fi
+
+# Truncate the existing body so body + separator + override stay under MAX_BODY.
+# Prefer dropping Dependabot prose over dropping package rows: the override is
+# what release-please renders into the changelog.
+blocklen=$(printf '%s' "$block" | wc -c)
+keep=$((max_body - blocklen))
+if [ -n "$stripped" ]; then
+	# Charge the blank-line separator between body and override.
+	keep=$((keep - 2))
+fi
+if [ "$keep" -lt 0 ]; then
+	echo "skip: override exceeds body budget" >&2
+	exit 0
+fi
+if [ -n "$stripped" ]; then
+	bodylen=$(printf '%s' "$stripped" | wc -c)
+	if [ "$bodylen" -gt "$keep" ]; then
+		if [ "$keep" -eq 0 ]; then
+			stripped=""
+		else
+			stripped=$(printf '%s' "$stripped" | awk -v n="$keep" '
+				BEGIN { ORS = "" }
+				{ buf = buf $0 RT }
+				END { print substr(buf, 1, n) }
+			')
+		fi
+	fi
+fi
 
 if [ -n "$stripped" ]; then
 	printf '%s\n\n%s\n' "$stripped" "$block"
