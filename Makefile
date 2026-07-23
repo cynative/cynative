@@ -12,6 +12,11 @@ SHELLCHECK_SHA256 := 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e2
 PESTER_VERSION := 5.7.1
 PSSCRIPTANALYZER_VERSION := 1.25.0
 
+# Every workflow that is callable as a release gate. Each must carry exactly one
+# EXPECTED_CALLER pin naming TRUSTED_CALLER; sh-test enforces that.
+GATE_WORKFLOWS := .github/workflows/connector-e2e.yaml .github/workflows/llm-smoke.yaml
+TRUSTED_CALLER := cynative/cynative/.github/workflows/release.yaml@refs/heads/main
+
 # The single CI gate. Locally, the fast hermetic check-go is the pre-commit hook.
 check: check-go check-scripts
 
@@ -126,31 +131,42 @@ sh-test:
 	@sh test/connector-e2e.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
-	@sh test/connector-e2e-contract.unit.test.sh
-	@sh test/connector-e2e-gate-assert.unit.test.sh
+	@sh test/ci-gate-contract.unit.test.sh
+	@sh test/ci-gate-assert.unit.test.sh
+	@sh test/llm-smoke-roster.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@sh test/connector.gcp.e2e.test.sh --selftest
 	@sh test/connector.aws.e2e.test.sh --selftest
 	@sh test/connector.github.e2e.test.sh --selftest
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
-	@# The trusted-caller pin in connector-e2e.yaml is the only thing that stops an
-	@# arbitrary workflow from driving the release gate; without it, anything calling
-	@# the workflow would pass the contract check and reach the credentialed jobs. Fail
-	@# closed if that exact pinned value is ever missing, edited away, duplicated (a
-	@# second EXPECTED_CALLER: line), or merely shadowed by a commented-out decoy -
-	@# require exactly one live EXPECTED_CALLER: line, and its value must match the
-	@# trusted caller exactly, not as a substring.
-	@count=$$(grep -cE '^[[:space:]]*EXPECTED_CALLER:' .github/workflows/connector-e2e.yaml); \
-	if [ "$$count" -ne 1 ]; then \
-		echo "FAIL: connector-e2e.yaml must have exactly one EXPECTED_CALLER: line (found $$count) - a missing or duplicated pin is what stops an arbitrary workflow from driving the release gate."; \
-		exit 1; \
-	fi; \
-	value=$$(grep -E '^[[:space:]]*EXPECTED_CALLER:' .github/workflows/connector-e2e.yaml | sed -E 's/^[[:space:]]*EXPECTED_CALLER:[[:space:]]*//'); \
-	if [ "$$value" != "cynative/cynative/.github/workflows/release.yaml@refs/heads/main" ]; then \
-		echo "FAIL: connector-e2e.yaml's EXPECTED_CALLER pin is '$$value', not the exact trusted caller - this pin is what stops an arbitrary workflow from driving the release gate."; \
+	@# The trusted-caller pin is the only thing that stops an arbitrary workflow from
+	@# driving a release gate; without it, anything calling the workflow would pass the
+	@# contract check and reach the credentialed jobs. Fail closed if that exact pinned
+	@# value is ever missing, edited away, duplicated (a second EXPECTED_CALLER: line),
+	@# or merely shadowed by a commented-out decoy - require exactly one live
+	@# EXPECTED_CALLER: line per gate, and its value must match the trusted caller
+	@# exactly, not as a substring. Every gate workflow must be listed here.
+	@if [ -z "$(GATE_WORKFLOWS)" ]; then \
+		echo "FAIL: GATE_WORKFLOWS is empty - an empty list means the pin check covers nothing; every gate workflow must be listed."; \
 		exit 1; \
 	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + connector-e2e-contract unit + connector-e2e-gate-assert unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
+	@for wf in $(GATE_WORKFLOWS); do \
+		if [ ! -f "$$wf" ]; then \
+			echo "FAIL: $$wf listed in GATE_WORKFLOWS does not exist - fix the path or the workflow file."; \
+			exit 1; \
+		fi; \
+		count=$$(grep -cE '^[[:space:]]*EXPECTED_CALLER:' "$$wf"); \
+		if [ "$$count" -ne 1 ]; then \
+			echo "FAIL: $$wf must have exactly one EXPECTED_CALLER: line (found $$count) - a missing or duplicated pin is what stops an arbitrary workflow from driving the release gate."; \
+			exit 1; \
+		fi; \
+		value=$$(grep -E '^[[:space:]]*EXPECTED_CALLER:' "$$wf" | sed -E 's/^[[:space:]]*EXPECTED_CALLER:[[:space:]]*//'); \
+		if [ "$$value" != "$(TRUSTED_CALLER)" ]; then \
+			echo "FAIL: $$wf's EXPECTED_CALLER pin is '$$value', not the exact trusted caller - this pin is what stops an arbitrary workflow from driving the release gate."; \
+			exit 1; \
+		fi; \
+	done
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
 
