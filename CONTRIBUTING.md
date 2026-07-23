@@ -4,7 +4,7 @@ Thanks for your interest in improving Cynative! Contributions are welcome — ne
 connectors and providers, evaluation datasets, documentation, and fixes across the
 board.
 
-## Development prerequisites
+## Development Prerequisites
 
 - A Go toolchain matching the version in [`go.mod`](go.mod).
 - `make` and a POSIX shell.
@@ -50,7 +50,7 @@ make check
 Add tests alongside any new code, or the coverage gate fails. Useful targets:
 `make check-go`, `make check-scripts`, `make lint`, `make test`, `make format`, `make generate`.
 
-## Pull requests
+## Pull Requests
 
 - **Branch** from `main`; direct pushes to `main` are blocked.
 - **Conventional-Commit PR titles** are required (CI enforces this): `feat:`,
