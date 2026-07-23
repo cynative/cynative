@@ -193,6 +193,31 @@ case_ 0 "a metacharacter-bearing key reaches lookup and matches only its literal
 gcp*wif=success' 'gcp*wif.meta=success' \
 	"$META_ROSTER" "$(needs_json "$META_JOBS")" "$META_JOBS"
 
+# ---- set -f: the word-split loops must never glob ---------------------------
+# JOBS carries the glob token g*:gcp-wif:always and the cwd contains a file whose
+# name that pattern matches. Under set -f the token stays literal: gcp-wif is then a
+# needs dependency missing from JOBS, so the run fails. Without set -f the token
+# expands against the cwd into the VALID triple and the whole run passes, so this
+# case flips outcome on set -f itself; the metacharacter case above only pins
+# lookup() quoting.
+globdir=$(mktemp -d)
+: >"$globdir/gcp-wif:gcp-wif:always"
+abs_script=$PWD/$script
+_got=0
+( cd "$globdir" && SELECTOR="" ROSTER="$ROSTER" RESULTS="$ALL_OK" PROOFS="$ALL_PROOF" \
+	NEEDS_JSON="$NEEDS_JSON_DEFAULT" \
+	JOBS='g*:gcp-wif:always aws-oidc:aws-oidc:always github-app:github-app:always' \
+	MODE=release sh "$abs_script" >/tmp/ga_out 2>/tmp/ga_err ) || _got=$?
+if [ "$_got" = 1 ] && grep -F -q -- "missing from JOBS" /tmp/ga_err; then
+	printf 'ok   %s\n' "a glob-bearing JOBS token stays literal instead of matching cwd files"
+else
+	printf 'FAIL %s (want exit 1 + missing-from-JOBS, got exit %s)\n' \
+		"a glob-bearing JOBS token stays literal instead of matching cwd files" "$_got"
+	sed 's/^/       /' /tmp/ga_err
+	fails=1
+fi
+rm -rf "$globdir"
+
 # ---- roster vs job-graph cross-check ---------------------------------------
 # needs is the actual dependency graph (toJSON(needs)); JOBS is a hand-maintained
 # parallel list. Nothing else binds them, so a job added to one and forgotten in the

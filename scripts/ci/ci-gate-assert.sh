@@ -43,6 +43,12 @@
 #                job actually depends on.
 set -eu
 
+# set -f for the whole script: globbing is never wanted here. Every word list (JOBS,
+# ROSTER, jobs_from_needs, the accumulated job/family sets) is deliberately expanded
+# unquoted to split on spaces, and -f keeps a glob character in any token literal
+# instead of expanding it against the caller's working directory.
+set -f
+
 : "${ROSTER:?ROSTER is required}"
 : "${JOBS:?JOBS is required}"
 : "${RESULTS:?RESULTS is required}"
@@ -189,16 +195,10 @@ else
 fi
 
 if [ "$needs_parse_ok" -eq 1 ]; then
-	# jobs_from_needs is a deliberately space-separated word list meant to be split on
-	# iteration, so it is intentionally unquoted here; set -f disables globbing for the
-	# duration so a job name containing a glob character expands to nothing but itself,
-	# never to filenames in the working directory.
-	set -f
 	for job in $jobs_from_needs; do
 		contains_word "$all_jobs" "$job" ||
 			fail "job '$job' is a dependency in needs but missing from JOBS, so it would never be gated"
 	done
-	set +f
 	for job in $all_jobs; do
 		contains_word "$jobs_from_needs" "$job" ||
 			fail "job '$job' is in JOBS but nothing in needs depends on it"
