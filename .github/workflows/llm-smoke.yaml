@@ -1,185 +1,173 @@
 name: Live LLM smoke
 
-# Runs the real `cynative -p` against live LLM providers, driven by the checked-in
-# manifest .github/live-llm-manifest.json (cynative#50). Each enabled manifest row
-# is one matrix job: a provider x suite pair. The manifest carries the provider
-# details (id, model variable, suite, required-or-optional, auth family) so adding
-# or disabling a row for an already-wired provider is a one-row manifest edit, not
-# a workflow rewrite (a new provider needs its family's credential wiring too);
-# internal/llm/livellm_manifest_test.go validates it fail-closed under the
-# required `Lint & Test` check, so a malformed row blocks merge.
+# The live LLM smoke against real providers: a real `cynative -p` one-shot per leg,
+# proving each provider still authenticates, answers, and drives the tool loop.
 #
-# The `plan` job turns the manifest into three per-family matrices; the smoke jobs
-# consume them. Credential mechanics genuinely differ per family and cannot be
-# expressed as data, so each auth family has its own job: `gcp-smoke` authenticates
-# to GCP project cynative-cli-ci via keyless Workload Identity Federation,
-# `aws-smoke` authenticates to AWS via keyless GitHub OIDC role assumption under a
-# static `environment: aws-ci` (the stable OIDC subject the AWS role trusts), and
-# `api-smoke` runs the direct API-key providers (OpenAI, Anthropic) with real
-# long-lived secrets held behind the reviewer-protected `environment:
-# llm-api-keys`. A new auth family is the one deliberate case that adds a job.
-# Mirrors install-e2e.yaml's detect gating, so the heavy live runs only fire for
-# release-please PRs or a manual dispatch, and every credential step is gated to
-# same-repo events so untrusted forks never reach it. The `Live LLM gate` summary
-# job is a required status check: on a release-please PR a red, cancelled, or
-# skipped live leg blocks the merge, while a non-release PR passes trivially
-# (everything skips).
+# Two entry points. The Release Pipeline calls it as a PRE-PUBLISH GATE, and maintainers
+# can dispatch it manually. There is deliberately no filter input: every invocation,
+# called or dispatched, is the full roster, so a caller cannot weaken the gate.
+#
+# The gate's danger is fail-OPEN. GitHub surfaces a conditionally skipped job as Success,
+# and a run concludes success once at least one job succeeded and none failed, so a gate
+# whose live legs all skipped next to a cheap passing job reads GREEN. That is why every
+# leg carries an always() sentinel, why gate-assert runs under bare always(), and why
+# publish compares gate_sha rather than trusting the result alone.
 on:
-  # Include `labeled` (on top of the opened/synchronize/reopened defaults) so the
-  # `autorelease: pending` fallback in the detect job actually fires when that
-  # label is added after the PR is created, which is the lag it exists to cover.
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
+  workflow_call:
+    inputs:
+      ref:
+        description: >-
+          Exact 40-hex commit to test. The Release Pipeline passes the SHA the release was
+          TAGGED at, which is not necessarily the SHA that triggered the pipeline:
+          release-please re-derives its work from repository state, so main can advance in
+          between.
+        type: string
+        required: true
+    outputs:
+      gate_sha:
+        description: The SHA for which the full LLM gate succeeded. Empty means it did not.
+        value: ${{ jobs.gate-assert.outputs.gate_sha }}
   workflow_dispatch:
 
-permissions:
-  contents: read
+# No workflow_call secrets. OPENAI_API_KEY and ANTHROPIC_API_KEY are ENVIRONMENT secrets
+# of llm-api-keys / llm-api-keys-release, resolved inside the jobs below. Declaring them
+# as call secrets would create a path that looks wired but is silently overridden: an
+# environment secret always wins over a same-named caller-passed secret.
+permissions: {}
 
-# One live run per PR: an environment-gated job can wait on reviewer approval for
-# up to 30 days, so without this every push to a release PR would stack another
-# pending run. PR runs share a PR-scoped group and cancel their predecessor; a
-# manual dispatch gets a per-run group so it never cancels (or is cancelled by)
-# anything else.
+# The gate path is keyed on the run id. A called workflow's concurrency group is evaluated
+# in the CALLER's context, so a ref-based group would let a standalone run cancel a release
+# gate, and a cancelled gate fails the fan-in below, blocking a release for a reason that
+# has nothing to do with the release.
+#
+# The discriminator is `inputs.ref`, which is declared only under workflow_call and so is
+# empty on every dispatch. Do NOT key this on github.event_name: a called workflow sees the
+# CALLER's event, so it reads `push` on the release path today only because release.yaml is
+# push-only.
 concurrency:
-  group: llm-smoke-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: llm-smoke-${{ inputs.ref && github.run_id || github.ref }}
+  cancel-in-progress: ${{ !inputs.ref }}
 
 jobs:
-  detect:
-    name: Detect release-please PR
+  # ---- The invocation contract ---------------------------------------------
+  # Resolves the call's mode and checkout SHA. This job's own checkout is pinned to this
+  # workflow's own repository and commit, so it always runs cynative's own contract
+  # script, never a foreign caller's copy. The actual defense that keeps a foreign caller
+  # off a credential-bearing job is the per-job `if: github.repository == 'cynative/cynative'`
+  # guard below; this job is not a substitute for those guards, and they must not be
+  # removed as redundant.
+  prepare:
+    name: Validate invocation contract
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
     outputs:
-      relevant: ${{ steps.detect.outputs.relevant }}
-    steps:
-      - name: Detect release-please PR
-        id: detect
-        env:
-          EVENT: ${{ github.event_name }}
-          HEAD_REF: ${{ github.head_ref }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: |
-          relevant=false
-          # Manual dispatch is an intentional run on any branch.
-          [ "${EVENT}" = "workflow_dispatch" ] && relevant=true
-          # release-please's branch name is deterministic and present from PR creation.
-          [ "${HEAD_REF}" = "release-please--branches--main" ] && relevant=true
-          # The autorelease label is a secondary fallback (it can lag creation).
-          case ",${LABELS}," in *",autorelease: pending,"*) relevant=true ;; esac
-          echo "relevant=${relevant}" >> "${GITHUB_OUTPUT}"
-          if [ "${relevant}" = "true" ]; then
-            echo "Release-please PR or manual dispatch - running the live LLM smoke."
-          else
-            echo "Not a release-please PR - skipping the live LLM smoke."
-          fi
-
-  plan:
-    name: Plan provider matrix
-    needs: detect
-    if: needs.detect.outputs.relevant == 'true'
-    runs-on: ubuntu-latest
-    # No credentials and no id-token here: this job only reads the checked-in
-    # manifest with jq, so it is fork-safe on its own. The fork-trust boundary is
-    # enforced on the smoke jobs, which are the only ones that mint credentials.
-    outputs:
-      gcp_matrix: ${{ steps.build.outputs.gcp_matrix }}
-      gcp_has: ${{ steps.build.outputs.gcp_has }}
-      aws_matrix: ${{ steps.build.outputs.aws_matrix }}
-      aws_has: ${{ steps.build.outputs.aws_has }}
-      api_matrix: ${{ steps.build.outputs.api_matrix }}
-      api_has: ${{ steps.build.outputs.api_has }}
+      mode: ${{ steps.contract.outputs.mode }}
+      checkout_sha: ${{ steps.contract.outputs.checkout_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build per-family matrices from the manifest
-        id: build
+        with:
+          # A called workflow's checkout defaults to the CALLER's repo and commit, which
+          # would run a caller's copy of the script below. Pin to the repository and
+          # commit that define this workflow so the contract is always ours.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Resolve and validate the invocation contract
+        id: contract
         env:
-          MANIFEST: .github/live-llm-manifest.json
-        run: |
-          # Project only the operational fields each smoke job reads into the matrix
-          # (never `note` or `enabled`). One compact single-line JSON per family (the
-          # name=value GITHUB_OUTPUT contract); a `*_has` boolean guards the
-          # empty-matrix hard-error (a fromJSON matrix with zero entries fails
-          # strategy evaluation instead of skipping).
-          gcp="$(jq -c '{include: [.[] | select(.enabled and .auth == "gcp-wif") | {id, provider, suite, model_var, required, require_no_connectors}]}' "$MANIFEST")"
-          aws="$(jq -c '{include: [.[] | select(.enabled and .auth == "aws-oidc") | {id, provider, suite, model_var, role_var, required, require_no_connectors}]}' "$MANIFEST")"
-          api="$(jq -c '{include: [.[] | select(.enabled and .auth == "api-key") | {id, provider, suite, model_var, required, require_no_connectors}]}' "$MANIFEST")"
-          enabled_n="$(jq '[.[] | select(.enabled)] | length' "$MANIFEST")"
-          gcp_n="$(jq '[.[] | select(.enabled and .auth == "gcp-wif")] | length' "$MANIFEST")"
-          aws_n="$(jq '[.[] | select(.enabled and .auth == "aws-oidc")] | length' "$MANIFEST")"
-          api_n="$(jq '[.[] | select(.enabled and .auth == "api-key")] | length' "$MANIFEST")"
-          # Fail closed: every enabled row must belong to a known auth family, so an
-          # enabled row with an unknown/typo'd auth turns this job red instead of
-          # silently vanishing from every matrix (the Go validator is the merge-time
-          # guard; this is the run-time backstop for a dispatch on unmerged code).
-          if [ "$enabled_n" -ne "$((gcp_n + aws_n + api_n))" ]; then
-            echo "::error::$enabled_n enabled rows but only $gcp_n gcp-wif + $aws_n aws-oidc + $api_n api-key; an enabled row has an unknown auth." >&2
-            exit 1
-          fi
-          {
-            printf 'gcp_matrix=%s\n' "$gcp"
-            printf 'aws_matrix=%s\n' "$aws"
-            printf 'api_matrix=%s\n' "$api"
-            printf 'gcp_has=%s\n' "$([ "$gcp_n" -gt 0 ] && echo true || echo false)"
-            printf 'aws_has=%s\n' "$([ "$aws_n" -gt 0 ] && echo true || echo false)"
-            printf 'api_has=%s\n' "$([ "$api_n" -gt 0 ] && echo true || echo false)"
-          } >> "$GITHUB_OUTPUT"
-          printf 'enabled: %s | gcp rows: %s | aws rows: %s | api rows: %s\n' "$enabled_n" "$gcp_n" "$aws_n" "$api_n"
+          REPOSITORY: ${{ github.repository }}
+          EXPECTED_REPOSITORY: cynative/cynative
+          EVENT: ${{ github.event_name }}
+          # github.workflow_ref names the CALLER's workflow; job.workflow_ref names the
+          # file defining this job. Equal means a direct dispatch, different means a
+          # reusable call. A called workflow's github context is the caller's, so
+          # github.event_name cannot make this distinction.
+          CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          JOB_WORKFLOW_REF: ${{ job.workflow_ref }}
+          EXPECTED_CALLER: cynative/cynative/.github/workflows/release.yaml@refs/heads/main
+          CALL_REF: ${{ inputs.ref }}
+          TRIGGER_SHA: ${{ github.sha }}
+          SELECTOR: ""
+          SELECTORS: ""
+          DISPATCH_POLICY: full-only
+        run: sh scripts/ci/ci-gate-contract.sh >>"$GITHUB_OUTPUT"
 
-  gcp-smoke:
-    name: Live LLM / ${{ matrix.id }}
-    needs: [detect, plan]
-    # Run only when relevant, there is at least one enabled gcp-wif row, AND either
-    # a manual dispatch (no PR context) or a same-repo PR. A fork PR must never
-    # reach the WIF credential step. The job-level `if:` references only
-    # github.event / needs, the contexts available to it (matrix and secrets are not).
+  # ---- gcp-wif family ------------------------------------------------------
+  gcp-wif:
+    name: Live LLM / ${{ matrix.leg }}
+    needs: prepare
     if: >-
-      needs.detect.outputs.relevant == 'true' &&
-      needs.plan.outputs.gcp_has == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write # mint the OIDC token for Workload Identity Federation
+    outputs:
+      proof_vertex_notool: ${{ steps.sentinel.outputs.proof_vertex_notool }}
+      proof_vertex_tools: ${{ steps.sentinel.outputs.proof_vertex_tools }}
     strategy:
-      fail-fast: false # one provider's failure must not cancel the others
-      max-parallel: 4 # bound simultaneous live token spend as the matrix grows
-      matrix: ${{ fromJSON(needs.plan.outputs.gcp_matrix) }}
+      fail-fast: false # one leg's failure must not cancel the others
+      matrix:
+        include:
+          - leg: vertex-notool
+            family: gcp-wif
+            suite: llm-smoke
+            provider: vertex
+            model_var: CYNATIVE_CLI_CI_VERTEX_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          - leg: vertex-tools
+            family: gcp-wif
+            suite: llm-tools-smoke
+            provider: vertex
+            model_var: CYNATIVE_CLI_CI_VERTEX_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
     steps:
-      # Resolve the model variable before minting credentials: a required row with an
-      # unset model fails here (loud, no wasted credential mint); an optional row with
-      # an unset model skips the credentialed steps (run=false) so it never
-      # authenticates. Matrix values (model_var, required) go through env, never into
-      # the run script text.
-      - name: Resolve model
-        id: model
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
         env:
-          MODEL: ${{ vars[matrix.model_var] }}
-          MODEL_VAR: ${{ matrix.model_var }}
-          REQUIRED: ${{ matrix.required }}
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
-          if [ -n "$MODEL" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$REQUIRED" = "true" ]; then
-            echo "::error::required row has unset model variable $MODEL_VAR" >&2
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
             exit 1
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "optional row with no model configured ($MODEL_VAR unset); skipping"
           fi
-      - name: Report tested head SHA
-        run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
-      - if: steps.model.outputs.run == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - if: steps.model.outputs.run == 'true'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # Fail loud on a missing or renamed variable, before minting credentials. There are
+      # no optional legs: an unset model is always an error, never a green skip.
+      - name: Preflight the required repo variables
+        env:
+          MODEL: ${{ matrix.model }}
+          MODEL_VAR: ${{ matrix.model_var }}
+          PROJECT: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          WIF_PROVIDER: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
+          SA: ${{ vars.CYNATIVE_CLI_CI_SA }}
+          REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
+        run: |
+          missing=
+          [ -n "${MODEL}" ]        || missing="${missing} ${MODEL_VAR}"
+          [ -n "${PROJECT}" ]      || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
+          [ -n "${WIF_PROVIDER}" ] || missing="${missing} CYNATIVE_CLI_CI_WIF_PROVIDER"
+          [ -n "${SA}" ]           || missing="${missing} CYNATIVE_CLI_CI_SA"
+          [ -n "${REGION}" ]       || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
+          if [ -n "${missing}" ]; then
+            echo "::error::missing repo variables:${missing}"
+            exit 1
+          fi
       # Keyless WIF into cynative-cli-ci. export_environment_variables:false keeps
-      # GOOGLE_APPLICATION_CREDENTIALS out of the process env, so the gcp connector
-      # stays dark; the minted credentials JSON is fed to cynative inline instead.
+      # GOOGLE_APPLICATION_CREDENTIALS out of the process env, so the gcp connector stays
+      # dark; the minted credentials JSON is fed to cynative inline instead.
       - name: Authenticate to GCP (Workload Identity Federation)
-        if: steps.model.outputs.run == 'true'
         id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
@@ -189,215 +177,274 @@ jobs:
           create_credentials_file: true
           export_environment_variables: false
       - name: Run the smoke
-        if: steps.model.outputs.run == 'true'
+        id: smoke
         env:
           CYNATIVE_LLM_PROVIDER: ${{ matrix.provider }}
-          CYNATIVE_LLM_MODEL: ${{ vars[matrix.model_var] }}
+          CYNATIVE_LLM_MODEL: ${{ matrix.model }}
           CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
           CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
-          # required -> hard-fail on an unset/renamed model var (never a silent skip);
-          # require_no_connectors -> hard-fail unless the runner stays connector-dark.
-          SMOKE_REQUIRE_RUN: ${{ matrix.required && '1' || '' }}
-          SMOKE_REQUIRE_NO_CONNECTORS: ${{ matrix.require_no_connectors && '1' || '' }}
+          # Hardcoded, never derived from the matrix: a dropped or misspelled matrix key
+          # would render empty and let the suite skip green.
+          SMOKE_REQUIRE_RUN: "1"
           SUITE: ${{ matrix.suite }}
           CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
-        # Literal suite dispatch (fail-closed): the suite is a validated enum, but a
-        # `make ${{ matrix.suite }}` would interpolate a matrix value into the run
-        # script; this keeps the target selection a literal case.
+        # Literal suite dispatch (fail-closed): a `make ${{ matrix.suite }}` would
+        # interpolate a matrix value into the run script. The connector-dark tripwire is
+        # DERIVED from the suite here rather than carried as a matrix key, so a no-tool
+        # leg cannot exist without it, and it cannot be set on a tools leg where the suite
+        # does not read it and it would be a silent no-op.
         run: |
           creds="$(cat "$CREDS_FILE")"
           export CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$creds"
           case "$SUITE" in
-            llm-smoke) make llm-smoke ;;
-            llm-tools-smoke) make llm-tools-smoke ;;
+            llm-smoke)       export SMOKE_REQUIRE_NO_CONNECTORS=1; exec make llm-smoke ;;
+            llm-tools-smoke) unset SMOKE_REQUIRE_NO_CONNECTORS;    exec make llm-tools-smoke ;;
             *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
           esac
+      # The per-leg proof. strategy.job-total catches a dropped, duplicated, or extra
+      # matrix row; the allowlist case catches a substituted one; the leg-specific output
+      # name is what lets the fan-in tell which legs actually ran (matrix outputs with
+      # IDENTICAL names race, distinct names combine).
+      #
+      # It asserts steps.smoke.OUTCOME, never .conclusion: outcome is the value before
+      # continue-on-error is applied, so it catches a tolerated step, a step skipped by a
+      # false condition, a step skipped because setup failed, and a renamed smoke step.
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() }}
+        env:
+          LEG: ${{ matrix.leg }}
+          ACTUAL_TOTAL: ${{ strategy.job-total }}
+          EXPECTED_TOTAL: "2"
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+        run: |
+          if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
+            echo "::error::gcp-wif realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"
+            exit 1
+          fi
+          if [ "$SMOKE_OUTCOME" != success ]; then
+            echo "::error::leg $LEG smoke outcome=$SMOKE_OUTCOME"
+            exit 1
+          fi
+          case "$LEG" in
+          vertex-notool) key=proof_vertex_notool ;;
+          vertex-tools) key=proof_vertex_tools ;;
+          *) echo "::error::leg $LEG is not in the gcp-wif allowlist"; exit 1 ;;
+          esac
+          printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
 
-  aws-smoke:
-    name: Live LLM / ${{ matrix.id }}
-    needs: [detect, plan]
-    # Same gating and trust boundary as gcp-smoke. A fork PR must never reach the
-    # AWS OIDC step (the same-repo head check is what excludes forks, not the role's
-    # trust policy).
+  # ---- aws-oidc family -----------------------------------------------------
+  aws-oidc:
+    name: Live LLM / ${{ matrix.leg }}
+    needs: prepare
     if: >-
-      needs.detect.outputs.relevant == 'true' &&
-      needs.plan.outputs.aws_has == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    # Bind to the aws-ci GitHub Environment so the OIDC subject is the stable
-    # repo:cynative/cynative:environment:aws-ci regardless of branch or event. The
-    # AWS role's trust policy pins that one subject, so a manual dispatch from any
-    # branch needs no per-branch trust-policy change, and the environment can carry a
-    # required-reviewer gate before creds are minted. A static literal (not a matrix
-    # expression), so the OIDC subject can never drift.
-    environment: aws-ci
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    # Static, so the OIDC subject stays repo:cynative/cynative:environment:aws-ci
+    # regardless of branch or event. Never a matrix expression.
+    environment: aws-ci
     permissions:
       contents: read
       id-token: write # mint the OIDC token for the AWS role assumption
+    outputs:
+      proof_bedrock_notool: ${{ steps.sentinel.outputs.proof_bedrock_notool }}
+      proof_bedrock_tools: ${{ steps.sentinel.outputs.proof_bedrock_tools }}
     strategy:
-      fail-fast: false # one provider's failure must not cancel the others
-      max-parallel: 4 # bound simultaneous live token spend as the matrix grows
-      matrix: ${{ fromJSON(needs.plan.outputs.aws_matrix) }}
+      fail-fast: false
+      matrix:
+        include:
+          - leg: bedrock-notool
+            family: aws-oidc
+            suite: llm-smoke
+            provider: bedrock
+            model_var: CYNATIVE_CLI_CI_BEDROCK_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
+          - leg: bedrock-tools
+            family: aws-oidc
+            suite: llm-tools-smoke
+            provider: bedrock
+            model_var: CYNATIVE_CLI_CI_BEDROCK_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_MODEL }}
     steps:
-      # Resolve the model before minting credentials (see gcp-smoke). A required row
-      # with an unset model fails here; an optional row with an unset model skips the
-      # credentialed steps.
-      - name: Resolve model
-        id: model
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
         env:
-          MODEL: ${{ vars[matrix.model_var] }}
-          MODEL_VAR: ${{ matrix.model_var }}
-          REQUIRED: ${{ matrix.required }}
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
-          if [ -n "$MODEL" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$REQUIRED" = "true" ]; then
-            echo "::error::required row has unset model variable $MODEL_VAR" >&2
-            exit 1
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "optional row with no model configured ($MODEL_VAR unset); skipping"
-          fi
-      # Fail loud when the row's AWS role variable is unset (unprovisioned, renamed,
-      # or deleted), so a broken variable can never green CI by skipping the live
-      # Bedrock path; configure-aws-credentials' own error is otherwise opaque.
-      - name: Preflight - AWS role variable must be set
-        if: steps.model.outputs.run == 'true'
-        env:
-          AWS_ROLE: ${{ vars[matrix.role_var] }}
-          ROLE_VAR: ${{ matrix.role_var }}
-        run: |
-          if [ -z "$AWS_ROLE" ]; then
-            echo "::error::AWS role variable $ROLE_VAR is not set. Provision the AWS OIDC role variable before running the Bedrock smoke." >&2
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
             exit 1
           fi
-      - name: Report tested head SHA
-        run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
-      - if: steps.model.outputs.run == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - if: steps.model.outputs.run == 'true'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # Keyless GitHub OIDC into the CI AWS account, no long-lived key. Like the gcp
-      # job, the assumed creds are fed to the provider inline (below) and kept out of
-      # the process env, so cynative's `aws` connector's default credential chain
-      # finds nothing and stays dark - a genuinely no-tool, no-connector smoke
-      # (SMOKE_REQUIRE_NO_CONNECTORS below hard-fails on any connector, catching CI
-      # role/credential drift before anything reaches the tool loop).
+      # The AWS role variable gets its own named check because
+      # configure-aws-credentials' error on an unset role is otherwise opaque.
+      - name: Preflight the required repo variables
+        env:
+          MODEL: ${{ matrix.model }}
+          MODEL_VAR: ${{ matrix.model_var }}
+          AWS_ROLE: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
+          REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
+        run: |
+          missing=
+          [ -n "${MODEL}" ]    || missing="${missing} ${MODEL_VAR}"
+          [ -n "${AWS_ROLE}" ] || missing="${missing} CYNATIVE_CLI_CI_AWS_ROLE"
+          [ -n "${REGION}" ]   || missing="${missing} CYNATIVE_CLI_CI_BEDROCK_REGION"
+          if [ -n "${missing}" ]; then
+            echo "::error::missing repo variables:${missing}"
+            exit 1
+          fi
+      # Keyless GitHub OIDC into the CI AWS account, no long-lived key. The assumed creds
+      # are fed to the provider inline below and kept out of the process env, so
+      # cynative's aws connector's default credential chain finds nothing and stays dark.
+      # The no-tool leg's SMOKE_REQUIRE_NO_CONNECTORS hard-fails on any connector,
+      # catching CI role/credential drift before anything reaches the tool loop.
       - name: Authenticate to AWS (GitHub OIDC)
-        if: steps.model.outputs.run == 'true'
         id: aws
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
-          role-to-assume: ${{ vars[matrix.role_var] }}
+          role-to-assume: ${{ vars.CYNATIVE_CLI_CI_AWS_ROLE }}
           aws-region: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
           role-session-name: cynative-live-llm-smoke
-          # Expose the assumed creds as step outputs only, not AWS_* env vars, so the
-          # aws connector cannot discover them (they go to Bedrock inline below).
+          # Expose the assumed creds as step outputs only, not AWS_* env vars, so the aws
+          # connector cannot discover them (they go to Bedrock inline below).
           output-env-credentials: false
           output-credentials: true
       - name: Run the smoke
-        if: steps.model.outputs.run == 'true'
+        id: smoke
         env:
           CYNATIVE_LLM_PROVIDER: ${{ matrix.provider }}
-          CYNATIVE_LLM_MODEL: ${{ vars[matrix.model_var] }}
+          CYNATIVE_LLM_MODEL: ${{ matrix.model }}
           CYNATIVE_LLM_BEDROCK_REGION: ${{ vars.CYNATIVE_CLI_CI_BEDROCK_REGION }}
-          # Feed the assumed creds to Bedrock inline (not via AWS_*): Bifrost's bedrock
-          # provider uses these explicit keys and only falls back to the AWS default
-          # chain when they are empty, so the provider authenticates while the aws
-          # connector stays dark.
+          # Fed inline (not via AWS_*): Bifrost's bedrock provider uses these explicit
+          # keys and only falls back to the AWS default chain when they are empty, so the
+          # provider authenticates while the aws connector stays dark.
           CYNATIVE_LLM_BEDROCK_ACCESS_KEY: ${{ steps.aws.outputs.aws-access-key-id }}
           CYNATIVE_LLM_BEDROCK_SECRET_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
           CYNATIVE_LLM_BEDROCK_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
-          # required -> hard-fail on an unset/renamed model var (never a silent skip);
-          # require_no_connectors -> hard-fail unless the runner stays connector-dark.
-          SMOKE_REQUIRE_RUN: ${{ matrix.required && '1' || '' }}
-          SMOKE_REQUIRE_NO_CONNECTORS: ${{ matrix.require_no_connectors && '1' || '' }}
+          SMOKE_REQUIRE_RUN: "1"
           SUITE: ${{ matrix.suite }}
-        # Literal suite dispatch (fail-closed); see gcp-smoke.
         run: |
           case "$SUITE" in
-            llm-smoke) make llm-smoke ;;
-            llm-tools-smoke) make llm-tools-smoke ;;
+            llm-smoke)       export SMOKE_REQUIRE_NO_CONNECTORS=1; exec make llm-smoke ;;
+            llm-tools-smoke) unset SMOKE_REQUIRE_NO_CONNECTORS;    exec make llm-tools-smoke ;;
             *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
           esac
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() }}
+        env:
+          LEG: ${{ matrix.leg }}
+          ACTUAL_TOTAL: ${{ strategy.job-total }}
+          EXPECTED_TOTAL: "2"
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+        run: |
+          if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
+            echo "::error::aws-oidc realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"
+            exit 1
+          fi
+          if [ "$SMOKE_OUTCOME" != success ]; then
+            echo "::error::leg $LEG smoke outcome=$SMOKE_OUTCOME"
+            exit 1
+          fi
+          case "$LEG" in
+          bedrock-notool) key=proof_bedrock_notool ;;
+          bedrock-tools) key=proof_bedrock_tools ;;
+          *) echo "::error::leg $LEG is not in the aws-oidc allowlist"; exit 1 ;;
+          esac
+          printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
 
-  api-smoke:
-    name: Live LLM / ${{ matrix.id }}
-    needs: [detect, plan]
-    # Same gating and trust boundary as gcp-smoke/aws-smoke. GitHub never hands
-    # secrets to fork-PR runs, but the same-repo head check is still what keeps a
-    # fork's code from ever reaching the job at all.
+  # ---- api-key family, release path ----------------------------------------
+  # Two jobs serve this family because `environment:` must stay a STATIC LITERAL (it is
+  # expressible as a matrix value, which is exactly why the rule needs structure rather
+  # than a comment). llm-api-keys-release carries no required reviewers, so a release run
+  # cannot pend for up to 30 days holding the release-pipeline concurrency group with an
+  # unpublished draft. The reviewer gate stays on the manual path below, where it guards
+  # ad-hoc access to the keys without blocking a release.
+  #
+  # The two jobs are mutually exclusive, so their identical proof keys cannot race.
+  api-key-release:
+    name: Live LLM / ${{ matrix.leg }}
+    needs: prepare
     if: >-
-      needs.detect.outputs.relevant == 'true' &&
-      needs.plan.outputs.api_has == 'true' &&
-      (github.event_name == 'workflow_dispatch' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    # Bind to the llm-api-keys GitHub Environment: unlike the keyless families it
-    # holds real long-lived secrets (OPENAI_API_KEY, ANTHROPIC_API_KEY), so a
-    # required-reviewer gate stands between any run and the keys. One approval
-    # releases every leg of this matrix that is waiting on the environment. A
-    # static literal, never a matrix expression.
-    environment: llm-api-keys
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.mode == 'release'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    environment: llm-api-keys-release
     permissions:
       contents: read # no id-token: nothing is minted, the stored keys are the credentials
+    outputs:
+      proof_openai_tools: ${{ steps.sentinel.outputs.proof_openai_tools }}
+      proof_anthropic_tools: ${{ steps.sentinel.outputs.proof_anthropic_tools }}
     strategy:
-      fail-fast: false # one provider's failure must not cancel the others
-      max-parallel: 4 # bound simultaneous live token spend as the matrix grows
-      matrix: ${{ fromJSON(needs.plan.outputs.api_matrix) }}
+      fail-fast: false
+      matrix:
+        include:
+          - leg: openai-tools
+            family: api-key
+            suite: llm-tools-smoke
+            provider: openai
+            model_var: CYNATIVE_CLI_CI_OPENAI_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_OPENAI_MODEL }}
+          - leg: anthropic-tools
+            family: api-key
+            suite: llm-tools-smoke
+            provider: anthropic
+            model_var: CYNATIVE_CLI_CI_ANTHROPIC_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_ANTHROPIC_MODEL }}
     steps:
-      # Resolve the model before anything else (see gcp-smoke). A required row
-      # with an unset model fails here; an optional row with an unset model skips
-      # the remaining steps.
-      - name: Resolve model
-        id: model
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
         env:
-          MODEL: ${{ vars[matrix.model_var] }}
-          MODEL_VAR: ${{ matrix.model_var }}
-          REQUIRED: ${{ matrix.required }}
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
-          if [ -n "$MODEL" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "$REQUIRED" = "true" ]; then
-            echo "::error::required row has unset model variable $MODEL_VAR" >&2
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
             exit 1
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "optional row with no model configured ($MODEL_VAR unset); skipping"
           fi
-      - name: Report tested head SHA
-        run: echo "Testing PR head SHA ${{ github.event.pull_request.head.sha || github.sha }}"
-      - if: steps.model.outputs.run == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - if: steps.model.outputs.run == 'true'
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      # Both keys are exposed to exactly this one step. The shell selects the
-      # matching key by provider (fail-closed default branch), preflights it
-      # non-empty (a rotated or deleted secret fails loud instead of skipping
-      # green; an unset ${{ secrets.X }} resolves to ""), drops the raw names so
-      # only CYNATIVE_LLM_API_KEY reaches the binary, and execs into make so not
-      # even this shell's process image retains the unselected key. Matrix values
-      # go through env, never into the run script text; the suite dispatch stays
-      # a literal case (fail-closed), as in the other jobs.
+      - name: Preflight the required repo variables
+        env:
+          MODEL: ${{ matrix.model }}
+          MODEL_VAR: ${{ matrix.model_var }}
+        run: |
+          if [ -z "${MODEL}" ]; then
+            echo "::error::missing repo variable: ${MODEL_VAR}"
+            exit 1
+          fi
+      # Both keys are exposed to exactly this one step. The shell selects the matching key
+      # by provider (fail-closed default branch), preflights it non-empty (a rotated or
+      # deleted secret fails loud instead of skipping green; an unset ${{ secrets.X }}
+      # resolves to ""), drops the raw names so only CYNATIVE_LLM_API_KEY reaches the
+      # binary, and execs into make so not even this shell's process image retains the
+      # unselected key.
       - name: Run the smoke
-        if: steps.model.outputs.run == 'true'
+        id: smoke
         env:
           CYNATIVE_LLM_PROVIDER: ${{ matrix.provider }}
-          CYNATIVE_LLM_MODEL: ${{ vars[matrix.model_var] }}
+          CYNATIVE_LLM_MODEL: ${{ matrix.model }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # required -> hard-fail on an unset/renamed model var (never a silent skip);
-          # require_no_connectors -> hard-fail unless the runner stays connector-dark.
-          SMOKE_REQUIRE_RUN: ${{ matrix.required && '1' || '' }}
-          SMOKE_REQUIRE_NO_CONNECTORS: ${{ matrix.require_no_connectors && '1' || '' }}
+          SMOKE_REQUIRE_RUN: "1"
           SUITE: ${{ matrix.suite }}
+          ENVIRONMENT_NAME: llm-api-keys-release
         run: |
           case "$CYNATIVE_LLM_PROVIDER" in
             openai) CYNATIVE_LLM_API_KEY="$OPENAI_API_KEY" ;;
@@ -405,52 +452,212 @@ jobs:
             *) echo "::error::no API-key wiring for provider: $CYNATIVE_LLM_PROVIDER" >&2; exit 1 ;;
           esac
           if [ -z "$CYNATIVE_LLM_API_KEY" ]; then
-            echo "::error::the $CYNATIVE_LLM_PROVIDER API-key secret is empty or unset; provision it in the llm-api-keys environment." >&2
+            echo "::error::the $CYNATIVE_LLM_PROVIDER API-key secret is empty or unset; provision it in the $ENVIRONMENT_NAME environment." >&2
             exit 1
           fi
           export CYNATIVE_LLM_API_KEY
           unset OPENAI_API_KEY ANTHROPIC_API_KEY
           case "$SUITE" in
-            llm-smoke) exec make llm-smoke ;;
-            llm-tools-smoke) exec make llm-tools-smoke ;;
+            llm-smoke)       export SMOKE_REQUIRE_NO_CONNECTORS=1; exec make llm-smoke ;;
+            llm-tools-smoke) unset SMOKE_REQUIRE_NO_CONNECTORS;    exec make llm-tools-smoke ;;
             *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
           esac
-
-  gate:
-    name: Live LLM gate
-    needs: [detect, plan, gcp-smoke, aws-smoke, api-smoke]
-    # The one stable check name the ruleset pins as a required status check (matrix
-    # leg names change with the manifest, so the legs themselves cannot be pinned).
-    # Runs on every PR: on a non-release PR the live jobs skip and this passes
-    # trivially; on a release-please PR or a dispatch it fails unless every live job
-    # actually SUCCEEDED. GitHub satisfies a required check with a conditionally
-    # skipped job, which would fail open, so this job runs on always() and asserts
-    # results explicitly (result == 'success', never != 'failure': a cancelled or
-    # skipped live leg must block the merge, not slip past it).
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Assert live legs ran and passed
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() }}
         env:
-          DETECT: ${{ needs.detect.result }}
-          RELEVANT: ${{ needs.detect.outputs.relevant }}
-          PLAN: ${{ needs.plan.result }}
-          GCP: ${{ needs.gcp-smoke.result }}
-          AWS: ${{ needs.aws-smoke.result }}
-          API: ${{ needs.api-smoke.result }}
+          LEG: ${{ matrix.leg }}
+          ACTUAL_TOTAL: ${{ strategy.job-total }}
+          EXPECTED_TOTAL: "2"
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
         run: |
-          if [ "$DETECT" != "success" ]; then
-            echo "::error::detect did not succeed (result: $DETECT)" >&2
+          if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
+            echo "::error::api-key-release realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"
             exit 1
           fi
-          if [ "$RELEVANT" != "true" ]; then
-            echo "not a release-please PR or dispatch; nothing to gate"
-            exit 0
+          if [ "$SMOKE_OUTCOME" != success ]; then
+            echo "::error::leg $LEG smoke outcome=$SMOKE_OUTCOME"
+            exit 1
           fi
-          rc=0
-          [ "$PLAN" = "success" ] || { echo "::error::plan result: $PLAN" >&2; rc=1; }
-          [ "$GCP" = "success" ] || { echo "::error::gcp-smoke result: $GCP" >&2; rc=1; }
-          [ "$AWS" = "success" ] || { echo "::error::aws-smoke result: $AWS" >&2; rc=1; }
-          [ "$API" = "success" ] || { echo "::error::api-smoke result: $API" >&2; rc=1; }
-          exit $rc
+          case "$LEG" in
+          openai-tools) key=proof_openai_tools ;;
+          anthropic-tools) key=proof_anthropic_tools ;;
+          *) echo "::error::leg $LEG is not in the api-key allowlist"; exit 1 ;;
+          esac
+          printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
+
+  # ---- api-key family, manual path -----------------------------------------
+  # Identical to api-key-release except for the mode condition and the environment. The
+  # reviewer gate on llm-api-keys stands between an ad-hoc dispatch and the live keys.
+  # The roster golden asserts the two jobs carry identical legs, so they cannot drift.
+  api-key-manual:
+    name: Live LLM / ${{ matrix.leg }}
+    needs: prepare
+    if: >-
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.mode == 'manual'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: llm-api-keys
+    permissions:
+      contents: read
+    outputs:
+      proof_openai_tools: ${{ steps.sentinel.outputs.proof_openai_tools }}
+      proof_anthropic_tools: ${{ steps.sentinel.outputs.proof_anthropic_tools }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: openai-tools
+            family: api-key
+            suite: llm-tools-smoke
+            provider: openai
+            model_var: CYNATIVE_CLI_CI_OPENAI_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_OPENAI_MODEL }}
+          - leg: anthropic-tools
+            family: api-key
+            suite: llm-tools-smoke
+            provider: anthropic
+            model_var: CYNATIVE_CLI_CI_ANTHROPIC_MODEL
+            model: ${{ vars.CYNATIVE_CLI_CI_ANTHROPIC_MODEL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
+            exit 1
+          fi
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Preflight the required repo variables
+        env:
+          MODEL: ${{ matrix.model }}
+          MODEL_VAR: ${{ matrix.model_var }}
+        run: |
+          if [ -z "${MODEL}" ]; then
+            echo "::error::missing repo variable: ${MODEL_VAR}"
+            exit 1
+          fi
+      - name: Run the smoke
+        id: smoke
+        env:
+          CYNATIVE_LLM_PROVIDER: ${{ matrix.provider }}
+          CYNATIVE_LLM_MODEL: ${{ matrix.model }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMOKE_REQUIRE_RUN: "1"
+          SUITE: ${{ matrix.suite }}
+          ENVIRONMENT_NAME: llm-api-keys
+        run: |
+          case "$CYNATIVE_LLM_PROVIDER" in
+            openai) CYNATIVE_LLM_API_KEY="$OPENAI_API_KEY" ;;
+            anthropic) CYNATIVE_LLM_API_KEY="$ANTHROPIC_API_KEY" ;;
+            *) echo "::error::no API-key wiring for provider: $CYNATIVE_LLM_PROVIDER" >&2; exit 1 ;;
+          esac
+          if [ -z "$CYNATIVE_LLM_API_KEY" ]; then
+            echo "::error::the $CYNATIVE_LLM_PROVIDER API-key secret is empty or unset; provision it in the $ENVIRONMENT_NAME environment." >&2
+            exit 1
+          fi
+          export CYNATIVE_LLM_API_KEY
+          unset OPENAI_API_KEY ANTHROPIC_API_KEY
+          case "$SUITE" in
+            llm-smoke)       export SMOKE_REQUIRE_NO_CONNECTORS=1; exec make llm-smoke ;;
+            llm-tools-smoke) unset SMOKE_REQUIRE_NO_CONNECTORS;    exec make llm-tools-smoke ;;
+            *) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;
+          esac
+      - name: Assert the leg really ran
+        id: sentinel
+        if: ${{ always() }}
+        env:
+          LEG: ${{ matrix.leg }}
+          ACTUAL_TOTAL: ${{ strategy.job-total }}
+          EXPECTED_TOTAL: "2"
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+        run: |
+          if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
+            echo "::error::api-key-manual realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"
+            exit 1
+          fi
+          if [ "$SMOKE_OUTCOME" != success ]; then
+            echo "::error::leg $LEG smoke outcome=$SMOKE_OUTCOME"
+            exit 1
+          fi
+          case "$LEG" in
+          openai-tools) key=proof_openai_tools ;;
+          anthropic-tools) key=proof_anthropic_tools ;;
+          *) echo "::error::leg $LEG is not in the api-key allowlist"; exit 1 ;;
+          esac
+          printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
+
+  # ---- The gate's fail-closed assertion ------------------------------------
+  # The `if:` is bare always() with ZERO conjuncts. Any conjunct here would reintroduce
+  # the skip-is-success hole, so every path decision lives in the script where a wrong
+  # branch is exit 1 rather than a skipped job.
+  gate-assert:
+    name: Assert the gate actually ran
+    needs: [prepare, gcp-wif, aws-oidc, api-key-release, api-key-manual]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      gate_sha: ${{ steps.assert.outputs.gate_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A called workflow's checkout defaults to the CALLER's repo and commit, which
+          # would run a caller's copy of the script below. Pin to the repository and
+          # commit that define this workflow so the assertion is always ours.
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Every leg in the roster must have run and passed
+        id: assert
+        env:
+          SELECTOR: ""
+          MODE: ${{ needs.prepare.outputs.mode }}
+          ROSTER: vertex-notool:gcp-wif vertex-tools:gcp-wif bedrock-notool:aws-oidc bedrock-tools:aws-oidc openai-tools:api-key anthropic-tools:api-key
+          # job:family:policy. The two api-key jobs are mutually exclusive; whichever the
+          # mode does not select must report exactly skipped.
+          JOBS: gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always api-key-release:api-key:release api-key-manual:api-key:manual
+          # The actual dependency set this job waits on, so the script can catch a job
+          # that was added to needs but never added to JOBS (or vice versa).
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          RESULTS: |
+            gcp-wif=${{ needs.gcp-wif.result }}
+            aws-oidc=${{ needs.aws-oidc.result }}
+            api-key-release=${{ needs.api-key-release.result }}
+            api-key-manual=${{ needs.api-key-manual.result }}
+          # Job-qualified (job.leg), and BOTH api-key jobs are listed unconditionally. The
+          # script selects the proof belonging to whichever job the validated MODE says is
+          # active. Do NOT collapse these with `a.outputs.x || b.outputs.x`: that is
+          # "whichever happens to be non-empty", which would let a proof from the wrong
+          # path satisfy the leg.
+          PROOFS: |
+            gcp-wif.vertex-notool=${{ needs.gcp-wif.outputs.proof_vertex_notool }}
+            gcp-wif.vertex-tools=${{ needs.gcp-wif.outputs.proof_vertex_tools }}
+            aws-oidc.bedrock-notool=${{ needs.aws-oidc.outputs.proof_bedrock_notool }}
+            aws-oidc.bedrock-tools=${{ needs.aws-oidc.outputs.proof_bedrock_tools }}
+            api-key-release.openai-tools=${{ needs.api-key-release.outputs.proof_openai_tools }}
+            api-key-release.anthropic-tools=${{ needs.api-key-release.outputs.proof_anthropic_tools }}
+            api-key-manual.openai-tools=${{ needs.api-key-manual.outputs.proof_openai_tools }}
+            api-key-manual.anthropic-tools=${{ needs.api-key-manual.outputs.proof_anthropic_tools }}
+          CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          sh scripts/ci/ci-gate-assert.sh &&
+            # Emitted only on the success path. publish requires this to equal the SHA it
+            # asked for, so removing or skipping this job yields an empty proof and blocks
+            # the release rather than waving it through. Joined with && (not relying on
+            # the default shell's -e) so this provably never runs when the assert fails.
+            printf 'gate_sha=%s\n' "$CHECKOUT_SHA" >>"$GITHUB_OUTPUT"
