@@ -114,12 +114,30 @@ for triple in $JOBS; do
 	rest=${triple#*:}
 	family=${rest%%:*}
 	policy=${rest##*:}
+	# Exact-reconstruction arity check: with four or more fields the three extractions
+	# above no longer cover the whole token, and an empty field survives
+	# reconstruction, so both are rejected explicitly rather than trusting the parse.
+	if [ "$job:$family:$policy" != "$triple" ] ||
+		[ -z "$job" ] || [ -z "$family" ] || [ -z "$policy" ]; then
+		fail "JOBS entry '$triple' is not job:family:policy"
+		continue
+	fi
 	case "$policy" in
 	always | release | manual) ;;
 	*) fail "job '$job' has unknown policy '$policy'" ;;
 	esac
 	contains_word "$all_jobs" "$job" && fail "job '$job' is listed twice in JOBS"
 	all_jobs="$all_jobs $job"
+done
+
+# ROSTER entries have the same silent-swallow hazard as JOBS triples: leg takes the
+# first field and family the last, so a middle field or an empty half vanishes.
+for pair in $ROSTER; do
+	leg=${pair%%:*}
+	family=${pair##*:}
+	if [ "$leg:$family" != "$pair" ] || [ -z "$leg" ] || [ -z "$family" ]; then
+		fail "ROSTER entry '$pair' is not leg:family"
+	fi
 done
 
 # active_job_for FAMILY - echo the sole job active in this mode, or return 1.
@@ -219,7 +237,6 @@ done
 for triple in $JOBS; do
 	job=${triple%%:*}
 	rest=${triple#*:}
-	family=${rest%%:*}
 	policy=${rest##*:}
 	[ "$policy" = always ] || [ "$policy" = "$MODE" ] && continue
 	if result=$(lookup "$RESULTS" "$job"); then

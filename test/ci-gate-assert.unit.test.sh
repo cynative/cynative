@@ -154,6 +154,29 @@ case_ 1 "a job listed under two families in JOBS fails" "" "$ALL_OK" "$ALL_PROOF
 	'gcp-wif:gcp-wif:always gcp-wif:aws-oidc:always github-app:github-app:always' \
 	release "is listed twice in JOBS"
 
+# ---- entry arity: a malformed token must never silently drop a field --------
+# Four fields parse as job=gcp-wif, family=gcp-wif, policy=always today, silently
+# swallowing "bogus"; without the guard this case is all green.
+case_ 1 "a JOBS entry with a stowaway fourth field fails" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" "$NEEDS_JSON_DEFAULT" \
+	'gcp-wif:gcp-wif:bogus:always aws-oidc:aws-oidc:always github-app:github-app:always' \
+	release "is not job:family:policy"
+
+# An empty field survives the exact-reconstruction check, so it needs its own guard.
+case_ 1 "a JOBS entry with an empty family fails" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" "$NEEDS_JSON_DEFAULT" \
+	'gcp-wif::always aws-oidc:aws-oidc:always github-app:github-app:always' \
+	release "is not job:family:policy"
+
+# leg takes the first field and family the last, so a middle field vanishes today.
+case_ 1 "a ROSTER entry with a stowaway middle field fails" "" "$ALL_OK" "$ALL_PROOF" \
+	'gcp:bogus:gcp-wif aws:aws-oidc github:github-app' "$NEEDS_JSON_DEFAULT" "$JOBS" \
+	release "is not leg:family"
+
+case_ 1 "a ROSTER entry with an empty family fails" "" "$ALL_OK" "$ALL_PROOF" \
+	'gcp: aws:aws-oidc github:github-app' "$NEEDS_JSON_DEFAULT" "$JOBS" \
+	release "is not leg:family"
+
 # A job name containing a shell glob character must match only its own literal line in
 # lookup(), never wildcard onto an unrelated one. JOBS/ROSTER/needs all declare the same
 # metacharacter-bearing family so the job reaches lookup() at all (a mismatched shape
