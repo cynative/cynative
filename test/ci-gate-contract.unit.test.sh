@@ -1,7 +1,6 @@
 #!/bin/sh
 # Unit tests for scripts/ci/ci-gate-contract.sh, the invocation contract shared by the
-# consolidated connector e2e gate and any other gate built on the same contract. Offline
-# and hermetic.
+# consolidated connector e2e gate and the live LLM gate. Offline and hermetic.
 #
 # The contract is what stops a caller weakening the release gate: every workflow_call is
 # the full gate, so a call that tries to narrow the roster must be rejected outright.
@@ -74,6 +73,34 @@ run_dispatch() {
 		export REPOSITORY EXPECTED_REPOSITORY EVENT CALLER_WORKFLOW_REF \
 			JOB_WORKFLOW_REF EXPECTED_CALLER SELECTORS DISPATCH_POLICY TRIGGER_SHA \
 			CALL_REF SELECTOR
+		sh "$script"
+	)
+}
+
+# run_dispatch_unset_policy - the dispatch shape with DISPATCH_POLICY truly UNSET (not
+# merely empty). The wrappers above default it via ${DISPATCH_POLICY-filtered}, so no
+# wrapper-driven case can ever exercise unset; this composes the env by hand and
+# unsets the variable immediately before the script runs. The script's own
+# ${DISPATCH_POLICY:-} resolves unset to empty, which the policy case rejects like
+# any other unknown value.
+run_dispatch_unset_policy() {
+	(
+		REPOSITORY=cynative/cynative
+		EXPECTED_REPOSITORY=cynative/cynative
+		EVENT=workflow_dispatch
+		CALLER_WORKFLOW_REF=$SELF
+		JOB_WORKFLOW_REF=$SELF
+		EXPECTED_CALLER=$CALLER
+		# shellcheck disable=SC2030  # intentional, see run_release above: this
+		# subshell-local assignment composes the isolated env for this one
+		# invocation and is never meant to propagate back to the caller.
+		SELECTORS='gcp aws github'
+		TRIGGER_SHA=$SHA
+		CALL_REF=
+		SELECTOR=gcp
+		export REPOSITORY EXPECTED_REPOSITORY EVENT CALLER_WORKFLOW_REF \
+			JOB_WORKFLOW_REF EXPECTED_CALLER SELECTORS TRIGGER_SHA CALL_REF SELECTOR
+		unset DISPATCH_POLICY
 		sh "$script"
 	)
 }
@@ -202,6 +229,8 @@ expect_status 1 'unknown DISPATCH_POLICY is rejected' run_dispatch gcp
 
 DISPATCH_POLICY=''
 expect_status 1 'empty DISPATCH_POLICY is rejected' run_dispatch gcp
+
+expect_status 1 'an unset DISPATCH_POLICY is rejected' run_dispatch_unset_policy
 
 # A workflow_call may never carry a selector under EITHER policy.
 DISPATCH_POLICY=filtered
