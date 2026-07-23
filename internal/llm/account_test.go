@@ -67,6 +67,10 @@ func TestFileAccount_GetConfigForProvider_Default(t *testing.T) {
 	}
 	if cfg == nil {
 		t.Fatal("expected non-nil ProviderConfig")
+		// Unreachable (t.Fatal ends the test), but it keeps the nil branch from
+		// flowing into the dereference below, which SA5011 otherwise reads as an
+		// unguarded deref. Do not drop it.
+		return
 	}
 	if cfg.NetworkConfig.DefaultRequestTimeoutInSeconds != 300 {
 		t.Errorf(
