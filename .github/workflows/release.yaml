@@ -31,8 +31,8 @@ jobs:
     # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10) plus
     # every short step with slack to spare, so the job limit can never fire
     # mid-step. Publish and its verification live in the downstream publish
-    # job, gated on the pre-publish smoke jobs (macos-pkg-smoke,
-    # archive-smoke).
+    # job, gated on the pre-publish gates (macos-pkg-smoke, archive-smoke,
+    # connector-e2e, llm-smoke).
     timeout-minutes: 90
     steps:
       # The App must grant contents: write (tag + release), pull-requests:
@@ -75,9 +75,9 @@ jobs:
       #     gh api repos/cynative/cynative/issues/<pr>/labels \
       #       -f "labels[]=autorelease: pending"
       #   Then re-run the workflow; release-please recreates the draft. The
-      #   pre-publish gate spans the release job, the smoke jobs
-      #   (macos-pkg-smoke, archive-smoke), and the publish job; a failure in
-      #   any of them, up to and including the publish
+      #   pre-publish gate spans the release job, the smoke and e2e gates
+      #   (macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke), and the
+      #   publish job; a failure in any of them, up to and including the publish
       #   job's re-assertions, leaves the draft intact and these notes apply.
       #   "Publish release" refuses to run while the repo's immutable-releases
       #   setting is disabled (the draft stays intact). If "Verify published
@@ -521,6 +521,35 @@ jobs:
       contents: read
       id-token: write
 
+  # ---- Pre-publish live LLM gate ---------------------------------------
+  # The live LLM smoke against the real Vertex, Bedrock, OpenAI, and Anthropic providers,
+  # between the draft build and publish: a release whose model path cannot authenticate,
+  # cannot answer, or cannot drive the tool loop fails here while the release is still an
+  # editable draft (recovery notes above apply unchanged).
+  #
+  # Like connector-e2e this exercises the SOURCE at the release SHA, not the built
+  # artifacts, so it needs no release-artifacts hand-off and runs in parallel with the
+  # install smokes. It does need OIDC for the Vertex and Bedrock legs, and a reusable
+  # workflow can never exceed its caller's token grant, so this job raises the ceiling to
+  # id-token: write.
+  #
+  # There is no filter input to pass. Every workflow_call IS the full gate: the callee's
+  # contract job rejects a call that tries to narrow the roster, and its gate-assert job
+  # hard-fails unless every leg actually ran and passed. That matters because GitHub
+  # surfaces a conditionally skipped job as Success to its caller, so the `== 'success'`
+  # check below would otherwise be satisfied by a gate that tested nothing. The gate_sha
+  # check is the second half: an absent or skipped fan-in returns an empty proof.
+  llm-smoke:
+    name: Live LLM smoke
+    needs: release
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/llm-smoke.yaml
+    with:
+      ref: ${{ needs.release.outputs.sha }}
+    permissions:
+      contents: read
+      id-token: write
+
   # ---- Publish: the instant of immutability ----------------------------
   # Runs only on release runs, once every pre-publish gate has SUCCEEDED.
   # Everything before this job's "Publish release" step still runs against
@@ -534,8 +563,8 @@ jobs:
   # nothing more (cynative#140).
   publish:
     name: Publish release
-    needs: [release, macos-pkg-smoke, archive-smoke, connector-e2e]
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-e2e.result == 'success' && needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha }}
+    needs: [release, macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke]
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-e2e.result == 'success' && needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha && needs.llm-smoke.result == 'success' && needs.llm-smoke.outputs.gate_sha == needs.release.outputs.sha }}
     runs-on: ubuntu-latest
     # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
     # plus every short step with slack, so the job limit can never fire
@@ -707,8 +736,8 @@ jobs:
           skip-github-release: true
 
   # Post-publish public-channel checks. Failure semantics, shared by the
-  # channel smoke jobs: a red `release`, `macos-pkg-smoke`, or
-  # `archive-smoke` job, or a red `publish`
+  # channel smoke jobs: a red `release`, `macos-pkg-smoke`,
+  # `archive-smoke`, `connector-e2e`, or `llm-smoke` job, or a red `publish`
   # job that failed BEFORE its "Publish release" step, means the release
   # needs recovery with the draft intact (see the recovery notes above); a
   # red `publish` job AFTER that step means the release is already live and
