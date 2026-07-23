@@ -166,7 +166,29 @@ sh-test:
 			exit 1; \
 		fi; \
 	done
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + connector-e2e trusted-caller pin check)"
+	@# The publish gate's compound if is the sole consumer of the two gate proofs; a
+	@# term dropped there (or a gate_sha comparison edited away) would let a red or
+	@# absent gate publish anyway, and nothing else would notice before a live
+	@# release. Scoped to the publish job's own if: line, never a whole-file grep,
+	@# which a comment or a dead job could satisfy.
+	@publish_if=$$(awk '/^  publish:$$/{injob=1} injob && /^    if: /{print; exit}' .github/workflows/release.yaml); \
+	if [ -z "$$publish_if" ]; then \
+		echo "FAIL: could not locate the publish job's if: line in release.yaml - the publish-gate pin has nothing to check."; \
+		exit 1; \
+	fi; \
+	for term in \
+		"needs.connector-e2e.result == 'success'" \
+		"needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha" \
+		"needs.llm-smoke.result == 'success'" \
+		"needs.llm-smoke.outputs.gate_sha == needs.release.outputs.sha" \
+		"needs.release.outputs.sha != ''" \
+	; do \
+		case "$$publish_if" in \
+		*"$$term"*) ;; \
+		*) echo "FAIL: the publish gate in release.yaml is missing the required term [$$term]."; exit 1 ;; \
+		esac; \
+	done
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
 
