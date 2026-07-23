@@ -667,8 +667,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   it skips). Direct pushes to `main` are **blocked** by an active GitHub **ruleset** (squash-only
   merges, linear history, required review-thread resolution, no human bypass) whose required
   status checks, under a strict up-to-date policy, are **`Lint & Test`**, **`Validate PR title`**
-  (`semantic-pr.yaml`), **`Build & smoke-test macOS packaging toolchain`** (`pkg-tools.yaml`),
-  and **`Live LLM gate`** (`llm-smoke.yaml`); the ruleset also runs Copilot code review on each
+  (`semantic-pr.yaml`), and **`Build & smoke-test macOS packaging toolchain`**
+  (`pkg-tools.yaml`); the ruleset also runs Copilot code review on each
   push. The pre-commit hook runs the fast hermetic `make check-go`, a local mirror of the Go half
   of the gate, not the enforcement boundary.
 - `.github/workflows/install-e2e.yaml` exercises the real installer against the goreleaser
@@ -679,23 +679,27 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `install.ps1` floor), hermetic via a stubbed `gh` and a loopback fixture server. None is a
   required status check, so they gate release-please PRs and on-demand runs, never normal
   merges.
-- `.github/workflows/llm-smoke.yaml` runs the live LLM smoke against real providers for release
-  confidence, driven by the checked-in manifest `.github/live-llm-manifest.json`: each enabled row
-  (a provider x suite pair, carrying the model variable, required-or-optional, and auth family)
-  becomes one matrix job, so adding or disabling a row for an already-wired provider is a manifest
-  edit, not a workflow change (a new provider also needs its family's credential wiring). A `plan`
-  job splits the manifest into per-family matrices; a `gcp-smoke` job (Vertex via Workload Identity
-  Federation), an `aws-smoke` job (Bedrock via GitHub OIDC under a static `environment: aws-ci`),
-  and an `api-smoke` job (direct OpenAI/Anthropic via API-key secrets held behind the
-  reviewer-protected `environment: llm-api-keys`; contents-read only, no id-token, in-shell secret
-  selection) consume them. Same `detect` gating and fork-trust boundary as `install-e2e.yaml`, and
-  `internal/llm/livellm_manifest_test.go` validates the manifest fail-closed under `Lint & Test`,
-  so a malformed row blocks merge. A new auth family is the one case that adds a job. The `Live LLM
-  gate` summary job is a required status check (added to the ruleset post-merge): it asserts every
-  live leg's result is exactly `success` when the detect gate fired, so a release-please PR cannot
-  merge with a red, cancelled, or unapproved-and-expired live run, while non-release PRs pass
-  trivially because everything skips. The matrix legs themselves stay unpinned (their names change
-  with the manifest).
+- `.github/workflows/llm-smoke.yaml` runs the live LLM smoke against real providers as a
+  PRE-PUBLISH RELEASE GATE, not on pull requests. Two entry points: `workflow_call` (the
+  Release Pipeline, with `ref: <release SHA>`) and `workflow_dispatch` for maintainers.
+  There is deliberately no filter input, so every invocation is the full roster and a
+  caller cannot weaken the gate. Six legs across three credential families, as static
+  `strategy.matrix.include` rows: `gcp-wif` (Vertex via Workload Identity Federation,
+  no-tool + tools), `aws-oidc` (Bedrock via GitHub OIDC under a static
+  `environment: aws-ci`, no-tool + tools), and the api-key family (direct OpenAI and
+  Anthropic, tools). The api-key family is TWO mutually exclusive jobs because
+  `environment:` must stay a static literal: `api-key-release` uses the un-reviewed
+  `llm-api-keys-release` (so a release cannot pend up to 30 days on an approval while
+  holding the `release-pipeline` concurrency group with an unpublished draft), and
+  `api-key-manual` uses the reviewer-gated `llm-api-keys` for ad-hoc dispatches. The two
+  no-tool legs are the connector-dark tripwire that keeps WIF/OIDC credentials out of the
+  ambient environment; that assertion exists ONLY in the no-tool suite, so
+  `SMOKE_REQUIRE_NO_CONNECTORS` is derived from the suite inside the run step rather than
+  carried as a matrix key, and `SMOKE_REQUIRE_RUN` is a hardcoded `"1"` with no optional
+  legs. `test/llm-smoke-roster.unit.test.sh` pins the canonical six-leg roster as a
+  golden under `make sh-test`, replacing the deleted JSON manifest and its Go validator:
+  it pins each leg's full id/family/suite/provider/model-variable tuple, because ids
+  alone would let a leg silently change suite or provider while staying green.
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. Dependency bumps use the `deps:` type
@@ -719,9 +723,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   Linux, PE machine arch on Windows, exact `--version`); the `connector-e2e` job calls
   `.github/workflows/connector-e2e.yaml` (`workflow_call` with `ref: <release SHA>`) against the
   real GCP, AWS, and GitHub fixture accounts, so a release whose connector cannot authenticate,
-  cannot read, or **fails to deny a write** cannot publish. One workflow now covers what used to
-  be three separate per-connector reusable workflows; it still receives the fixture App's private
-  key through a declared `workflow_call` secret (never `secrets: inherit`). It exercises the
+  cannot read, or **fails to deny a write** cannot publish. The `llm-smoke` job calls
+  `.github/workflows/llm-smoke.yaml` the same way (`workflow_call` with `ref: <release SHA>`,
+  ceiling raised to `id-token: write`), so a release whose model path cannot authenticate,
+  answer, or drive the tool loop cannot publish. `publish` gates on both gates the same way: an
+  exact `== 'success'` result AND an `outputs.gate_sha` equal to the release SHA, because a
+  result check alone is satisfied by a gate that tested nothing. One workflow now covers what
+  used to be three separate per-connector reusable workflows; it still receives the fixture App's
+  private key through a declared `workflow_call` secret (never `secrets: inherit`). It exercises the
   source at the **release** SHA, not the triggering SHA (release-please re-derives its work from
   repository state, so the two can diverge, and a gate that tested the wrong commit would be
   worthless) and not the built artifacts, so it needs no `release-artifacts` hand-off and runs in
@@ -738,7 +747,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   still unpublished. There is also deliberately no `gate:` input: the old per-suite workflows took
   one, and a caller passing `gate: false` got a green result from a run that tested nothing. Every
   `workflow_call` IS the full gate now, and the contract script
-  (`scripts/ci/connector-e2e-contract.sh`) rejects a call that carries a connector filter, so
+  (`scripts/ci/ci-gate-contract.sh`) rejects a call that carries a connector filter, so
   narrowing the roster exists only on the manual-dispatch side. Because a called workflow sees the
   *caller's* event (`push` on the release path), `github.event_name` cannot identify the release
   call; the discriminator is structural instead: `github.workflow_ref` names the caller's workflow
@@ -758,10 +767,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `== 'success'` term for the whole `connector-e2e` job plus a `gate_sha` equality check, so a
   fan-in that is removed, skipped, or short one connector returns an empty proof and blocks the
   release rather than waving it through. The fail-closed logic, the invocation contract and the
-  roster assertion, lives in `scripts/ci/connector-e2e-contract.sh` and
-  `scripts/ci/connector-e2e-gate-assert.sh`, each with offline unit tests gated by `make sh-test`,
-  so it is exercised on every PR rather than only on a live release run; `make sh-test` also
-  asserts the trusted-caller pin in `connector-e2e.yaml` directly. The
+  roster assertion, lives in `scripts/ci/ci-gate-contract.sh` and `scripts/ci/ci-gate-assert.sh`,
+  each with offline unit tests gated by `make sh-test`, so it is exercised on every PR rather
+  than only on a live release run; `make sh-test` also asserts the trusted-caller pin in
+  `connector-e2e.yaml` directly. Both scripts are now shared with the LLM gate: the connector
+  gate passes `DISPATCH_POLICY: filtered` (a dispatch must carry a selector from an allowlist),
+  while the LLM gate passes `full-only` (a dispatch must not carry one). The
   `publish` job re-asserts the
   still-editable draft (same id,
   same exact asset set) immediately before publishing, then verifies and pushes the tap; a
