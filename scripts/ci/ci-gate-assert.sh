@@ -206,9 +206,11 @@ if [ "$needs_parse_ok" -eq 1 ]; then
 fi
 
 # ---- family coupling ------------------------------------------------------
-# Every family named in JOBS must be gated by at least one ROSTER leg, and every family
-# a ROSTER leg names must have a job in JOBS. Together with the JOBS/needs comparison
-# above, this leaves no job that is real but ungated.
+# The load-bearing direction is JOBS -> ROSTER: a family with jobs but no ROSTER leg
+# is never examined by the per-leg loop, so together with the JOBS/needs comparison
+# above this is what leaves no job that is real but ungated. The reverse direction (a
+# ROSTER family with no job in JOBS) would also surface later, per leg, via
+# active_job_for; checking it here just fails earlier with a clearer message.
 roster_families=
 for pair in $ROSTER; do
 	family=${pair##*:}
@@ -247,12 +249,18 @@ for triple in $JOBS; do
 	fi
 done
 
+selector_matched=0
 for pair in $ROSTER; do
 	leg=${pair%%:*}
 	family=${pair##*:}
 
 	if [ -z "$SELECTOR" ] || [ "$SELECTOR" = "$leg" ]; then
 		selected=1
+		# Exact-equality match only: an empty SELECTOR selects every leg without
+		# "matching" any, and must not satisfy the roster-membership check below.
+		if [ "$SELECTOR" = "$leg" ]; then
+			selector_matched=1
+		fi
 	else
 		selected=0
 	fi
@@ -303,6 +311,14 @@ for pair in $ROSTER; do
 			fail "leg $leg was excluded by the filter but produced a proof, so the filter leaked"
 	fi
 done
+
+# A non-empty selector passed the contract's allowlist, but the allowlist and the
+# roster are maintained separately: a selector no leg carries would leave every leg
+# "excluded", every job legitimately skipped, and the gate green having tested
+# nothing.
+if [ -n "$SELECTOR" ] && [ "$selector_matched" -eq 0 ]; then
+	fail "selector '$SELECTOR' matches no roster leg, so nothing was gated"
+fi
 
 [ "$fails" = 0 ] || exit 1
 

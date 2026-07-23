@@ -130,6 +130,17 @@ github-app=skipped' 'gcp-wif.gcp=
 aws-oidc.aws=
 github-app.github='
 
+# A selector that names no roster leg must fail closed. Every leg is "excluded",
+# every job legitimately skipped, and today the script exits 0 while claiming the
+# selected leg ran; allowlist/roster drift on a filtered dispatch would go green
+# while testing nothing.
+case_ 1 "a selector naming no roster leg fails closed" ghost 'gcp-wif=skipped
+aws-oidc=skipped
+github-app=skipped' 'gcp-wif.gcp=
+aws-oidc.aws=
+github-app.github=' "$ROSTER" "$NEEDS_JSON_DEFAULT" "$JOBS" manual \
+	"matches no roster leg"
+
 # ---- duplicate-key and metacharacter safety --------------------------------
 # A script whose whole purpose is fail-closed must not agree with a result it only
 # partly read. A duplicate key must be a hard failure, not a silent first-match. Both
