@@ -1,22 +1,27 @@
 #!/bin/sh
-# Unit tests for the live LLM gate's leg roster. Offline and hermetic.
+# Unit tests for the live LLM gate's static contract in llm-smoke.yaml. Offline and
+# hermetic. Three layers, all anchored to the one canonical roster below:
 #
-# This replaces internal/llm/livellm_manifest_test.go, which validated the deleted JSON
-# manifest under `Lint & Test`. A static matrix has no schema, so without this the first
-# time a bad roster is noticed is a release run.
+#   1. The matrix rows: each physical row's full job/leg/family/suite/provider/
+#      model-variable tuple, plus release/manual parity for the api-key jobs.
+#   2. The gate-assert fan-in: the ROSTER/JOBS/PROOFS literals are derived from the
+#      canonical rows plus the job->policy map and compared as sorted multisets, so a
+#      leg dropped from the fan-in (invisible to the runtime checks: the remaining
+#      legs still pass) fails here instead of going silently ungated.
+#   3. The smoke steps' operational seam: SUITE/provider/model must be consumed from
+#      the matrix and the canonical suite dispatcher must be present, so a row field
+#      cannot degrade into an unused label and the connector-dark tripwire cannot be
+#      disabled while the rows stay green.
 #
 # It is deliberately a GOLDEN, not a relational check. Comparing the workflow's matrix
-# rows against the workflow's own ROSTER string would pass if a whole family were deleted
-# from both, and the remaining legs would still emit gate_sha. The canonical roster below
-# is the independent anchor.
+# rows against the workflow's own ROSTER string would pass if a whole family were
+# deleted from both. The canonical roster is the independent anchor; the policy map is
+# part of that anchor (policies are not derivable from the matrix).
 #
-# It pins each row's full tuple INCLUDING its owning job, not just the leg id: flipping
-# vertex-notool to the tools suite keeps its id, family, live success, and proof while
-# silently dropping the connector-dark tripwire, and repointing openai-tools at Anthropic
-# yields two Anthropic calls, zero OpenAI calls, and a green gate. Job attribution is
-# what makes the release/manual parity check real: without it, two OpenAI rows in one API
-# job and two Anthropic rows in the other satisfy an aggregate multiset while violating
-# parity outright.
+# Rows pin the full tuple INCLUDING the owning job: flipping vertex-notool to the
+# tools suite keeps its id/family/proof while dropping the connector-dark tripwire,
+# and repointing openai-tools at Anthropic yields two Anthropic calls and a green
+# gate. Job attribution is what makes the release/manual parity check real.
 set -eu
 
 workflow=.github/workflows/llm-smoke.yaml
@@ -229,6 +234,81 @@ if sorted(got_proofs) != want_proofs:
         % (sorted(got_proofs), want_proofs)
     )
 
+# ---- per-job smoke-step operational seam -----------------------------------
+# The rows pin what the matrix DECLARES; these pin what the smoke step CONSUMES. A
+# SUITE hardcoded to llm-tools-smoke would keep every row green while silently
+# disabling the connector-dark tripwire, and an unbound provider/model would reduce
+# canonical row fields to unused labels.
+SMOKE_ENV_PINS = {
+    "SMOKE_REQUIRE_RUN": '"1"',
+    "SUITE": "${{ matrix.suite }}",
+    "CYNATIVE_LLM_PROVIDER": "${{ matrix.provider }}",
+    "CYNATIVE_LLM_MODEL": "${{ matrix.model }}",
+}
+DISPATCHER = [
+    'case "$SUITE" in',
+    'llm-smoke) export SMOKE_REQUIRE_NO_CONNECTORS=1; exec make llm-smoke ;;',
+    'llm-tools-smoke) unset SMOKE_REQUIRE_NO_CONNECTORS; exec make llm-tools-smoke ;;',
+    '*) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;',
+    'esac',
+]
+
+def norm(line):
+    return " ".join(line.split())
+
+def check_smoke(jobname):
+    chunk = job_slice(jobname)
+    smoke = [i for i, l in enumerate(chunk) if norm(l) == "id: smoke"]
+    if len(smoke) != 1:
+        problems.append(
+            "job %s must have exactly one id: smoke step, found %d" % (jobname, len(smoke))
+        )
+        return
+    j = smoke[0]
+    while j < len(chunk) and norm(chunk[j]) != "env:":
+        j += 1
+    if j == len(chunk):
+        problems.append("job %s smoke step has no env block" % jobname)
+        return
+    env_indent = len(chunk[j]) - len(chunk[j].lstrip())
+    env = {}
+    j += 1
+    while j < len(chunk):
+        l = chunk[j]
+        if l.strip() and (len(l) - len(l.lstrip())) <= env_indent:
+            break
+        m = re.match(r"^\s*([A-Za-z0-9_]+):\s*(.*?)\s*$", l)
+        if m and not l.lstrip().startswith("#"):
+            if m.group(1) in env:
+                problems.append("job %s smoke env declares %s twice" % (jobname, m.group(1)))
+            env[m.group(1)] = m.group(2)
+        j += 1
+    for key, want in sorted(SMOKE_ENV_PINS.items()):
+        if env.get(key) != want:
+            problems.append(
+                "job %s smoke env %s is %r, want %r" % (jobname, key, env.get(key), want)
+            )
+    while j < len(chunk) and norm(chunk[j]) != "run: |":
+        j += 1
+    if j == len(chunk):
+        problems.append("job %s smoke step has no run block" % jobname)
+        return
+    run_indent = len(chunk[j]) - len(chunk[j].lstrip())
+    body = []
+    for l in chunk[j + 1:]:
+        if l.strip() and (len(l) - len(l.lstrip())) <= run_indent:
+            break
+        if l.strip():
+            body.append(norm(l))
+    for k in range(len(body) - len(DISPATCHER) + 1):
+        if body[k:k + len(DISPATCHER)] == DISPATCHER:
+            break
+    else:
+        problems.append("job %s smoke run block lacks the canonical suite dispatcher" % jobname)
+
+for jobname in canonical_jobs:
+    check_smoke(jobname)
+
 if declared != len(rows) or problems:
     for p in problems:
         sys.stderr.write("  %s\n" % p)
@@ -266,7 +346,7 @@ if ! cmp -s "$tmp/api_release" "$tmp/api_manual"; then
 fi
 
 if [ "$fails" = 0 ]; then
-	printf 'OK: llm-smoke-roster\n'
+	printf 'OK: llm-smoke-roster (rows + fan-in literals + smoke seam)\n'
 else
 	exit 1
 fi
