@@ -4,8 +4,9 @@
 #
 # Hermetic: no network, no credentials. Exercises the parser against the three
 # real Dependabot message shapes (prose, table, ungrouped), the fail-safe empty
-# outputs, idempotent body replacement, sanitization, and the MAX_BODY overflow
-# summary. Run by `make sh-test`.
+# outputs, idempotent body replacement, sanitization, the MAX_BODY overflow
+# summary, oversized-body truncation (#170), and distinct stderr skip reasons.
+# Run by `make sh-test`.
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -269,14 +270,40 @@ if (
 	exit 0
 ); then pass "MAX_BODY overflow collapses tail into summary"; else fail "overflow cap"; fi
 
-# ---- an oversized existing body leaves no room for even the first entry --------
+# ---- an oversized existing body is truncated so the override still fits --------
+# Regression for #170: Dependabot bodies at GitHub's 65536 ceiling used to leave
+# no room for even the first override entry, so the script exited empty and the
+# changelog fell back to the opaque group title.
 if (
-	awk 'BEGIN { for (i = 0; i < 20; i++) print "This existing PR body line pads out the body content." }' \
+	awk 'BEGIN { for (i = 0; i < 40; i++) print "This existing PR body line pads out the body content." }' \
 		> "$tmp/bigbody.txt"
-	out=$(MAX_BODY=100 "$render" render "$tmp/bigbody.txt" < "$tmp/prose.msg") || exit 1
-	[ -z "$out" ] || exit 1
+	out=$(MAX_BODY=500 "$render" render "$tmp/bigbody.txt" < "$tmp/prose.msg" 2>"$tmp/big.err") || exit 1
+	[ -n "$out" ] || exit 1
+	[ ! -s "$tmp/big.err" ] || exit 1
+	printf '%s\n' "$out" | grep -q '^BEGIN_COMMIT_OVERRIDE$' || exit 1
+	printf '%s\n' "$out" | grep -q '^deps: bump github.com/maximhq/bifrost/core from 1.7.1 to 1.7.2$' || exit 1
+	[ "$(printf '%s' "$out" | wc -c)" -le 500 ] || exit 1
+	# Body was truncated (full pad is well over 500 once the override is charged).
+	printf '%s\n' "$out" | grep -q 'This existing PR body line' || exit 1
 	exit 0
-); then pass "oversized existing body yields empty output"; else fail "oversized body"; fi
+); then pass "oversized existing body is truncated around the override"; else fail "oversized body"; fi
+
+# ---- override alone past MAX_BODY yields a distinct stderr skip reason ---------
+if (
+	out=$(MAX_BODY=20 "$render" render "$tmp/body.txt" < "$tmp/prose.msg" 2>"$tmp/tiny.err") || exit 1
+	[ -z "$out" ] || exit 1
+	grep -q '^skip: override exceeds body budget$' "$tmp/tiny.err" || exit 1
+	exit 0
+); then pass "override-only budget miss reports skip: override exceeds body budget"; else fail "budget skip reason"; fi
+
+# ---- no-metadata empty output reports a distinct stderr skip reason ------------
+if (
+	printf 'fix: a human commit\n\nNo dependabot fragment here.\n' > "$tmp/human2.msg"
+	out=$("$render" render "$tmp/body.txt" < "$tmp/human2.msg" 2>"$tmp/nometa.err") || exit 1
+	[ -z "$out" ] || exit 1
+	grep -q '^skip: no dependency metadata$' "$tmp/nometa.err" || exit 1
+	exit 0
+); then pass "no metadata reports skip: no dependency metadata"; else fail "no-metadata skip reason"; fi
 
 # ---- a final entry that fits is not collapsed into a summary -------------------
 cat > "$tmp/final.msg" <<'EOF'
