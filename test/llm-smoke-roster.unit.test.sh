@@ -54,7 +54,8 @@ python3 - "$workflow" "$tmp/expected" >"$tmp/actual" <<'PY'
 import re
 import sys
 
-lines = open(sys.argv[1]).read().splitlines()
+with open(sys.argv[1], encoding="utf-8") as workflow_file:
+    lines = workflow_file.read().splitlines()
 
 # Job headers sit at exactly two spaces of indentation, but only inside the top-level
 # `jobs:` block. `on:` has children (workflow_call, workflow_dispatch) at that same
@@ -136,9 +137,10 @@ policy_map = {
 }
 
 canonical = []
-for raw in open(sys.argv[2]).read().splitlines():
-    if raw.strip():
-        canonical.append(raw.split("|"))
+with open(sys.argv[2], encoding="utf-8") as canonical_file:
+    for raw in canonical_file.read().splitlines():
+        if raw.strip():
+            canonical.append(raw.split("|"))
 for parts in canonical:
     if len(parts) != 6:
         problems.append(
