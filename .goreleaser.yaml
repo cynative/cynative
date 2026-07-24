@@ -39,9 +39,6 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
-source:
-  enabled: true
-
 scoops:
   - repository:
       owner: cynative

@@ -87,6 +87,25 @@ if (
 	exit 0
 ); then pass "sha_for_checksums returns the unique digest, fails on missing/malformed/duplicate"; else fail "sha_for_checksums"; fi
 
+# ---- sha_for: exactly-one-row strictness (duplicate name) --------------------
+# Bash function (uses [[ =~ ]]); exercise it through a bash subprocess so this
+# POSIX-sh harness stays dialect-clean.
+shafn() { bash -c '. "$1"; sha_for "$2" "$3"' _ "$lib" "$1" "$2"; }
+
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	{
+		printf 'cynative_Windows_x86_64.zip\t%s\tdist/cynative_Windows_x86_64.zip\n' "$sha_a"
+		printf 'cynative_Windows_arm64.zip\t%s\tdist/cynative_Windows_arm64.zip\n' "$sha_b"
+	} > "$td/manifest.tsv"
+	[ "$(shafn "$td/manifest.tsv" cynative_Windows_x86_64.zip)" = "$sha_a" ] || exit 1  # unique -> value
+	# Append a duplicate x86_64 row -> fail (must not silently return the first match).
+	printf 'cynative_Windows_x86_64.zip\t%s\tdist/other.zip\n' "$sha_b" >> "$td/manifest.tsv"
+	if shafn "$td/manifest.tsv" cynative_Windows_x86_64.zip >/dev/null 2>&1; then exit 1; fi   # duplicate -> fail
+	exit 0
+); then pass "sha_for returns the unique digest, fails on a duplicate row"; else fail "sha_for duplicate row"; fi
+
 if [ "$fails" -ne 0 ]; then
 	printf 'render-scoop.unit: %d case(s) FAILED\n' "$fails" >&2
 	exit 1

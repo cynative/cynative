@@ -285,7 +285,7 @@ jobs:
           GH_TOKEN: ${{ steps.prepublish-token.outputs.token }}
           RELEASE_ID: ${{ steps.draft.outputs.release_id }}
         run: |
-          scripts/release/expected-assets.sh dist > /tmp/expected-assets.tsv
+          scripts/release/assert-assets.sh generate dist > /tmp/expected-assets.tsv
           cat /tmp/pkg-assets.tsv >> /tmp/expected-assets.tsv
           LC_ALL=C sort -o /tmp/expected-assets.tsv /tmp/expected-assets.tsv
           scripts/release/assert-assets.sh "${GITHUB_REPOSITORY}" "${RELEASE_ID}" /tmp/expected-assets.tsv

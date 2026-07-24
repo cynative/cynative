@@ -4,9 +4,33 @@
 # pre-publish (gate) and post-publish (authoritative re-check: the published
 # asset list is immutable, so the read cannot be raced).
 #
-# Usage: assert-assets.sh <owner/repo> <release-id> <manifest.tsv>
-#   manifest: LC_ALL=C-sorted TSV "name<TAB>sha256<TAB>path"   (requires GH_TOKEN)
+# Usage:
+#   assert-assets.sh generate <dist-dir>
+#     Print the expected release-asset manifest as sorted TSV
+#     "name<TAB>sha256<TAB>path", derived from goreleaser's dist/artifacts.json.
+#     Covers exactly what goreleaser uploads: archives and the checksums file.
+#     Columns 1-2 are the assertion key (assert mode below); column 3 is the
+#     local path the release job stages into the release-artifacts hand-off
+#     (downstream consumers never dereference it).
+#
+#   assert-assets.sh <owner/repo> <release-id> <manifest.tsv>
+#     manifest: LC_ALL=C-sorted TSV "name<TAB>sha256<TAB>path"   (requires GH_TOKEN)
 set -euo pipefail
+
+if [ "${1:-}" = "generate" ]; then
+  dist=$2
+
+  jq -r '.[]
+    | select(.type == "Archive" or .type == "Checksum")
+    | [.name, .path] | @tsv' "${dist}/artifacts.json" |
+    while IFS=$'\t' read -r name path; do
+      # Bare assignment so a sha256sum failure aborts the script (an argument
+      # substitution would swallow the exit status and emit an empty digest).
+      digest=$(sha256sum "${path}" | cut -d' ' -f1)
+      printf '%s\t%s\t%s\n' "${name}" "${digest}" "${path}"
+    done | LC_ALL=C sort
+  exit 0
+fi
 
 repo=$1
 release_id=$2
