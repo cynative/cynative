@@ -42,20 +42,18 @@ if [ ! -s "${manifest}" ]; then
 fi
 
 remote_file=$(mktemp)
-tmp_asset=$(mktemp)
-trap 'rm -f "${remote_file}" "${tmp_asset}"' EXIT
+trap 'rm -f "${remote_file}"' EXIT
 
 assets=$(gh api --paginate "repos/${repo}/releases/${release_id}/assets?per_page=100" |
-  jq -r '.[] | [.id, .name, (.digest // "null")] | @tsv')
+  jq -r '.[] | [.name, (.digest // "null")] | @tsv')
 
 if [ -n "${assets}" ]; then
-  while IFS=$'\t' read -r asset_id name digest; do
+  while IFS=$'\t' read -r name digest; do
     if [ "${digest}" = "null" ] || [ -z "${digest}" ]; then
-      # API returned no digest — download the asset and hash it ourselves.
-      gh api "repos/${repo}/releases/assets/${asset_id}" \
-        -H "Accept: application/octet-stream" > "${tmp_asset}"
-      hashed=$(sha256sum "${tmp_asset}" | cut -d' ' -f1)
-      digest="sha256:${hashed}"
+      # API returned no digest. Fail closed rather than downloading the asset
+      # body (potentially several hundred MB) to hash it ourselves.
+      echo "::error::release asset ${name} has no API digest; refusing to hash locally" >&2
+      exit 1
     fi
     printf '%s\t%s\n' "${name}" "${digest#sha256:}" >> "${remote_file}"
   done <<<"${assets}"

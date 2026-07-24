@@ -116,8 +116,10 @@ pwsh-test:
 # library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
 # orchestration unit tests (test/lib/connector-e2e.sh: arbitrate + connector_run_phase
 # + e2e_pin_audit_size), the per-package changelog override renderer unit tests
-# (test/dependabot-override.unit.test.sh), an AST syntax check of every file in the
-# shared connector audit-parser package (test/lib/connector-audit-parser.py,
+# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's
+# fail-closed-on-missing-digest unit tests (test/assert-assets.unit.test.sh), an AST
+# syntax check of every file in the shared connector audit-parser package
+# (test/lib/connector-audit-parser.py,
 # test/lib/connector_audit/*.py, and its specs/), all three connector suites' offline
 # audit-parser selftests (--selftest), and the shared-machinery selftest (the engine's
 # own cases run with no provider, including the #56 credential prepass detection
@@ -137,6 +139,7 @@ sh-test:
 	@sh test/connector-e2e.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
+	@sh test/assert-assets.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
@@ -196,7 +199,7 @@ sh-test:
 		*) echo "FAIL: the publish gate in release.yaml is missing the required term [$$term]."; exit 1 ;; \
 		esac; \
 	done
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
 
