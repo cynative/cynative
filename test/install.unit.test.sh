@@ -1,8 +1,10 @@
 #!/bin/sh
-# Unit tests for the install.sh URL-safety seam. Sources install.sh via the
-# CYNATIVE_TEST_SOURCE guard (no install runs, no network) and checks the pure
-# helpers. Mirrors the Pester Test-CynUrlAllowed / Resolve-CynBaseUrl blocks and
-# adds the IPv6 / 127.0.0.0/8 / spoof cases the POSIX parser must prove itself.
+# Unit tests for the install.sh URL-safety seam and attestation decision. Sources
+# install.sh via the CYNATIVE_TEST_SOURCE guard (no install runs, no network) and
+# checks the pure helpers. Mirrors the Pester Test-CynUrlAllowed / Resolve-CynBaseUrl
+# blocks and adds the IPv6 / 127.0.0.0/8 / spoof cases the POSIX parser must prove
+# itself, plus attestation_action, the POSIX counterpart of
+# Resolve-CynAttestationAction.
 set -u
 
 CYNATIVE_TEST_SOURCE=1
@@ -65,6 +67,16 @@ case "$msg" in
   *cynative-install:*"must be https"*) pass=$((pass + 1)) ;;
   *) fail=$((fail + 1)); printf 'FAIL reject message shape: %s\n' "$msg" >&2 ;;
 esac
+
+# attestation_action(gh_present, verify_result, require) -> verified|fail|warn|skip.
+# gh absent + required must fail closed (the bug this task fixes); gh absent +
+# not required stays a silent skip, matching install.ps1's Resolve-CynAttestationAction.
+eq 'gh absent, required -> fail'        'fail'     "$(attestation_action 0 '' 1)"
+eq 'gh absent, not required -> skip'    'skip'     "$(attestation_action 0 '' 0)"
+eq 'verify ok, required -> verified'    'verified' "$(attestation_action 1 ok 1)"
+eq 'verify ok, not required -> verified' 'verified' "$(attestation_action 1 ok 0)"
+eq 'verify fail, required -> fail'      'fail'     "$(attestation_action 1 fail 1)"
+eq 'verify fail, not required -> warn'  'warn'     "$(attestation_action 1 fail 0)"
 
 printf 'install.unit: %d passed, %d failed\n' "$pass" "$fail" >&2
 [ "$fail" -eq 0 ]

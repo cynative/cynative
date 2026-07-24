@@ -89,6 +89,19 @@ resolve_base_url() { # override repo version -> base url (stdout) | err
   printf 'https://github.com/%s/releases/download/%s' "$repo" "$version"
 }
 
+# --- Attestation decision (mirrors install.ps1's Resolve-CynAttestationAction). ---
+attestation_action() { # gh_present(0/1) verify_result(ok|anything-else) require(0/1) -> verified|fail|warn|skip
+  gh_present=$1; verify_result=$2; require=$3
+  if [ "$gh_present" = "0" ]; then
+    if [ "$require" = "1" ]; then printf 'fail\n'; else printf 'skip\n'; fi
+    return 0
+  fi
+  if [ "$verify_result" = "ok" ]; then printf 'verified\n'
+  elif [ "$require" = "1" ]; then printf 'fail\n'
+  else printf 'warn\n'
+  fi
+}
+
 main() {
   set -eu
 
@@ -140,15 +153,30 @@ main() {
   got=$(cd "$tmp" && sha256 "$ARCHIVE" | awk '{print $1}')
   [ "$matches" = "$got" ] || err "checksum mismatch: want ${matches} got ${got}"
 
+  gh_present=0
+  verify_result=""
   if command -v gh >/dev/null 2>&1; then
+    gh_present=1
     if gh release verify-asset "$VERSION" "$tmp/$ARCHIVE" --repo "$REPO" >/dev/null 2>&1; then
-      printf 'attestation verified\n' >&2
-    elif [ "${CYNATIVE_REQUIRE_ATTESTATION:-0}" = "1" ]; then
-      err "attestation verification failed (CYNATIVE_REQUIRE_ATTESTATION=1)"
+      verify_result=ok
     else
-      printf 'warning: attestation not verified (continuing)\n' >&2
+      verify_result=fail
     fi
   fi
+  require=0
+  [ "${CYNATIVE_REQUIRE_ATTESTATION:-0}" = "1" ] && require=1
+  case "$(attestation_action "$gh_present" "$verify_result" "$require")" in
+    verified) printf 'attestation verified\n' >&2 ;;
+    fail)
+      if [ "$gh_present" = "0" ]; then
+        err "CYNATIVE_REQUIRE_ATTESTATION=1 but gh is not installed"
+      else
+        err "attestation verification failed (CYNATIVE_REQUIRE_ATTESTATION=1)"
+      fi
+      ;;
+    warn) printf 'warning: attestation not verified (continuing)\n' >&2 ;;
+    skip) : ;;
+  esac
 
   tar -xzf "$tmp/$ARCHIVE" -C "$tmp" "$BINARY" || err "failed to extract ${BINARY}"
   [ -f "$tmp/$BINARY" ] || err "${BINARY} not found in archive"
