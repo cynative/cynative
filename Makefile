@@ -205,7 +205,18 @@ sh-test:
 		*) echo "FAIL: the publish gate in release.yaml is missing the required term [$$term]."; exit 1 ;; \
 		esac; \
 	done
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check)"
+	@# The api-key legs read exactly two secrets across the workflow_call boundary.
+	@# release.yaml forwards ONLY these two names (not secrets: inherit), so pin the
+	@# full set of secrets.<NAME> references in llm-smoke.yaml: a new one would widen
+	@# what the gate can read, and this fails closed if the sorted-unique set is ever
+	@# anything other than exactly ANTHROPIC_API_KEY + OPENAI_API_KEY.
+	@got=$$(grep -vE '^[[:space:]]*#' .github/workflows/llm-smoke.yaml | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | paste -sd' ' -); \
+	want="ANTHROPIC_API_KEY OPENAI_API_KEY"; \
+	if [ "$$got" != "$$want" ]; then \
+		echo "FAIL: llm-smoke.yaml secrets.* references are [$$got], expected exactly [$$want] - a new reference would widen the gate's secret access across workflow_call."; \
+		exit 1; \
+	fi
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 

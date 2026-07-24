@@ -555,6 +555,16 @@ jobs:
     uses: ./.github/workflows/llm-smoke.yaml
     with:
       ref: ${{ needs.release.outputs.sha }}
+    # These forward EMPTY from here (this job is not in the llm-api-keys-release
+    # environment). Their only purpose is to grant the called workflow a secrets
+    # context: without a caller grant, a workflow_call job resolves environment
+    # secrets as empty (actions/runner#1490). The api-key-release job's own
+    # environment then supplies the real values, since a same-named environment
+    # secret wins over a caller-passed one. This is NOT `secrets: inherit`: only
+    # these two names cross the boundary, never the App key/signing/PAT secrets.
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     permissions:
       contents: read
       id-token: write
