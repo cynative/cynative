@@ -206,15 +206,26 @@ sh-test:
 		esac; \
 	done
 	@# The api-key legs read exactly two secrets across the workflow_call boundary.
-	@# release.yaml forwards ONLY these two names (not secrets: inherit), so pin the
-	@# full set of secrets.<NAME> references in llm-smoke.yaml: a new one would widen
-	@# what the gate can read, and this fails closed if the sorted-unique set is ever
-	@# anything other than exactly ANTHROPIC_API_KEY + OPENAI_API_KEY. `sed 's/#.*//'`
-	@# drops comments (full-line AND inline) so a secret named only in prose never counts.
-	@got=$$(sed 's/#.*//' .github/workflows/llm-smoke.yaml | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | xargs); \
+	@# release.yaml forwards ONLY these two names, never secrets: inherit. Pin the
+	@# boundary from both sides, comments stripped (sed 's/#.*//') so prose never counts:
+	@#   llm-smoke.yaml - the sorted-unique set of secrets.<NAME> refs must be exactly
+	@#     the two keys, and bracket-form secrets[...] is rejected outright since it
+	@#     would evade the dot-form scan;
+	@#   release.yaml - `secrets: inherit` must never appear, or a future edit could
+	@#     hand every release secret (App key, signing, PAT) to the gate.
+	@smoke=$$(sed 's/#.*//' .github/workflows/llm-smoke.yaml); \
+	if printf '%s\n' "$$smoke" | grep -q 'secrets\['; then \
+		echo "FAIL: llm-smoke.yaml uses bracket-form secrets[...]; only dot-form secrets.NAME is allowed so this pin can enforce the exact set."; \
+		exit 1; \
+	fi; \
+	got=$$(printf '%s\n' "$$smoke" | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | xargs); \
 	want="ANTHROPIC_API_KEY OPENAI_API_KEY"; \
 	if [ "$$got" != "$$want" ]; then \
 		echo "FAIL: llm-smoke.yaml secrets.* references are [$$got], expected exactly [$$want] - a new reference would widen the gate's secret access across workflow_call."; \
+		exit 1; \
+	fi; \
+	if sed 's/#.*//' .github/workflows/release.yaml | grep -qE 'secrets:[[:space:]]*inherit'; then \
+		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
 		exit 1; \
 	fi
 	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
