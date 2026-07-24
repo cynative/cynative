@@ -209,8 +209,9 @@ sh-test:
 	@# release.yaml forwards ONLY these two names (not secrets: inherit), so pin the
 	@# full set of secrets.<NAME> references in llm-smoke.yaml: a new one would widen
 	@# what the gate can read, and this fails closed if the sorted-unique set is ever
-	@# anything other than exactly ANTHROPIC_API_KEY + OPENAI_API_KEY.
-	@got=$$(grep -vE '^[[:space:]]*#' .github/workflows/llm-smoke.yaml | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | paste -sd' ' -); \
+	@# anything other than exactly ANTHROPIC_API_KEY + OPENAI_API_KEY. `sed 's/#.*//'`
+	@# drops comments (full-line AND inline) so a secret named only in prose never counts.
+	@got=$$(sed 's/#.*//' .github/workflows/llm-smoke.yaml | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | xargs); \
 	want="ANTHROPIC_API_KEY OPENAI_API_KEY"; \
 	if [ "$$got" != "$$want" ]; then \
 		echo "FAIL: llm-smoke.yaml secrets.* references are [$$got], expected exactly [$$want] - a new reference would widen the gate's secret access across workflow_call."; \
