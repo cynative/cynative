@@ -11,9 +11,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 `go test ./internal/<pkg>` on a fresh checkout**, or the tests won't compile.
 
 - `make check`: the full gate CI runs, `check-go` + `check-scripts`.
-- `make check-go`: generate + lint + shell-complexity + format-diff + test + `windows-build`
-  (GOOS=windows amd64/arm64 cross-compile). 100% `go.mod`-pinned and hermetic; **the pre-commit
-  hook runs this**.
+- `make check-go`: `mod-tidy-check` (a non-mutating `go mod tidy -diff`, so the gate fails on an
+  untidy `go.mod`/`go.sum` instead of rewriting them) + generate + lint + shell-complexity +
+  format-diff + test + `windows-build` (GOOS=windows amd64/arm64 cross-compile). 100%
+  `go.mod`-pinned and hermetic; **the pre-commit hook runs this**.
 - `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1`,
   `test/install-script.smoke.test.ps1`, `test/scoop.smoke.test.ps1`, and
   `test/archive.smoke.test.ps1` + Pester unit tests +
@@ -51,11 +52,13 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - Run a single test: `go test ./internal/agent -run TestName` (add `-v` for output, `-count=1`
   to skip cache).
 - Build the binary: `go build ./cmd/cynative` (or `go run ./cmd/cynative -p "..."`).
-- `make snapshot`: builds the release archives via a goreleaser snapshot (no publish;
-  `--skip=before` keeps it hermetic/offline). `make install-e2e`: standalone release-confidence
-  check, not part of `make check`; builds the snapshot, then runs the real `install.sh` against
-  a loopback fixture server (`test/install.e2e.test.sh`, needs `python3`), verifying install,
-  `--version`, uninstall, and the fail-closed checksum-mismatch path. `make llm-smoke`:
+- `make snapshot`: builds the release archives via a goreleaser snapshot (no publish; goreleaser
+  runs no before-hook, so snapshot and release share one prep path, and dependency tidiness is
+  enforced separately, non-mutating, by `mod-tidy-check` in the gate). `make install-e2e`:
+  standalone release-confidence check, not part of `make check`; builds the snapshot, then runs
+  the real `install.sh` against a loopback fixture server (`test/install.e2e.test.sh`, needs
+  `python3`), verifying install, `--version`, uninstall, and the fail-closed checksum-mismatch
+  path. `make llm-smoke`:
   standalone live LLM smoke (not part of `make check`); runs the real `cynative -p` against a
   real provider chosen via `CYNATIVE_LLM_*` env (nonce echo, no tools; `test/llm.smoke.test.sh`),
   asserting the nonce on stdout and `0 tool calls` in the footer, and skips cleanly when no

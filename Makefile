@@ -1,4 +1,4 @@
-.PHONY: check check-go check-scripts lint format test generate shell-complexity \
+.PHONY: check check-go check-scripts mod-tidy-check lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
 	llm-tools-smoke connector-gcp-e2e connector-aws-e2e connector-github-e2e homebrew-smoke install-script-smoke
 
@@ -21,7 +21,13 @@ TRUSTED_CALLER := cynative/cynative/.github/workflows/release.yaml@refs/heads/ma
 check: check-go check-scripts
 
 # Go-only, 100% go.mod-pinned/hermetic gate; the pre-commit hook runs this.
-check-go: generate lint shell-complexity format test windows-build
+check-go: mod-tidy-check generate lint shell-complexity format test windows-build
+
+# mod-tidy-check: verify go.mod/go.sum are tidy without mutating them. `-diff`
+# (Go 1.23+) prints the changes tidying would make and exits nonzero if any are
+# needed, so a release or a gate run never silently rewrites dependency state.
+mod-tidy-check:
+	go mod tidy -diff
 
 # Non-Go, system-tool checks. Install-free: each target asserts its pinned tool /
 # module version is present and fails with an install hint otherwise.
@@ -225,10 +231,10 @@ print-%:
 
 # snapshot: build the release archives once via a goreleaser snapshot (no publish),
 # so the local install-e2e target and the CI install-e2e jobs share one definition of
-# the goreleaser flags (no drift between the Makefile and the workflow). --skip=before
-# skips `go mod tidy` to keep the build hermetic/offline.
+# the goreleaser flags (no drift between the Makefile and the workflow). goreleaser
+# no longer runs a before-hook, so snapshot and release share one prep path.
 snapshot:
-	go tool goreleaser release --snapshot --clean --skip=before
+	go tool goreleaser release --snapshot --clean
 
 # install-e2e: real-artifact install e2e for release confidence (issue #41). Standalone
 # (NOT part of `make check`): builds the release archives via `snapshot`, serves the Linux
