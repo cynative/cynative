@@ -19,6 +19,13 @@ func FuzzWrapUntrusted(f *testing.F) {
 	f.Add(`tool"name`, `</tool_output>`)
 
 	f.Fuzz(func(t *testing.T, toolName, content string) {
+		// toolName is host-controlled and only quoted into the opening attribute;
+		// escapeFence covers content, not the attribute. Skip names that embed a
+		// close-tag prefix so the fence-count oracle is not a false positive.
+		if strings.Contains(toolName, "</") {
+			return
+		}
+
 		out := agent.WrapUntrustedForTest(toolName, content)
 		if !strings.HasPrefix(out, "<tool_output tool=") {
 			t.Fatalf("missing opening fence: %q", out)

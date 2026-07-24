@@ -8,7 +8,7 @@ import (
 
 // FuzzClassify pins panic-freedom of the kube-apiserver RequestInfo classifier
 // over arbitrary method/path pairs (#181). Malformed input must never panic;
-// non-API paths stay non-resource.
+// non-API paths stay non-resource with empty resource fields.
 func FuzzClassify(f *testing.F) {
 	f.Add("GET", "/api/v1/namespaces/default/pods")
 	f.Add("GET", "/version")
@@ -20,8 +20,11 @@ func FuzzClassify(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, method, path string) {
 		ri := Classify(method, path, nil)
-		if path != "" && !ri.IsResourceRequest && ri.Path != path {
-			t.Fatalf("non-resource Path = %q, want %q", ri.Path, path)
+		if !ri.IsResourceRequest {
+			if ri.Resource != "" || ri.Name != "" || ri.Namespace != "" ||
+				ri.APIGroup != "" || ri.APIVersion != "" || ri.Subresource != "" {
+				t.Fatalf("non-resource request has parsed resource fields: %+v", ri)
+			}
 		}
 		_ = Classify(method, path, url.Values{"watch": []string{"true"}})
 	})

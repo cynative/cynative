@@ -56,9 +56,7 @@ func FuzzRedactHeader(f *testing.F) {
 		locBefore := h.Get("Location")
 		r.RedactHeader(h)
 
-		canon := http.CanonicalHeaderKey(strings.ReplaceAll(
-			http.CanonicalHeaderKey(name), "_", "-",
-		))
+		canon := http.CanonicalHeaderKey(strings.ReplaceAll(name, "_", "-"))
 		switch canon {
 		case "Authorization", "Set-Cookie", "Proxy-Authorization",
 			"Private-Token", "Job-Token", "Deploy-Token",
