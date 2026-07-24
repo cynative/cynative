@@ -69,18 +69,18 @@ Describe 'Get-CynExpectedHash' {
     # Pester 5 separates discovery from run: fixtures must be set in BeforeAll, not the
     # Describe body, or they are undefined inside It during the run phase.
     BeforeAll {
-        $checksums = @"
+        $script:checksums = @"
 aaaa1111  cynative_Windows_arm64.zip
 bbbb2222  cynative_Windows_x86_64.zip
 cccc3333  cynative_Linux_x86_64.tar.gz
 "@
     }
     It 'returns the single matching hash' {
-        Get-CynExpectedHash -ChecksumsText $checksums -ArchiveName 'cynative_Windows_x86_64.zip' |
+        Get-CynExpectedHash -ChecksumsText $script:checksums -ArchiveName 'cynative_Windows_x86_64.zip' |
             Should -Be 'bbbb2222'
     }
     It 'throws when there is no entry' {
-        { Get-CynExpectedHash -ChecksumsText $checksums -ArchiveName 'nope.zip' } | Should -Throw
+        { Get-CynExpectedHash -ChecksumsText $script:checksums -ArchiveName 'nope.zip' } | Should -Throw
     }
     It 'throws when there is more than one entry' {
         $dup = "h1  a.zip`nh2  a.zip"

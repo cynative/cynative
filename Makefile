@@ -98,22 +98,25 @@ shellcheck:
 	fi
 	@git ls-files -z '*.sh' | xargs -0 shellcheck && echo "OK: shellcheck ($(SHELLCHECK_VERSION))"
 
-# pwsh-lint: PSScriptAnalyzer on install.ps1 and the smoke ps1 scripts at the pinned
-# module version. Presence-check with a readable install hint first (install-free —
+# pwsh-lint: PSScriptAnalyzer on every tracked *.ps1 at the pinned module version
+# (mirrors shellcheck's git ls-files approach, so a new tracked ps1 file is covered
+# automatically). Presence-check with a readable install hint first (install-free,
 # never installs the module). -Path binds a single string, so analyze per file and
 # aggregate; -EnableExit would end the session after the first file, so fail explicitly.
 pwsh-lint:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION)."; exit 1; }
-	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq "$(PSSCRIPTANALYZER_VERSION)")) { Write-Host "FAIL: PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION) not installed — run: Install-Module PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Scope CurrentUser"; exit 1 }; Import-Module -Name PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Force -ErrorAction Stop; $$findings = @(); foreach ($$f in "install.ps1", "test/install-script.smoke.test.ps1", "test/scoop.smoke.test.ps1", "test/archive.smoke.test.ps1") { $$findings += Invoke-ScriptAnalyzer -Path $$f -Settings test/PSScriptAnalyzerSettings.psd1 }; if ($$findings.Count -gt 0) { $$findings | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }'
+	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq "$(PSSCRIPTANALYZER_VERSION)")) { Write-Host "FAIL: PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION) not installed — run: Install-Module PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Scope CurrentUser"; exit 1 }; Import-Module -Name PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Force -ErrorAction Stop; $$files = & git ls-files "*.ps1"; $$findings = @(); foreach ($$f in $$files) { $$findings += Invoke-ScriptAnalyzer -Path $$f -Settings test/PSScriptAnalyzerSettings.psd1 }; if ($$findings.Count -gt 0) { $$findings | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }'
 
-# pwsh-test: Pester unit tests at the pinned module version. Presence-check with a
-# readable install hint first (install-free — never installs the module).
+# pwsh-test: Pester unit tests, one run over every tracked test/*.Tests.ps1 suite
+# (mirrors shellcheck's git ls-files approach, so a new hermetic suite is picked up
+# automatically), at the pinned module version. Presence-check with a readable
+# install hint first (install-free, never installs the module).
 # Also presence-check python3: the install.smoke.Tests.ps1 suite launches the
 # loopback fixture server (test/serve-fixture.py), mirroring sh-test's guard.
 pwsh-test:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + Pester $(PESTER_VERSION)."; exit 1; }
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, needed by the install.smoke.Tests.ps1 loopback fixture server (test/serve-fixture.py)."; exit 1; }
-	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1, test/install.smoke.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
+	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$files = & git ls-files "test/*.Tests.ps1"; $$r = Invoke-Pester -Path $$files -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
 
 # sh-test: POSIX install.sh unit + loopback smoke tests, the live-e2e guardrails
 # library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
