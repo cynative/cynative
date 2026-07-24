@@ -107,11 +107,11 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   assets - install, exact `cynative --version` assert (`SMOKE_VERSION`, default: latest published),
   documented uninstall, gone-assert (`test/install-script.smoke.test.sh`, needs curl and network; no
   skip path). The Windows sibling (`test/install-script.smoke.test.ps1`, Windows PowerShell 5.1)
-  runs in CI via `.github/workflows/install-script-smoke.yaml`. The Scoop channel smoke is
+  runs in CI via the reusable `.github/workflows/channel-smoke.yaml`. The Scoop channel smoke is
   Windows-only and has no make target: `test/scoop.smoke.test.ps1` (Windows PowerShell 5.1)
   adds the public bucket, runs the documented `scoop install cynative`, asserts exact
   `--version` and cynative-bucket provenance, uninstalls, and asserts it is gone; it runs in CI
-  via `.github/workflows/scoop-smoke.yaml` (Release Pipeline call + maintainer dispatch;
+  via `.github/workflows/channel-smoke.yaml` (Release Pipeline call + maintainer dispatch;
   `SMOKE_VERSION` pins the expected release; no skip path; the script header documents its env
   and knobs).
 
@@ -792,7 +792,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   while the LLM gate passes `full-only` (a dispatch must not carry one). The
   `publish` job re-asserts the
   still-editable draft (same id,
-  same exact asset set) immediately before publishing, then verifies and pushes the tap; a
+  same exact asset set) immediately before publishing, then verifies the published release; the
+  Homebrew tap push now lives in a separate `homebrew-publish` job (gated on `publish`, minting
+  its own homebrew-tap-scoped write token) rather than as a final step inside `publish`, so the
+  release/prepublish/publish tokens are cynative-only. A
   separate `candidate-pr` job (gated on `publish`) then runs release-please phase 2. Phase 2
   lives in its own job, not inside `publish`, so a flake computing the next-release candidate
   can never fail `publish` and skip the post-publish channel jobs (cynative#140). Publish is
@@ -803,16 +806,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   publish; that is also why `connector-e2e.yaml` scopes `cancel-in-progress` to `workflow_dispatch`
   runs and gives the gate path its own run-id concurrency group (a called workflow's concurrency
   group is evaluated in the caller's context, so it would otherwise collide with a standalone run
-  on the same ref). After the tap push, the pipeline calls
-  the reusable `.github/workflows/homebrew-smoke.yaml`
-  (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
-  the Homebrew install smoke on macOS and Linux. It also calls the reusable
-  `.github/workflows/install-script-smoke.yaml` (also maintainer-dispatchable) once the
-  `publish` job completes, which runs the documented `curl | sh` install path on Linux and macOS
-  and the `irm | iex` path on Windows PowerShell 5.1 against the public release assets. It also
-  calls the reusable `.github/workflows/scoop-smoke.yaml` (also maintainer-dispatchable), which
-  waits for the public Scoop bucket to serve the new version and runs the Scoop install smoke on
-  windows-latest. For all three: a red channel smoke with a green `publish` job means
+  on the same ref). After publish, the pipeline calls the single reusable
+  `.github/workflows/channel-smoke.yaml` (also maintainer-dispatchable), which validates all three
+  public install channels in one workflow: the Homebrew brew channel (waits for the tap to serve
+  the new version, macOS and Linux), the documented install-script one-liners (`curl | sh` on Linux
+  and macOS, `irm | iex` on Windows PowerShell 5.1, against the public release assets), and the
+  Scoop bucket (waits for the public bucket to serve the new version, windows-latest). It gates on
+  `publish` success and lists `homebrew-publish`/`scoop-publish` in `needs` only to order the tap
+  and bucket push before the smoke. A red channel smoke with a green `publish` job means
   public-channel drift, nothing to roll back.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and

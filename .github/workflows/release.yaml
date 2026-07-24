@@ -45,9 +45,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            cynative
-            homebrew-tap
+          repositories: cynative
 
       # release-please PHASE 1 — releases only (skip-github-pull-request):
       # creates the GitHub release as a DRAFT ("draft": true in
@@ -251,9 +249,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            cynative
-            homebrew-tap
+          repositories: cynative
 
       - name: Upload pkgs to draft release
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
@@ -560,8 +556,9 @@ jobs:
   # On a plain push
   # (release_created != 'true') this skips: nothing is published, and the
   # candidate-pr job below computes the next-release candidate instead. A
-  # green `publish` therefore means "published + verified + tap pushed",
-  # nothing more (cynative#140).
+  # green `publish` therefore means "published + verified", nothing more
+  # (cynative#140). The tap push is now a separate homebrew-publish sibling
+  # job gated on this one, so it is no longer part of publish's contract.
   publish:
     name: Publish release
     needs: [release, macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke]
@@ -583,9 +580,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            cynative
-            homebrew-tap
+          repositories: cynative
 
       # The publish scripts live in the repo; check out the exact SHA the
       # release was cut from.
@@ -670,10 +665,51 @@ jobs:
           echo "::error::post-publish verification failed after 3 attempts"
           exit 1
 
+  # ---- Publish the Homebrew tap ----------------------------------------
+  # Relocated out of the publish job (was its last step) into its own sibling
+  # job, so a green `publish` means "published + verified", nothing tap-side.
+  # It gates on `publish` (implicit success() across all of needs), so the tap
+  # is pushed only after the release is live and verified. It mints its OWN
+  # token scoped to homebrew-tap alone with contents: write - the sole place
+  # in this pipeline that needs push access to the tap, which is why the
+  # release/prepublish/publish tokens are now cynative-only. Source at the
+  # release SHA (no persisted checkout credential; the tap push uses the App
+  # token via GH_TOKEN), plus the release-artifacts hand-off for the
+  # expected-assets.tsv digests.
+  homebrew-publish:
+    name: Publish Homebrew formula
+    needs: [release, publish]
+    if: ${{ needs.release.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Generate tap token
+        id: tap-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+          permission-contents: write
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release.outputs.sha }}
+          persist-credentials: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-artifacts
+          path: ${{ runner.temp }}/release-artifacts
+
       - name: Render & push Homebrew formula
-        if: ${{ needs.release.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
           VERSION: ${{ needs.release.outputs.tag_name }}
         run: |
           set -euo pipefail
@@ -736,48 +772,21 @@ jobs:
           token: ${{ steps.candidate-token.outputs.token }}
           skip-github-release: true
 
-  # Post-publish public-channel checks. Failure semantics, shared by the
-  # channel smoke jobs: a red `release`, `macos-pkg-smoke`,
-  # `archive-smoke`, `connector-e2e`, or `llm-smoke` job, or a red `publish`
-  # job that failed BEFORE its "Publish release" step, means the release
-  # needs recovery with the draft intact (see the recovery notes above); a
-  # red `publish` job AFTER that step means the release is already live and
-  # immutable - investigate, and if the artifacts are bad ship a follow-up
-  # patch release. A green `publish` with a red channel smoke means the
-  # release published fine but that public channel is broken - investigate
-  # and re-run (workflow_dispatch on the smoke workflow), nothing to roll
-  # back. These jobs gate on `publish` (implicit success() across all of
-  # needs; scoop-smoke additionally on scoop-publish), so they run only after
-  # the release is published and the tap pushed. The candidate-pr job runs in
-  # parallel with them on the same `publish` gate, so a channel-smoke failure
-  # cannot block candidate computation, and - the point of cynative#140 - a
-  # candidate flake can no longer skip these channel jobs.
-  # homebrew-smoke (cynative#45) runs after the tap push and validates the
-  # brew channel; install-script-smoke (cynative#47) validates the documented
-  # curl|sh and irm|iex install paths against the public release assets;
-  # scoop-publish (cynative#103) renders and pushes the Scoop bucket manifest
-  # after publish (goreleaser no longer pushes it), and scoop-smoke (cynative#46)
-  # then validates the documented scoop bucket add + install path against the
-  # public bucket and release assets.
-  homebrew-smoke:
-    name: Homebrew install smoke
-    needs: [release, publish]
-    if: ${{ needs.release.outputs.release_created == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/homebrew-smoke.yaml
-    with:
-      tag: ${{ needs.release.outputs.tag_name }}
-
-  install-script-smoke:
-    name: Install-script smoke
-    needs: [release, publish]
-    if: ${{ needs.release.outputs.release_created == 'true' }}
-    permissions:
-      contents: read
-    uses: ./.github/workflows/install-script-smoke.yaml
-    with:
-      tag: ${{ needs.release.outputs.tag_name }}
+  # Post-publish channel jobs: scoop-publish (renders and pushes the Scoop
+  # bucket manifest) and one channel-smoke caller that validates all three
+  # public install channels. Failure semantics: a red `release`,
+  # `macos-pkg-smoke`, `archive-smoke`, `connector-e2e`, or `llm-smoke` job,
+  # or a red `publish` job that failed BEFORE its "Publish release" step,
+  # means the release needs recovery with the draft intact (see the recovery
+  # notes above); a red `publish` job AFTER that step means the release is
+  # already live and immutable - investigate, and if the artifacts are bad
+  # ship a follow-up patch release. A green `publish` with a red channel-smoke
+  # means the release published fine but a public channel is broken -
+  # investigate and re-run (workflow_dispatch on channel-smoke.yaml), nothing
+  # to roll back. The candidate-pr job runs in parallel with these on the same
+  # `publish` gate, so a channel-smoke failure cannot block candidate
+  # computation, and - the point of cynative#140 - a candidate flake can no
+  # longer skip these channel jobs.
 
   # Renders and pushes the Scoop bucket manifest after publish (cynative#103),
   # replacing goreleaser's pre-publish bucket push. Only the App credentials are
@@ -796,12 +805,20 @@ jobs:
       APP_ID: ${{ secrets.APP_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
 
-  scoop-smoke:
-    name: Scoop install smoke
-    needs: [release, publish, scoop-publish]
-    if: ${{ needs.release.outputs.release_created == 'true' }}
+  # One reusable caller now covers all three public install channels - Homebrew
+  # (cynative#45), the install-script curl|sh and irm|iex one-liners
+  # (cynative#47), and Scoop (cynative#46). It lists homebrew-publish and
+  # scoop-publish in `needs` only to order the tap and bucket push before the
+  # smoke; the `!cancelled()` guard plus the explicit
+  # `needs.publish.result == 'success'` term means it runs whenever the release
+  # published, regardless of whether homebrew-publish or scoop-publish
+  # succeeded, while a cancelled run still blocks it.
+  channel-smoke:
+    name: Channel install smoke
+    needs: [release, publish, homebrew-publish, scoop-publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.release.outputs.release_created == 'true' }}
     permissions:
       contents: read
-    uses: ./.github/workflows/scoop-smoke.yaml
+    uses: ./.github/workflows/channel-smoke.yaml
     with:
       tag: ${{ needs.release.outputs.tag_name }}
