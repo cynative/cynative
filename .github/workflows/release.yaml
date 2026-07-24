@@ -89,7 +89,14 @@ jobs:
       - id: release-please
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          token: ${{ steps.generate-token.outputs.token }}
+          # TEMPORARY recovery override (revert to the App token after v1.7.0
+          # ships). A GitHub App installation token cannot create a release
+          # whose target_commitish is not the branch HEAD; it fails with
+          # "Resource not accessible by integration". The v1.7.0 recovery
+          # advanced main past the release commit, so the App can no longer
+          # create that release. A PAT is not subject to that restriction. Only
+          # this step needs it: every later step operates on the existing draft.
+          token: ${{ secrets.RELEASE_PLEASE_PAT }}
           skip-github-pull-request: true
 
       # The tag does not exist yet, so check out the exact SHA release-please
