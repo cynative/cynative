@@ -108,8 +108,11 @@ pwsh-lint:
 
 # pwsh-test: Pester unit tests at the pinned module version. Presence-check with a
 # readable install hint first (install-free — never installs the module).
+# Also presence-check python3: the install.smoke.Tests.ps1 suite launches the
+# loopback fixture server (test/serve-fixture.py), mirroring sh-test's guard.
 pwsh-test:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + Pester $(PESTER_VERSION)."; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, needed by the install.smoke.Tests.ps1 loopback fixture server (test/serve-fixture.py)."; exit 1; }
 	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
 
 # sh-test: POSIX install.sh unit + loopback smoke tests, the live-e2e guardrails
