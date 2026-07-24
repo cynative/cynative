@@ -680,14 +680,16 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (`pkg-tools.yaml`); the ruleset also runs Copilot code review on each
   push. The pre-commit hook runs the fast hermetic `make check-go`, a local mirror of the Go half
   of the gate, not the enforcement boundary.
-- `.github/workflows/install-e2e.yaml` exercises the real installer against the goreleaser
-  release archives for release confidence. It does not run on normal PRs: a `detect` job flags
-  release-please PRs and manual `workflow_dispatch`, one `snapshot` job builds the archives
-  (`make snapshot`), and per-OS jobs run the installer tests: Linux via
-  `test/install.e2e.test.sh`, Windows via the Pester suite under Windows PowerShell 5.1 (the
-  `install.ps1` floor), hermetic via a stubbed `gh` and a loopback fixture server. None is a
-  required status check, so they gate release-please PRs and on-demand runs, never normal
-  merges.
+- The installer fail-closed paths are covered hermetically in `make check`, not as a separate
+  release-gate workflow: `test/install.smoke.test.sh` (run by `sh-test`) drives `install.sh`
+  against a loopback fixture server and asserts the Linux checksum-mismatch abort writes no
+  binary, and `test/install.smoke.Tests.ps1` (run by `pwsh-test`) drives the `install.ps1`
+  logic the same way, asserting the Windows-logic checksum-mismatch abort and the non-loopback
+  URL reject. `make install-e2e` remains the standalone real-artifact check: it builds a
+  goreleaser snapshot and runs the real `install.sh` against it on Linux
+  (`test/install.e2e.test.sh`), for release confidence beyond the hermetic gate. The Windows
+  PowerShell 5.1 floor (the shipped `install.ps1`'s actual interpreter) is covered post-publish
+  by the install-script smoke against the public release assets.
 - `.github/workflows/llm-smoke.yaml` runs the live LLM smoke against real providers as a
   PRE-PUBLISH RELEASE GATE, not on pull requests. Two entry points: `workflow_call` (the
   Release Pipeline, with `ref: <release SHA>`) and `workflow_dispatch` for maintainers.
