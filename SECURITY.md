@@ -1,4 +1,4 @@
-# Security
+# Security Policy
 
 Please do **not** open a public GitHub issue for security reports. Use either private channel:
 
@@ -8,10 +8,10 @@ Please do **not** open a public GitHub issue for security reports. Use either pr
 
 Include:
 
-- the Cynative version, please confirm it's the latest;
+- The Cynative version (please confirm it's the latest);
 - how it was installed;
 - a clear description of the issue and its security impact;
 - steps to trigger the behavior;
 - relevant logs.
 
-**Do not include live credentials, tokens, secrets or customer data in a report.**
+**Do not include live credentials, tokens, secrets, or customer data in a report.**
