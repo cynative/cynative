@@ -26,7 +26,7 @@ needs_json() {
 }
 NEEDS_JSON_DEFAULT=$(needs_json "$JOBS")
 
-# case_ WANT DESC SELECTOR RESULTS PROOFS [ROSTER] [NEEDS_JSON] [JOBS] [MODE]
+# case_ WANT DESC SELECTOR RESULTS PROOFS [ROSTER] [NEEDS_JSON] [JOBS] [MODE] [STDERR_SUBSTR]
 case_() {
 	_want=$1
 	_desc=$2
@@ -37,6 +37,11 @@ case_() {
 	# a release-mode one and make it pass for the wrong reason.
 	_mode=${9-release}
 	_needs=${7-$NEEDS_JSON_DEFAULT}
+	# Optional literal stderr substring. Some guards share their exit code with later,
+	# unrelated failures (removing the guard still exits 1 via a different message), so
+	# the exit status alone cannot pin them; the diagnostic is the distinguishing
+	# signal.
+	_stderr=${10-}
 	# Capture the REAL exit status, never a collapsed 0/1: the retained empty-NEEDS_JSON
 	# case asserts exit 2, and flattening every nonzero to 1 would turn it into a false
 	# pass. `|| _got=$?` rather than a bare if/else so the distinction survives.
@@ -44,12 +49,16 @@ case_() {
 	( SELECTOR="$3" ROSTER="$_roster" RESULTS="$4" PROOFS="$5" \
 		NEEDS_JSON="$_needs" JOBS="$_jobs" MODE="$_mode" \
 		sh "$script" >/tmp/ga_out 2>/tmp/ga_err ) || _got=$?
-	if [ "$_got" = "$_want" ]; then
-		printf 'ok   %s\n' "$_desc"
-	else
+	if [ "$_got" != "$_want" ]; then
 		printf 'FAIL %s (want exit %s, got %s)\n' "$_desc" "$_want" "$_got"
 		sed 's/^/       /' /tmp/ga_err
 		fails=1
+	elif [ -n "$_stderr" ] && ! grep -F -q -- "$_stderr" /tmp/ga_err; then
+		printf 'FAIL %s (stderr does not contain "%s")\n' "$_desc" "$_stderr"
+		sed 's/^/       /' /tmp/ga_err
+		fails=1
+	else
+		printf 'ok   %s\n' "$_desc"
 	fi
 }
 
@@ -121,6 +130,17 @@ github-app=skipped' 'gcp-wif.gcp=
 aws-oidc.aws=
 github-app.github='
 
+# A selector that names no roster leg must fail closed. Every leg is "excluded",
+# every job legitimately skipped, and today the script exits 0 while claiming the
+# selected leg ran; allowlist/roster drift on a filtered dispatch would go green
+# while testing nothing.
+case_ 1 "a selector naming no roster leg fails closed" ghost 'gcp-wif=skipped
+aws-oidc=skipped
+github-app=skipped' 'gcp-wif.gcp=
+aws-oidc.aws=
+github-app.github=' "$ROSTER" "$NEEDS_JSON_DEFAULT" "$JOBS" manual \
+	"matches no roster leg"
+
 # ---- duplicate-key and metacharacter safety --------------------------------
 # A script whose whole purpose is fail-closed must not agree with a result it only
 # partly read. A duplicate key must be a hard failure, not a silent first-match. Both
@@ -137,6 +157,37 @@ gcp-wif.gcp=success
 aws-oidc.aws=success
 github-app.github=success'
 
+# The same physical job listed under two different families must be rejected by the
+# duplicate-JOBS guard itself. The families differ, so a guard loosened to dedupe on
+# the (job, family) pair rather than the job name alone would wave this through.
+case_ 1 "a job listed under two families in JOBS fails" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" "$NEEDS_JSON_DEFAULT" \
+	'gcp-wif:gcp-wif:always gcp-wif:aws-oidc:always github-app:github-app:always' \
+	release "is listed twice in JOBS"
+
+# ---- entry arity: a malformed token must never silently drop a field --------
+# Four fields parse as job=gcp-wif, family=gcp-wif, policy=always today, silently
+# swallowing "bogus"; without the guard this case is all green.
+case_ 1 "a JOBS entry with a stowaway fourth field fails" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" "$NEEDS_JSON_DEFAULT" \
+	'gcp-wif:gcp-wif:bogus:always aws-oidc:aws-oidc:always github-app:github-app:always' \
+	release "is not job:family:policy"
+
+# An empty field survives the exact-reconstruction check, so it needs its own guard.
+case_ 1 "a JOBS entry with an empty family fails" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" "$NEEDS_JSON_DEFAULT" \
+	'gcp-wif::always aws-oidc:aws-oidc:always github-app:github-app:always' \
+	release "is not job:family:policy"
+
+# leg takes the first field and family the last, so a middle field vanishes today.
+case_ 1 "a ROSTER entry with a stowaway middle field fails" "" "$ALL_OK" "$ALL_PROOF" \
+	'gcp:bogus:gcp-wif aws:aws-oidc github:github-app' "$NEEDS_JSON_DEFAULT" "$JOBS" \
+	release "is not leg:family"
+
+case_ 1 "a ROSTER entry with an empty family fails" "" "$ALL_OK" "$ALL_PROOF" \
+	'gcp: aws:aws-oidc github:github-app' "$NEEDS_JSON_DEFAULT" "$JOBS" \
+	release "is not leg:family"
+
 # A job name containing a shell glob character must match only its own literal line in
 # lookup(), never wildcard onto an unrelated one. JOBS/ROSTER/needs all declare the same
 # metacharacter-bearing family so the job reaches lookup() at all (a mismatched shape
@@ -152,6 +203,31 @@ case_ 0 "a metacharacter-bearing key reaches lookup and matches only its literal
 	'gcpXXXwif=success
 gcp*wif=success' 'gcp*wif.meta=success' \
 	"$META_ROSTER" "$(needs_json "$META_JOBS")" "$META_JOBS"
+
+# ---- set -f: the word-split loops must never glob ---------------------------
+# JOBS carries the glob token g*:gcp-wif:always and the cwd contains a file whose
+# name that pattern matches. Under set -f the token stays literal: gcp-wif is then a
+# needs dependency missing from JOBS, so the run fails. Without set -f the token
+# expands against the cwd into the VALID triple and the whole run passes, so this
+# case flips outcome on set -f itself; the metacharacter case above only pins
+# lookup() quoting.
+globdir=$(mktemp -d)
+: >"$globdir/gcp-wif:gcp-wif:always"
+abs_script=$PWD/$script
+_got=0
+( cd "$globdir" && SELECTOR="" ROSTER="$ROSTER" RESULTS="$ALL_OK" PROOFS="$ALL_PROOF" \
+	NEEDS_JSON="$NEEDS_JSON_DEFAULT" \
+	JOBS='g*:gcp-wif:always aws-oidc:aws-oidc:always github-app:github-app:always' \
+	MODE=release sh "$abs_script" >/tmp/ga_out 2>/tmp/ga_err ) || _got=$?
+if [ "$_got" = 1 ] && grep -F -q -- "missing from JOBS" /tmp/ga_err; then
+	printf 'ok   %s\n' "a glob-bearing JOBS token stays literal instead of matching cwd files"
+else
+	printf 'FAIL %s (want exit 1 + missing-from-JOBS, got exit %s)\n' \
+		"a glob-bearing JOBS token stays literal instead of matching cwd files" "$_got"
+	sed 's/^/       /' /tmp/ga_err
+	fails=1
+fi
+rm -rf "$globdir"
 
 # ---- roster vs job-graph cross-check ---------------------------------------
 # needs is the actual dependency graph (toJSON(needs)); JOBS is a hand-maintained
@@ -197,6 +273,23 @@ aws.awsx=success' \
 case_ 1 "malformed NEEDS_JSON fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" 'not json'
 
 case_ 1 "a NEEDS_JSON that is valid JSON but not an object fails" "" "$ALL_OK" "$ALL_PROOF" "$ROSTER" '["prepare"]'
+
+# A NEEDS_JSON that is a JSON ARRAY of exactly the job names is the case only the type
+# guard can catch: iterating a list yields the same job set as iterating a dict's
+# keys, so with the isinstance check removed the downstream JOBS/needs cross-check
+# would pass and the whole run would go green. (The not-an-object case above still
+# documents the general shape, but its exit 1 also arises downstream, so it cannot
+# pin the guard by itself.)
+case_ 1 "a NEEDS_JSON array of the job names fails on the type guard" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" '["aws-oidc","gcp-wif","github-app"]' "$JOBS" release \
+	"NEEDS_JSON is missing, empty, or not a JSON object"
+
+# An empty JSON object means toJSON(needs) saw no dependencies at all. Removing the
+# `or not needs` half still exits 1 via the downstream cross-check, so the case pins
+# the guard's own diagnostic, not just the exit code.
+case_ 1 "an empty NEEDS_JSON object fails on the type guard" "" "$ALL_OK" "$ALL_PROOF" \
+	"$ROSTER" '{}' "$JOBS" release \
+	"NEEDS_JSON is missing, empty, or not a JSON object"
 
 # NEEDS_JSON is a required env var (a fatal shell parameter-expansion error, exit 2),
 # so an empty value fails closed before the cross-check even runs.
@@ -289,6 +382,16 @@ aws-oidc=success
 api-key-release=success
 api-key-manual=failure' \
 	"$LLM_PROOFS" "$LLM_ROSTER" "$LLM_NEEDS" "$LLM_JOBS" 'release'
+
+# An inactive job that vanishes from RESULTS entirely (not merely non-skipped) must be
+# caught by the inactive-job loop's own missing-key branch: every other check in this
+# fixture is green, so nothing else reports it.
+case_ 1 'an inactive job missing from RESULTS fails' '' \
+	'gcp-wif=success
+aws-oidc=success
+api-key-release=success' \
+	"$LLM_PROOFS" "$LLM_ROSTER" "$LLM_NEEDS" "$LLM_JOBS" 'release' \
+	'job api-key-manual is missing from the results'
 
 # NOTE the PROOFS argument is present. Omitting it shifts every later argument by one,
 # which silently supplies a different JOBS/MODE than the case name claims.

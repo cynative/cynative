@@ -89,9 +89,16 @@ jobs:
           gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" \
             --jq '[.[].commit.message | select(contains("updated-dependencies:"))] | last // ""' > /tmp/commit-msg
           gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""' > /tmp/pr-body
-          new_body="$(sh scripts/ci/dependabot-commit-override.sh render /tmp/pr-body < /tmp/commit-msg)"
+          # Capture stderr so a budget miss is not misreported as "no metadata"
+          # (that ambiguity hid #170 when Dependabot's body hit GitHub's ceiling).
+          new_body="$(sh scripts/ci/dependabot-commit-override.sh render /tmp/pr-body < /tmp/commit-msg 2>/tmp/ovr.err)" || true
           if [ -z "${new_body}" ]; then
-            echo "No dependency metadata parsed; leaving the body unchanged."
+            if [ -s /tmp/ovr.err ]; then
+              cat /tmp/ovr.err
+              echo "Leaving the body unchanged."
+            else
+              echo "No dependency metadata parsed; leaving the body unchanged."
+            fi
             exit 0
           fi
           if [ "${new_body}" = "$(cat /tmp/pr-body)" ]; then

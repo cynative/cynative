@@ -11,18 +11,20 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 `go test ./internal/<pkg>` on a fresh checkout**, or the tests won't compile.
 
 - `make check`: the full gate CI runs, `check-go` + `check-scripts`.
-- `make check-go`: generate + lint + shell-complexity + format-diff + test + `windows-build`
-  (GOOS=windows amd64/arm64 cross-compile). 100% `go.mod`-pinned and hermetic; **the pre-commit
-  hook runs this**.
-- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1`,
-  `test/install-script.smoke.test.ps1`, `test/scoop.smoke.test.ps1`, and
-  `test/archive.smoke.test.ps1` + Pester unit tests +
+- `make check-go`: `mod-tidy-check` (a non-mutating `go mod tidy -diff`, so the gate fails on an
+  untidy `go.mod`/`go.sum` instead of rewriting them) + generate + lint + shell-complexity +
+  format-diff + test + `windows-build` (GOOS=windows amd64/arm64 cross-compile). 100%
+  `go.mod`-pinned; the `mod-tidy-check` step is non-mutating but may consult the module cache,
+  so the gate is not fully network-free; **the pre-commit hook runs this**.
+- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer (every tracked
+  `*.ps1`) + Pester unit tests (every tracked `test/*.Tests.ps1`) +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
-  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the connector-e2e
-  invocation-contract unit tests, the connector-e2e gate-assert unit tests, the connector-e2e
-  trusted-caller pin check, the shared audit-parser python syntax gate, all three connector
-  suites' offline audit-parser selftests, and the shared-machinery selftest).
+  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the shared
+  release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
+  the gate trusted-caller pin check, the release publish-gate pin check, the shared
+  audit-parser python syntax gate, all three connector suites' offline audit-parser
+  selftests, and the shared-machinery selftest).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
   otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
@@ -50,11 +52,13 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - Run a single test: `go test ./internal/agent -run TestName` (add `-v` for output, `-count=1`
   to skip cache).
 - Build the binary: `go build ./cmd/cynative` (or `go run ./cmd/cynative -p "..."`).
-- `make snapshot`: builds the release archives via a goreleaser snapshot (no publish;
-  `--skip=before` keeps it hermetic/offline). `make install-e2e`: standalone release-confidence
-  check, not part of `make check`; builds the snapshot, then runs the real `install.sh` against
-  a loopback fixture server (`test/install.e2e.test.sh`, needs `python3`), verifying install,
-  `--version`, uninstall, and the fail-closed checksum-mismatch path. `make llm-smoke`:
+- `make snapshot`: builds the release archives via a goreleaser snapshot (no publish; goreleaser
+  runs no before-hook, so snapshot and release share one prep path, and dependency tidiness is
+  enforced separately, non-mutating, by `mod-tidy-check` in the gate). `make install-e2e`:
+  standalone release-confidence check, not part of `make check`; builds the snapshot, then runs
+  the real `install.sh` against a loopback fixture server (`test/install.e2e.test.sh`, needs
+  `python3`), verifying install, `--version`, uninstall, and the fail-closed checksum-mismatch
+  path. `make llm-smoke`:
   standalone live LLM smoke (not part of `make check`); runs the real `cynative -p` against a
   real provider chosen via `CYNATIVE_LLM_*` env (nonce echo, no tools; `test/llm.smoke.test.sh`),
   asserting the nonce on stdout and `0 tool calls` in the footer, and skips cleanly when no
@@ -88,7 +92,12 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   credential material was logged. `make sh-test` gates the parser: each suite's offline `--selftest`
   drives it and pins the suite's frozen case-name/code set
   (`connector_audit/testdata/<provider>.names.txt`), plus a shared-machinery `--selftest` that
-  exercises the engine's own fail-closed and prepass cases. `make homebrew-smoke`: standalone post-release
+  exercises the engine's own fail-closed and prepass cases. The `test/connector.<provider>.e2e.test.sh`
+  naming is load-bearing: `make connector-<provider>-e2e` is a single FORCE-guarded
+  `connector-%-e2e` pattern rule keyed on it, and `make sh-test` runs each suite's `--selftest`
+  through a `git ls-files 'test/connector.*.e2e.test.sh'` glob that fails closed (a `git
+  ls-files` error, or a zero-match result, is a hard failure rather than a silently skipped
+  selftest). `make homebrew-smoke`: standalone post-release
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
   documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
   release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone
@@ -98,11 +107,11 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   assets - install, exact `cynative --version` assert (`SMOKE_VERSION`, default: latest published),
   documented uninstall, gone-assert (`test/install-script.smoke.test.sh`, needs curl and network; no
   skip path). The Windows sibling (`test/install-script.smoke.test.ps1`, Windows PowerShell 5.1)
-  runs in CI via `.github/workflows/install-script-smoke.yaml`. The Scoop channel smoke is
+  runs in CI via the reusable `.github/workflows/channel-smoke.yaml`. The Scoop channel smoke is
   Windows-only and has no make target: `test/scoop.smoke.test.ps1` (Windows PowerShell 5.1)
   adds the public bucket, runs the documented `scoop install cynative`, asserts exact
   `--version` and cynative-bucket provenance, uninstalls, and asserts it is gone; it runs in CI
-  via `.github/workflows/scoop-smoke.yaml` (Release Pipeline call + maintainer dispatch;
+  via `.github/workflows/channel-smoke.yaml` (Release Pipeline call + maintainer dispatch;
   `SMOKE_VERSION` pins the expected release; no skip path; the script header documents its env
   and knobs).
 
@@ -663,22 +672,24 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - `.github/workflows/ci.yaml` runs `make check` as the single **`Lint & Test`** job on every PR
   against `main`; a bootstrap step installs the pinned shellcheck (download + SHA-256 verify) and
   the pinned Pester/PSScriptAnalyzer modules, versions read from the `Makefile` via `make -s
-  print-*`. The job is gated to pull requests (the workflow also fires on push to `main`, where
-  it skips). Direct pushes to `main` are **blocked** by an active GitHub **ruleset** (squash-only
+  print-*`. It runs only on pull requests against `main`. Direct pushes to `main` are
+  **blocked** by an active GitHub **ruleset** (squash-only
   merges, linear history, required review-thread resolution, no human bypass) whose required
   status checks, under a strict up-to-date policy, are **`Lint & Test`**, **`Validate PR title`**
   (`semantic-pr.yaml`), and **`Build & smoke-test macOS packaging toolchain`**
   (`pkg-tools.yaml`); the ruleset also runs Copilot code review on each
-  push. The pre-commit hook runs the fast hermetic `make check-go`, a local mirror of the Go half
+  push. The pre-commit hook runs the fast `make check-go`, a local mirror of the Go half
   of the gate, not the enforcement boundary.
-- `.github/workflows/install-e2e.yaml` exercises the real installer against the goreleaser
-  release archives for release confidence. It does not run on normal PRs: a `detect` job flags
-  release-please PRs and manual `workflow_dispatch`, one `snapshot` job builds the archives
-  (`make snapshot`), and per-OS jobs run the installer tests: Linux via
-  `test/install.e2e.test.sh`, Windows via the Pester suite under Windows PowerShell 5.1 (the
-  `install.ps1` floor), hermetic via a stubbed `gh` and a loopback fixture server. None is a
-  required status check, so they gate release-please PRs and on-demand runs, never normal
-  merges.
+- The installer fail-closed paths are covered hermetically in `make check`, not as a separate
+  release-gate workflow: `test/install.smoke.test.sh` (run by `sh-test`) drives `install.sh`
+  against a loopback fixture server and asserts the Linux checksum-mismatch abort writes no
+  binary, and `test/install.smoke.Tests.ps1` (run by `pwsh-test`) drives the `install.ps1`
+  logic the same way, asserting the Windows-logic checksum-mismatch abort and the non-loopback
+  URL reject. `make install-e2e` remains the standalone real-artifact check: it builds a
+  goreleaser snapshot and runs the real `install.sh` against it on Linux
+  (`test/install.e2e.test.sh`), for release confidence beyond the hermetic gate. The Windows
+  PowerShell 5.1 floor (the shipped `install.ps1`'s actual interpreter) is covered post-publish
+  by the install-script smoke against the public release assets.
 - `.github/workflows/llm-smoke.yaml` runs the live LLM smoke against real providers as a
   PRE-PUBLISH RELEASE GATE, not on pull requests. Two entry points: `workflow_call` (the
   Release Pipeline, with `ref: <release SHA>`) and `workflow_dispatch` for maintainers.
@@ -696,10 +707,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   ambient environment; that assertion exists ONLY in the no-tool suite, so
   `SMOKE_REQUIRE_NO_CONNECTORS` is derived from the suite inside the run step rather than
   carried as a matrix key, and `SMOKE_REQUIRE_RUN` is a hardcoded `"1"` with no optional
-  legs. `test/llm-smoke-roster.unit.test.sh` pins the canonical six-leg roster as a
+  legs. `test/llm-smoke-roster.unit.test.sh` pins the workflow's static contract as a
   golden under `make sh-test`, replacing the deleted JSON manifest and its Go validator:
-  it pins each leg's full id/family/suite/provider/model-variable tuple, because ids
-  alone would let a leg silently change suite or provider while staying green.
+  each leg's full id/family/suite/provider/model-variable tuple (ids alone would let a
+  leg silently change suite or provider while staying green), the gate-assert
+  ROSTER/JOBS/PROOFS literals derived from the same canonical rows (a leg dropped from
+  the fan-in is invisible to the runtime checks while the remaining legs stay green),
+  and each smoke step's operational seam (the matrix suite/provider/model bindings and
+  the suite dispatcher that derives the connector-dark tripwire).
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. Dependency bumps use the `deps:` type
@@ -769,13 +784,18 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   release rather than waving it through. The fail-closed logic, the invocation contract and the
   roster assertion, lives in `scripts/ci/ci-gate-contract.sh` and `scripts/ci/ci-gate-assert.sh`,
   each with offline unit tests gated by `make sh-test`, so it is exercised on every PR rather
-  than only on a live release run; `make sh-test` also asserts the trusted-caller pin in
-  `connector-e2e.yaml` directly. Both scripts are now shared with the LLM gate: the connector
+  than only on a live release run; `make sh-test` also asserts the trusted-caller pin in both
+  gate workflows directly and pins the publish gate's required conjuncts (the two gate result
+  and gate_sha terms plus the non-empty release SHA) against `release.yaml`. Both scripts are
+  now shared with the LLM gate: the connector
   gate passes `DISPATCH_POLICY: filtered` (a dispatch must carry a selector from an allowlist),
   while the LLM gate passes `full-only` (a dispatch must not carry one). The
   `publish` job re-asserts the
   still-editable draft (same id,
-  same exact asset set) immediately before publishing, then verifies and pushes the tap; a
+  same exact asset set) immediately before publishing, then verifies the published release; the
+  Homebrew tap push now lives in a separate `homebrew-publish` job (gated on `publish`, minting
+  its own homebrew-tap-scoped write token) rather than as a final step inside `publish`, so the
+  release/prepublish/publish tokens are cynative-only. A
   separate `candidate-pr` job (gated on `publish`) then runs release-please phase 2. Phase 2
   lives in its own job, not inside `publish`, so a flake computing the next-release candidate
   can never fail `publish` and skip the post-publish channel jobs (cynative#140). Publish is
@@ -786,16 +806,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   publish; that is also why `connector-e2e.yaml` scopes `cancel-in-progress` to `workflow_dispatch`
   runs and gives the gate path its own run-id concurrency group (a called workflow's concurrency
   group is evaluated in the caller's context, so it would otherwise collide with a standalone run
-  on the same ref). After the tap push, the pipeline calls
-  the reusable `.github/workflows/homebrew-smoke.yaml`
-  (also maintainer-dispatchable), which waits for the tap to serve the new version and runs
-  the Homebrew install smoke on macOS and Linux. It also calls the reusable
-  `.github/workflows/install-script-smoke.yaml` (also maintainer-dispatchable) once the
-  `publish` job completes, which runs the documented `curl | sh` install path on Linux and macOS
-  and the `irm | iex` path on Windows PowerShell 5.1 against the public release assets. It also
-  calls the reusable `.github/workflows/scoop-smoke.yaml` (also maintainer-dispatchable), which
-  waits for the public Scoop bucket to serve the new version and runs the Scoop install smoke on
-  windows-latest. For all three: a red channel smoke with a green `publish` job means
+  on the same ref). After publish, the pipeline calls the single reusable
+  `.github/workflows/channel-smoke.yaml` (also maintainer-dispatchable), which validates all three
+  public install channels in one workflow: the Homebrew brew channel (waits for the tap to serve
+  the new version, macOS and Linux), the documented install-script one-liners (`curl | sh` on Linux
+  and macOS, `irm | iex` on Windows PowerShell 5.1, against the public release assets), and the
+  Scoop bucket (waits for the public bucket to serve the new version, windows-latest). It gates on
+  `publish` success and lists `homebrew-publish`/`scoop-publish` in `needs` only to order the tap
+  and bucket push before the smoke. A red channel smoke with a green `publish` job means
   public-channel drift, nothing to roll back.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and

@@ -1,0 +1,287 @@
+name: Channel install smoke
+
+# Post-release public-channel check: prove the documented install one-liners
+# serve the expected release, the installed binary reports exactly that version,
+# and uninstall is clean. One reusable workflow covers all three channels:
+# Homebrew (cynative#45), the install-script one-liners (cynative#47), and Scoop
+# (cynative#46). Two entry points, no PR trigger: the Release Pipeline calls it
+# post-publish (workflow_call, tag input), and maintainers can dispatch it
+# manually against the latest published release. Failure semantics: a red run
+# with a green Release Pipeline `publish` job means a public channel is broken -
+# investigate and re-run via workflow_dispatch, nothing to roll back.
+#
+# Every job carries an explicit timeout-minutes: a caller job that `uses:` a
+# reusable workflow cannot set one, and on the call path a wedged job would
+# otherwise hold the release-pipeline concurrency group for the default 360
+# minutes. Every checkout sets persist-credentials: false; the smoke jobs
+# deliberately execute what the public channel serves, so they must not hold a
+# repo token they do not need.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to smoke (e.g. v0.4.0)
+        required: true
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      # Discriminate the entry point STRUCTURALLY, not by event name: a called
+      # workflow inherits the caller's event, so github.event_name cannot tell a
+      # reusable call from a direct dispatch. github.workflow_ref names the
+      # CALLER's workflow; job.workflow_ref names the file defining this job.
+      # Equal means a direct dispatch, so resolve the latest published release;
+      # different means a reusable call, where the tag input is REQUIRED and an
+      # empty value fails closed (required: true is not enforced at runtime, and
+      # silently falling back to latest could green-light the wrong version).
+      # Same idiom as connector-e2e.yaml. GH_TOKEN stays confined to this job;
+      # the smoke jobs below export no token, because they deliberately execute
+      # what the public channel serves.
+      - name: Resolve expected version
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_INPUT: ${{ inputs.tag }}
+        run: |
+          if [ "${{ github.workflow_ref }}" = "${{ job.workflow_ref }}" ]; then
+            tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)" \
+              || { echo "::error::no published release to smoke"; exit 1; }
+          else
+            if [ -z "${TAG_INPUT}" ]; then
+              echo "::error::empty tag on the call path"; exit 1
+            fi
+            tag="${TAG_INPUT}"
+          fi
+          version="${tag#v}"
+          # Fail closed on a tag of exactly "v": an empty SMOKE_VERSION would
+          # make the smoke scripts resolve latest themselves, un-pinning the
+          # release under test.
+          if [ -z "${version}" ]; then
+            echo "::error::resolved an empty version from tag '${tag}'"; exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "expecting cynative ${version}"
+
+  brew:
+    name: brew install (${{ matrix.os }})
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # ubuntu runners ship Homebrew off PATH; macos runners have it on PATH.
+      - name: Add Homebrew to PATH (Linux)
+        if: runner.os == 'Linux'
+        run: echo "/home/linuxbrew/.linuxbrew/bin" >> "${GITHUB_PATH}"
+      # Bounded propagation defense: the tap push completes before the caller
+      # reaches this workflow, so this only absorbs propagation lag (and a manual
+      # dispatch racing a still-running release). ~1 minute budget (4 x 20s).
+      # Each probe is an anonymous shallow git clone of the public tap - the same
+      # mechanism brew itself uses - with none of the REST rate-limit or
+      # cross-repo token-scope questions. Deliberately not raw.githubusercontent.com:
+      # no freshness guarantee. No GNU `timeout` wrapper: the brew matrix includes
+      # macos-latest, so the poll stays POSIX/macOS-safe. The default shell is
+      # bash -e, so the final-attempt sleep guard is an if, not a bare [ ] && chain.
+      - name: Wait for the tap to serve the version
+        shell: bash
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          last="no probe yet"
+          for attempt in $(seq 1 4); do
+            rm -rf /tmp/tap-probe
+            if git clone --quiet --depth 1 \
+                https://github.com/cynative/homebrew-tap /tmp/tap-probe 2>/tmp/poll-err; then
+              if grep -Fq "version \"${VERSION}\"" /tmp/tap-probe/Formula/cynative.rb 2>/dev/null; then
+                echo "tap serves ${VERSION} (attempt ${attempt})"
+                exit 0
+              fi
+              last="tap cloned but formula version != ${VERSION}"
+            else
+              last="$(tr -d '\n' < /tmp/poll-err)"
+            fi
+            echo "attempt ${attempt}/4: tap not serving ${VERSION} yet (${last})"
+            if [ "${attempt}" -lt 4 ]; then sleep 20; fi
+          done
+          echo "::error::tap did not serve version ${VERSION} within ~1 minute; last: ${last}"
+          exit 1
+      - name: Install, verify, uninstall via brew
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: sh test/homebrew.smoke.test.sh
+
+  install-script-sh:
+    name: curl install.sh (${{ matrix.os }})
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      # persist-credentials off: this job executes scripts served by public main,
+      # so it must not hold a repo token it does not need.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No propagation poll: the release assets are published before the caller
+      # reaches this workflow, and the smoke intentionally tests whatever public
+      # main serves for install.sh (which can lag or lead the release SHA;
+      # accepted residual). Downloads are single-attempt; recover a transient
+      # network failure by re-running via workflow_dispatch.
+      - name: Install, verify, uninstall via the public install.sh
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: sh test/install-script.smoke.test.sh
+
+  install-script-ps1:
+    name: irm install.ps1 (windows-latest)
+    needs: resolve
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install, verify, uninstall via the public install.ps1
+        shell: powershell # 5.1, not pwsh (7) - the floor install.ps1 targets.
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          & .\test\install-script.smoke.test.ps1
+          exit $LASTEXITCODE
+
+  scoop:
+    name: scoop install (windows-latest)
+    needs: resolve
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      # persist-credentials off: this job executes what the public channel serves,
+      # so it must not hold a repo token it does not need.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Bounded propagation defense for the scoop channel, PowerShell-native
+      # because this leg runs under Windows PowerShell 5.1 (a bash snippet would
+      # not parse under `shell: powershell`). scoop-publish (cynative#103) pushes
+      # the bucket after publish, before this smoke on the call path, so the first
+      # probe normally succeeds; the loop is bounded defense for a manual dispatch
+      # that resolves a just-published version before scoop-publish has pushed it.
+      # ~1 minute budget (4 x 20s). Each probe is an anonymous shallow git clone of
+      # the public bucket - the same mechanism scoop itself uses. Deliberately not
+      # raw.githubusercontent.com: no freshness guarantee. Probes classify
+      # distinctly: UNAVAILABLE (clone failed), ABSENT (manifest missing), INVALID
+      # (version not a nonempty JSON string), MISMATCH (wrong version).
+      - name: Wait for the bucket to serve the version
+        shell: powershell # 5.1, matching the scoop leg it gates.
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $probe = Join-Path $env:RUNNER_TEMP 'bucket-probe'
+          $state = 'no probe yet'
+          foreach ($attempt in 1..4) {
+            if (Test-Path -LiteralPath $probe) {
+              Remove-Item -Recurse -Force -LiteralPath $probe
+            }
+            & git clone --quiet --depth 1 https://github.com/cynative/scoop-bucket $probe
+            if ($LASTEXITCODE -eq 0) {
+              $manifest = Join-Path (Join-Path $probe 'bucket') 'cynative.json'
+              if (-not (Test-Path -LiteralPath $manifest)) {
+                $state = 'ABSENT: bucket/cynative.json missing from the bucket'
+              } else {
+                $served = $null
+                try {
+                  $served = (Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json).version
+                } catch {
+                  $served = $null
+                }
+                if (-not ($served -is [string]) -or [string]::IsNullOrEmpty($served)) {
+                  $state = 'INVALID: manifest version is not a nonempty string'
+                } elseif ($served -eq $env:VERSION) {
+                  Write-Host "bucket serves $($env:VERSION) (attempt $attempt)"
+                  exit 0
+                } else {
+                  $state = "MISMATCH: bucket serves $served, expected $($env:VERSION)"
+                }
+              }
+            } else {
+              $state = 'UNAVAILABLE: git clone of the public bucket failed'
+            }
+            Write-Host "attempt ${attempt}/4: $state"
+            if ($attempt -lt 4) { Start-Sleep -Seconds 20 }
+          }
+          Write-Host "::error::bucket did not serve $($env:VERSION); last: $state (if a release is mid-run, re-run this dispatch after it publishes)"
+          exit 1
+      # Own step so a bootstrap failure reads as "Scoop bootstrap failed", never
+      # as cynative channel drift. Runner images do not ship scoop; the official
+      # installer is safe to run as admin here (it has an explicit GITHUB_ACTIONS+CI
+      # exception) and prepends the shims dir to this session's PATH. The fetch is
+      # retried, the execution never is (a partial install must not be rerun
+      # blindly). The resolved root and shims dir propagate to the next step via
+      # GITHUB_ENV/GITHUB_PATH; Windows PowerShell 5.1 needs the explicit utf8
+      # encoding for workflow command files.
+      - name: Install Scoop
+        shell: powershell # 5.1, not pwsh (7) - scoop's documented floor, and what the smoke runs under.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $existing = Get-Command scoop -ErrorAction SilentlyContinue
+          if ($existing) {
+            $shimsDir = Split-Path -Path ([string]$existing.Source) -Parent
+            $scoopRoot = Split-Path -Path $shimsDir -Parent
+            Write-Host "reusing preinstalled scoop at $($existing.Source)"
+          } else {
+            $content = $null
+            foreach ($attempt in 1..3) {
+              try {
+                $content = Invoke-RestMethod -UseBasicParsing -Uri 'https://get.scoop.sh' -TimeoutSec 60
+                if ($content) { break }
+              } catch {
+                Write-Host "installer fetch attempt ${attempt}/3 failed: $($_.Exception.Message)"
+              }
+              if ($attempt -lt 3) { Start-Sleep -Seconds 5 }
+            }
+            if (-not $content) { throw 'could not fetch the scoop installer after 3 attempts' }
+            & ([scriptblock]::Create([string]$content))
+            $scoopRoot = [string]$env:SCOOP
+            if (-not $scoopRoot) { $scoopRoot = Join-Path $env:USERPROFILE 'scoop' }
+            $shimsDir = Join-Path $scoopRoot 'shims'
+          }
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            throw 'scoop not resolvable after bootstrap'
+          }
+          # Health check out of process under Desktop 5.1: scoop's .cmd shim
+          # would prefer pwsh, and an in-process run has no reliable exit
+          # code. Same invocation shape the smoke script uses; a broken or
+          # partial scoop must fail THIS step, never read as channel drift.
+          $scoopPs1 = Join-Path $shimsDir 'scoop.ps1'
+          if (-not (Test-Path -LiteralPath $scoopPs1)) { throw "$scoopPs1 missing after bootstrap" }
+          & (Join-Path $PSHOME 'powershell.exe') -NoProfile -ExecutionPolicy Bypass -File $scoopPs1 --version
+          if ($LASTEXITCODE -ne 0) { throw "scoop --version exited $LASTEXITCODE" }
+          "SCOOP=$scoopRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $shimsDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install, verify, uninstall via scoop
+        shell: powershell # 5.1, not pwsh (7) - scoop's documented floor.
+        env:
+          SMOKE_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          & .\test\scoop.smoke.test.ps1
+          exit $LASTEXITCODE
