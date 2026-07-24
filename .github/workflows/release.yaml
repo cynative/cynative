@@ -72,8 +72,12 @@ jobs:
       #       repos/cynative/cynative/issues/<pr>/labels/autorelease%3A%20tagged
       #     gh api repos/cynative/cynative/issues/<pr>/labels \
       #       -f "labels[]=autorelease: pending"
-      #   Then re-run the workflow; release-please recreates the draft. The
-      #   pre-publish gate spans the release job, the smoke and e2e gates
+      #   Then trigger a fresh run so release-please recreates the draft. If
+      #   the failure was a secret that had to be created or fixed, start a
+      #   NEW run (a push to main), do NOT re-run the failed one: GitHub
+      #   snapshots secret values at workflow-run-create time, so a re-run
+      #   reuses the stale values and fails the same way (cli/cli#13522).
+      #   The pre-publish gate spans the release job, the smoke and e2e gates
       #   (macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke), and the
       #   publish job; a failure in any of them, up to and including the publish
       #   job's re-assertions, leaves the draft intact and these notes apply.
