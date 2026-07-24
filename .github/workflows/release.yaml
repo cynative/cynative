@@ -116,7 +116,11 @@ jobs:
       - name: Ensure release tag
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          # TEMPORARY recovery override (revert with the release-please token):
+          # ensure-tag.sh creates the tag ref, and a GitHub App token cannot
+          # create a ref at a non-HEAD commit. The v1.7.0 recovery advanced main
+          # past the release commit, so the App 403s here; a PAT is not.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
           TAG: ${{ steps.release-please.outputs.tag_name }}
           SHA: ${{ steps.release-please.outputs.sha }}
         run: |
@@ -612,7 +616,10 @@ jobs:
       - name: Re-verify tag before publish
         if: ${{ needs.release.outputs.release_created == 'true' }}
         env:
-          GH_TOKEN: ${{ steps.publish-token.outputs.token }}
+          # TEMPORARY recovery override (see the release job's Ensure release
+          # tag step): the App token cannot create/verify the tag ref at the
+          # non-HEAD release commit, so this re-verify uses the PAT too.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_PAT }}
           TAG: ${{ needs.release.outputs.tag_name }}
           SHA: ${{ needs.release.outputs.sha }}
         run: scripts/release/ensure-tag.sh "${GITHUB_REPOSITORY}" "${TAG}" "${SHA}"
