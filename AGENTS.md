@@ -92,7 +92,12 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   credential material was logged. `make sh-test` gates the parser: each suite's offline `--selftest`
   drives it and pins the suite's frozen case-name/code set
   (`connector_audit/testdata/<provider>.names.txt`), plus a shared-machinery `--selftest` that
-  exercises the engine's own fail-closed and prepass cases. `make homebrew-smoke`: standalone post-release
+  exercises the engine's own fail-closed and prepass cases. The `test/connector.<provider>.e2e.test.sh`
+  naming is load-bearing: `make connector-<provider>-e2e` is a single FORCE-guarded
+  `connector-%-e2e` pattern rule keyed on it, and `make sh-test` runs each suite's `--selftest`
+  through a `git ls-files 'test/connector.*.e2e.test.sh'` glob that fails closed (a `git
+  ls-files` error, or a zero-match result, is a hard failure rather than a silently skipped
+  selftest). `make homebrew-smoke`: standalone post-release
   Homebrew install smoke (not part of `make check`); installs cynative from the public tap via the
   documented `brew install cynative/tap/cynative`, asserts `cynative --version` reports the expected
   release (`SMOKE_VERSION`, default: latest published), uninstalls, and asserts it is gone

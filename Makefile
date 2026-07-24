@@ -1,6 +1,6 @@
 .PHONY: check check-go check-scripts mod-tidy-check lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	llm-tools-smoke connector-gcp-e2e connector-aws-e2e connector-github-e2e homebrew-smoke install-script-smoke
+	llm-tools-smoke homebrew-smoke install-script-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -144,9 +144,9 @@ sh-test:
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
-	@sh test/connector.gcp.e2e.test.sh --selftest
-	@sh test/connector.aws.e2e.test.sh --selftest
-	@sh test/connector.github.e2e.test.sh --selftest
+	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
+	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
+	 for f in $$files; do echo "  selftest $$f"; sh "$$f" --selftest || exit 1; done
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
 	@# The trusted-caller pin is the only thing that stops an arbitrary workflow from
 	@# driving a release gate; without it, anything calling the workflow would pass the
@@ -265,26 +265,18 @@ llm-smoke:
 llm-tools-smoke:
 	sh test/llm-tools.smoke.test.sh
 
-# connector-gcp-e2e: live GCP connector end-to-end test (cynative#39). Standalone
-# (NOT part of `make check`): runs the real `cynative -p` against a real GCP fixture
-# project through the gcp connector and needs real credentials; skips cleanly when
-# GCP_E2E_* env is unset. The script header documents its env and knobs.
-connector-gcp-e2e:
-	sh test/connector.gcp.e2e.test.sh
+# connector-%-e2e: live connector end-to-end tests (cynative#39, cynative#52,
+# cynative#53). Standalone (NOT part of `make check`): runs the real `cynative -p`
+# against a real fixture account/repo through the named connector and needs real
+# credentials; skips cleanly when the connector's *_E2E_* env is unset. Each
+# script header documents its env and knobs. FORCE keeps the recipe live even if
+# a file named connector-<name>-e2e exists in the repo root; a bare pattern rule
+# has no such guarantee since it cannot be a .PHONY prerequisite.
+.PHONY: FORCE
+FORCE:
 
-# connector-aws-e2e: live AWS connector end-to-end test (cynative#52). Standalone
-# (NOT part of `make check`): runs the real `cynative -p` against a real AWS fixture
-# account through the aws connector and needs real credentials; skips cleanly when
-# AWS_E2E_* env is unset. The script header documents its env and knobs.
-connector-aws-e2e:
-	sh test/connector.aws.e2e.test.sh
-
-# connector-github-e2e: live GitHub connector end-to-end test (cynative#53). Standalone
-# (NOT part of `make check`): runs the real `cynative -p` against a private fixture repo
-# through the github connector and needs a token; skips cleanly when GH_E2E_* is unset.
-# The script header documents its env and knobs.
-connector-github-e2e:
-	sh test/connector.github.e2e.test.sh
+connector-%-e2e: FORCE ## run one live connector e2e (gcp|aws|github); naming is load-bearing
+	sh test/connector.$*.e2e.test.sh
 
 # homebrew-smoke: post-release Homebrew install smoke (cynative#45). Standalone
 # (NOT part of `make check`): installs cynative from the public tap via the
