@@ -14,10 +14,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - `make check-go`: `mod-tidy-check` (a non-mutating `go mod tidy -diff`, so the gate fails on an
   untidy `go.mod`/`go.sum` instead of rewriting them) + generate + lint + shell-complexity +
   format-diff + test + `windows-build` (GOOS=windows amd64/arm64 cross-compile). 100%
-  `go.mod`-pinned and hermetic; **the pre-commit hook runs this**.
-- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer on `install.ps1`,
-  `test/install-script.smoke.test.ps1`, `test/scoop.smoke.test.ps1`, and
-  `test/archive.smoke.test.ps1` + Pester unit tests +
+  `go.mod`-pinned; the `mod-tidy-check` step is non-mutating but may consult the module cache,
+  so the gate is not fully network-free; **the pre-commit hook runs this**.
+- `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer (every tracked
+  `*.ps1`) + Pester unit tests (every tracked `test/*.Tests.ps1`) +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
   live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the shared
@@ -672,8 +672,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - `.github/workflows/ci.yaml` runs `make check` as the single **`Lint & Test`** job on every PR
   against `main`; a bootstrap step installs the pinned shellcheck (download + SHA-256 verify) and
   the pinned Pester/PSScriptAnalyzer modules, versions read from the `Makefile` via `make -s
-  print-*`. The job is gated to pull requests (the workflow also fires on push to `main`, where
-  it skips). Direct pushes to `main` are **blocked** by an active GitHub **ruleset** (squash-only
+  print-*`. It runs only on pull requests against `main`. Direct pushes to `main` are
+  **blocked** by an active GitHub **ruleset** (squash-only
   merges, linear history, required review-thread resolution, no human bypass) whose required
   status checks, under a strict up-to-date policy, are **`Lint & Test`**, **`Validate PR title`**
   (`semantic-pr.yaml`), and **`Build & smoke-test macOS packaging toolchain`**
