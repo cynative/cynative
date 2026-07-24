@@ -1,8 +1,10 @@
 #!/bin/sh
 # End-to-end smoke: run the real install.sh against a loopback fixture server.
 # Proves both issue #40 clauses - install from http://127.0.0.1, and reject a
-# non-loopback http override. Hermetic (no network): CYNATIVE_VERSION is pinned,
-# the server is loopback-only, and a gh stub keeps attestation offline.
+# non-loopback http override - plus a fail-closed checksum mismatch: a tampered
+# archive must abort before any binary is written. Hermetic (no network):
+# CYNATIVE_VERSION is pinned, the server is loopback-only, and a gh stub keeps
+# attestation offline.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
@@ -21,8 +23,9 @@ command -v python3 >/dev/null 2>&1 || { printf 'FAIL: python3 not found (fixture
 workdir=$(mktemp -d)
 srv="$workdir/srv"
 bin="$workdir/bin"
+bad="$workdir/bad"
 stub="$workdir/stub"
-mkdir -p "$srv" "$bin" "$stub"
+mkdir -p "$srv" "$bin" "$bad" "$stub"
 
 case "$(uname -s)" in
   Linux) os=Linux ;;
@@ -75,6 +78,25 @@ PATH="$stub:$PATH" \
 out=$("$bin/cynative")
 [ "$out" = "$marker" ] || { printf 'FAIL: installed binary marker mismatch: %s\n' "$out" >&2; exit 1; }
 
+# Checksum-mismatch path: tamper the served archive so its sha diverges from the
+# unchanged checksums.txt; install.sh must abort before writing a binary.
+printf 'tamper' >> "$srv/$archive"
+set +e
+out=$(CYNATIVE_BASE_URL="http://127.0.0.1:$port" \
+      CYNATIVE_VERSION="v0.0.0-test" \
+      CYNATIVE_REQUIRE_ATTESTATION=0 \
+      CYNATIVE_INSTALL_DIR="$bad" \
+      PATH="$stub:$PATH" \
+        sh "$installer" 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || { printf 'FAIL: tampered archive did not fail install\n' >&2; exit 1; }
+case "$out" in
+  *"checksum mismatch"*) : ;;
+  *) printf 'FAIL: expected "checksum mismatch", got: %s\n' "$out" >&2; exit 1 ;;
+esac
+[ ! -e "$bad/cynative" ] || { printf 'FAIL: tampered install wrote a binary\n' >&2; exit 1; }
+
 # Reject path: a non-loopback http override must fail closed before any download.
 set +e
 reject=$(CYNATIVE_BASE_URL="http://evil.example" CYNATIVE_VERSION="v0.0.0-test" sh "$installer" 2>&1)
@@ -86,4 +108,4 @@ case "$reject" in
   *) printf 'FAIL: reject message shape: %s\n' "$reject" >&2; exit 1 ;;
 esac
 
-printf 'install.smoke: OK (accept http://127.0.0.1 + reject non-loopback http)\n' >&2
+printf 'install.smoke: OK (accept http://127.0.0.1 + checksum mismatch + reject non-loopback http)\n' >&2

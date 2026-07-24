@@ -1,22 +1,27 @@
 #!/bin/sh
-# Unit tests for the live LLM gate's leg roster. Offline and hermetic.
+# Unit tests for the live LLM gate's static contract in llm-smoke.yaml. Offline and
+# hermetic. Three layers, all anchored to the one canonical roster below:
 #
-# This replaces internal/llm/livellm_manifest_test.go, which validated the deleted JSON
-# manifest under `Lint & Test`. A static matrix has no schema, so without this the first
-# time a bad roster is noticed is a release run.
+#   1. The matrix rows: each physical row's full job/leg/family/suite/provider/
+#      model-variable tuple, plus release/manual parity for the api-key jobs.
+#   2. The gate-assert fan-in: the ROSTER/JOBS/PROOFS literals are derived from the
+#      canonical rows plus the job->policy map and compared as sorted multisets, so a
+#      leg dropped from the fan-in (invisible to the runtime checks: the remaining
+#      legs still pass) fails here instead of going silently ungated.
+#   3. The smoke steps' operational seam: SUITE/provider/model must be consumed from
+#      the matrix and the canonical suite dispatcher must be present, so a row field
+#      cannot degrade into an unused label and the connector-dark tripwire cannot be
+#      disabled while the rows stay green.
 #
 # It is deliberately a GOLDEN, not a relational check. Comparing the workflow's matrix
-# rows against the workflow's own ROSTER string would pass if a whole family were deleted
-# from both, and the remaining legs would still emit gate_sha. The canonical roster below
-# is the independent anchor.
+# rows against the workflow's own ROSTER string would pass if a whole family were
+# deleted from both. The canonical roster is the independent anchor; the policy map is
+# part of that anchor (policies are not derivable from the matrix).
 #
-# It pins each row's full tuple INCLUDING its owning job, not just the leg id: flipping
-# vertex-notool to the tools suite keeps its id, family, live success, and proof while
-# silently dropping the connector-dark tripwire, and repointing openai-tools at Anthropic
-# yields two Anthropic calls, zero OpenAI calls, and a green gate. Job attribution is
-# what makes the release/manual parity check real: without it, two OpenAI rows in one API
-# job and two Anthropic rows in the other satisfy an aggregate multiset while violating
-# parity outright.
+# Rows pin the full tuple INCLUDING the owning job: flipping vertex-notool to the
+# tools suite keeps its id/family/proof while dropping the connector-dark tripwire,
+# and repointing openai-tools at Anthropic yields two Anthropic calls and a green
+# gate. Job attribution is what makes the release/manual parity check real.
 set -eu
 
 workflow=.github/workflows/llm-smoke.yaml
@@ -45,11 +50,12 @@ EOF
 # It also asserts each row's OPERATIONAL model expression equals `${{ vars.<model_var> }}`
 # for that row's own model_var. Pinning model_var alone would leave the diagnostic label
 # canonical while the consumed expression pointed elsewhere.
-python3 - "$workflow" >"$tmp/actual" <<'PY'
+python3 - "$workflow" "$tmp/expected" >"$tmp/actual" <<'PY'
 import re
 import sys
 
-lines = open(sys.argv[1]).read().splitlines()
+with open(sys.argv[1], encoding="utf-8") as workflow_file:
+    lines = workflow_file.read().splitlines()
 
 # Job headers sit at exactly two spaces of indentation, but only inside the top-level
 # `jobs:` block. `on:` has children (workflow_call, workflow_dispatch) at that same
@@ -117,6 +123,194 @@ while i < len(lines):
         continue
     i += 1
 
+# ---- gate-assert fan-in literals -------------------------------------------
+# The canonical rows (argv[2]) are the anchor; the gate-assert env's ROSTER, JOBS,
+# and PROOFS are DERIVED from them plus this job->policy map and compared as sorted
+# multisets. The map is part of the anchor: policies are not derivable from the
+# matrix. A leg dropped from the fan-in is invisible to the runtime checks (the
+# remaining legs still pass), which is exactly why these literals need a golden.
+policy_map = {
+    "gcp-wif": "always",
+    "aws-oidc": "always",
+    "api-key-release": "release",
+    "api-key-manual": "manual",
+}
+
+canonical = []
+with open(sys.argv[2], encoding="utf-8") as canonical_file:
+    for raw in canonical_file.read().splitlines():
+        if raw.strip():
+            canonical.append(raw.split("|"))
+for parts in canonical:
+    if len(parts) != 6:
+        problems.append(
+            "canonical row %r is not job|leg|family|suite|provider|model_var" % "|".join(parts)
+        )
+
+# Derivation self-guards: a stale policy map or an ambiguous family mapping must fail
+# the golden itself, not silently derive a wrong expectation.
+canonical_jobs = sorted({parts[0] for parts in canonical})
+if sorted(policy_map) != canonical_jobs:
+    problems.append(
+        "policy map keys %s do not equal the canonical job set %s"
+        % (sorted(policy_map), canonical_jobs)
+    )
+for what, idx in (("job", 0), ("leg", 1)):
+    fams = {}
+    for parts in canonical:
+        fams.setdefault(parts[idx], set()).add(parts[2])
+    for name, seen in sorted(fams.items()):
+        if len(seen) != 1:
+            problems.append("%s %s maps to multiple families %s" % (what, name, sorted(seen)))
+
+want_roster = sorted({parts[1] + ":" + parts[2] for parts in canonical})
+want_jobs = sorted(
+    {parts[0] + ":" + parts[2] + ":" + policy_map.get(parts[0], "<unmapped>") for parts in canonical}
+)
+want_proofs = sorted(
+    parts[0] + "." + parts[1] + "=${{ needs." + parts[0]
+    + ".outputs.proof_" + parts[1].replace("-", "_") + " }}"
+    for parts in canonical
+)
+
+def job_slice(name):
+    start = None
+    for i, line in enumerate(lines):
+        if line == "  %s:" % name:
+            start = i + 1
+            break
+    if start is None:
+        problems.append("job %s not found in the workflow" % name)
+        return []
+    end = len(lines)
+    for i in range(start, len(lines)):
+        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[i]) or re.match(r"^\S", lines[i]):
+            end = i
+            break
+    return lines[start:end]
+
+def scalars(chunk, key):
+    out = []
+    for line in chunk:
+        m = re.match(r"^\s*%s:\s*(.+?)\s*$" % re.escape(key), line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+def block(chunk, key):
+    out = []
+    starts = [i for i, l in enumerate(chunk) if re.match(r"^\s*%s:\s*\|\s*$" % re.escape(key), l)]
+    if len(starts) != 1:
+        problems.append("expected exactly one %s block in gate-assert, found %d" % (key, len(starts)))
+        return out
+    indent = len(chunk[starts[0]]) - len(chunk[starts[0]].lstrip())
+    for l in chunk[starts[0] + 1:]:
+        if l.strip() and (len(l) - len(l.lstrip())) <= indent:
+            break
+        if l.strip():
+            out.append(l.strip())
+    return out
+
+ga = job_slice("gate-assert")
+got_roster = scalars(ga, "ROSTER")
+got_jobs = scalars(ga, "JOBS")
+if len(got_roster) != 1:
+    problems.append("expected exactly one ROSTER scalar in gate-assert, found %d" % len(got_roster))
+if len(got_jobs) != 1:
+    problems.append("expected exactly one JOBS scalar in gate-assert, found %d" % len(got_jobs))
+got_proofs = block(ga, "PROOFS")
+
+if got_roster and sorted(got_roster[0].split()) != want_roster:
+    problems.append(
+        "gate-assert ROSTER %s does not match the derived %s"
+        % (sorted(got_roster[0].split()), want_roster)
+    )
+if got_jobs and sorted(got_jobs[0].split()) != want_jobs:
+    problems.append(
+        "gate-assert JOBS %s does not match the derived %s"
+        % (sorted(got_jobs[0].split()), want_jobs)
+    )
+if sorted(got_proofs) != want_proofs:
+    problems.append(
+        "gate-assert PROOFS do not match the derived lines:\n    got  %s\n    want %s"
+        % (sorted(got_proofs), want_proofs)
+    )
+
+# ---- per-job smoke-step operational seam -----------------------------------
+# The rows pin what the matrix DECLARES; these pin what the smoke step CONSUMES. A
+# SUITE hardcoded to llm-tools-smoke would keep every row green while silently
+# disabling the connector-dark tripwire, and an unbound provider/model would reduce
+# canonical row fields to unused labels.
+SMOKE_ENV_PINS = {
+    "SMOKE_REQUIRE_RUN": '"1"',
+    "SUITE": "${{ matrix.suite }}",
+    "CYNATIVE_LLM_PROVIDER": "${{ matrix.provider }}",
+    "CYNATIVE_LLM_MODEL": "${{ matrix.model }}",
+}
+DISPATCHER = [
+    'case "$SUITE" in',
+    'llm-smoke) export SMOKE_REQUIRE_NO_CONNECTORS=1; exec make llm-smoke ;;',
+    'llm-tools-smoke) unset SMOKE_REQUIRE_NO_CONNECTORS; exec make llm-tools-smoke ;;',
+    '*) echo "::error::unknown suite: $SUITE" >&2; exit 1 ;;',
+    'esac',
+]
+
+def norm(line):
+    return " ".join(line.split())
+
+def check_smoke(jobname):
+    chunk = job_slice(jobname)
+    smoke = [i for i, l in enumerate(chunk) if norm(l) == "id: smoke"]
+    if len(smoke) != 1:
+        problems.append(
+            "job %s must have exactly one id: smoke step, found %d" % (jobname, len(smoke))
+        )
+        return
+    j = smoke[0]
+    while j < len(chunk) and norm(chunk[j]) != "env:":
+        j += 1
+    if j == len(chunk):
+        problems.append("job %s smoke step has no env block" % jobname)
+        return
+    env_indent = len(chunk[j]) - len(chunk[j].lstrip())
+    env = {}
+    j += 1
+    while j < len(chunk):
+        l = chunk[j]
+        if l.strip() and (len(l) - len(l.lstrip())) <= env_indent:
+            break
+        m = re.match(r"^\s*([A-Za-z0-9_]+):\s*(.*?)\s*$", l)
+        if m and not l.lstrip().startswith("#"):
+            if m.group(1) in env:
+                problems.append("job %s smoke env declares %s twice" % (jobname, m.group(1)))
+            env[m.group(1)] = m.group(2)
+        j += 1
+    for key, want in sorted(SMOKE_ENV_PINS.items()):
+        if env.get(key) != want:
+            problems.append(
+                "job %s smoke env %s is %r, want %r" % (jobname, key, env.get(key), want)
+            )
+    while j < len(chunk) and norm(chunk[j]) != "run: |":
+        j += 1
+    if j == len(chunk):
+        problems.append("job %s smoke step has no run block" % jobname)
+        return
+    run_indent = len(chunk[j]) - len(chunk[j].lstrip())
+    body = []
+    for l in chunk[j + 1:]:
+        if l.strip() and (len(l) - len(l.lstrip())) <= run_indent:
+            break
+        if l.strip():
+            body.append(norm(l))
+    for k in range(len(body) - len(DISPATCHER) + 1):
+        if body[k:k + len(DISPATCHER)] == DISPATCHER:
+            break
+    else:
+        problems.append("job %s smoke run block lacks the canonical suite dispatcher" % jobname)
+
+for jobname in canonical_jobs:
+    check_smoke(jobname)
+
 if declared != len(rows) or problems:
     for p in problems:
         sys.stderr.write("  %s\n" % p)
@@ -154,7 +348,7 @@ if ! cmp -s "$tmp/api_release" "$tmp/api_manual"; then
 fi
 
 if [ "$fails" = 0 ]; then
-	printf 'OK: llm-smoke-roster\n'
+	printf 'OK: llm-smoke-roster (rows + fan-in literals + smoke seam)\n'
 else
 	exit 1
 fi
