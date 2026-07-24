@@ -678,7 +678,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   status checks, under a strict up-to-date policy, are **`Lint & Test`**, **`Validate PR title`**
   (`semantic-pr.yaml`), and **`Build & smoke-test macOS packaging toolchain`**
   (`pkg-tools.yaml`); the ruleset also runs Copilot code review on each
-  push. The pre-commit hook runs the fast hermetic `make check-go`, a local mirror of the Go half
+  push. The pre-commit hook runs the fast `make check-go`, a local mirror of the Go half
   of the gate, not the enforcement boundary.
 - The installer fail-closed paths are covered hermetically in `make check`, not as a separate
   release-gate workflow: `test/install.smoke.test.sh` (run by `sh-test`) drives `install.sh`
