@@ -170,8 +170,10 @@ sh-test:
 	@# term dropped there (or a gate_sha comparison edited away) would let a red or
 	@# absent gate publish anyway, and nothing else would notice before a live
 	@# release. Scoped to the publish job's own if: line, never a whole-file grep,
-	@# which a comment or a dead job could satisfy.
-	@publish_if=$$(awk '/^  publish:$$/{injob=1} injob && /^    if: /{print; exit}' .github/workflows/release.yaml); \
+	@# which a comment or a dead job could satisfy. The scan resets at every job
+	@# header, so a publish job missing its if: reports the locate failure below
+	@# instead of latching onto a later job's if: line.
+	@publish_if=$$(awk '/^  [A-Za-z0-9_-]+:$$/{injob=($$0=="  publish:")} injob && /^    if: /{print; exit}' .github/workflows/release.yaml); \
 	if [ -z "$$publish_if" ]; then \
 		echo "FAIL: could not locate the publish job's if: line in release.yaml - the publish-gate pin has nothing to check."; \
 		exit 1; \
