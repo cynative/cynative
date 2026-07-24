@@ -556,7 +556,10 @@ jobs:
   # an editable draft: any failure leaves nothing published and nothing
   # immutable. The compound if - !cancelled() plus explicit `== 'success'`
   # result checks (not `!= 'failure'`) - is what makes a skipped or cancelled
-  # gate block the publish rather than wave it through. On a plain push
+  # gate block the publish rather than wave it through.
+  # The explicit non-empty release-SHA term keeps the two gate_sha equality checks
+  # from ever being satisfied degenerately as '' == ''.
+  # On a plain push
   # (release_created != 'true') this skips: nothing is published, and the
   # candidate-pr job below computes the next-release candidate instead. A
   # green `publish` therefore means "published + verified + tap pushed",
@@ -564,7 +567,7 @@ jobs:
   publish:
     name: Publish release
     needs: [release, macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke]
-    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-e2e.result == 'success' && needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha && needs.llm-smoke.result == 'success' && needs.llm-smoke.outputs.gate_sha == needs.release.outputs.sha }}
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.release.outputs.release_created == 'true' && needs.release.outputs.sha != '' && needs.macos-pkg-smoke.result == 'success' && needs.archive-smoke.result == 'success' && needs.connector-e2e.result == 'success' && needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha && needs.llm-smoke.result == 'success' && needs.llm-smoke.outputs.gate_sha == needs.release.outputs.sha }}
     runs-on: ubuntu-latest
     # Budget: the capped steps (artifact download 5, re-assert 5, verify 5)
     # plus every short step with slack, so the job limit can never fire

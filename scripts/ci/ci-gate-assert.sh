@@ -43,6 +43,12 @@
 #                job actually depends on.
 set -eu
 
+# set -f for the whole script: globbing is never wanted here. Every word list (JOBS,
+# ROSTER, jobs_from_needs, the accumulated job/family sets) is deliberately expanded
+# unquoted to split on spaces, and -f keeps a glob character in any token literal
+# instead of expanding it against the caller's working directory.
+set -f
+
 : "${ROSTER:?ROSTER is required}"
 : "${JOBS:?JOBS is required}"
 : "${RESULTS:?RESULTS is required}"
@@ -114,12 +120,30 @@ for triple in $JOBS; do
 	rest=${triple#*:}
 	family=${rest%%:*}
 	policy=${rest##*:}
+	# Exact-reconstruction arity check: with four or more fields the three extractions
+	# above no longer cover the whole token, and an empty field survives
+	# reconstruction, so both are rejected explicitly rather than trusting the parse.
+	if [ "$job:$family:$policy" != "$triple" ] ||
+		[ -z "$job" ] || [ -z "$family" ] || [ -z "$policy" ]; then
+		fail "JOBS entry '$triple' is not job:family:policy"
+		continue
+	fi
 	case "$policy" in
 	always | release | manual) ;;
 	*) fail "job '$job' has unknown policy '$policy'" ;;
 	esac
 	contains_word "$all_jobs" "$job" && fail "job '$job' is listed twice in JOBS"
 	all_jobs="$all_jobs $job"
+done
+
+# ROSTER entries have the same silent-swallow hazard as JOBS triples: leg takes the
+# first field and family the last, so a middle field or an empty half vanishes.
+for pair in $ROSTER; do
+	leg=${pair%%:*}
+	family=${pair##*:}
+	if [ "$leg:$family" != "$pair" ] || [ -z "$leg" ] || [ -z "$family" ]; then
+		fail "ROSTER entry '$pair' is not leg:family"
+	fi
 done
 
 # active_job_for FAMILY - echo the sole job active in this mode, or return 1.
@@ -171,16 +195,10 @@ else
 fi
 
 if [ "$needs_parse_ok" -eq 1 ]; then
-	# jobs_from_needs is a deliberately space-separated word list meant to be split on
-	# iteration, so it is intentionally unquoted here; set -f disables globbing for the
-	# duration so a job name containing a glob character expands to nothing but itself,
-	# never to filenames in the working directory.
-	set -f
 	for job in $jobs_from_needs; do
 		contains_word "$all_jobs" "$job" ||
 			fail "job '$job' is a dependency in needs but missing from JOBS, so it would never be gated"
 	done
-	set +f
 	for job in $all_jobs; do
 		contains_word "$jobs_from_needs" "$job" ||
 			fail "job '$job' is in JOBS but nothing in needs depends on it"
@@ -188,9 +206,11 @@ if [ "$needs_parse_ok" -eq 1 ]; then
 fi
 
 # ---- family coupling ------------------------------------------------------
-# Every family named in JOBS must be gated by at least one ROSTER leg, and every family
-# a ROSTER leg names must have a job in JOBS. Together with the JOBS/needs comparison
-# above, this leaves no job that is real but ungated.
+# The load-bearing direction is JOBS -> ROSTER: a family with jobs but no ROSTER leg
+# is never examined by the per-leg loop, so together with the JOBS/needs comparison
+# above this is what leaves no job that is real but ungated. The reverse direction (a
+# ROSTER family with no job in JOBS) would also surface later, per leg, via
+# active_job_for; checking it here just fails earlier with a clearer message.
 roster_families=
 for pair in $ROSTER; do
 	family=${pair##*:}
@@ -219,7 +239,6 @@ done
 for triple in $JOBS; do
 	job=${triple%%:*}
 	rest=${triple#*:}
-	family=${rest%%:*}
 	policy=${rest##*:}
 	[ "$policy" = always ] || [ "$policy" = "$MODE" ] && continue
 	if result=$(lookup "$RESULTS" "$job"); then
@@ -230,12 +249,18 @@ for triple in $JOBS; do
 	fi
 done
 
+selector_matched=0
 for pair in $ROSTER; do
 	leg=${pair%%:*}
 	family=${pair##*:}
 
 	if [ -z "$SELECTOR" ] || [ "$SELECTOR" = "$leg" ]; then
 		selected=1
+		# Exact-equality match only: an empty SELECTOR selects every leg without
+		# "matching" any, and must not satisfy the roster-membership check below.
+		if [ "$SELECTOR" = "$leg" ]; then
+			selector_matched=1
+		fi
 	else
 		selected=0
 	fi
@@ -286,6 +311,14 @@ for pair in $ROSTER; do
 			fail "leg $leg was excluded by the filter but produced a proof, so the filter leaked"
 	fi
 done
+
+# A non-empty selector passed the contract's allowlist, but the allowlist and the
+# roster are maintained separately: a selector no leg carries would leave every leg
+# "excluded", every job legitimately skipped, and the gate green having tested
+# nothing.
+if [ -n "$SELECTOR" ] && [ "$selector_matched" -eq 0 ]; then
+	fail "selector '$SELECTOR' matches no roster leg, so nothing was gated"
+fi
 
 [ "$fails" = 0 ] || exit 1
 
