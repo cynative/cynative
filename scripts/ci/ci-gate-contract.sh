@@ -1,7 +1,8 @@
 #!/bin/sh
 # ci-gate-contract.sh - validate how a release-gate workflow was invoked and emit the
 # resolved contract. Shared by every gate built on this contract (today: the connector
-# e2e gate); each gate picks a DISPATCH_POLICY that fits its own selector shape.
+# e2e gate and the live LLM gate); each gate picks a DISPATCH_POLICY that fits its own
+# selector shape.
 #
 # A called reusable workflow sees the CALLER's github context, so github.event_name is
 # "push" on the release path and cannot identify it. The discriminator is structural:
@@ -26,6 +27,10 @@
 #   selector=<leg, or empty meaning every leg>
 #   checkout_sha=<40 hex>
 set -eu
+# set -f for the whole script: nothing here wants globbing, and the allowlist loop
+# below deliberately word-splits $SELECTORS unquoted, so -f keeps a glob character in
+# a selector token literal instead of expanding it against the working directory.
+set -f
 
 die() {
 	printf '::error::gate contract: %s\n' "$*" >&2
@@ -77,7 +82,7 @@ if [ "$CALLER_WORKFLOW_REF" != "$JOB_WORKFLOW_REF" ]; then
 	[ "$CALLER_WORKFLOW_REF" = "$EXPECTED_CALLER" ] ||
 		die "unexpected reusable-workflow caller $CALLER_WORKFLOW_REF"
 	[ -z "$SELECTOR" ] ||
-		die "a workflow_call must not carry a connector selector"
+		die "a workflow_call must not carry a selector"
 	is_sha "$CALL_REF" ||
 		die "call ref is not a 40-hex SHA"
 	mode=release
