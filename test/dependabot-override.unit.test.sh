@@ -283,8 +283,9 @@ if (
 	printf '%s\n' "$out" | grep -q '^BEGIN_COMMIT_OVERRIDE$' || exit 1
 	printf '%s\n' "$out" | grep -q '^deps: bump github.com/maximhq/bifrost/core from 1.7.1 to 1.7.2$' || exit 1
 	[ "$(printf '%s' "$out" | wc -c)" -le 500 ] || exit 1
-	# Body was truncated (full pad is well over 500 once the override is charged).
-	printf '%s\n' "$out" | grep -q 'This existing PR body line' || exit 1
+	# Body was truncated (full pad is well over 500 once the override is charged)
+	# and newlines must survive (POSIX awk has no RT; flattening would be a regression).
+	[ "$(printf '%s\n' "$out" | grep -c '^This existing PR body line pads out the body content\.$')" -ge 2 ] || exit 1
 	exit 0
 ); then pass "oversized existing body is truncated around the override"; else fail "oversized body"; fi
 

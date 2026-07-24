@@ -198,9 +198,12 @@ if [ -n "$stripped" ]; then
 		if [ "$keep" -eq 0 ]; then
 			stripped=""
 		else
+			# Append an explicit "\n" rather than gawk's RT: mawk (Ubuntu CI) and
+			# BSD awk (macOS) leave RT empty, which would strip every newline and
+			# flatten the truncated Dependabot body into one line.
 			stripped=$(printf '%s' "$stripped" | awk -v n="$keep" '
 				BEGIN { ORS = "" }
-				{ buf = buf $0 RT }
+				{ buf = buf $0 "\n" }
 				END { print substr(buf, 1, n) }
 			')
 		fi
