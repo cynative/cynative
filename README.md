@@ -12,7 +12,7 @@
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 
 <!-- BEGIN agent-about -->
-**Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
+**Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud, and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
 
 ```bash
 cynative "what in my cloud is publicly exposed that shouldn't be?"
@@ -53,7 +53,7 @@ cynative -p "cloud credentials leaked in source code and their current blast rad
 cynative "live cloud resources absent from IaC - drift" # starts an interactive session
 ```
 
-## What makes it special
+## What Makes It Special
 
 - **Code-to-runtime**: Reasons through AWS, GCP, Azure, any K8s, GitHub and GitLab
 - **Action-gate**: Authorizes every call against a read-only policy
