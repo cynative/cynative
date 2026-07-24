@@ -98,8 +98,9 @@ if (
 		GH_TOKEN=fake-token \
 		"$assert" cynative/cynative 999 "$manifest" >"$tmp/out2.log" 2>"$tmp/err2.log" || rc=$?
 
-	[ "$rc" -ne 0 ] || exit 1
-	[ ! -s "$download_marker" ] || exit 1
+	[ "$rc" -ne 0 ] || exit 1                          # must fail closed, not exit 0
+	[ ! -s "$download_marker" ] || exit 1              # must never hit the download endpoint
+	grep -q 'no API digest' "$tmp/err2.log" || exit 1  # explicit ::error, not a silent failure
 	exit 0
 ); then pass "assert-assets fails closed on an empty-string digest, never downloads the asset"; else fail "empty digest fail-closed"; fi
 
