@@ -19,10 +19,11 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   `test/archive.smoke.test.ps1` + Pester unit tests +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
   test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
-  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the connector-e2e
-  invocation-contract unit tests, the connector-e2e gate-assert unit tests, the connector-e2e
-  trusted-caller pin check, the shared audit-parser python syntax gate, all three connector
-  suites' offline audit-parser selftests, and the shared-machinery selftest).
+  live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the shared
+  release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
+  the gate trusted-caller pin check, the release publish-gate pin check, the shared
+  audit-parser python syntax gate, all three connector suites' offline audit-parser
+  selftests, and the shared-machinery selftest).
   Install-free: asserts each pinned tool or module is present and fails with an install hint
   otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
@@ -696,10 +697,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   ambient environment; that assertion exists ONLY in the no-tool suite, so
   `SMOKE_REQUIRE_NO_CONNECTORS` is derived from the suite inside the run step rather than
   carried as a matrix key, and `SMOKE_REQUIRE_RUN` is a hardcoded `"1"` with no optional
-  legs. `test/llm-smoke-roster.unit.test.sh` pins the canonical six-leg roster as a
+  legs. `test/llm-smoke-roster.unit.test.sh` pins the workflow's static contract as a
   golden under `make sh-test`, replacing the deleted JSON manifest and its Go validator:
-  it pins each leg's full id/family/suite/provider/model-variable tuple, because ids
-  alone would let a leg silently change suite or provider while staying green.
+  each leg's full id/family/suite/provider/model-variable tuple (ids alone would let a
+  leg silently change suite or provider while staying green), the gate-assert
+  ROSTER/JOBS/PROOFS literals derived from the same canonical rows (a leg dropped from
+  the fan-in is invisible to the runtime checks while the remaining legs stay green),
+  and each smoke step's operational seam (the matrix suite/provider/model bindings and
+  the suite dispatcher that derives the connector-dark tripwire).
 - Releases are automated by **release-please** (`release-please-config.json`,
   `.release-please-manifest.json`); Conventional Commit prefixes in PR titles determine the
   version bump, enforced by `semantic-pr.yaml`. Dependency bumps use the `deps:` type
@@ -769,8 +774,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   release rather than waving it through. The fail-closed logic, the invocation contract and the
   roster assertion, lives in `scripts/ci/ci-gate-contract.sh` and `scripts/ci/ci-gate-assert.sh`,
   each with offline unit tests gated by `make sh-test`, so it is exercised on every PR rather
-  than only on a live release run; `make sh-test` also asserts the trusted-caller pin in
-  `connector-e2e.yaml` directly. Both scripts are now shared with the LLM gate: the connector
+  than only on a live release run; `make sh-test` also asserts the trusted-caller pin in both
+  gate workflows directly and pins the publish gate's required conjuncts (the two gate result
+  and gate_sha terms plus the non-empty release SHA) against `release.yaml`. Both scripts are
+  now shared with the LLM gate: the connector
   gate passes `DISPATCH_POLICY: filtered` (a dispatch must carry a selector from an allowlist),
   while the LLM gate passes `full-only` (a dispatch must not carry one). The
   `publish` job re-asserts the

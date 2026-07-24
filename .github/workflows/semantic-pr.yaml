@@ -8,6 +8,11 @@ on:
       - edited
       - synchronize
 
+# Empty-by-default: pull_request_target tokens are write-capable under the
+# repository default, so any future job must opt in explicitly. The job below
+# keeps pull-requests: read as its only grant.
+permissions: {}
+
 jobs:
   main:
     name: Validate PR title
