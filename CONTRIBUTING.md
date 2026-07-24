@@ -21,7 +21,7 @@ On a fresh checkout, generate the gitignored mocks before running package tests:
 make generate
 ```
 
-## The gate: `make check`
+## The Gate: `make check`
 
 Every PR must pass `make check`, which runs two halves:
 
@@ -63,7 +63,7 @@ Add tests alongside any new code, or the coverage gate fails. Useful targets:
 - Required checks (`Lint & Test`, `Validate PR title`, `Build & smoke-test macOS
   packaging toolchain`) must pass and review threads must be resolved before merge.
 
-## Reporting issues
+## Reporting Issues
 
 - **Bugs / features:** open a GitHub issue with repro steps, the Cynative version,
   and your environment.
