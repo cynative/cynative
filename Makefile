@@ -1,6 +1,6 @@
-.PHONY: check check-go check-scripts lint format test generate shell-complexity \
+.PHONY: check check-go check-scripts mod-tidy-check lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	llm-tools-smoke connector-gcp-e2e connector-aws-e2e connector-github-e2e homebrew-smoke install-script-smoke
+	llm-tools-smoke homebrew-smoke install-script-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -21,7 +21,13 @@ TRUSTED_CALLER := cynative/cynative/.github/workflows/release.yaml@refs/heads/ma
 check: check-go check-scripts
 
 # Go-only, 100% go.mod-pinned/hermetic gate; the pre-commit hook runs this.
-check-go: generate lint shell-complexity format test windows-build
+check-go: mod-tidy-check generate lint shell-complexity format test windows-build
+
+# mod-tidy-check: verify go.mod/go.sum are tidy without mutating them. `-diff`
+# (Go 1.23+) prints the changes tidying would make and exits nonzero if any are
+# needed, so a release or a gate run never silently rewrites dependency state.
+mod-tidy-check:
+	go mod tidy -diff
 
 # Non-Go, system-tool checks. Install-free: each target asserts its pinned tool /
 # module version is present and fails with an install hint otherwise.
@@ -92,26 +98,34 @@ shellcheck:
 	fi
 	@git ls-files -z '*.sh' | xargs -0 shellcheck && echo "OK: shellcheck ($(SHELLCHECK_VERSION))"
 
-# pwsh-lint: PSScriptAnalyzer on install.ps1 and the smoke ps1 scripts at the pinned
-# module version. Presence-check with a readable install hint first (install-free —
+# pwsh-lint: PSScriptAnalyzer on every tracked *.ps1 at the pinned module version
+# (mirrors shellcheck's git ls-files approach, so a new tracked ps1 file is covered
+# automatically). Presence-check with a readable install hint first (install-free,
 # never installs the module). -Path binds a single string, so analyze per file and
 # aggregate; -EnableExit would end the session after the first file, so fail explicitly.
 pwsh-lint:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION)."; exit 1; }
-	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq "$(PSSCRIPTANALYZER_VERSION)")) { Write-Host "FAIL: PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION) not installed — run: Install-Module PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Scope CurrentUser"; exit 1 }; Import-Module -Name PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Force -ErrorAction Stop; $$findings = @(); foreach ($$f in "install.ps1", "test/install-script.smoke.test.ps1", "test/scoop.smoke.test.ps1", "test/archive.smoke.test.ps1") { $$findings += Invoke-ScriptAnalyzer -Path $$f -Settings test/PSScriptAnalyzerSettings.psd1 }; if ($$findings.Count -gt 0) { $$findings | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }'
+	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object Version -eq "$(PSSCRIPTANALYZER_VERSION)")) { Write-Host "FAIL: PSScriptAnalyzer $(PSSCRIPTANALYZER_VERSION) not installed — run: Install-Module PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Scope CurrentUser"; exit 1 }; Import-Module -Name PSScriptAnalyzer -RequiredVersion $(PSSCRIPTANALYZER_VERSION) -Force -ErrorAction Stop; $$files = & git ls-files "*.ps1"; if ($$LASTEXITCODE -ne 0) { Write-Host "FAIL: git ls-files failed enumerating *.ps1"; exit 1 }; if ($$files.Count -eq 0) { Write-Host "FAIL: no tracked *.ps1 files matched"; exit 1 }; $$findings = @(); foreach ($$f in $$files) { $$findings += Invoke-ScriptAnalyzer -Path $$f -Settings test/PSScriptAnalyzerSettings.psd1 }; if ($$findings.Count -gt 0) { $$findings | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }'
 
-# pwsh-test: Pester unit tests at the pinned module version. Presence-check with a
-# readable install hint first (install-free — never installs the module).
+# pwsh-test: Pester unit tests, one run over every tracked test/*.Tests.ps1 suite
+# (mirrors shellcheck's git ls-files approach, so a new hermetic suite is picked up
+# automatically), at the pinned module version. Presence-check with a readable
+# install hint first (install-free, never installs the module).
+# Also presence-check python3: the install.smoke.Tests.ps1 suite launches the
+# loopback fixture server (test/serve-fixture.py), mirroring sh-test's guard.
 pwsh-test:
 	@command -v pwsh >/dev/null 2>&1 || { echo "FAIL: pwsh not found — install PowerShell 7 + Pester $(PESTER_VERSION)."; exit 1; }
-	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$r = Invoke-Pester -Path test/install.unit.Tests.ps1 -Output Detailed -PassThru; if ($$r.FailedCount -gt 0) { exit 1 }'
+	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found, needed by the install.smoke.Tests.ps1 loopback fixture server (test/serve-fixture.py)."; exit 1; }
+	pwsh -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name Pester | Where-Object Version -eq "$(PESTER_VERSION)")) { Write-Host "FAIL: Pester $(PESTER_VERSION) not installed — run: Install-Module Pester -RequiredVersion $(PESTER_VERSION) -Scope CurrentUser -SkipPublisherCheck"; exit 1 }; Import-Module -Name Pester -RequiredVersion $(PESTER_VERSION) -Force -ErrorAction Stop; $$files = & git ls-files "test/*.Tests.ps1"; if ($$LASTEXITCODE -ne 0) { Write-Host "FAIL: git ls-files failed enumerating test/*.Tests.ps1"; exit 1 }; if ($$files.Count -eq 0) { Write-Host "FAIL: no tracked test/*.Tests.ps1 suites matched"; exit 1 }; $$r = Invoke-Pester -Path $$files -Output Detailed -PassThru -ErrorAction Stop; if (($$null -eq $$r) -or ($$r.Result -ne "Passed") -or ($$r.TotalCount -lt 1)) { Write-Host "FAIL: pester run not clean"; exit 1 }'
 
 # sh-test: POSIX install.sh unit + loopback smoke tests, the live-e2e guardrails
 # library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
 # orchestration unit tests (test/lib/connector-e2e.sh: arbitrate + connector_run_phase
 # + e2e_pin_audit_size), the per-package changelog override renderer unit tests
-# (test/dependabot-override.unit.test.sh), an AST syntax check of every file in the
-# shared connector audit-parser package (test/lib/connector-audit-parser.py,
+# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's
+# fail-closed-on-missing-digest unit tests (test/assert-assets.unit.test.sh), an AST
+# syntax check of every file in the shared connector audit-parser package
+# (test/lib/connector-audit-parser.py,
 # test/lib/connector_audit/*.py, and its specs/), all three connector suites' offline
 # audit-parser selftests (--selftest), and the shared-machinery selftest (the engine's
 # own cases run with no provider, including the #56 credential prepass detection
@@ -131,13 +145,14 @@ sh-test:
 	@sh test/connector-e2e.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
+	@sh test/assert-assets.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
-	@sh test/connector.gcp.e2e.test.sh --selftest
-	@sh test/connector.aws.e2e.test.sh --selftest
-	@sh test/connector.github.e2e.test.sh --selftest
+	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
+	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
+	 for f in $$files; do echo "  selftest $$f"; sh "$$f" --selftest || exit 1; done
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
 	@# The trusted-caller pin is the only thing that stops an arbitrary workflow from
 	@# driving a release gate; without it, anything calling the workflow would pass the
@@ -190,7 +205,7 @@ sh-test:
 		*) echo "FAIL: the publish gate in release.yaml is missing the required term [$$term]."; exit 1 ;; \
 		esac; \
 	done
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check)"
 
 SHELL_COMPLEXITY_MAX := 6
 
@@ -225,10 +240,10 @@ print-%:
 
 # snapshot: build the release archives once via a goreleaser snapshot (no publish),
 # so the local install-e2e target and the CI install-e2e jobs share one definition of
-# the goreleaser flags (no drift between the Makefile and the workflow). --skip=before
-# skips `go mod tidy` to keep the build hermetic/offline.
+# the goreleaser flags (no drift between the Makefile and the workflow). goreleaser
+# no longer runs a before-hook, so snapshot and release share one prep path.
 snapshot:
-	go tool goreleaser release --snapshot --clean --skip=before
+	go tool goreleaser release --snapshot --clean
 
 # install-e2e: real-artifact install e2e for release confidence (issue #41). Standalone
 # (NOT part of `make check`): builds the release archives via `snapshot`, serves the Linux
@@ -256,26 +271,18 @@ llm-smoke:
 llm-tools-smoke:
 	sh test/llm-tools.smoke.test.sh
 
-# connector-gcp-e2e: live GCP connector end-to-end test (cynative#39). Standalone
-# (NOT part of `make check`): runs the real `cynative -p` against a real GCP fixture
-# project through the gcp connector and needs real credentials; skips cleanly when
-# GCP_E2E_* env is unset. The script header documents its env and knobs.
-connector-gcp-e2e:
-	sh test/connector.gcp.e2e.test.sh
+# connector-%-e2e: live connector end-to-end tests (cynative#39, cynative#52,
+# cynative#53). Standalone (NOT part of `make check`): runs the real `cynative -p`
+# against a real fixture account/repo through the named connector and needs real
+# credentials; skips cleanly when the connector's *_E2E_* env is unset. Each
+# script header documents its env and knobs. FORCE keeps the recipe live even if
+# a file named connector-<name>-e2e exists in the repo root; a bare pattern rule
+# has no such guarantee since it cannot be a .PHONY prerequisite.
+.PHONY: FORCE
+FORCE:
 
-# connector-aws-e2e: live AWS connector end-to-end test (cynative#52). Standalone
-# (NOT part of `make check`): runs the real `cynative -p` against a real AWS fixture
-# account through the aws connector and needs real credentials; skips cleanly when
-# AWS_E2E_* env is unset. The script header documents its env and knobs.
-connector-aws-e2e:
-	sh test/connector.aws.e2e.test.sh
-
-# connector-github-e2e: live GitHub connector end-to-end test (cynative#53). Standalone
-# (NOT part of `make check`): runs the real `cynative -p` against a private fixture repo
-# through the github connector and needs a token; skips cleanly when GH_E2E_* is unset.
-# The script header documents its env and knobs.
-connector-github-e2e:
-	sh test/connector.github.e2e.test.sh
+connector-%-e2e: FORCE ## run one live connector e2e (gcp|aws|github); naming is load-bearing
+	sh test/connector.$*.e2e.test.sh
 
 # homebrew-smoke: post-release Homebrew install smoke (cynative#45). Standalone
 # (NOT part of `make check`): installs cynative from the public tap via the
