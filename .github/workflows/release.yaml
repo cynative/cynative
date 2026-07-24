@@ -140,14 +140,17 @@ jobs:
           done
           exit "${missing}"
 
-      - name: Install packaging tools & stage signing material
+      - name: Install packaging tools
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        run: scripts/release/install-pkg-tools.sh
+
+      - name: Stage signing material
         if: ${{ steps.release-please.outputs.release_created == 'true' }}
         env:
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
         run: |
           umask 077
-          scripts/release/install-pkg-tools.sh
           d="$(mktemp -d)"
           printf '%s' "${MACOS_SIGN_P12}" | base64 -d > "${d}/app.p12"
           printf '%s' "${MACOS_SIGN_PASSWORD}" > "${d}/app.pw"
@@ -166,11 +169,6 @@ jobs:
         timeout-minutes: 35
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
-          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
-          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
-          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
         run: |
           set -o pipefail
           go tool goreleaser release --clean 2>&1 | tee /tmp/goreleaser.log
