@@ -77,6 +77,14 @@ jobs:
       #   NEW run (a push to main), do NOT re-run the failed one: GitHub
       #   snapshots secret values at workflow-run-create time, so a re-run
       #   reuses the stale values and fails the same way (cli/cli#13522).
+      #   That fresh run is a new push, so main HEAD advances past the release
+      #   PR's SHA, and a GitHub App token cannot create a release or tag ref at
+      #   a non-HEAD target_commitish (403 "Resource not accessible by
+      #   integration"). BREAK-GLASS until #202 lands a repository_dispatch
+      #   re-trigger (which recovers WITHOUT advancing HEAD, so the release SHA
+      #   stays == HEAD and the App works): temporarily point this step's `token`
+      #   and both ensure-tag `GH_TOKEN`s at a short-lived PAT (contents +
+      #   pull-requests write), recover, then revert and delete the PAT.
       #   The pre-publish gate spans the release job, the smoke and e2e gates
       #   (macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke), and the
       #   publish job; a failure in any of them, up to and including the publish
