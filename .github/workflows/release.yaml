@@ -80,11 +80,14 @@ jobs:
       #   That fresh run is a new push, so main HEAD advances past the release
       #   PR's SHA, and a GitHub App token cannot create a release or tag ref at
       #   a non-HEAD target_commitish (403 "Resource not accessible by
-      #   integration"). BREAK-GLASS until #202 lands a repository_dispatch
-      #   re-trigger (which recovers WITHOUT advancing HEAD, so the release SHA
-      #   stays == HEAD and the App works): temporarily point this step's `token`
-      #   and both ensure-tag `GH_TOKEN`s at a short-lived PAT (contents +
-      #   pull-requests write), recover, then revert and delete the PAT.
+      #   integration"). The same wall can appear WITHOUT a recovery: if the
+      #   release-PR-merge run is coalesced away by a later push in the
+      #   release-pipeline concurrency group, the run that executes re-derives
+      #   the release at the older release-PR SHA while starting at a newer HEAD.
+      #   BREAK-GLASS for either case, until a repository_dispatch re-trigger
+      #   (#202) and HEAD-safe targeting remove the need: temporarily point this
+      #   step's `token` and both ensure-tag `GH_TOKEN`s at a short-lived PAT
+      #   (contents + pull-requests write), recover, then revert and delete it.
       #   The pre-publish gate spans the release job, the smoke and e2e gates
       #   (macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke), and the
       #   publish job; a failure in any of them, up to and including the publish
