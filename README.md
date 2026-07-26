@@ -305,6 +305,10 @@ Configure under `audit:` in `~/.cynative/config.yaml`, or via env:
 | `audit.retention_days` | `CYNATIVE_AUDIT_RETENTION_DAYS` | `30` |
 | `audit.compress` | `CYNATIVE_AUDIT_COMPRESS` | `false` |
 
+## Questions and feedback
+
+[Discussions](https://github.com/cynative/cynative/discussions) is the best place - what you pointed it at, what came back, what's missing.
+
 ## Contributing
 
 Contributions welcome - new connectors, providers, evaluation datasets, and
