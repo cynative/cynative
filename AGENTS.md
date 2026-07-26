@@ -34,9 +34,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   tests, the shared audit-parser python syntax gate, all three connector suites' offline
   audit-parser selftests, and the shared-machinery selftest).
   Install-free: presence-checks `shellcheck`, PowerShell 7, and `python3` up front and fails with
-  an install hint otherwise. `jq` is a fourth requirement that is **not** presence-checked: the
-  Scoop-renderer and asset-set suites drive production scripts that shell out to it, so on a
-  jq-less machine `sh-test` dies mid-suite with a raw `jq not found` instead of a hint. The pinned
+  an install hint otherwise. `jq` is a fourth requirement, checked one level down instead of at
+  the `Makefile`: the Scoop-renderer and asset-set suites each guard it themselves (a
+  `FAIL: jq not found (required by ...)` line) because the production scripts they drive shell out
+  to it, so a jq-less machine fails partway into `sh-test` rather than up front. The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
   Dependabot has no PowerShell Gallery or raw-binary ecosystem.
 - `make generate`: `go generate ./...` (regenerates the `moq` mocks).
@@ -170,10 +171,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   feeds only the LLM block's first-run onboarding example (the `ErrLLMProviderMissing` branch of
   `llmConfigStatus`, shared by the root command and `doctor`). It lives at the root because
   `go:embed` cannot reference a parent directory, so no `internal/` package can embed the root
-  README. Tests fail if a marker pair goes missing, if extraction returns empty, if a marker
-  leaks into the output, or if the `agent-about` block loses its "Cynative runs frontier models"
-  sentence (pinned twice, here and in `internal/cli`), so **editing README.md between the
-  `agent-about` markers changes the agent's system prompt**.
+  README. Tests fail if either marker pair goes missing or its extraction comes back empty, and
+  the About half is pinned harder still: a marker must not leak into its output, and the block must
+  keep its "Cynative runs frontier models" sentence (asserted twice, here and in `internal/cli`).
+  The quickstart half only asserts a non-empty slice, so a marker leaking into the onboarding block
+  would pass. **Editing README.md between the `agent-about` markers changes the agent's system
+  prompt.**
 
 - **`internal/cli`**: cobra commands and the **composition root**. `wire_shell.go`'s `newDeps`
   is the one place that reads the real environment (`os.LookupEnv` into `config.NewLoader`,
@@ -587,8 +590,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (DWORD/octal/hex) deliberately pass** (`netip.ParseAddr` rejects them) and are caught by each
   cloud's suffix allowlist, a carve-out the package tests pin. `IsIPLiteral` (bracketed, any
   bare-colon IPv6 including IPv4-mapped, or `netip`-parseable) is the separate gate every cloud's
-  own `rejectHost` calls, and `HostOf` (raw URL → lowercase host) backs the gcp/azure
-  host→service indices. Plus `NotReady` (the uniform `<prefix>: <step>: <err>` lazy-init failure
+  own `rejectHost` calls, and `HostOf` backs the gcp/azure host→service indices. `HostOf` is
+  **not** a general URL parser: it trims a lowercase `http://`/`https://` prefix, cuts at the
+  first slash, and keeps any port, so `HTTPS://…` or `host:443` do not normalize. Use it only on
+  the controlled catalog endpoint strings it is meant for, never as a host-authorization input.
+  Plus `NotReady` (the uniform `<prefix>: <step>: <err>` lazy-init failure
   the `lazyInit` wrapper surfaces to the model as `not_ready`), `ShortenError`, and the HTTP
   fetch shells `GetBytes` (all three clouds; optional bearer for azure's authed
   providerOperations GET) and `GetJSON` (gcp's Discovery catalog only; also returns the status
@@ -699,15 +705,18 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   triggered rotate error); the shell (`Open`) seeds the oldest-record time from the existing
   file's first line, adds size rotation via lumberjack, and forces mode 0600. Mapped from
   `config.AuditConfig` (`enabled`/`path`/`max_size_mb`/`retention_days`/`compress`).
-  `context.go` carries four per-call recorders that `invokeIO` threads onto the context before
-  every I/O dispatch, and they are the reason the loop's safety properties are not string-matched:
+  `context.go` carries four per-call recorders, and they are the reason the loop's safety
+  properties are not string-matched. `invokeIO` installs three of them before every I/O dispatch:
   - `Scope` stamps session/run/depth so an inner `code_execution` record is attributable.
   - `Decision` is a context-carried pointer, so a **tool's output string can no longer masquerade
     as a denial**; the approval decorator records through it.
-  - `Fatal` latches the first inner audit-write error so `code_execution.Run` aborts instead of
-    stringifying it (the fail-closed audit contract reaching inside the sandbox).
   - `Failure` (`MarkFailed`/`MarkProgress`) feeds the consecutive-failure halt, with a separate
     atomic progress counter so a partly-successful fan-out is not counted as stuck.
+
+  The fourth, `Fatal`, is installed by `codeExecutionTool.Run` instead, immediately before
+  entering the sandbox: it latches the first inner audit-write error so the run aborts rather than
+  stringifying it, extending the fail-closed audit contract inside the sandbox. Non-sandbox tools
+  never receive a fatal latch.
 
   **A new I/O tool must call `audit.MarkFailed`/`MarkProgress`** (see `httptool.go`): tools report
   failure as a result string rather than a Go error, so without those calls the audit outcome
