@@ -241,7 +241,7 @@ func TestDoctor_Help(t *testing.T) {
 	}
 
 	out := buf.String()
-	for _, want := range []string{"Validate configuration", "connector", "verbose", "live read-only"} {
+	for _, want := range []string{"Validate configuration", "connector", "verbose", "live-llm", "live read-only"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("doctor help missing %q; got:\n%s", want, out)
 		}
@@ -268,6 +268,129 @@ func TestDoctor_DoesNotCallChatModel(t *testing.T) {
 	}
 }
 
+func TestDoctor_LiveLLM_OK(t *testing.T) {
+	t.Parallel()
+
+	const nonce = "DOCTOR-TESTNONCE"
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.doctorProbeNonce = nonce
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &fakeChatModel{ //nolint:exhaustruct // errs/calls not pre-set
+			responses: []*schema.Message{schema.AssistantMessage(nonce, nil)},
+		}, nil
+	}
+
+	var errBuf bytes.Buffer
+
+	d.errOut = &errBuf
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if err != nil {
+		t.Fatalf("doctor --live-llm: %v", err)
+	}
+	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorOK {
+		t.Errorf("llmStatuses = %+v, want one OK status", u.llmStatuses)
+	}
+	if got := u.llmStatuses[0].Reason; got != "configuration valid; connectivity verified" {
+		t.Errorf("LLM Reason = %q, want connectivity-verified wording", got)
+	}
+	if !strings.Contains(errBuf.String(), "Doctor: ready") {
+		t.Errorf("stderr missing Doctor: ready; got %q", errBuf.String())
+	}
+}
+
+func TestDoctor_LiveLLM_InitFailure(t *testing.T) {
+	t.Parallel()
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return nil, errors.New("bifrost init failed")
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorError {
+		t.Errorf("llmStatuses = %+v, want one Error status", u.llmStatuses)
+	}
+	if ExitCodeFor(err) != 1 {
+		t.Errorf("ExitCodeFor = %d, want 1", ExitCodeFor(err))
+	}
+}
+
+func TestDoctor_LiveLLM_GenerateFailure(t *testing.T) {
+	t.Parallel()
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.doctorProbeNonce = "DOCTOR-TESTNONCE"
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &fakeChatModel{ //nolint:exhaustruct // responses unused
+			errs: []error{errors.New("provider down")},
+		}, nil
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorError {
+		t.Errorf("llmStatuses = %+v, want one Error status", u.llmStatuses)
+	}
+}
+
+func TestDoctor_LiveLLM_NonceMismatch(t *testing.T) {
+	t.Parallel()
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.doctorProbeNonce = "DOCTOR-EXPECTED"
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &fakeChatModel{ //nolint:exhaustruct // errs unused
+			responses: []*schema.Message{schema.AssistantMessage("unrelated answer", nil)},
+		}, nil
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	if len(u.llmStatuses) != 1 || u.llmStatuses[0].Reason != "live probe response mismatch" {
+		t.Errorf("llmStatuses = %+v, want mismatch reason", u.llmStatuses)
+	}
+}
+
+func TestDoctor_LiveLLM_SkippedWhenValidateLLMFails(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	d := testDeps()
+	d.loadConfig = func(string) (config.Config, error) {
+		return config.Config{}, nil //nolint:exhaustruct // empty LLM triggers ValidateLLM
+	}
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		called = true
+
+		return nil, errors.New("must not construct")
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	if called {
+		t.Fatal("--live-llm must not probe before ValidateLLM passes")
+	}
+}
+
 func TestSilenceGracefulStop_DoctorNotReady(t *testing.T) {
 	t.Parallel()
 
@@ -278,5 +401,17 @@ func TestSilenceGracefulStop_DoctorNotReady(t *testing.T) {
 	}
 	if !cmd.SilenceErrors {
 		t.Error("SilenceErrors should be set for ErrDoctorNotReady")
+	}
+}
+
+func TestNewDoctorProbeNonce(t *testing.T) {
+	t.Parallel()
+
+	a, b := newDoctorProbeNonce(), newDoctorProbeNonce()
+	if !strings.HasPrefix(a, "DOCTOR-") || len(a) < len("DOCTOR-")+8 {
+		t.Errorf("nonce = %q, want DOCTOR-<hex>", a)
+	}
+	if a == b {
+		t.Error("consecutive nonces must differ")
 	}
 }

@@ -1,20 +1,30 @@
 package cli
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/cynative/cynative/internal/config"
+	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/ui"
 )
 
+// doctorProbePromptFmt is the tool-less live probe (same spirit as
+// test/llm.smoke.test.sh): the model must echo the nonce.
+const doctorProbePromptFmt = "Reply with exactly this token and nothing else: %s"
+
 // newDoctorCmd returns the `cynative doctor` subcommand. Config is loaded by the
-// root PersistentPreRunE before RunE; doctor never constructs a chat model or
-// runs tools — it only prints the startup inventory and structural LLM status.
+// root PersistentPreRunE before RunE; without --live-llm, doctor never constructs
+// a chat model or runs tools — it only prints the startup inventory and
+// structural LLM status. With --live-llm it additionally performs one tool-less
+// Generate after ValidateLLM passes.
 func newDoctorCmd(d *deps) *cobra.Command {
-	var verbose bool
+	var verbose, liveLLM bool
 
 	cmd := &cobra.Command{ //nolint:exhaustruct // optional cobra fields intentionally omitted
 		Use:   "doctor",
@@ -23,21 +33,23 @@ func newDoctorCmd(d *deps) *cobra.Command {
 
 Prints the same stderr startup inventory as a normal run (banner, connectors,
 LLM structural status). Connector checks may perform live read-only network
-calls. The LLM check is configuration-only (connectivity is not tested). Does
-not call the LLM, open an interactive session, or run tools.
+calls. The LLM check is configuration-only unless --live-llm is set. Does not
+open an interactive session or run tools.
 
-Exit 0 when the LLM block is valid and no actionable connector failures are
-present. Exit 1 on config-load failure, ValidateLLM failure, or an actionable
-connector readiness failure (structural errors and explicitly configured
-connectors that failed live checks). Ambient "no credentials" skips shown only
-under --verbose do not change the result.`,
+Exit 0 when the LLM block is valid (and, with --live-llm, reachable) and no
+actionable connector failures are present. Exit 1 on config-load failure,
+ValidateLLM failure, a failed --live-llm probe (ErrLLMUnavailable), or an
+actionable connector readiness failure. Ambient "no credentials" skips shown
+only under --verbose do not change the result.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return silenceGracefulStop(cmd, d.runDoctor(d.cfg, verbose))
+			return silenceGracefulStop(cmd, d.runDoctor(cmd.Context(), d.cfg, verbose, liveLLM))
 		},
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
 		"Show skipped connectors that are normally hidden (does not change readiness)")
+	cmd.Flags().BoolVar(&liveLLM, "live-llm", false,
+		"Probe the configured LLM with a live tool-less round-trip after structural validation")
 
 	return cmd
 }
@@ -74,10 +86,34 @@ func llmDoctorOKStatus(cfg config.Config) ui.LLMStatus {
 	}
 }
 
-// runDoctor prints banner → connector inventory → LLM structural status and
-// returns ErrLLMUnavailable or ErrDoctorNotReady when health checks fail.
+// llmDoctorLiveOKStatus is the doctor ✓ line after a successful --live-llm probe.
+func llmDoctorLiveOKStatus(cfg config.Config) ui.LLMStatus {
+	return ui.LLMStatus{ //nolint:exhaustruct // doctor OK: no hint/onboarding fields.
+		State:    ui.ConnectorOK,
+		Provider: cfg.LLM.Provider,
+		Model:    cfg.LLM.Model,
+		Reason:   "configuration valid; connectivity verified",
+	}
+}
+
+// llmDoctorProbeMismatchStatus is the ✗ line when Generate succeeds but the
+// response does not echo the probe nonce (not a GenerateError, so llmRuntimeStatus
+// would mis-bucket it as a connectivity failure).
+func llmDoctorProbeMismatchStatus(cfg config.Config) ui.LLMStatus {
+	return ui.LLMStatus{ //nolint:exhaustruct // mismatch: Reason/Hint only.
+		State:    ui.ConnectorError,
+		Provider: cfg.LLM.Provider,
+		Model:    cfg.LLM.Model,
+		Reason:   "live probe response mismatch",
+		Hint:     "The model answered but did not echo the probe token. Check llm.model and retry.",
+	}
+}
+
+// runDoctor prints banner → connector inventory → LLM status and returns
+// ErrLLMUnavailable or ErrDoctorNotReady when health checks fail.
 // Ambient connector absences (verbose-only) do not fail the command.
-func (d *deps) runDoctor(cfg config.Config, verbose bool) error {
+// With liveLLM, a tool-less Generate runs only after ValidateLLM passes.
+func (d *deps) runDoctor(ctx context.Context, cfg config.Config, verbose, liveLLM bool) error {
 	d.ui.RenderBanner(d.errOut)
 
 	_, views := d.buildProviders(cfg, verbose)
@@ -94,7 +130,18 @@ func (d *deps) runDoctor(cfg config.Config, verbose bool) error {
 		return ErrLLMUnavailable
 	}
 
-	d.ui.RenderLLM(d.errOut, llmDoctorOKStatus(cfg))
+	if liveLLM {
+		if err := d.probeLiveLLM(ctx, cfg); err != nil {
+			fmt.Fprintln(d.errOut, "Doctor: not ready")
+			fmt.Fprintln(d.errOut, "  Connector checks may perform live read-only network calls.")
+
+			return ErrLLMUnavailable
+		}
+		d.ui.RenderLLM(d.errOut, llmDoctorLiveOKStatus(cfg))
+	} else {
+		d.ui.RenderLLM(d.errOut, llmDoctorOKStatus(cfg))
+	}
+
 	fmt.Fprintln(d.errOut, "  Connector checks may perform live read-only network calls.")
 
 	if !health.ok() {
@@ -107,4 +154,48 @@ func (d *deps) runDoctor(cfg config.Config, verbose bool) error {
 	fmt.Fprintln(d.errOut, "Doctor: ready")
 
 	return nil
+}
+
+// probeLiveLLM constructs the chat model, sends a tool-less nonce-echo prompt,
+// and requires the nonce in the assistant text. On failure it renders an LLM
+// ✗ status; the caller returns ErrLLMUnavailable. doctorProbeNonce, when set
+// (tests), replaces the random token so fakes can echo it deterministically.
+func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config) error {
+	cm, err := d.newChatModel(ctx, cfg, func(schema.Usage) {})
+	if err != nil {
+		d.ui.RenderLLM(d.errOut, llmRuntimeStatus(cfg, err))
+
+		return err
+	}
+	defer cm.Shutdown()
+
+	nonce := d.doctorProbeNonce
+	if nonce == "" {
+		nonce = newDoctorProbeNonce()
+	}
+
+	msg, err := cm.Generate(ctx, []*schema.Message{
+		schema.UserMessage(fmt.Sprintf(doctorProbePromptFmt, nonce)),
+	}, nil)
+	if err != nil {
+		d.ui.RenderLLM(d.errOut, llmRuntimeStatus(cfg, err))
+
+		return err
+	}
+	if msg == nil || !strings.Contains(msg.Text(), nonce) {
+		d.ui.RenderLLM(d.errOut, llmDoctorProbeMismatchStatus(cfg))
+
+		return fmt.Errorf("%w: live probe response mismatch", ErrLLMUnavailable)
+	}
+
+	return nil
+}
+
+func newDoctorProbeNonce() string {
+	var b [16]byte
+	// crypto/rand.Read fills the whole buffer on success; a failure leaves zeros
+	// and we still emit a stable-shaped token rather than aborting doctor.
+	_, _ = rand.Read(b[:])
+
+	return "DOCTOR-" + hex.EncodeToString(b[:])
 }

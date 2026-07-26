@@ -163,6 +163,7 @@ type deps struct {
 	readStdin            func() (data string, truncated bool, err error)
 	interrupter          agent.Interrupter
 	version              string // pre-rendered `--version` output; resolved in newDeps.
+	doctorProbeNonce     string // test-only: fixed --live-llm probe token (empty → random).
 }
 
 // runRoot reads any piped stdin, resolves the invocation, and dispatches to run.
