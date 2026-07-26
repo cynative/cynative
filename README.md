@@ -38,7 +38,7 @@ Install and set an LLM:
 brew install cynative/tap/cynative
 
 export CYNATIVE_LLM_PROVIDER=anthropic
-export CYNATIVE_LLM_MODEL=claude-fable-5
+export CYNATIVE_LLM_MODEL=claude-opus-5
 export ANTHROPIC_API_KEY=...
 
 ```
@@ -132,7 +132,7 @@ export OPENAI_API_KEY=sk-...
 
 # Amazon Bedrock - AWS credential chain
 export CYNATIVE_LLM_PROVIDER=bedrock
-export CYNATIVE_LLM_MODEL=anthropic.claude-opus-4-8
+export CYNATIVE_LLM_MODEL=anthropic.claude-opus-5
 export CYNATIVE_LLM_BEDROCK_REGION=us-east-1
 
 # Azure OpenAI - endpoint via env, no YAML needed
@@ -176,7 +176,7 @@ configuration reference.
 
 ## How to run
 
-`cynative` with no arguments opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
+`cynative` opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
 
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 

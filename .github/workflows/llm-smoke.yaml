@@ -27,12 +27,23 @@ on:
       gate_sha:
         description: The SHA for which the full LLM gate succeeded. Empty means it did not.
         value: ${{ jobs.gate-assert.outputs.gate_sha }}
+    secrets:
+      OPENAI_API_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
   workflow_dispatch:
 
-# No workflow_call secrets. OPENAI_API_KEY and ANTHROPIC_API_KEY are ENVIRONMENT secrets
-# of llm-api-keys / llm-api-keys-release, resolved inside the jobs below. Declaring them
-# as call secrets would create a path that looks wired but is silently overridden: an
-# environment secret always wins over a same-named caller-passed secret.
+# OPENAI_API_KEY and ANTHROPIC_API_KEY are ENVIRONMENT secrets of llm-api-keys (dispatch)
+# and llm-api-keys-release (release). They MUST be declared under on.workflow_call.secrets
+# above and forwarded by the caller, even though the value the caller forwards is empty: a
+# called workflow's secrets context is populated ONLY by the caller's grant, so on a
+# workflow_call they resolve EMPTY without it (actions/runner#1490, closed works-as-designed).
+# The grant is all the caller supplies; the api-key-release job's environment then provides
+# the real value, since a same-named environment secret wins over the caller-passed one. On a
+# dispatch there is no caller and they resolve directly from the job's environment. make
+# sh-test pins the secrets.* references in this file to exactly these two names, so inheriting
+# or forwarding cannot silently widen what the gate can read.
 permissions: {}
 
 # The gate path is keyed on the run id. A called workflow's concurrency group is evaluated
