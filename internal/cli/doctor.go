@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +17,12 @@ import (
 // doctorProbePromptFmt is the tool-less live probe (same spirit as
 // test/llm.smoke.test.sh): the model must echo the nonce.
 const doctorProbePromptFmt = "Reply with exactly this token and nothing else: %s"
+
+// doctorLiveProbeTimeout bounds doctor --live-llm independently of research
+// defaults (300s request timeout × up to max_retries+1 attempts). A hung or
+// retry-looping endpoint must fail the diagnostic promptly, like other startup
+// probes (credentialProbeTimeout / welcomeTimeout).
+const doctorLiveProbeTimeout = 30 * time.Second
 
 // newDoctorCmd returns the `cynative doctor` subcommand. Config is loaded by the
 // root PersistentPreRunE before RunE; without --live-llm, doctor never constructs
@@ -159,9 +166,18 @@ func (d *deps) runDoctor(ctx context.Context, cfg config.Config, verbose, liveLL
 // and requires the nonce in the assistant text (case-insensitive). On failure it
 // renders an LLM ✗ status; when verbose is set it also prints a redacted details
 // line so the "-v for details" hint from llmRuntimeStatus is actionable. The
-// caller returns ErrLLMUnavailable.
+// caller returns ErrLLMUnavailable. The whole probe runs under a short deadline
+// (doctorLiveProbeTimeout, overridable via deps.doctorLiveProbeTimeout) so it
+// cannot inherit the research call's multi-minute timeout×retry window.
 func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool) error {
-	cm, err := d.newChatModel(ctx, cfg, func(schema.Usage) {})
+	timeout := d.doctorLiveProbeTimeout
+	if timeout <= 0 {
+		timeout = doctorLiveProbeTimeout
+	}
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cm, err := d.newChatModel(pctx, cfg, func(schema.Usage) {})
 	if err != nil {
 		d.ui.RenderLLM(d.errOut, llmRuntimeStatus(cfg, err))
 		d.printDoctorProbeDetails(verbose, err)
@@ -171,7 +187,7 @@ func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool
 	defer cm.Shutdown()
 
 	nonce := d.newDoctorProbeNonce()
-	msg, err := cm.Generate(ctx, []*schema.Message{
+	msg, err := cm.Generate(pctx, []*schema.Message{
 		schema.UserMessage(fmt.Sprintf(doctorProbePromptFmt, nonce)),
 	}, nil)
 	if err != nil {

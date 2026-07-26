@@ -166,6 +166,9 @@ type deps struct {
 	// newDoctorProbeNonce returns the nonce doctor --live-llm asks the model to
 	// echo. Production wires crypto/rand in the shell; tests inject a fixed value.
 	newDoctorProbeNonce func() string
+	// doctorLiveProbeTimeout, when > 0, overrides doctorLiveProbeTimeout for
+	// doctor --live-llm so tests can assert deadline behavior without waiting 30s.
+	doctorLiveProbeTimeout time.Duration
 }
 
 // runRoot reads any piped stdin, resolves the invocation, and dispatches to run.

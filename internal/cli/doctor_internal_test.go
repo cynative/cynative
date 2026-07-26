@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -438,6 +439,53 @@ func TestDoctor_LiveLLM_SkippedWhenValidateLLMFails(t *testing.T) {
 	}
 	if called {
 		t.Fatal("--live-llm must not probe before ValidateLLM passes")
+	}
+}
+
+func TestDoctor_LiveLLM_BoundsProbeContext(t *testing.T) {
+	t.Parallel()
+
+	d := testDeps()
+	var remaining time.Duration
+	var hadDeadline bool
+	d.newChatModel = func(ctx context.Context, _ config.Config, _ func(schema.Usage)) (chatModel, error) {
+		if dl, ok := ctx.Deadline(); ok {
+			hadDeadline = true
+			remaining = time.Until(dl)
+		}
+
+		return &fakeChatModel{ //nolint:exhaustruct // errs unused
+			responses: []*schema.Message{schema.AssistantMessage("DOCTOR-TEST-DEFAULT", nil)},
+		}, nil
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if err != nil {
+		t.Fatalf("doctor --live-llm: %v", err)
+	}
+	// Pin the production const (~30s): a wrong default would hang diagnostics.
+	if !hadDeadline || remaining <= 29*time.Second || remaining > 30*time.Second {
+		t.Fatalf("hadDeadline=%v remaining=%v, want in (29s, 30s]", hadDeadline, remaining)
+	}
+}
+
+func TestDoctor_LiveLLM_ProbeTimeout(t *testing.T) {
+	t.Parallel()
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.doctorLiveProbeTimeout = time.Millisecond
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &seqBlockThenAnswerModel{answer: "unused"}, nil //nolint:exhaustruct // calls zero
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorError {
+		t.Errorf("llmStatuses = %+v, want one Error status", u.llmStatuses)
 	}
 }
 
