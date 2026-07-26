@@ -131,16 +131,17 @@ func newDeps() *deps {
 
 			return audit.New(w, audit.WithActor(cfg.LLM.Provider+"/"+cfg.LLM.Model)), w.Close, nil
 		},
-		newAgent:    agent.New,
-		ui:          newUI(inR, promptW, editor, ctrl, state.Interrupted),
-		out:         os.Stdout,
-		errOut:      os.Stderr,
-		cfg:         config.Config{}, //nolint:exhaustruct // populated by PersistentPreRunE.
-		stdinIsTTY:  stdinIsTTY,
-		hasTerminal: hasTerminal,
-		readStdin:   readStdin,
-		interrupter: interrupter,
-		version:     versionString(),
+		newAgent:            agent.New,
+		ui:                  newUI(inR, promptW, editor, ctrl, state.Interrupted),
+		out:                 os.Stdout,
+		errOut:              os.Stderr,
+		cfg:                 config.Config{}, //nolint:exhaustruct // populated by PersistentPreRunE.
+		stdinIsTTY:          stdinIsTTY,
+		hasTerminal:         hasTerminal,
+		readStdin:           readStdin,
+		interrupter:         interrupter,
+		version:             versionString(),
+		newDoctorProbeNonce: doctorProbeNonce,
 	}
 	d.run = d.runResearch
 

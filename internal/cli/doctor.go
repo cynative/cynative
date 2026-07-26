@@ -2,14 +2,13 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/cynative/cynative/internal/config"
+	"github.com/cynative/cynative/internal/redact"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/ui"
 )
@@ -47,7 +46,7 @@ only under --verbose do not change the result.`,
 		},
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
-		"Show skipped connectors that are normally hidden (does not change readiness)")
+		"Show skipped connectors; with --live-llm, also print redacted probe errors")
 	cmd.Flags().BoolVar(&liveLLM, "live-llm", false,
 		"Probe the configured LLM with a live tool-less round-trip after structural validation")
 
@@ -131,7 +130,7 @@ func (d *deps) runDoctor(ctx context.Context, cfg config.Config, verbose, liveLL
 	}
 
 	if liveLLM {
-		if err := d.probeLiveLLM(ctx, cfg); err != nil {
+		if err := d.probeLiveLLM(ctx, cfg, verbose); err != nil {
 			fmt.Fprintln(d.errOut, "Doctor: not ready")
 			fmt.Fprintln(d.errOut, "  Connector checks may perform live read-only network calls.")
 
@@ -157,32 +156,32 @@ func (d *deps) runDoctor(ctx context.Context, cfg config.Config, verbose, liveLL
 }
 
 // probeLiveLLM constructs the chat model, sends a tool-less nonce-echo prompt,
-// and requires the nonce in the assistant text. On failure it renders an LLM
-// ✗ status; the caller returns ErrLLMUnavailable. doctorProbeNonce, when set
-// (tests), replaces the random token so fakes can echo it deterministically.
-func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config) error {
+// and requires the nonce in the assistant text (case-insensitive). On failure it
+// renders an LLM ✗ status; when verbose is set it also prints a redacted details
+// line so the "-v for details" hint from llmRuntimeStatus is actionable. The
+// caller returns ErrLLMUnavailable.
+func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool) error {
 	cm, err := d.newChatModel(ctx, cfg, func(schema.Usage) {})
 	if err != nil {
 		d.ui.RenderLLM(d.errOut, llmRuntimeStatus(cfg, err))
+		d.printDoctorProbeDetails(verbose, err)
 
 		return err
 	}
 	defer cm.Shutdown()
 
-	nonce := d.doctorProbeNonce
-	if nonce == "" {
-		nonce = newDoctorProbeNonce()
-	}
-
+	nonce := d.newDoctorProbeNonce()
 	msg, err := cm.Generate(ctx, []*schema.Message{
 		schema.UserMessage(fmt.Sprintf(doctorProbePromptFmt, nonce)),
 	}, nil)
 	if err != nil {
 		d.ui.RenderLLM(d.errOut, llmRuntimeStatus(cfg, err))
+		d.printDoctorProbeDetails(verbose, err)
 
 		return err
 	}
-	if msg == nil || !strings.Contains(msg.Text(), nonce) {
+	// Case-insensitive: some models normalize token casing in the echo.
+	if msg == nil || !strings.Contains(strings.ToLower(msg.Text()), strings.ToLower(nonce)) {
 		d.ui.RenderLLM(d.errOut, llmDoctorProbeMismatchStatus(cfg))
 
 		return fmt.Errorf("%w: live probe response mismatch", ErrLLMUnavailable)
@@ -191,11 +190,12 @@ func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config) error {
 	return nil
 }
 
-func newDoctorProbeNonce() string {
-	var b [16]byte
-	// crypto/rand.Read fills the whole buffer on success; a failure leaves zeros
-	// and we still emit a stable-shaped token rather than aborting doctor.
-	_, _ = rand.Read(b[:])
-
-	return "DOCTOR-" + hex.EncodeToString(b[:])
+// printDoctorProbeDetails writes a redacted provider error when -v is set.
+// Doctor does not wrap the probe model in RedactingChatModel, so this is the
+// boundary that keeps credential-shaped text off stderr.
+func (d *deps) printDoctorProbeDetails(verbose bool, err error) {
+	if !verbose || err == nil {
+		return
+	}
+	fmt.Fprintf(d.errOut, "  details: %s\n", redact.New().Redact(err.Error()))
 }

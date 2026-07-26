@@ -209,15 +209,16 @@ func testDeps() *deps {
 		newAuditSink: func(config.Config) (audit.Sink, func() error, error) {
 			return nil, func() error { return nil }, nil
 		},
-		newAgent:    agent.New,
-		ui:          &fakeUI{}, //nolint:exhaustruct // empty script: PromptUserInput EOFs immediately
-		out:         io.Discard,
-		errOut:      io.Discard,
-		cfg:         validCfg(),
-		stdinIsTTY:  true,
-		hasTerminal: true,
-		readStdin:   func() (string, bool, error) { return "", false, nil },
-		version:     "cynative 9.9.9\n  commit:   deadbeefcafe",
+		newAgent:            agent.New,
+		ui:                  &fakeUI{}, //nolint:exhaustruct // empty script: PromptUserInput EOFs immediately
+		out:                 io.Discard,
+		errOut:              io.Discard,
+		cfg:                 validCfg(),
+		stdinIsTTY:          true,
+		hasTerminal:         true,
+		readStdin:           func() (string, bool, error) { return "", false, nil },
+		version:             "cynative 9.9.9\n  commit:   deadbeefcafe",
+		newDoctorProbeNonce: func() string { return "DOCTOR-TEST-DEFAULT" },
 	}
 	d.run = d.runResearch
 

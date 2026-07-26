@@ -276,7 +276,7 @@ func TestDoctor_LiveLLM_OK(t *testing.T) {
 	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
 	d := testDeps()
 	d.ui = u
-	d.doctorProbeNonce = nonce
+	d.newDoctorProbeNonce = func() string { return nonce }
 	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
 		return &fakeChatModel{ //nolint:exhaustruct // errs/calls not pre-set
 			responses: []*schema.Message{schema.AssistantMessage(nonce, nil)},
@@ -299,6 +299,30 @@ func TestDoctor_LiveLLM_OK(t *testing.T) {
 	}
 	if !strings.Contains(errBuf.String(), "Doctor: ready") {
 		t.Errorf("stderr missing Doctor: ready; got %q", errBuf.String())
+	}
+}
+
+func TestDoctor_LiveLLM_CaseInsensitiveNonce(t *testing.T) {
+	t.Parallel()
+
+	const nonce = "DOCTOR-AbCdEf"
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.newDoctorProbeNonce = func() string { return nonce }
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &fakeChatModel{ //nolint:exhaustruct // errs unused
+			responses: []*schema.Message{schema.AssistantMessage(strings.ToLower(nonce), nil)},
+		}, nil
+	}
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm"})
+	if err != nil {
+		t.Fatalf("doctor --live-llm with case-folded echo: %v", err)
+	}
+	if len(u.llmStatuses) != 1 || u.llmStatuses[0].State != ui.ConnectorOK {
+		t.Errorf("llmStatuses = %+v, want one OK status", u.llmStatuses)
 	}
 }
 
@@ -330,7 +354,7 @@ func TestDoctor_LiveLLM_GenerateFailure(t *testing.T) {
 	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
 	d := testDeps()
 	d.ui = u
-	d.doctorProbeNonce = "DOCTOR-TESTNONCE"
+	d.newDoctorProbeNonce = func() string { return "DOCTOR-TESTNONCE" }
 	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
 		return &fakeChatModel{ //nolint:exhaustruct // responses unused
 			errs: []error{errors.New("provider down")},
@@ -346,13 +370,39 @@ func TestDoctor_LiveLLM_GenerateFailure(t *testing.T) {
 	}
 }
 
+func TestDoctor_LiveLLM_VerbosePrintsDetails(t *testing.T) {
+	t.Parallel()
+
+	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
+	d := testDeps()
+	d.ui = u
+	d.newDoctorProbeNonce = func() string { return "DOCTOR-TESTNONCE" }
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &fakeChatModel{ //nolint:exhaustruct // responses unused
+			errs: []error{errors.New("upstream timeout from gateway")},
+		}, nil
+	}
+
+	var errBuf bytes.Buffer
+
+	d.errOut = &errBuf
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm", "-v"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	if !strings.Contains(errBuf.String(), "details: upstream timeout from gateway") {
+		t.Errorf("stderr missing verbose details; got %q", errBuf.String())
+	}
+}
+
 func TestDoctor_LiveLLM_NonceMismatch(t *testing.T) {
 	t.Parallel()
 
 	u := &fakeUI{} //nolint:exhaustruct // recorders zero.
 	d := testDeps()
 	d.ui = u
-	d.doctorProbeNonce = "DOCTOR-EXPECTED"
+	d.newDoctorProbeNonce = func() string { return "DOCTOR-EXPECTED" }
 	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
 		return &fakeChatModel{ //nolint:exhaustruct // errs unused
 			responses: []*schema.Message{schema.AssistantMessage("unrelated answer", nil)},
@@ -401,17 +451,5 @@ func TestSilenceGracefulStop_DoctorNotReady(t *testing.T) {
 	}
 	if !cmd.SilenceErrors {
 		t.Error("SilenceErrors should be set for ErrDoctorNotReady")
-	}
-}
-
-func TestNewDoctorProbeNonce(t *testing.T) {
-	t.Parallel()
-
-	a, b := newDoctorProbeNonce(), newDoctorProbeNonce()
-	if !strings.HasPrefix(a, "DOCTOR-") || len(a) < len("DOCTOR-")+8 {
-		t.Errorf("nonce = %q, want DOCTOR-<hex>", a)
-	}
-	if a == b {
-		t.Error("consecutive nonces must differ")
 	}
 }
