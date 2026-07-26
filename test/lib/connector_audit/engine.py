@@ -672,7 +672,7 @@ def credential_prepass(records, raw_lines, live_secrets_path):
 
 
 def _pop_live_secrets_path(args):
-    """Remove a --live-secrets FILE pair from args, returning (remaining_args, file).
+    """Remove a --live-secrets FILE pair from args, returning (remaining_args, secrets_path).
 
     Every name on this seam is `*_path`: what is threaded from argv down to
     `_read_live_secrets` is the FILE PATH, never the secret values it holds. The decoded
