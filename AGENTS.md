@@ -398,10 +398,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     preferred (it also yields the `@login` identity) but is not universal, since App
     installation/Actions tokens 401/403 it, so any non-200 or transport error falls back to the
     authoritative, rate-limit-exempt `GET /rate_limit`. `githubDialAllowed` is
-    a public-internet dial guard that denies all internal and special-use ranges (CGNAT,
-    benchmarking, documentation, 0.0.0.0/8, 240.0.0.0/4, non-global-unicast) plus
-    IPv4-embedding IPv6 (NAT64, 6to4) whose embedded IPv4 is internal, while a NAT64-wrapped
-    public GitHub IPv4 stays allowed so IPv6-only/DNS64 hosts work.
+    a public-internet dial guard that denies exactly three classes: whatever `isInternalIP`
+    denies (including IPv4-embedding IPv6 (NAT64, 6to4) whose embedded IPv4 is internal),
+    non-global-unicast, and the **finite** `githubExtraForbidden` prefix list (CGNAT,
+    benchmarking, documentation, 0.0.0.0/8, 240.0.0.0/4, …). It is an enumeration, not a
+    blanket special-use deny: a special-purpose range `netip` still calls global unicast and
+    that list omits (e.g. ORCHIDv2 `2001:20::/28`) passes, so widening the boundary means
+    extending the list and its tests. A NAT64-wrapped public GitHub IPv4 stays allowed so
+    IPv6-only/DNS64 hosts work.
   - gitlab discovers its token (`GITLAB_TOKEN`/`GITLAB_ACCESS_TOKEN`/`OAUTH_TOKEN`, else the
     pinned `glab auth credential-helper`) and validates it with a dial-guarded
     `GET /api/v4/user` through the provider's own host-pinned/CA path.
@@ -589,8 +593,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   smuggle surface an all-ASCII allowlist would otherwise have; **non-canonical numerics
   (DWORD/octal/hex) deliberately pass** (`netip.ParseAddr` rejects them) and are caught by each
   cloud's suffix allowlist, a carve-out the package tests pin. `IsIPLiteral` (bracketed, any
-  bare-colon IPv6 including IPv4-mapped, or `netip`-parseable) is the separate gate every cloud's
-  own `rejectHost` calls, and `HostOf` backs the gcp/azure host→service indices. `HostOf` is
+  bare-colon IPv6 including IPv4-mapped, or `netip`-parseable) is the separate gate each cloud's
+  host-classification path calls (a `rejectHost` helper in gcp and azure; inline in aws's
+  `ParseHost`), and `HostOf` backs the gcp/azure host→service indices. `HostOf` is
   **not** a general URL parser: it trims a lowercase `http://`/`https://` prefix, cuts at the
   first slash, and keeps any port, so `HTTPS://…` or `host:443` do not normalize. Use it only on
   the controlled catalog endpoint strings it is meant for, never as a host-authorization input.
