@@ -192,9 +192,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   aborts only on context cancellation, a fail-closed audit-write failure, or an LLM generation
   failure before the first successful turn. Piped stdin (1 MiB-capped, UTF-8-repaired)
   combined with a positional task is folded in as untrusted `<piped_input>` context
-  (`agent.WrapPipedInput`). An interactive session opens with `Agent.Welcome`: one extra
-  tool-less `Generate` bounded by `welcomeTimeout` (60s) that greets and offers numbered example
-  questions, counted in metrics either way and appended to session history so the user can answer
+  (`agent.WrapPipedInput`). A bare interactive session opens with `Agent.Welcome`, gated on all
+  four of: interactive, no seed task, no configured token budget, and at least one registered
+  connector (so a seeded, budgeted, or connector-less session skips it). It is one extra tool-less
+  `Generate` bounded by `welcomeTimeout` (60s) that greets and offers numbered example questions,
+  counted in metrics either way and appended to session history so the user can answer
   by number. It returns the text **without** rendering it, so the caller can order the LLM status
   line first; `ErrWelcomeTimedOut` is a soft skip that continues the session, while a real
   generation failure renders the ✗ block and aborts.
@@ -598,10 +600,13 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   cloud's suffix allowlist, a carve-out the package tests pin. The empty check runs **before** the
   `:port`/trailing-dot strip, so `":443"` and `"."` normalize to `("", nil)`; today's callers
   reject that through their suffix allowlists, but a new caller must not treat a nil error as
-  proof of a non-empty host. `IsIPLiteral` (bracketed, any
-  bare-colon IPv6 including IPv4-mapped, or `netip`-parseable) is the separate gate each cloud's
-  host-classification path calls (a `rejectHost` helper in gcp and azure; inline in aws's
-  `ParseHost`), and `HostOf` backs the gcp/azure host→service indices. `HostOf` is
+  proof of a non-empty host. `IsIPLiteral` is the separate gate each cloud's host-classification
+  path calls (a `rejectHost` helper in gcp and azure; inline in aws's `ParseHost`): bracketed,
+  `netip`-parseable, or **containing any colon at all**. That last arm is deliberately
+  conservative rather than IPv6-specific, so it also rejects `example.com:443` and `foo:bar` —
+  callers must pass a hostname only, never an authority with a port. `HostOf` backs gcp's
+  host→service index and azure's host→**cloud** mapping (`ResolveCloud`; azure derives the service
+  separately, from the request path's last `/providers/<namespace>` segment). `HostOf` is
   **not** a general URL parser: it trims a lowercase `http://`/`https://` prefix, cuts at the
   first slash, and keeps any port, so `HTTPS://…` or `host:443` do not normalize. Use it only on
   the controlled catalog endpoint strings it is meant for, never as a host-authorization input.
@@ -718,7 +723,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `config.AuditConfig` (`enabled`/`path`/`max_size_mb`/`retention_days`/`compress`).
   `context.go` carries four per-call recorders, and they are the reason the loop's safety
   properties are not string-matched. `invokeIO` installs three of them before every I/O dispatch:
-  - `Scope` stamps session/run/depth so an inner `code_execution` record is attributable.
+  - `Scope` stamps session/run/depth so the inner tool records emitted **via** `code_execution`
+    (today `http_request`; `buildToolFuncs` excludes `code_execution` itself, so there is no
+    nested record of it) correlate back to the outer call.
   - `Decision` is a context-carried pointer, so a tool's output string can no longer masquerade as
     a denial **in the audit record**; the approval decorator records through it. The model-facing
     path is separate and still string-compared (`invokeIO` checks `out == a.deniedResult` to skip
