@@ -26,7 +26,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
   secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
   exactly the two api keys, bracket-form `secrets[...]` is rejected outright since it would
-  evade the scan, and `release.yaml` must never say `secrets: inherit`), the Scoop-manifest
+  evade the scan, and `release.yaml` must carry no `secrets: inherit` — matched as
+  `secrets:[[:space:]]*inherit`, so the check is a tripwire for the ordinary spelling, not a
+  syntax-complete guarantee: YAML also accepts `secrets : inherit`, which slips past it), the
+  Scoop-manifest
   renderer and both strict asset-digest lookups (`sha_for` over the manifest TSV,
   `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
   the first match) unit tests, the release asset-set assertion's
@@ -588,11 +591,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   the shared code never hardcodes one connector's leak category.
 
 - **`internal/auth/cloudauth`**: the aws/gcp/azure counterpart leaf. `NormalizeHost` is the
-  shared host normalizer whose `ErrInvalidHost` rejects empty hosts, userinfo, canonical IP
+  shared host normalizer whose `ErrInvalidHost` rejects an empty input, userinfo, canonical IP
   literals, any non-ASCII rune, and IDNA non-idempotency, closing the fullwidth-digit/homoglyph
   smuggle surface an all-ASCII allowlist would otherwise have; **non-canonical numerics
   (DWORD/octal/hex) deliberately pass** (`netip.ParseAddr` rejects them) and are caught by each
-  cloud's suffix allowlist, a carve-out the package tests pin. `IsIPLiteral` (bracketed, any
+  cloud's suffix allowlist, a carve-out the package tests pin. The empty check runs **before** the
+  `:port`/trailing-dot strip, so `":443"` and `"."` normalize to `("", nil)`; today's callers
+  reject that through their suffix allowlists, but a new caller must not treat a nil error as
+  proof of a non-empty host. `IsIPLiteral` (bracketed, any
   bare-colon IPv6 including IPv4-mapped, or `netip`-parseable) is the separate gate each cloud's
   host-classification path calls (a `rejectHost` helper in gcp and azure; inline in aws's
   `ParseHost`), and `HostOf` backs the gcp/azure host→service indices. `HostOf` is
@@ -713,8 +719,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `context.go` carries four per-call recorders, and they are the reason the loop's safety
   properties are not string-matched. `invokeIO` installs three of them before every I/O dispatch:
   - `Scope` stamps session/run/depth so an inner `code_execution` record is attributable.
-  - `Decision` is a context-carried pointer, so a **tool's output string can no longer masquerade
-    as a denial**; the approval decorator records through it.
+  - `Decision` is a context-carried pointer, so a tool's output string can no longer masquerade as
+    a denial **in the audit record**; the approval decorator records through it. The model-facing
+    path is separate and still string-compared (`invokeIO` checks `out == a.deniedResult` to skip
+    the untrusted fence), so the sentinel collision remains on that side.
   - `Failure` (`MarkFailed`/`MarkProgress`) feeds the consecutive-failure halt, with a separate
     atomic progress counter so a partly-successful fan-out is not counted as stuck.
 
@@ -725,9 +733,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (the context flows `sandbox.Run` → `loggingToolFunc` → `runInnerCall`), while the same tool
   dispatched directly by `invokeIO` has none.
 
-  **A new I/O tool must call `audit.MarkFailed`/`MarkProgress`** (see `httptool.go`): tools report
-  failure as a result string rather than a Go error, so without those calls the audit outcome
-  stays `ok` on a failed call and `max_consecutive_failures` never fires.
+  **A new I/O tool that encodes failure as a nil-error result string must call
+  `audit.MarkFailed`** (see `httptool.go`): that is the case the recorders exist for, since a Go
+  error already records `OutcomeError` and `creditedFailures` floors any non-OK outcome to 1.
+  Without the marker such a call records `ok` and resets the streak, so
+  `max_consecutive_failures` never fires. `MarkProgress` is the narrower signal, needed only to
+  keep a mixed `code_execution` fan-out (some inner calls succeeded) from counting as stuck.
 
 ### Conventions
 
@@ -866,9 +877,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (`AUTOMERGE_APP_ID`) whose push to `main` **does** re-trigger the Release Pipeline, where a
   `GITHUB_TOKEN` merge would not (which used to leave the release PR stale). The token is
   downscoped to contents + pull-requests + **workflows** write, that last one because arming
-  auto-merge on a workflow-touching PR needs it. The body edit is `continue-on-error` and the merge
-  retries 3 times, so the body PATCH racing a re-run of `Validate PR title` degrades to the group
-  title instead of blocking the merge. `deps` commits
+  auto-merge on a workflow-touching PR needs it. Two independent tolerances, easily conflated: the
+  body edit (and the renderer checkout) is `continue-on-error`, so a **failed** edit degrades to
+  the group title rather than blocking; separately `gh pr merge` retries 3 times to absorb the body
+  PATCH racing a re-run of `Validate PR title`, and if all three fail the job `exit 1`s rather than
+  degrading. `deps` commits
   still cut patch releases; `release-please-config.json` pins the visible section list
   explicitly, so re-check it when release-please is bumped. `.goreleaser.yaml` handles binary
   builds for release tags, with four contracts worth treating as untouchable:
