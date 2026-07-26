@@ -19,14 +19,29 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - `make check-scripts`: `shellcheck` (all tracked `*.sh`) + PSScriptAnalyzer (every tracked
   `*.ps1`) + Pester unit tests (every tracked `test/*.Tests.ps1`) +
   `sh-test` (the POSIX `install.sh` unit tests, a `python3`-backed loopback smoke
-  test of the `CYNATIVE_BASE_URL` download-base seam and its non-loopback-HTTP reject, the
+  test of the `CYNATIVE_BASE_URL` download-base seam, its non-loopback-HTTP reject, and the
+  fail-closed checksum-mismatch abort, the
   live-e2e guardrails unit tests, the connector-e2e orchestration unit tests, the shared
   release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
-  the gate trusted-caller pin check, the release publish-gate pin check, the shared
-  audit-parser python syntax gate, all three connector suites' offline audit-parser
-  selftests, and the shared-machinery selftest).
-  Install-free: asserts each pinned tool or module is present and fails with an install hint
-  otherwise (needs `shellcheck`, PowerShell 7, `python3`). The pinned
+  the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
+  secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
+  exactly the two api keys, adjacent bracket-form `secrets[` is rejected since it would evade the
+  dot-form scan, and `release.yaml` must carry no `secrets: inherit`). Treat all three as
+  **tripwires for the ordinary spelling, not syntax-complete guarantees**: the greps are
+  `secrets\[` and `secrets:[[:space:]]*inherit`, so whitespace variants GitHub and YAML both
+  accept (`secrets ['K']`, `secrets : inherit`) slip past. Tighten the patterns if that matters.
+  Then the Scoop-manifest
+  renderer and both strict asset-digest lookups (`sha_for` over the manifest TSV,
+  `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
+  the first match) unit tests, the release asset-set assertion's
+  fail-closed-on-missing-digest unit tests, the per-package changelog override renderer unit
+  tests, the shared audit-parser python syntax gate, all three connector suites' offline
+  audit-parser selftests, and the shared-machinery selftest).
+  Install-free: presence-checks `shellcheck`, PowerShell 7, and `python3` up front and fails with
+  an install hint otherwise. `jq` is a fourth requirement, checked one level down instead of at
+  the `Makefile`: the Scoop-renderer and asset-set suites each guard it themselves (a
+  `FAIL: jq not found (required by ...)` line) because the production scripts they drive shell out
+  to it, so a jq-less machine fails partway into `sh-test` rather than up front. The pinned
   shellcheck/Pester/PSScriptAnalyzer versions live in the `Makefile` and are bumped by hand;
   Dependabot has no PowerShell Gallery or raw-binary ecosystem.
 - `make generate`: `go generate ./...` (regenerates the `moq` mocks).
@@ -62,7 +77,18 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   standalone live LLM smoke (not part of `make check`); runs the real `cynative -p` against a
   real provider chosen via `CYNATIVE_LLM_*` env (nonce echo, no tools; `test/llm.smoke.test.sh`),
   asserting the nonce on stdout and `0 tool calls` in the footer, and skips cleanly when no
-  provider is set. `make connector-gcp-e2e`: standalone
+  provider is set. `make llm-tools-smoke`: its tool-use sibling (`test/llm-tools.smoke.test.sh`),
+  same provider selection and clean skip, but proving the model actually drives the tool loop by
+  summing a random integer list through `code_execution` in the sandbox; unlike the no-tool suite
+  it hard-requires `python3` (its load-bearing check parses the JSONL audit log for an `ok`
+  `code_execution` record rather than grepping stdout). The two suites are what the
+  `llm-smoke.yaml` gate legs run: **every leg names one of them literally** in a `case "$SUITE"`
+  with a fail-closed default arm, because an interpolated `make ${{ matrix.suite }}` would run
+  bare `make` (i.e. the default `check` goal, green without touching a provider) if the matrix key
+  were ever dropped or renamed. Only the no-tool suite reads `SMOKE_REQUIRE_NO_CONNECTORS`, the
+  connector-dark tripwire: an available connector is a warn locally and a hard fail when the gate
+  sets it to `1` (so setting it on a tools leg would be a silent no-op).
+  `make connector-gcp-e2e`: standalone
   live GCP connector e2e (not part of `make check`); runs the real `cynative -p` against a real
   GCP fixture project through the `gcp` connector (`test/connector.gcp.e2e.test.sh`, needs
   `python3`), asserting a read of the project's own Cloud Resource Manager metadata and a
@@ -142,6 +168,20 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 
 - **`cmd/cynative`**: a thin `main` that calls `cli.Execute()`.
 
+- **`about.go`** (package `cynative`, module root): the README is the single source for two
+  runtime values, each extracted from between a pair of HTML-comment markers in `README.md`.
+  `About()` (a string, `agent-about`) feeds `agent.Config.About` and lands in the system prompt
+  via `systemPrompt`; `QuickstartExample()` (`[]string`, `quickstart-example`, fences stripped)
+  feeds only the LLM block's first-run onboarding example (the `ErrLLMProviderMissing` branch of
+  `llmConfigStatus`, shared by the root command and `doctor`). It lives at the root because
+  `go:embed` cannot reference a parent directory, so no `internal/` package can embed the root
+  README. Tests fail if either marker pair goes missing or its extraction comes back empty, and
+  the About half is pinned harder still: a marker must not leak into its output, and the block must
+  keep its "Cynative runs frontier models" sentence (asserted twice, here and in `internal/cli`).
+  The quickstart half only asserts a non-empty slice, so a marker leaking into the onboarding block
+  would pass. **Editing README.md between the `agent-about` markers changes the agent's system
+  prompt.**
+
 - **`internal/cli`**: cobra commands and the **composition root**. `wire_shell.go`'s `newDeps`
   is the one place that reads the real environment (`os.LookupEnv` into `config.NewLoader`,
   `auth.GetProviders`, `ui.New`, stdio, and the `llm`/`tools`/`agent` constructors); every
@@ -153,8 +193,25 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   aborts only on context cancellation, a fail-closed audit-write failure, or an LLM generation
   failure before the first successful turn. Piped stdin (1 MiB-capped, UTF-8-repaired)
   combined with a positional task is folded in as untrusted `<piped_input>` context
-  (`agent.WrapPipedInput`).
+  (`agent.WrapPipedInput`). A bare interactive session opens with `Agent.Welcome`, gated on all
+  four of: interactive, no seed task, no configured token budget, and at least one registered
+  connector (so a seeded, budgeted, or connector-less session skips it). It is one extra tool-less
+  `Generate` bounded by `welcomeTimeout` (60s) that greets and offers numbered example questions.
+  The round-trip is counted in metrics unconditionally, but the exchange is appended to session
+  history **only on a successful non-empty greeting** — a timeout, error, or empty response leaves
+  no reply-by-number context for the next turn. It returns the text **without** rendering it, so
+  the caller can order the LLM status line first; `ErrWelcomeTimedOut` is a soft skip that
+  continues the session, while a real generation failure renders the ✗ block and aborts.
+  `cynative doctor` is the second cobra command (`doctor.go`, its own `--verbose`): it validates
+  config and connector readiness, failing only on **`Actionable`** connector errors, never on a
+  genuinely absent ambient credential. Its `ErrLLMUnavailable`/`ErrDoctorNotReady` sentinels are
+  silenced by `silenceGracefulStop` and mapped by `ExitCodeFor`, so the exit code carries the
+  verdict instead of a cobra error dump.
   Invariants:
+  - `skipsConfigLoad` keeps the whole completion tree (`completion`, plus the hidden
+    `__complete`/`__completeNoDesc`) out of `PersistentPreRunE`'s config load: shell completion
+    must never read config or touch credentials, so a fresh install can complete before it is
+    configured. New startup work added to `PersistentPreRunE` has to respect that.
   - Every I/O tool is **approval-wrapped unconditionally** (`tools.NewApprovalTool`);
     `--auto-approve` swaps the prompter for `ui.AutoApproveToolCall` (prints and approves), it
     never skips the wrapper. The orchestration tools (`write_todos`/`task`) are registered
@@ -168,6 +225,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     ClusterRoles); the cached connectors (github/gitlab/aws/gcp/azure) additionally embed a
     `cache.Config` namespaced per provider via `filepath.Join(cfg.Cache.Dir, "<provider>")`,
     while the four K8s connector configs carry only a ClusterRole.
+    `AzureHardeningConfig` carries a third field beyond the role definition, `Cloud`, which
+    governs both the azure and aks connectors (they share the resolved cloud + credential chain).
   - Operational footers render on **stderr** (`ui.RenderFooter`): a `turn` footer per
     interactive turn plus one cumulative `session` footer at session end (`-p` prints only the
     `session` footer), so redirecting stdout keeps the answer clean. One `metrics.Accumulator`
@@ -342,11 +401,18 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   gke, azure, aks, kubernetes) plus an `onStatus` callback that receives a `ConnectorStatus`
   per connector for the startup inventory, probes the environment, and returns whatever
   registers. Registration is eager where it matters:
-  - github validates its token live with a hardened `GET /user` probe over `githubDialAllowed`,
-    a public-internet dial guard that denies all internal and special-use ranges (CGNAT,
-    benchmarking, documentation, 0.0.0.0/8, 240.0.0.0/4, non-global-unicast) plus
-    IPv4-embedding IPv6 (NAT64, 6to4) whose embedded IPv4 is internal, while a NAT64-wrapped
-    public GitHub IPv4 stays allowed so IPv6-only/DNS64 hosts work.
+  - github validates its token live over `githubDialAllowed` in two stages: `GET /user` is
+    preferred (it also yields the `@login` identity) but is not universal, since App
+    installation/Actions tokens 401/403 it, so any non-200 or transport error falls back to the
+    authoritative, rate-limit-exempt `GET /rate_limit`. `githubDialAllowed` is
+    a public-internet dial guard that denies exactly three classes: whatever `isInternalIP`
+    denies (including IPv4-embedding IPv6 (NAT64, 6to4) whose embedded IPv4 is internal),
+    non-global-unicast, and the **finite** `githubExtraForbidden` prefix list (CGNAT,
+    benchmarking, documentation, 0.0.0.0/8, 240.0.0.0/4, …). It is an enumeration, not a
+    blanket special-use deny: a special-purpose range `netip` still calls global unicast and
+    that list omits (e.g. ORCHIDv2 `2001:20::/28`) passes, so widening the boundary means
+    extending the list and its tests. A NAT64-wrapped public GitHub IPv4 stays allowed so
+    IPv6-only/DNS64 hosts work.
   - gitlab discovers its token (`GITLAB_TOKEN`/`GITLAB_ACCESS_TOKEN`/`OAUTH_TOKEN`, else the
     pinned `glab auth credential-helper`) and validates it with a dial-guarded
     `GET /api/v4/user` through the provider's own host-pinned/CA path.
@@ -453,6 +519,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   scope: Cynative is control-plane only and denies data-plane hosts at the network layer. I/O
   is lazy and cached under `<cache>/azure`; the role definition is fetched live per run; the
   `role definition=<name> (<guid>)` posture surfaces in the startup connector inventory.
+  Sovereign clouds are supported: `ResolveCloudConfig` picks the cloud most-specific-first
+  (explicit `connectors.azure.cloud` → `AZURE_AUTHORITY_HOST` → the Azure CLI's `[cloud] name` →
+  public fallback), tagging each result with its `Source`; env outranks the CLI because the
+  credential chain tries environment/workload-identity credentials before the CLI credential. A
+  per-request `azure_auth.cloud` is a **claim verified** against the startup-resolved cloud, not a
+  selector: a request cannot switch clouds.
 
 - **`internal/auth/k8s`**: the shared Kubernetes authorization core (pure, no network) used by
   the `eks`/`gke`/`aks`/`kubernetes` providers through `k8sGate`: a faithful kube-apiserver
@@ -511,6 +583,43 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `ci-variables` is opened, or any category is widened); the compact
   `CYNATIVE_CONNECTORS_GITLAB_PERMISSIONS` env scalar replaces the file map wholesale.
 
+- **`internal/auth/exposure`**: the provider-agnostic exposure-ceiling currency the github and
+  gitlab connectors share: the `Level` lattice (`none` < `read` < `write`, where write implies
+  read), the `Exposure` map keyed by `DefaultKey` plus categories, and the `ParseLevel`/
+  `LevelName`/`Allows`/`MergeExposure`/`BuildExposure`/`CompactCeiling` helpers (`LevelName` is
+  `ParseLevel`'s inverse and renders both `CompactCeiling` and every **category-ceiling** denial
+  message, so neither connector needs its own `Level`-to-string switch or `"default"` literal;
+  `ErrExposureExceeded` also covers denials with no level to render, e.g. a non-GET/HEAD request
+  to a GitHub download host).
+  A stdlib-only leaf importing nothing from `internal/auth`, so both
+  subpackages (which the parent imports) can depend on it without a cycle; `CompactCeiling`
+  takes each connector's sensitive key (`secret-scanning`, `ci-variables`) as a parameter, so
+  the shared code never hardcodes one connector's leak category.
+
+- **`internal/auth/cloudauth`**: the aws/gcp/azure counterpart leaf. `NormalizeHost` is the
+  shared host normalizer whose `ErrInvalidHost` rejects an empty input, userinfo, canonical IP
+  literals, any non-ASCII rune, and IDNA non-idempotency, closing the fullwidth-digit/homoglyph
+  smuggle surface an all-ASCII allowlist would otherwise have; **non-canonical numerics
+  (DWORD/octal/hex) deliberately pass** (`netip.ParseAddr` rejects them) and are caught by each
+  cloud's suffix allowlist, a carve-out the package tests pin. The empty check runs **before** the
+  `:port`/trailing-dot strip, so `":443"` and `"."` normalize to `("", nil)`; today's callers
+  reject that through their suffix allowlists, but a new caller must not treat a nil error as
+  proof of a non-empty host. `IsIPLiteral` is the separate gate each cloud's host-classification
+  path calls (a `rejectHost` helper in gcp and azure; inline in aws's `ParseHost`): bracketed,
+  `netip`-parseable, or **containing any colon at all**. That last arm is deliberately
+  conservative rather than IPv6-specific, so it also rejects `example.com:443` and `foo:bar` —
+  callers must pass a hostname only, never an authority with a port. `HostOf` backs gcp's
+  host→service index and azure's host→**cloud** mapping (`ResolveCloud`; azure derives the service
+  separately, from the request path's last `/providers/<namespace>` segment). `HostOf` is
+  **not** a general URL parser: it trims a lowercase `http://`/`https://` prefix, cuts at the
+  first slash, and keeps any port, so `HTTPS://…` or `host:443` do not normalize. Use it only on
+  the controlled catalog endpoint strings it is meant for, never as a host-authorization input.
+  Plus `NotReady` (the uniform `<prefix>: <step>: <err>` lazy-init failure
+  the `lazyInit` wrapper surfaces to the model as `not_ready`), `ShortenError`, and the HTTP
+  fetch shells `GetBytes` (all three clouds; optional bearer for azure's authed
+  providerOperations GET) and `GetJSON` (gcp's Discovery catalog only; also returns the status
+  code so a caller can tell a permanent 404/410 from a retryable miss).
+
 - **`internal/cache`**: stdlib-only leaf holding the one on-disk cache primitive,
   `TTLCache[T]` (in-memory → on-disk per TTL → fetch, with stale-on-error fallback), plus
   `Config{Dir, TTL, Clock}`, which every connector cache embeds. It imports nothing from
@@ -557,9 +666,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `~/.cynative/cache`; `cache.ttl` 24h (min 1m); `connectors.aws.policy` an IAM policy ARN
   (default `SecurityAudit`); `connectors.gcp.role` `roles/viewer` (accepts predefined or
   custom project/org roles); `connectors.azure.role_definition` `Reader` (required);
-  `connectors.{eks,gke,aks,kubernetes}.cluster_role` `view` (validated as a safe URL path
-  segment, fail-closed on empty); `llm.network_config.max_retries` 3 (the one llm-block
-  default, registered by hand since ProviderEntry embeds Bifrost's untaggable struct;
+  `connectors.azure.cloud` `auto` (one of `auto`/`AzureCloud`/`AzureUSGovernment`/
+  `AzureChinaCloud`); `connectors.{eks,gke,aks,kubernetes}.cluster_role` `view` (validated as a
+  safe URL path segment, fail-closed on empty); `llm.network_config.max_retries` 3 (the one
+  llm-block default, registered by hand since ProviderEntry embeds Bifrost's untaggable struct;
   Bifrost retries 429/500/502/503/504, recognized rate-limit errors, and transport errors
   with backoff; an explicit file/env value including 0 wins, and a negative value is
   rejected by `llm.ValidateNetworkConfig`). Each knob has a matching `CYNATIVE_*` env var.
@@ -615,6 +725,31 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   triggered rotate error); the shell (`Open`) seeds the oldest-record time from the existing
   file's first line, adds size rotation via lumberjack, and forces mode 0600. Mapped from
   `config.AuditConfig` (`enabled`/`path`/`max_size_mb`/`retention_days`/`compress`).
+  `context.go` carries four per-call recorders, and they are the reason the loop's safety
+  properties are not string-matched. `invokeIO` installs three of them before every I/O dispatch:
+  - `Scope` stamps session/run/depth so the inner tool records emitted **via** `code_execution`
+    (today `http_request`; `buildToolFuncs` excludes `code_execution` itself, so there is no
+    nested record of it) correlate back to the outer call.
+  - `Decision` is a context-carried pointer, so a tool's output string can no longer masquerade as
+    a denial **in the audit record**; the approval decorator records through it. The model-facing
+    path is separate and still string-compared (`invokeIO` checks `out == a.deniedResult` to skip
+    the untrusted fence), so the sentinel collision remains on that side.
+  - `Failure` (`MarkFailed`/`MarkProgress`) feeds the consecutive-failure halt, with a separate
+    atomic progress counter so a partly-successful fan-out is not counted as stuck.
+
+  The fourth, `Fatal`, is installed by `codeExecutionTool.Run` instead, immediately before
+  entering the sandbox: it latches the first inner audit-write error so the run aborts rather than
+  stringifying it, extending the fail-closed audit contract inside the sandbox. The latch is
+  scoped by dispatch path, not by tool: a tool called from inside `code_execution` inherits it
+  (the context flows `sandbox.Run` → `loggingToolFunc` → `runInnerCall`), while the same tool
+  dispatched directly by `invokeIO` has none.
+
+  **A new I/O tool that encodes failure as a nil-error result string must call
+  `audit.MarkFailed`** (see `httptool.go`): that is the case the recorders exist for, since a Go
+  error already records `OutcomeError` and `creditedFailures` floors any non-OK outcome to 1.
+  Without the marker such a call records `ok` and resets the streak, so
+  `max_consecutive_failures` never fires. `MarkProgress` is the narrower signal, needed only to
+  keep a mixed `code_execution` fan-out (some inner calls succeeded) from counting as stuck.
 
 ### Conventions
 
@@ -646,6 +781,17 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `internal/auth/authtest` is a sibling package of reusable fake `Provider` implementations:
   test support imported only from `_test.go` files, coverage-exempt, and guarded by the
   `make test` import check.
+- **Fuzz targets guard the parsers on the trust boundary**, named `*_fuzz_test.go` /
+  `*_fuzz_internal_test.go`: the redactor, the untrusted-output fencing, sandbox output
+  finalization, AWS `ParseHost`, the K8s classifier and ClusterRole parser, and the github and
+  gitlab classifiers (route lookup, request classification, level derivation, GraphQL-endpoint
+  detection, OpenAPI distillation). Each pins panic-freedom; most also pin a fail-closed
+  contract, but the two `IsGraphQLEndpoint` targets and github's `FuzzLookup` discard their
+  results and pin panic-freedom alone (gitlab's `FuzzLookup`, by contrast, asserts the root
+  anchor). No corpus is committed and `make check` never
+  passes `-fuzz`, so **the `f.Add` seeds are the whole gate**: they must cover the interesting
+  branches, since that is all CI executes. Extended fuzzing is a manual
+  `go test -fuzz=FuzzX -fuzztime=…` run.
 - **Lint config is strict** (`.golangci.yaml`, based on the maratori golden config):
   `modernize`, `mnd`, `funlen`, `cyclop`, `godot`, `gochecknoglobals`, `gochecknoinits`,
   `paralleltest`, `forbidigo`, and many more are on (`exhaustruct` is configured but commented
@@ -666,6 +812,18 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   same convention: `internal/auth/connector_docs_test.go` fails unless every connector id
   `GetProviders` can register has a guide at `docs/connectors/<file>.md`; when adding a
   connector, add its doc and the test-table row together.
+- **README demo assets are generated, never hand-edited.** `docs/assets/demo*` (the `.ansi`
+  capture and the three freeze-rendered column SVGs) come from `scripts/demo/capture.sh`.
+  `capture.sh all` is the leak gate: `render` + `validate` (a generic structural scan needing no
+  map, so it is fresh-checkout safe) + `validate-local` (an exact denylist from the map) when the
+  map is present. **No `make` target or CI job runs it** (`make check` only shellchecks the file),
+  so run it by hand before committing a regenerated asset. The real-to-placeholder identifier
+  pairs live only in the gitignored `scripts/demo/sanitize.map.local` (see
+  `sanitize.map.example`); the committed script carries placeholders, structural patterns, and one
+  world-fixed public Azure Reader role-definition GUID exemption, so it stays public-safe. Raw
+  captures (`docs/assets/*.raw.ansi`) contain real identifiers and are gitignored. Re-pick the
+  curated `RANGES_DEFAULT` column ranges when re-capturing (or pass `DEMO_RANGES`); `render`
+  fails closed unless they reach the capture's last line.
 
 ### CI and release
 
@@ -673,13 +831,15 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   against `main`; a bootstrap step installs the pinned shellcheck (download + SHA-256 verify) and
   the pinned Pester/PSScriptAnalyzer modules, versions read from the `Makefile` via `make -s
   print-*`. It runs only on pull requests against `main`. Direct pushes to `main` are
-  **blocked** by an active GitHub **ruleset** (squash-only
-  merges, linear history, required review-thread resolution, no human bypass) whose required
+  **blocked** by an active GitHub **ruleset** (six rules: deletion, non-fast-forward, creation,
+  linear history, pull request, required status checks; squash-only merges and required
+  review-thread resolution, with `required_approving_review_count` 0 and no code-owner
+  requirement) whose required
   status checks, under a strict up-to-date policy, are **`Lint & Test`**, **`Validate PR title`**
   (`semantic-pr.yaml`), and **`Build & smoke-test macOS packaging toolchain`**
-  (`pkg-tools.yaml`); the ruleset also runs Copilot code review on each
-  push. The pre-commit hook runs the fast `make check-go`, a local mirror of the Go half
-  of the gate, not the enforcement boundary.
+  (`pkg-tools.yaml`). No human can bypass it, but there is **one Integration bypass actor with
+  `bypass_mode: always`**, so an app can. The pre-commit hook runs the fast `make check-go`, a
+  local mirror of the Go half of the gate, not the enforcement boundary.
 - The installer fail-closed paths are covered hermetically in `make check`, not as a separate
   release-gate workflow: `test/install.smoke.test.sh` (run by `sh-test`) drives `install.sh`
   against a loopback fixture server and asserts the Linux checksum-mismatch abort writes no
@@ -721,10 +881,33 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (Dependabot's commit prefix) and render under a dedicated Dependencies changelog section, one
   entry per updated package: the auto-merge workflow writes a release-please commit-override
   block into the PR body via `scripts/ci/dependabot-commit-override.sh` (unit-tested by `make
-  sh-test`), falling back to the group title when the metadata cannot be parsed. `deps` commits
+  sh-test`), falling back to the group title when the metadata cannot be parsed.
+  `dependabot-auto-merge.yaml` triggers on **`workflow_run`** (after CI completes), not
+  `pull_request`, for two reasons that are easy to undo: the App key never becomes visible to a
+  Dependabot PR's head-modified workflow code, and the merge is attributed to a dedicated App
+  (`AUTOMERGE_APP_ID`) whose push to `main` **does** re-trigger the Release Pipeline, where a
+  `GITHUB_TOKEN` merge would not (which used to leave the release PR stale). The token is
+  downscoped to contents + pull-requests + **workflows** write, that last one because arming
+  auto-merge on a workflow-touching PR needs it. Two independent tolerances, easily conflated: the
+  body edit (and the renderer checkout) is `continue-on-error`, so a **failed** edit degrades to
+  the group title rather than blocking; separately `gh pr merge` retries 3 times to absorb the body
+  PATCH racing a re-run of `Validate PR title`, and if all three fail the job `exit 1`s rather than
+  degrading. `deps` commits
   still cut patch releases; `release-please-config.json` pins the visible section list
   explicitly, so re-check it when release-please is bumped. `.goreleaser.yaml` handles binary
-  builds for release tags. The Release Pipeline splits at the publish boundary: the `release`
+  builds for release tags, with four contracts worth treating as untouchable:
+  `draft: true` + `use_existing_draft: true` + `mode: keep-existing` is the **draft-adoption
+  handshake** (goreleaser adopts release-please's draft, matched by draft title == the git tag
+  string, keeps its changelog body, uploads, and stops; with `draft: true` its publish step is a
+  no-op, so the workflow owns the publish PATCH and runs it only after every assertion passes);
+  `scoops[0].skip_upload: true` makes goreleaser's local Scoop manifest inert, since
+  `render-scoop.sh` is the authoritative renderer; the darwin post-build hook
+  `scripts/release/sign-darwin-binary.sh` (snapshot-skips, asserts a Developer ID Application
+  cert, verifies hardened-runtime flags before replacing the binary); and
+  `.goreleaser/entitlements.plist`'s `allow-unsigned-executable-memory` — **without it the
+  notarized macOS binary is SIGKILLed on the first Bifrost JSON marshal**, because
+  bytedance/sonic JIT-compiles serializers onto non-MAP_JIT executable pages that the hardened
+  runtime forbids. The Release Pipeline splits at the publish boundary: the `release`
   job builds, signs, and statically asserts everything, then hands the draft's exact asset set
   (pkgs, archives, manifests) to downstream jobs as the `release-artifacts` workflow artifact;
   the `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs
@@ -815,6 +998,26 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `publish` success and lists `homebrew-publish`/`scoop-publish` in `needs` only to order the tap
   and bucket push before the smoke. A red channel smoke with a green `publish` job means
   public-channel drift, nothing to roll back.
+- `.github/workflows/attestation.yaml` is the post-publish attestation alarm, deliberately a
+  separate workflow on the `release: published` event: GitHub mints release attestations
+  **asynchronously**, 15-20+ minutes after publish (v0.3.3 exhausted a 10-minute in-run retry
+  window inside the pipeline), so it retries `gh release verify` for ~30 minutes and then
+  cross-checks that **every** published asset is an attested subject, closing the
+  built == frozen == attested chain. Its helper is `scripts/release/ensure-gh-verify.sh`. Like the
+  channel smoke, a red run is an alarm, not a rollback: the release is immutable either way, and
+  the pipeline already pinned the asset digests and tag binding synchronously. On the client side
+  `install.sh` honors `CYNATIVE_REQUIRE_ATTESTATION=1`, which turns a failed or unavailable
+  verification into a hard install failure (including when `gh` is absent).
+- `.github/dependabot.yml` runs one daily `multi-ecosystem-group` (`all-dependencies`) across
+  gomod, github-actions, cargo (`/tools/rcodesign`), and gitsubmodule, with the `deps` commit
+  prefix. `allow: dependency-type: all` is what turns on **indirect** (transitive) module updates.
+  Three `ignore:` entries exist purely to keep the gate green, each with a documented exit
+  condition: `github.com/charmbracelet/x/exp/*` wholesale (untagged monorepo submodules that
+  Dependabot mis-resolves to the tagged root, failing the gomod update outright),
+  `denis-tingaikin/go-header` semver-major (v1 is an API rewrite `golangci-lint` cannot compile
+  against, so it breaks `make lint`), and `go.digitalxero.dev/go-msix` semver-major (v1 breaks
+  goreleaser's nfpm MSIX packager, so it breaks `make snapshot`). Minor/patch stay allowed on the
+  latter two.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and
   `third_party/xar`, plus `tools/rcodesign` (a Cargo stub that pins the `apple-codesign`

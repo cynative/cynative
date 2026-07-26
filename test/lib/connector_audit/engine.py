@@ -563,23 +563,25 @@ _POSITIONAL_RULES = (
 )
 
 
-def _read_live_secrets(path):
+def _read_live_secrets(secrets_path):
     """The out-of-band live secret values, one BASE64-encoded value per line, blanks
     dropped. Encoding keeps a multi-line credential (a JSON key blob) as a single exact
     needle rather than per-line needles that false-positive against an audit. The suites
     always pass the flag, so a MISSING/UNREADABLE file, or a non-base64 line, is a wiring
     bug and fails closed (4). An EMPTY file is legitimate: ambient-credential runs (AWS
     profiles/instance roles, GCP ADC, Bedrock/Vertex chains) enumerate no env secret and
-    rely on the class-2/class-3 SHAPE families, so an empty file must not fail. path is
-    None only on the offline replay that passes no flag; class-1 is then skipped, never
-    fatal, so the frozen corpus stays inert."""
-    if path is None:
+    rely on the class-2/class-3 SHAPE families, so an empty file must not fail.
+    secrets_path is None only on the offline replay that passes no flag; class-1 is then
+    skipped, never fatal, so the frozen corpus stays inert. Only the PATH is ever named in
+    a diagnostic; the decoded values are returned and never printed."""
+    if secrets_path is None:
         return []
     text = None
     try:
-        text = open(path, encoding="utf-8").read()
+        text = open(secrets_path, encoding="utf-8").read()
     except OSError as e:
-        insecure("credential prepass: cannot read live-secrets file %s: %s - failing closed" % (path, e))
+        insecure("credential prepass: cannot read live-secrets file %s: %s - failing closed"
+                 % (secrets_path, e))
     except UnicodeDecodeError:
         insecure("credential prepass: live-secrets file is not valid UTF-8 - failing closed")
     out = []
@@ -669,27 +671,32 @@ def credential_prepass(records, raw_lines, live_secrets_path):
 # ---------------------------------------------------------------------------
 
 
-def _pop_live_secrets(args):
-    """Remove a --live-secrets FILE pair from args, returning (remaining_args, file)."""
+def _pop_live_secrets_path(args):
+    """Remove a --live-secrets FILE pair from args, returning (remaining_args, secrets_path).
+
+    Every name on this seam is `*_path`: what is threaded from argv down to
+    `_read_live_secrets` is the FILE PATH, never the secret values it holds. The decoded
+    values exist only inside `credential_prepass`, which never prints one (a diagnostic
+    names the credential family, never the bytes)."""
     out = []
-    secrets = None
+    secrets_path = None
     i = 0
     while i < len(args):
         if args[i] == "--live-secrets":
             if i + 1 >= len(args):
                 die("usage: --live-secrets requires a FILE argument", USAGE)
-            secrets = args[i + 1]
+            secrets_path = args[i + 1]
             i += 2
             continue
         out.append(args[i])
         i += 1
-    return out, secrets
+    return out, secrets_path
 
 
-def dispatch(spec, mode, records, raw_lines, rest, live_secrets):
+def dispatch(spec, mode, records, raw_lines, rest, live_secrets_path):
     """Route `mode` to the read assertion or one of the provider's canaries. An unknown
     mode fails closed to 4."""
-    credential_prepass(records, raw_lines, live_secrets)
+    credential_prepass(records, raw_lines, live_secrets_path)
     if mode == spec.read_mode:
         if len(rest) < 2:
             die("usage: %s %s AUDIT TARGET EXPECT" % (spec.name, mode), USAGE)
@@ -718,13 +725,13 @@ def main(argv):
             die("usage: --dump-names PROVIDER", USAGE)
         _dump_names(args[1])
         return
-    args, live_secrets = _pop_live_secrets(args)
+    args, live_secrets_path = _pop_live_secrets_path(args)
     if len(args) < 3:
         die("usage: audit_check.py PROVIDER MODE AUDIT [TARGET] [EXPECT] [--live-secrets FILE]", USAGE)
     provider, mode, audit = args[0], args[1], args[2]
     spec = resolve(provider)
     records, raw_lines = load_records(audit)
-    dispatch(spec, mode, records, raw_lines, args[3:], live_secrets)
+    dispatch(spec, mode, records, raw_lines, args[3:], live_secrets_path)
 
 
 # ---------------------------------------------------------------------------
@@ -1005,14 +1012,14 @@ def _shared_selftest():
         multi_secret = '{\n  "project_id": "cynative-cli-ci",\n  "token_url": "x"\n}'
         p_secrets_multi = _write(tmp, _b64line(multi_secret))
 
-        def cp(lines, secrets=None):
+        def cp(lines, secrets_path=None):
             recs = []
             for ln in lines:
                 try:
                     recs.append(json.loads(ln))
                 except ValueError:
                     pass
-            credential_prepass(recs, lines, secrets)
+            credential_prepass(recs, lines, secrets_path)
 
         # class-2: an AKIA-shaped access key sitting in verbatim (unredacted) arguments.
         akia_line = _jline("c1", "attempt", {
