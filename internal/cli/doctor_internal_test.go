@@ -397,6 +397,60 @@ func TestDoctor_LiveLLM_VerbosePrintsDetails(t *testing.T) {
 	}
 }
 
+func TestDoctor_LiveLLM_InitFailureVerbosePrintsDetails(t *testing.T) {
+	t.Parallel()
+
+	const leak = "sk-ABCDEFGHIJ0123456789abcd"
+	d := testDeps()
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return nil, errors.New("bifrost init failed: Incorrect API key: " + leak)
+	}
+
+	var errBuf bytes.Buffer
+
+	d.errOut = &errBuf
+
+	_, err := runWithArgs(t, d, []string{"doctor", "--live-llm", "-v"})
+	if !errors.Is(err, ErrLLMUnavailable) {
+		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
+	}
+	out := errBuf.String()
+	if !strings.Contains(out, "details:") {
+		t.Errorf("stderr missing verbose details; got %q", out)
+	}
+	if strings.Contains(out, leak) {
+		t.Errorf("verbose details must redact credential-shaped text; got %q", out)
+	}
+	if !strings.Contains(out, "[REDACTED:llm-api-key]") {
+		t.Errorf("verbose details missing llm-api-key redaction; got %q", out)
+	}
+}
+
+func TestDoctorLiveProbeConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := validCfg()
+	cfg.LLM.NetworkConfig.MaxRetries = 3
+	cfg.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds = 300
+
+	got := doctorLiveProbeConfig(cfg, 30*time.Second)
+	if got.LLM.NetworkConfig.MaxRetries != 0 {
+		t.Errorf("MaxRetries = %d, want 0", got.LLM.NetworkConfig.MaxRetries)
+	}
+	if got.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds != 30 {
+		t.Errorf("timeout = %d, want 30", got.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds)
+	}
+	if cfg.LLM.NetworkConfig.MaxRetries != 3 {
+		t.Error("doctorLiveProbeConfig must not mutate the caller's config")
+	}
+
+	tiny := doctorLiveProbeConfig(cfg, time.Millisecond)
+	if tiny.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds != 1 {
+		t.Errorf("sub-second timeout must clamp to 1s, got %d",
+			tiny.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds)
+	}
+}
+
 func TestDoctor_LiveLLM_NonceMismatch(t *testing.T) {
 	t.Parallel()
 
@@ -448,11 +502,15 @@ func TestDoctor_LiveLLM_BoundsProbeContext(t *testing.T) {
 	d := testDeps()
 	var remaining time.Duration
 	var hadDeadline bool
-	d.newChatModel = func(ctx context.Context, _ config.Config, _ func(schema.Usage)) (chatModel, error) {
+	gotRetries := -1
+	var gotTimeout int
+	d.newChatModel = func(ctx context.Context, cfg config.Config, _ func(schema.Usage)) (chatModel, error) {
 		if dl, ok := ctx.Deadline(); ok {
 			hadDeadline = true
 			remaining = time.Until(dl)
 		}
+		gotRetries = cfg.LLM.NetworkConfig.MaxRetries
+		gotTimeout = cfg.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds
 
 		return &fakeChatModel{ //nolint:exhaustruct // errs unused
 			responses: []*schema.Message{schema.AssistantMessage("DOCTOR-TEST-DEFAULT", nil)},
@@ -466,6 +524,12 @@ func TestDoctor_LiveLLM_BoundsProbeContext(t *testing.T) {
 	// Pin the production const (~30s): a wrong default would hang diagnostics.
 	if !hadDeadline || remaining <= 29*time.Second || remaining > 30*time.Second {
 		t.Fatalf("hadDeadline=%v remaining=%v, want in (29s, 30s]", hadDeadline, remaining)
+	}
+	if gotRetries != 0 {
+		t.Errorf("MaxRetries = %d, want 0 for the live probe", gotRetries)
+	}
+	if gotTimeout != 30 {
+		t.Errorf("DefaultRequestTimeoutInSeconds = %d, want 30", gotTimeout)
 	}
 }
 

@@ -166,9 +166,9 @@ func (d *deps) runDoctor(ctx context.Context, cfg config.Config, verbose, liveLL
 // and requires the nonce in the assistant text (case-insensitive). On failure it
 // renders an LLM ✗ status; when verbose is set it also prints a redacted details
 // line so the "-v for details" hint from llmRuntimeStatus is actionable. The
-// caller returns ErrLLMUnavailable. The whole probe runs under a short deadline
-// (doctorLiveProbeTimeout, overridable via deps.doctorLiveProbeTimeout) so it
-// cannot inherit the research call's multi-minute timeout×retry window.
+// caller returns ErrLLMUnavailable. The probe is isolated from research defaults:
+// a short context deadline, MaxRetries forced to 0, and a request timeout capped
+// to the same window — so a hung or retrying provider cannot block for minutes.
 func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool) error {
 	timeout := d.doctorLiveProbeTimeout
 	if timeout <= 0 {
@@ -177,7 +177,8 @@ func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cm, err := d.newChatModel(pctx, cfg, func(schema.Usage) {})
+	probeCfg := doctorLiveProbeConfig(cfg, timeout)
+	cm, err := d.newChatModel(pctx, probeCfg, nil)
 	if err != nil {
 		d.ui.RenderLLM(d.errOut, llmRuntimeStatus(cfg, err))
 		d.printDoctorProbeDetails(verbose, err)
@@ -204,6 +205,17 @@ func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool
 	}
 
 	return nil
+}
+
+// doctorLiveProbeConfig returns a copy of cfg whose LLM network knobs cannot
+// inherit the research multi-minute timeout×retry window.
+func doctorLiveProbeConfig(cfg config.Config, timeout time.Duration) config.Config {
+	probe := cfg
+	secs := max(int(timeout/time.Second), 1)
+	probe.LLM.NetworkConfig.MaxRetries = 0
+	probe.LLM.NetworkConfig.DefaultRequestTimeoutInSeconds = secs
+
+	return probe
 }
 
 // printDoctorProbeDetails writes a redacted provider error when -v is set.
