@@ -307,7 +307,7 @@ Configure under `audit:` in `~/.cynative/config.yaml`, or via env:
 
 ## Questions and feedback
 
-[Discussions](https://github.com/cynative/cynative/discussions) is the best place - what you pointed it at, what came back, what's missing.
+[Discussions](https://github.com/cynative/cynative/discussions) is the best place to share your feedback—what you pointed it at, what came back, and what's missing.
 
 ## Contributing
 
