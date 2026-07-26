@@ -1,4 +1,4 @@
-<p align="left"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png"><img src="docs/assets/logo.png" alt="cynative" width="400"></picture></p>
+<p align="left"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png"><img src="docs/assets/logo.png" alt="cynative" width="350"></picture></p>
 
 # Deep research for your infrastructure
 
