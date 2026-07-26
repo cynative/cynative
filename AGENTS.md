@@ -25,11 +25,12 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
   the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
   secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
-  exactly the two api keys, bracket-form `secrets[...]` is rejected outright since it would
-  evade the scan, and `release.yaml` must carry no `secrets: inherit` — matched as
-  `secrets:[[:space:]]*inherit`, so the check is a tripwire for the ordinary spelling, not a
-  syntax-complete guarantee: YAML also accepts `secrets : inherit`, which slips past it), the
-  Scoop-manifest
+  exactly the two api keys, adjacent bracket-form `secrets[` is rejected since it would evade the
+  dot-form scan, and `release.yaml` must carry no `secrets: inherit`). Treat all three as
+  **tripwires for the ordinary spelling, not syntax-complete guarantees**: the greps are
+  `secrets\[` and `secrets:[[:space:]]*inherit`, so whitespace variants GitHub and YAML both
+  accept (`secrets ['K']`, `secrets : inherit`) slip past. Tighten the patterns if that matters.
+  Then the Scoop-manifest
   renderer and both strict asset-digest lookups (`sha_for` over the manifest TSV,
   `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
   the first match) unit tests, the release asset-set assertion's
@@ -195,11 +196,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (`agent.WrapPipedInput`). A bare interactive session opens with `Agent.Welcome`, gated on all
   four of: interactive, no seed task, no configured token budget, and at least one registered
   connector (so a seeded, budgeted, or connector-less session skips it). It is one extra tool-less
-  `Generate` bounded by `welcomeTimeout` (60s) that greets and offers numbered example questions,
-  counted in metrics either way and appended to session history so the user can answer
-  by number. It returns the text **without** rendering it, so the caller can order the LLM status
-  line first; `ErrWelcomeTimedOut` is a soft skip that continues the session, while a real
-  generation failure renders the ✗ block and aborts.
+  `Generate` bounded by `welcomeTimeout` (60s) that greets and offers numbered example questions.
+  The round-trip is counted in metrics unconditionally, but the exchange is appended to session
+  history **only on a successful non-empty greeting** — a timeout, error, or empty response leaves
+  no reply-by-number context for the next turn. It returns the text **without** rendering it, so
+  the caller can order the LLM status line first; `ErrWelcomeTimedOut` is a soft skip that
+  continues the session, while a real generation failure renders the ✗ block and aborts.
   `cynative doctor` is the second cobra command (`doctor.go`, its own `--verbose`): it validates
   config and connector readiness, failing only on **`Actionable`** connector errors, never on a
   genuinely absent ambient credential. Its `ErrLLMUnavailable`/`ErrDoctorNotReady` sentinels are
@@ -585,8 +587,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   gitlab connectors share: the `Level` lattice (`none` < `read` < `write`, where write implies
   read), the `Exposure` map keyed by `DefaultKey` plus categories, and the `ParseLevel`/
   `LevelName`/`Allows`/`MergeExposure`/`BuildExposure`/`CompactCeiling` helpers (`LevelName` is
-  `ParseLevel`'s inverse and renders both `CompactCeiling` and every ceiling-exceeded denial
-  message, so neither connector needs its own `Level`-to-string switch or `"default"` literal).
+  `ParseLevel`'s inverse and renders both `CompactCeiling` and every **category-ceiling** denial
+  message, so neither connector needs its own `Level`-to-string switch or `"default"` literal;
+  `ErrExposureExceeded` also covers denials with no level to render, e.g. a non-GET/HEAD request
+  to a GitHub download host).
   A stdlib-only leaf importing nothing from `internal/auth`, so both
   subpackages (which the parent imports) can depend on it without a cycle; `CompactCeiling`
   takes each connector's sensitive key (`secret-scanning`, `ci-variables`) as a parameter, so
