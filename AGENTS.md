@@ -720,8 +720,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 
   The fourth, `Fatal`, is installed by `codeExecutionTool.Run` instead, immediately before
   entering the sandbox: it latches the first inner audit-write error so the run aborts rather than
-  stringifying it, extending the fail-closed audit contract inside the sandbox. Non-sandbox tools
-  never receive a fatal latch.
+  stringifying it, extending the fail-closed audit contract inside the sandbox. The latch is
+  scoped by dispatch path, not by tool: a tool called from inside `code_execution` inherits it
+  (the context flows `sandbox.Run` → `loggingToolFunc` → `runInnerCall`), while the same tool
+  dispatched directly by `invokeIO` has none.
 
   **A new I/O tool must call `audit.MarkFailed`/`MarkProgress`** (see `httptool.go`): tools report
   failure as a result string rather than a Go error, so without those calls the audit outcome
