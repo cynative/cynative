@@ -206,6 +206,21 @@ sh-test:
 		*) echo "FAIL: the publish gate in release.yaml is missing the required term [$$term]."; exit 1 ;; \
 		esac; \
 	done
+	@# The recovery path (cynative#202) is a workflow trigger, which nothing else
+	@# exercises: no test can dispatch it, and its absence is invisible until an
+	@# operator needs it mid-incident. Pin both triggers, comments stripped
+	@# (sed 's/#.*//') so the prose above them never satisfies the check:
+	@#   repository_dispatch/release-retry - the recovery entry point itself;
+	@#   push/main - so the recovery trigger can never be added in PLACE of the
+	@#     normal release path, which would stop releases entirely.
+	@release_on=$$(sed 's/#.*//' .github/workflows/release.yaml | \
+		awk '/^[a-zA-Z]/ && !/^on:/ {inon=0} /^on:/{inon=1} inon{print}'); \
+	for term in "repository_dispatch:" "- release-retry" "push:" "- main"; do \
+		case "$$release_on" in \
+		*"$$term"*) ;; \
+		*) echo "FAIL: release.yaml's on: block is missing [$$term] - the recovery re-trigger (scripts/release/retrigger.sh) or the normal push trigger would not fire."; exit 1 ;; \
+		esac; \
+	done
 	@# The api-key legs read exactly two secrets across the workflow_call boundary.
 	@# release.yaml forwards ONLY these two names, never secrets: inherit. Pin the
 	@# boundary from both sides, comments stripped (sed 's/#.*//') so prose never counts:
@@ -229,7 +244,7 @@ sh-test:
 		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
 		exit 1; \
 	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
