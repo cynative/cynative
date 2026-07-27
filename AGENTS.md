@@ -25,12 +25,11 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
   the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
   secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
-  exactly the two api keys, adjacent bracket-form `secrets[` is rejected since it would evade the
-  dot-form scan, and `release.yaml` must carry no `secrets: inherit`). Treat all three as
-  **tripwires for the ordinary spelling, not syntax-complete guarantees**: the greps are
-  `secrets\[` and `secrets:[[:space:]]*inherit`, so whitespace variants GitHub and YAML both
-  accept (`secrets ['K']`, `secrets : inherit`) slip past. Tighten the patterns if that matters.
-  Then the Scoop-manifest
+  exactly the two api keys; bracket-form `secrets[...]` — including whitespace variants
+  like `secrets ['K']` — is rejected since it would evade the dot-form scan; and
+  `release.yaml` must carry no `secrets: inherit`, including `secrets : inherit`). The
+  checker lives in `scripts/ci/check-llm-smoke-secrets.sh` and is unit-tested by
+  `test/llm-smoke-secrets.unit.test.sh`. Then the Scoop-manifest
   renderer and both strict asset-digest lookups (`sha_for` over the manifest TSV,
   `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
   the first match) unit tests, the release asset-set assertion's

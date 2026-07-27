@@ -149,6 +149,7 @@ sh-test:
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
+	@sh test/llm-smoke-secrets.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
 	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
@@ -206,29 +207,11 @@ sh-test:
 		esac; \
 	done
 	@# The api-key legs read exactly two secrets across the workflow_call boundary.
-	@# release.yaml forwards ONLY these two names, never secrets: inherit. Pin the
-	@# boundary from both sides, comments stripped (sed 's/#.*//') so prose never counts:
-	@#   llm-smoke.yaml - the sorted-unique set of secrets.<NAME> refs must be exactly
-	@#     the two keys, and bracket-form secrets[...] is rejected outright since it
-	@#     would evade the dot-form scan;
-	@#   release.yaml - `secrets: inherit` must never appear, or a future edit could
-	@#     hand every release secret (App key, signing, PAT) to the gate.
-	@smoke=$$(sed 's/#.*//' .github/workflows/llm-smoke.yaml); \
-	if printf '%s\n' "$$smoke" | grep -q 'secrets\['; then \
-		echo "FAIL: llm-smoke.yaml uses bracket-form secrets[...]; only dot-form secrets.NAME is allowed so this pin can enforce the exact set."; \
-		exit 1; \
-	fi; \
-	got=$$(printf '%s\n' "$$smoke" | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | xargs); \
-	want="ANTHROPIC_API_KEY OPENAI_API_KEY"; \
-	if [ "$$got" != "$$want" ]; then \
-		echo "FAIL: llm-smoke.yaml secrets.* references are [$$got], expected exactly [$$want] - a new reference would widen the gate's secret access across workflow_call."; \
-		exit 1; \
-	fi; \
-	if sed 's/#.*//' .github/workflows/release.yaml | grep -qE 'secrets:[[:space:]]*inherit'; then \
-		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
-		exit 1; \
-	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
+	@# release.yaml forwards ONLY these two names, never secrets: inherit. The
+	@# checker (scripts/ci/check-llm-smoke-secrets.sh) is unit-tested so whitespace
+	@# evasions like `secrets ['K']` / `secrets : inherit` cannot slip past (#216).
+	@sh scripts/ci/check-llm-smoke-secrets.sh
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + llm-smoke secret-reference unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
