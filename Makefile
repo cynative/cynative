@@ -149,6 +149,7 @@ sh-test:
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
+	@sh test/retrigger.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
 	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
@@ -228,7 +229,7 @@ sh-test:
 		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
 		exit 1; \
 	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
