@@ -28,10 +28,10 @@ Every PR must pass `make check`, which runs two halves:
 - `make check-go` — the hermetic Go gate (generate + lint + shell-complexity +
   format-diff + the full race-enabled test suite + a `GOOS=windows` cross-build);
   100% `go.mod`-pinned. **The pre-commit hook runs this.**
-- `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer on
-  `install.ps1`, `test/install-script.smoke.test.ps1`, and `test/scoop.smoke.test.ps1`, the
-  Pester unit tests, and the POSIX `install.sh` unit + loopback smoke tests (`sh-test`, which
-  needs `python3`), each at a version pinned in the `Makefile`.
+- `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer over
+  every tracked `*.ps1`, Pester over every tracked `test/*.Tests.ps1`, and the POSIX
+  `install.sh` unit + loopback smoke tests (`sh-test`, which needs `python3`), each at a
+  version pinned in the `Makefile`.
 
 ```bash
 make check
