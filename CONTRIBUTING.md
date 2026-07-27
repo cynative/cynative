@@ -11,9 +11,11 @@ board.
 - Go tooling (`golangci-lint`, `moq`, complexity checkers) is pinned via `go.mod`
   and invoked through `make` — no separate installs. The shell/PowerShell gate
   (`make check-scripts`) additionally needs `shellcheck`, PowerShell 7 with
-  Pester/PSScriptAnalyzer, and `python3` (the `install.sh` loopback smoke test's
-  fixture server); those versions are pinned in the `Makefile` and installed
-  separately (`make check-scripts` prints an install hint if one is missing).
+  Pester/PSScriptAnalyzer, `python3` (the `install.sh` loopback smoke test's
+  fixture server), and `jq` (used by the Scoop-renderer and release asset-set
+  suites inside `sh-test`); those versions are pinned in the `Makefile` and
+  installed separately (`make check-scripts` prints an install hint if one is
+  missing; `jq` is presence-checked one level down by the suites that need it).
 
 On a fresh checkout, generate the gitignored mocks before running package tests:
 
@@ -25,13 +27,17 @@ make generate
 
 Every PR must pass `make check`, which runs two halves:
 
-- `make check-go` — the hermetic Go gate (generate + lint + shell-complexity +
-  format-diff + the full race-enabled test suite + a `GOOS=windows` cross-build);
-  100% `go.mod`-pinned. **The pre-commit hook runs this.**
+- `make check-go` — `mod-tidy-check` + generate + lint + shell-complexity +
+  format-diff + the full race-enabled test suite + `windows-build` (GOOS=windows
+  amd64 and arm64). 100% `go.mod`-pinned; `mod-tidy-check` may consult the module
+  cache, so the gate is not fully network-free. **The pre-commit hook runs this.**
 - `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer over
-  every tracked `*.ps1`, Pester over every tracked `test/*.Tests.ps1`, and the POSIX
-  `install.sh` unit + loopback smoke tests (`sh-test`, which needs `python3`), each at a
-  version pinned in the `Makefile`.
+  every tracked `*.ps1`, Pester over every tracked `test/*.Tests.ps1`, and `sh-test`
+  (install.sh unit + loopback smoke, e2e-guardrails / connector-e2e / render-scoop /
+  dependabot-override / assert-assets / ci-gate / llm-smoke-roster / retrigger unit
+  tests, the connector audit-parser selftests, and the release-gate pins for trusted
+  caller, publish `if:`, recovery triggers, and llm-smoke secret references). Needs
+  `python3` and `jq`; tool versions are pinned in the `Makefile`.
 
 ```bash
 make check
