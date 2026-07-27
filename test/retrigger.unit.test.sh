@@ -30,7 +30,7 @@ run() {
 		PATH="$bindir:$PATH"
 		GH_TOKEN=${GH_TOKEN-stub-token}
 		export PATH GH_TOKEN
-		sh "$script" "$@"
+		bash "$script" "$@"
 	)
 }
 
@@ -75,7 +75,7 @@ write_gh 'exit 0'
 	PATH="$bindir:$PATH"
 	unset GH_TOKEN
 	export PATH
-	sh "$script" cynative/cynative
+	bash "$script" cynative/cynative
 ) >"$out" 2>"$err" && rc=0 || rc=$?
 check "$rc" 1 "missing GH_TOKEN exits 1"
 

@@ -15,7 +15,7 @@
 # pending is a no-op rather than a spurious release.
 #
 # Usage: retrigger.sh <owner/repo>   (requires GH_TOKEN with contents: write)
-set -eu
+set -euo pipefail
 
 if [ "$#" -ne 1 ]; then
   echo "usage: retrigger.sh <owner/repo>   (requires GH_TOKEN)" >&2
