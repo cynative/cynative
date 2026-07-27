@@ -4,6 +4,25 @@ on:
   push:
     branches:
       - main
+  # Recovery entry point (cynative#202). A failed pre-publish gate leaves the draft
+  # intact, but re-running that run reuses the secret values snapshotted when it was
+  # created (cli/cli#13522), so recovery needs a FRESH run. This trigger provides one
+  # without an artificial push to main: scripts/release/retrigger.sh.
+  #
+  # repository_dispatch rather than workflow_dispatch, deliberately. A dispatched
+  # workflow_dispatch run executes the definition from the CALLER's ref with repository
+  # secrets available, so any write-access user could dispatch a doctored branch copy
+  # and exfiltrate the release App key or the macOS signing secrets. A
+  # repository_dispatch run always executes the default branch's definition, so that
+  # path does not exist.
+  #
+  # Nothing in this workflow reads github.sha, github.ref, or github.event, so the
+  # dispatch path is behaviourally identical to the push path: every SHA flows from
+  # release-please's outputs, and the reusable gates pin their caller by
+  # github.workflow_ref, which still resolves to this file on refs/heads/main.
+  repository_dispatch:
+    types:
+      - release-retry
 
 permissions:
   contents: read
@@ -72,22 +91,25 @@ jobs:
       #       repos/cynative/cynative/issues/<pr>/labels/autorelease%3A%20tagged
       #     gh api repos/cynative/cynative/issues/<pr>/labels \
       #       -f "labels[]=autorelease: pending"
-      #   Then trigger a fresh run so release-please recreates the draft. If
-      #   the failure was a secret that had to be created or fixed, start a
-      #   NEW run (a push to main), do NOT re-run the failed one: GitHub
-      #   snapshots secret values at workflow-run-create time, so a re-run
-      #   reuses the stale values and fails the same way (cli/cli#13522).
-      #   That fresh run is a new push, so main HEAD advances past the release
-      #   PR's SHA, and a GitHub App token cannot create a release or tag ref at
-      #   a non-HEAD target_commitish (403 "Resource not accessible by
-      #   integration"). The same wall can appear WITHOUT a recovery: if the
-      #   release-PR-merge run is coalesced away by a later push in the
-      #   release-pipeline concurrency group, the run that executes re-derives
-      #   the release at the older release-PR SHA while starting at a newer HEAD.
-      #   BREAK-GLASS for either case, until a repository_dispatch re-trigger
-      #   (#202) and HEAD-safe targeting remove the need: temporarily point this
-      #   step's `token` and both ensure-tag `GH_TOKEN`s at a short-lived PAT
-      #   (contents + pull-requests write), recover, then revert and delete it.
+      #   Then start a FRESH run so release-please recreates the draft:
+      #     GH_TOKEN=<contents:write token> scripts/release/retrigger.sh \
+      #       cynative/cynative
+      #   Do NOT re-run the failed run: GitHub snapshots secret values at
+      #   workflow-run-create time, so a re-run reuses the stale values and
+      #   fails the same way (cli/cli#13522). The dispatch starts a genuinely
+      #   new run without advancing main, which a recovery push would do.
+      #
+      #   If the release/tag creation itself 403s with "Resource not
+      #   accessible by integration", the cause is the workflow-file guard,
+      #   NOT the release SHA being behind HEAD (non-HEAD targeting is not
+      #   restricted; verified by experiment). GitHub requires a token
+      #   authorized to modify workflows whenever the target commit's
+      #   .github/workflows/ content differs from the DEFAULT BRANCH's, on all
+      #   four of POST/PATCH /git/refs and /releases. The App holds
+      #   workflows: write and the four cynative token mints in this file pass
+      #   no permission-* inputs, so each inherits it; if this ever returns,
+      #   check that grant first (a mint that starts downscoping its
+      #   permissions would silently drop it).
       #   The pre-publish gate spans the release job, the smoke and e2e gates
       #   (macos-pkg-smoke, archive-smoke, connector-e2e, llm-smoke), and the
       #   publish job; a failure in any of them, up to and including the publish
