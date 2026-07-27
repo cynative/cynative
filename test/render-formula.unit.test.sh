@@ -50,10 +50,11 @@ golden="$here/testdata/homebrew-cynative.golden.rb"
 if "$render" 1.5.1 "$sha_a" "$sha_b" "$sha_c" "$sha_d" | diff -u "$golden" - >/dev/null 2>&1; then
 	pass "render-formula output matches the frozen golden byte-for-byte"
 else
+	"$render" 1.5.1 "$sha_a" "$sha_b" "$sha_c" "$sha_d" | diff -u "$golden" - >&2 || true
 	fail "render-formula golden byte parity (regenerate test/testdata/homebrew-cynative.golden.rb if intentional)"
 fi
 
-# ---- fail-closed on malformed hash / empty version ---------------------------
+# ---- fail-closed on malformed hash / empty / unsafe version ------------------
 if "$render" 1.5.1 not-a-hash "$sha_b" "$sha_c" "$sha_d" >/dev/null 2>&1; then
 	fail "render-formula malformed hash should fail"
 else
@@ -64,6 +65,13 @@ if "$render" "" "$sha_a" "$sha_b" "$sha_c" "$sha_d" >/dev/null 2>&1; then
 	fail "render-formula empty version should fail"
 else
 	pass "render-formula fails on an empty version"
+fi
+
+# Unquoted heredoc would otherwise expand shell metacharacters in version.
+if "$render" '1.0$(echo pwned)' "$sha_a" "$sha_b" "$sha_c" "$sha_d" >/dev/null 2>&1; then
+	fail "render-formula shell-metachar version should fail"
+else
+	pass "render-formula fails on a shell-metachar version"
 fi
 
 if [ "$fails" -ne 0 ]; then

@@ -9,6 +9,7 @@ sha_darwin_arm="$2"; sha_darwin_intel="$3"
 sha_linux_arm="$4"; sha_linux_intel="$5"
 
 [ -n "${version}" ] || { echo "::error::empty version" >&2; exit 1; }
+[[ "${version}" =~ ^[0-9a-zA-Z.-]+$ ]] || { echo "::error::malformed version: ${version}" >&2; exit 1; }
 for sha in "${sha_darwin_arm}" "${sha_darwin_intel}" "${sha_linux_arm}" "${sha_linux_intel}"; do
   [[ "${sha}" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::malformed sha256: ${sha}" >&2; exit 1; }
 done
