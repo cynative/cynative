@@ -68,6 +68,7 @@ else
 fi
 
 # Unquoted heredoc would otherwise expand shell metacharacters in version.
+# shellcheck disable=SC2016 # fixture must keep $(...) literal; do not expand here.
 if "$render" '1.0$(echo pwned)' "$sha_a" "$sha_b" "$sha_c" "$sha_d" >/dev/null 2>&1; then
 	fail "render-formula shell-metachar version should fail"
 else
