@@ -195,6 +195,8 @@ sh-test:
 		exit 1; \
 	fi; \
 	for term in \
+		"needs.macos-pkg-smoke.result == 'success'" \
+		"needs.archive-smoke.result == 'success'" \
 		"needs.connector-e2e.result == 'success'" \
 		"needs.connector-e2e.outputs.gate_sha == needs.release.outputs.sha" \
 		"needs.llm-smoke.result == 'success'" \
