@@ -12,6 +12,9 @@
 #
 # Patterns intentionally allow optional whitespace so YAML/GitHub forms like
 # `secrets ['K']` and `secrets : inherit` cannot slip past (AGENTS.md / #216).
+# After comment-stripping, newlines are collapsed to spaces so a folded YAML
+# scalar that splits `secrets` and `[...]` / `: inherit` across physical lines
+# cannot evade a line-oriented grep.
 #
 # Usage: sh scripts/ci/check-llm-smoke-secrets.sh [llm-smoke.yaml] [release.yaml]
 set -eu
@@ -28,7 +31,15 @@ if [ ! -f "$release_file" ]; then
 	exit 1
 fi
 
-smoke=$(sed 's/#.*//' "$smoke_file")
+# Strip comments per physical line, then flatten so greps see expression whitespace
+# the same way Actions does after YAML folding.
+normalize() {
+	sed 's/#.*//' "$1" | tr '\n' ' '
+}
+
+smoke=$(normalize "$smoke_file")
+release=$(normalize "$release_file")
+
 # Bracket-form (with optional whitespace): secrets[ / secrets [ / secrets["K"]
 if printf '%s\n' "$smoke" | grep -qE 'secrets[[:space:]]*\['; then
 	printf 'FAIL: %s uses bracket-form secrets[...]; only dot-form secrets.NAME is allowed so this pin can enforce the exact set.\n' \
@@ -36,17 +47,16 @@ if printf '%s\n' "$smoke" | grep -qE 'secrets[[:space:]]*\['; then
 	exit 1
 fi
 
-got=$(printf '%s\n' "$smoke" | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | tr '\n' ' ')
-got=$(printf '%s' "$got" | sed 's/[[:space:]]*$//')
-want="ANTHROPIC_API_KEY OPENAI_API_KEY"
+got=$(printf '%s\n' "$smoke" | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u)
+want=$(printf '%s\n' 'ANTHROPIC_API_KEY' 'OPENAI_API_KEY')
 if [ "$got" != "$want" ]; then
 	printf 'FAIL: %s secrets.* references are [%s], expected exactly [%s] - a new reference would widen the gate'\''s secret access across workflow_call.\n' \
-		"$smoke_file" "$got" "$want" >&2
+		"$smoke_file" "$(printf '%s' "$got" | tr '\n' ' ')" "$(printf '%s' "$want" | tr '\n' ' ')" >&2
 	exit 1
 fi
 
 # secrets: inherit / secrets : inherit (optional whitespace around ':')
-if sed 's/#.*//' "$release_file" | grep -qE 'secrets[[:space:]]*:[[:space:]]*inherit'; then
+if printf '%s\n' "$release" | grep -qE 'secrets[[:space:]]*:[[:space:]]*inherit'; then
 	printf 'FAIL: %s uses '\''secrets: inherit'\'' - reusable gates must be granted only the exact named secrets they need, never the full set.\n' \
 		"$release_file" >&2
 	exit 1

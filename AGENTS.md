@@ -26,7 +26,8 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
   secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
   exactly the two api keys; bracket-form `secrets[...]` — including whitespace variants
-  like `secrets ['K']` — is rejected since it would evade the dot-form scan; and
+  like `secrets ['K']` and folded YAML that splits `secrets` / `[...]` across lines — is
+  rejected since it would evade the dot-form scan; and
   `release.yaml` must carry no `secrets: inherit`, including `secrets : inherit`). The
   checker lives in `scripts/ci/check-llm-smoke-secrets.sh` and is unit-tested by
   `test/llm-smoke-secrets.unit.test.sh`. Then the Scoop-manifest

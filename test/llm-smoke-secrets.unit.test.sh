@@ -81,6 +81,20 @@ run 'commented secrets: inherit is ignored' 0 \
 	"$ok_release
 # secrets: inherit"
 
+# Folded / multiline YAML: Actions joins the expression with whitespace, so the
+# tripwire must see across physical lines after normalize (Codex #218 review).
+run 'multiline bracket form fails' 1 \
+	"$ok_smoke
+LEAK: \${{ secrets
+['APP_PRIVATE_KEY'] }}" \
+	"$ok_release"
+
+run 'multiline secrets: inherit fails' 1 \
+	"$ok_smoke" \
+	"$ok_release
+secrets
+: inherit"
+
 # Live workflows under the repo root must still pass the checker.
 set +e
 live_out=$(sh "$script" 2>&1)
