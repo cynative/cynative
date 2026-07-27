@@ -28,7 +28,11 @@ write_gh() {
 run() {
 	(
 		PATH="$bindir:$PATH"
-		GH_TOKEN=${GH_TOKEN-stub-token}
+		# Colon form, so an ambient GH_TOKEN= (empty, not unset) still gets the
+		# stub. The no-colon form would preserve the empty value and the script
+		# would exit on its own token check before reaching the stub gh, failing
+		# a test that is supposed to be hermetic.
+		GH_TOKEN=${GH_TOKEN:-stub-token}
 		export PATH GH_TOKEN
 		bash "$script" "$@"
 	)
