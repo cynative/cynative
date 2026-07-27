@@ -30,8 +30,8 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   **tripwires for the ordinary spelling, not syntax-complete guarantees**: the greps are
   `secrets\[` and `secrets:[[:space:]]*inherit`, so whitespace variants GitHub and YAML both
   accept (`secrets ['K']`, `secrets : inherit`) slip past. Tighten the patterns if that matters.
-  Then the Scoop-manifest
-  renderer and both strict asset-digest lookups (`sha_for` over the manifest TSV,
+  Then the Scoop-manifest and Homebrew-Formula
+  renderers and both strict asset-digest lookups (`sha_for` over the manifest TSV,
   `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
   the first match) unit tests, the release asset-set assertion's
   fail-closed-on-missing-digest unit tests, the per-package changelog override renderer unit

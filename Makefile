@@ -144,6 +144,7 @@ sh-test:
 	@sh test/e2e-guardrails.unit.test.sh
 	@sh test/connector-e2e.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
+	@sh test/render-formula.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
 	@sh test/assert-assets.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
@@ -244,7 +245,7 @@ sh-test:
 		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
 		exit 1; \
 	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
