@@ -274,6 +274,16 @@ run 'a literal run block with secrets then a bracket is allowed' 0 '' \
           [ -n \"\$TOKEN\" ] && echo ok" \
 	"$ok_release"
 
+# --- scalar keys keep the spelling they were written with --------------------
+# YAML 1.1 resolves `on` and `yes` to booleans, so under a 1.1 parser these two
+# distinct keys collapse onto one and the later silently drops the former, taking
+# its expression out of the tree before anything scans it.
+run 'a key coerced to a boolean cannot hide a reference' 1 'secrets.* references are' \
+	"$ok_smoke
+          on: \${{ secrets.APP_PRIVATE_KEY }}
+          yes: harmless" \
+	"$ok_release"
+
 # --- other contexts that merely end in .secrets ------------------------------
 run 'inputs.secrets is a different context' 0 '' \
 	"$ok_smoke
@@ -393,7 +403,13 @@ run 'a self-referencing anchor still reports cleanly' 1 'secrets.* references ar
 printf 'jobs:\n  g:\n   bad\n  : [\n' >"$tmp/bad.yaml"
 printf '%s\n' "$ok_release" >"$tmp/good-release.yaml"
 printf 'name: \303\251\377\376 bad bytes\n' >"$tmp/binary.yaml"
-ran=$((ran + 3))
+# The loader clears YAML 1.1 implicit scalar resolution but still subclasses
+# SafeLoader, so a tag that would construct a python object is refused rather
+# than executed. Written straight to disk: the fixture guard uses safe_load,
+# which rejects this too, so it would report the case vacuous.
+printf "leg:\n  EVIL: !!python/object/apply:os.system ['echo pwned']\n" >"$tmp/pytag.yaml"
+ran=$((ran + 4))
+run_raw 'a python object tag fails closed' 1 'not parseable YAML' "$tmp/pytag.yaml" "$tmp/good-release.yaml"
 run_raw 'unparseable YAML fails closed' 1 'not parseable YAML' "$tmp/bad.yaml" "$tmp/good-release.yaml"
 run_raw 'a missing file fails closed' 1 'not readable' "$tmp/nope.yaml" "$tmp/good-release.yaml"
 run_raw 'a non-UTF-8 file fails closed' 1 'not valid UTF-8' "$tmp/binary.yaml" "$tmp/good-release.yaml"
@@ -443,8 +459,8 @@ fi
 
 # The suite must never report success without having executed its cases (the
 # fail-open shape this repo has been burned by before).
-if [ "$ran" -lt 44 ]; then
-	printf 'FAIL: only %s llm-smoke secret-reference cases ran, expected at least 44\n' "$ran" >&2
+if [ "$ran" -lt 46 ]; then
+	printf 'FAIL: only %s llm-smoke secret-reference cases ran, expected at least 46\n' "$ran" >&2
 	exit 1
 fi
 if [ "$fails" -ne 0 ]; then

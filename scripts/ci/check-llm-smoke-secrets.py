@@ -97,6 +97,26 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _plain_string_loader(yaml):
+    """A SafeLoader that leaves every plain scalar as the string it was written as.
+
+    PyYAML implements YAML 1.1, where `on`, `yes`, `no` and `off` resolve to
+    booleans. Two distinct workflow keys, `on:` and `yes:`, therefore collapse onto
+    the single Python key True and the later silently overwrites the earlier,
+    taking whatever expression the first one held out of the tree before anything
+    scans it. Actions reads those keys as the strings they are, so resolve them the
+    same way. Nothing in this script needs a typed scalar: every check is a string
+    match or a structural one. Explicit tags (`!!str`, `!!bool`) still apply, since
+    clearing the implicit resolvers only changes what an untagged scalar becomes.
+    """
+
+    class PlainStringLoader(yaml.SafeLoader):
+        pass
+
+    PlainStringLoader.yaml_implicit_resolvers = {}
+    return PlainStringLoader
+
+
 def load_workflow(path: str):
     """Parse a workflow, failing closed on anything that is not readable YAML."""
     try:
@@ -114,7 +134,7 @@ def load_workflow(path: str):
     except UnicodeDecodeError as err:
         fail(f"workflow is not valid UTF-8, so it cannot be parsed: {path}: {err}")
     try:
-        return yaml.safe_load(text)
+        return yaml.load(text, Loader=_plain_string_loader(yaml))  # noqa: S506 - SafeLoader subclass
     except Exception as err:  # noqa: BLE001 - any parse failure must fail closed
         fail(f"{path} is not parseable YAML, so the secret boundary cannot be pinned: {err}")
     return None

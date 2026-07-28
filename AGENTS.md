@@ -40,7 +40,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   retargeted at `attacker/collector/.github/workflows/llm-smoke.yaml@main` would otherwise
   satisfy every arm while forwarding both api keys out of the repository. The checker (`scripts/ci/check-llm-smoke-secrets.py`,
   unit-tested by `test/llm-smoke-secrets.unit.test.sh`) **parses both workflows with
-  PyYAML** rather than grepping the text, which is what makes the pin hold: comments carry
+  PyYAML** (a `SafeLoader` subclass with the YAML 1.1 implicit scalar resolvers cleared, so
+  `on:` and `yes:` stay distinct string keys instead of colliding on `True` and dropping
+  whichever expression the first one held; `!!python/*` tags are still refused)
+  rather than grepping the text, which is what makes the pin hold: comments carry
   no meaning, so prose can neither hide a reference nor invent one; `secrets: inherit` is
   matched structurally, so the next-line, folded, quoted, `!!str` and anchor/alias
   spellings all fail alike; and expression scanning is confined to `${{ }}` spans with
