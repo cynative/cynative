@@ -152,6 +152,7 @@ pwsh-test:
 # mirroring the shellcheck/pwsh install-free pattern.
 sh-test:
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found — needed by the install.sh loopback smoke test (test/install.smoke.test.sh)."; exit 1; }
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML not found, needed by the llm-smoke secret-boundary pin (scripts/ci/check-llm-smoke-secrets.py). apt: python3-yaml, pip: PyYAML."; exit 1; }
 	@sh test/install.unit.test.sh
 	@sh test/install.smoke.test.sh
 	@sh test/e2e-guardrails.unit.test.sh
@@ -165,7 +166,7 @@ sh-test:
 	@sh test/llm-smoke-roster.unit.test.sh
 	@sh test/llm-smoke-secrets.unit.test.sh
 	@sh test/retrigger.unit.test.sh
-	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
+	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
 	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
 	 for f in $$files; do echo "  selftest $$f"; sh "$$f" --selftest || exit 1; done
@@ -237,10 +238,12 @@ sh-test:
 		esac; \
 	done
 	@# The api-key legs read exactly two secrets across the workflow_call boundary.
-	@# release.yaml forwards ONLY these two names, never secrets: inherit. The
-	@# checker (scripts/ci/check-llm-smoke-secrets.sh) is unit-tested so whitespace
-	@# evasions like `secrets ['K']` / `secrets : inherit` cannot slip past (#216).
-	@sh scripts/ci/check-llm-smoke-secrets.sh
+	@# release.yaml forwards ONLY these two names, never secrets: inherit. The checker
+	@# (scripts/ci/check-llm-smoke-secrets.py) parses both workflows rather than
+	@# grepping them, so the spellings a line-based scan misses - inherit on the
+	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
+	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
+	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
 	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6

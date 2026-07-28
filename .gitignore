@@ -44,3 +44,7 @@ docs/superpowers/
 # README demo: local-only capture inputs (contain real identifiers; never commit)
 docs/assets/*.raw.ansi
 scripts/demo/sanitize.map.local
+
+# Python bytecode (the Makefile uses -B / PYTHONDONTWRITEBYTECODE, but stray runs happen)
+__pycache__/
+*.pyc
