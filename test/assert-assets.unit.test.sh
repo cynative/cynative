@@ -1,12 +1,16 @@
 #!/bin/sh
 # assert-assets.unit.test.sh - offline unit tests for the release asset-set
-# assertion script (scripts/release/assert-assets.sh), cynative#155 item 3.
+# assertion script (scripts/release/assert-assets.sh), cynative#155 item 3 and #180.
 #
-# Hermetic: no network, no credentials, no real gh CLI. Stubs `gh` on PATH to
-# serve a fixed release-assets listing, exercising the branch where the GitHub
-# API reports a null/empty digest for an asset: the script must fail closed
-# (nonzero exit, an ::error line) rather than falling back to downloading the
-# asset body and hashing it locally. Run by `make sh-test`.
+# Hermetic: no network, no credentials, no real gh CLI. Two halves:
+#   assert mode - stubs `gh` on PATH to serve a fixed release-assets listing,
+#   exercising the branch where the GitHub API reports a null/empty digest for an
+#   asset: the script must fail closed (nonzero exit, an ::error line) rather than
+#   falling back to downloading the asset body and hashing it locally.
+#   generate mode - drives a synthetic dist/artifacts.json and pins the artifact-type
+#   allowlist (Archive, Checksum, Signature; never Binary or Certificate), the
+#   LC_ALL=C row ordering, the frozen digests, and the missing-path abort.
+# Run by `make sh-test`.
 set -eu
 
 here=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
@@ -103,6 +107,68 @@ if (
 	grep -q 'no API digest' "$tmp/err2.log" || exit 1  # explicit ::error, not a silent failure
 	exit 0
 ); then pass "assert-assets fails closed on an empty-string digest, never downloads the asset"; else fail "empty digest fail-closed"; fi
+
+# ---- generate: exactly the release-uploadable types, sorted, with real digests ----
+# One deliberately scrambled fixture proves four things at once: the two long-standing
+# inclusions (Archive, Checksum), the signature bundle (Signature), and both intentional
+# exclusions (Binary is not a release asset; Certificate is excluded so that adding a
+# `certificate:` field to .goreleaser.yaml's signs block fails the release closed on a
+# surplus asset instead of publishing an unasserted one). Digests are frozen: the
+# fixture files hold fixed content whose sha256 is hardcoded below, so a change to how
+# the digest is computed fails rather than silently agreeing with itself.
+if (
+	fix="$tmp/fix"
+	mkdir -p "$fix"
+	printf '%s' alpha   > "$fix/darwin"
+	printf '%s' bravo   > "$fix/linux"
+	printf '%s' charlie > "$fix/sums"
+	printf '%s' delta   > "$fix/sig"
+	printf '%s' alpha   > "$fix/bin"
+	printf '%s' alpha   > "$fix/cert"
+
+	cat > "$fix/artifacts.json" <<JSON
+[{"name":"cynative_Linux_x86_64.tar.gz","path":"$fix/linux","type":"Archive"},
+ {"name":"cynative","path":"$fix/bin","type":"Binary"},
+ {"name":"checksums.txt.sigstore.json","path":"$fix/sig","type":"Signature"},
+ {"name":"checksums.txt","path":"$fix/sums","type":"Checksum"},
+ {"name":"checksums.txt.pem","path":"$fix/cert","type":"Certificate"},
+ {"name":"cynative_Darwin_arm64.tar.gz","path":"$fix/darwin","type":"Archive"}]
+JSON
+
+	cat > "$fix/expected.tsv" <<TSV
+checksums.txt	b9dd960c1753459a78115d3cb845a57d924b6877e805b08bd01086ccdf34433c	$fix/sums
+checksums.txt.sigstore.json	4f4a9410ffcdf895c4adb880659e9b5c0dd1f23a30790684340b3eaacb045398	$fix/sig
+cynative_Darwin_arm64.tar.gz	8ed3f6ad685b959ead7022518e1af76cd816f8e8ec7ccdda1ed4018e8f2223f8	$fix/darwin
+cynative_Linux_x86_64.tar.gz	f144a6907dc4284d1f9fe6a7d9b9ff53c02c1d07ba68f24d413d7ff7f757a782	$fix/linux
+TSV
+
+	"$assert" generate "$fix" > "$fix/actual.tsv" 2>"$fix/err.log" || exit 1
+	diff "$fix/expected.tsv" "$fix/actual.tsv" >&2 || exit 1
+	exit 0
+); then pass "assert-assets generate emits exactly Archive+Checksum+Signature, sorted, with correct digests"; else fail "generate golden fixture"; fi
+
+# ---- generate: a missing artifact path aborts instead of emitting an empty digest ---
+# The script uses a bare `digest=$(sha256sum ...)` assignment precisely so a failure
+# aborts under `set -euo pipefail`. Rows already flushed to the sort stay on stdout, so
+# assert the exit status and the absence of an empty-digest row, never empty output.
+if (
+	miss="$tmp/miss"
+	mkdir -p "$miss"
+	printf '%s' alpha > "$miss/present"
+	cat > "$miss/artifacts.json" <<JSON
+[{"name":"a_present.tar.gz","path":"$miss/present","type":"Archive"},
+ {"name":"b_gone.txt","path":"$miss/does-not-exist","type":"Checksum"}]
+JSON
+
+	rc=0
+	"$assert" generate "$miss" > "$miss/out.tsv" 2>"$miss/err.log" || rc=$?
+	[ "$rc" -ne 0 ] || exit 1                        # must fail closed
+	# Never an empty digest column. awk with a tab FS, not a grep pattern: grep does
+	# not interpret \t, so a '\t\t' pattern would match a literal backslash-t instead.
+	awk -F'\t' '$2 == "" { bad = 1 } END { exit bad ? 1 : 0 }' "$miss/out.tsv" || exit 1
+	! grep -q 'b_gone.txt' "$miss/out.tsv" || exit 1 # the bad artifact is never emitted
+	exit 0
+); then pass "assert-assets generate fails closed on a missing artifact path"; else fail "generate missing-path fail-closed"; fi
 
 [ "$fails" -eq 0 ] || { printf '%d failure(s)\n' "$fails" >&2; exit 1; }
 printf 'OK: assert-assets unit tests\n'
