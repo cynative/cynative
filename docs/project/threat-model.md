@@ -43,9 +43,16 @@ cannot move any of these lines.
   process; scripts run in the JS sandbox.
 - **Request redirection** - hosts pinned, resolved IP verified before
   connect.
+- **Credential leakage** - no credential store; secrets are redacted from
+  tool results and the audit log, which is readable only by the running
+  user.
 - **Memory and concurrency bugs** - pure Go, no cgo; the full test suite
   runs under Go's race detector.
 - **Untested paths** - 100% statement coverage enforced in CI.
+- **Dependency compromise** - versions pinned in go.mod, Dependabot
+  updates, CodeQL and gosec on every PR.
+- **Artifact tampering** - releases carry checksums signed with cosign
+  keyless and GitHub build attestations, verified by install.sh.
 
 ---
 
