@@ -25,13 +25,41 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
   the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
   secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
-  exactly the two api keys, adjacent bracket-form `secrets[` is rejected since it would evade the
-  dot-form scan, and `release.yaml` must carry no `secrets: inherit`). Treat all three as
-  **tripwires for the ordinary spelling, not syntax-complete guarantees**: the greps are
-  `secrets\[` and `secrets:[[:space:]]*inherit`, so whitespace variants GitHub and YAML both
-  accept (`secrets ['K']`, `secrets : inherit`) slip past. Tighten the patterns if that matters.
-  Then the Scoop-manifest
-  renderer and both strict asset-digest lookups (`sha_for` over the manifest TSV,
+  exactly the two api keys; the `release.yaml` job that calls the gate must forward exactly
+  those two names and each as an **identity forward**, `NAME: ${{ secrets.NAME }}`; in
+  **both** workflows, bracket-form `secrets[...]` and
+  whole-object uses like `toJSON(secrets)` are rejected, as is any `secrets:` key whose
+  value is the scalar `inherit`). The forwarding arm is the load-bearing one and the one no
+  earlier version had: the exact-set arm counts references *inside* `llm-smoke.yaml`, so by
+  itself it is satisfied by a caller that forwards `OPENAI_API_KEY: ${{ secrets.APP_PRIVATE_KEY }}`
+  - the name the gate sees never changes, only the value does. It is scoped to the job whose
+  `uses:` names the gate (matched on basename, `@ref` tolerated), so the other reusable calls
+  in `release.yaml` keep their own grants; a `release.yaml` with no such job fails closed
+  rather than passing vacuously. The matched target must also be **this repo's own** workflow
+  (`./` or `cynative/cynative/`), since a basename says nothing about the owner: a call
+  retargeted at `attacker/collector/.github/workflows/llm-smoke.yaml@main` would otherwise
+  satisfy every arm while forwarding both api keys out of the repository. The checker (`scripts/ci/check-llm-smoke-secrets.py`,
+  unit-tested by `test/llm-smoke-secrets.unit.test.sh`) **parses both workflows with
+  PyYAML** (a `SafeLoader` subclass with the YAML 1.1 implicit scalar resolvers cleared, so
+  `on:` and `yes:` stay distinct string keys instead of colliding on `True` and dropping
+  whichever expression the first one held; `!!python/*` tags are still refused)
+  rather than grepping the text, which is what makes the pin hold: comments carry
+  no meaning, so prose can neither hide a reference nor invent one; `secrets: inherit` is
+  matched structurally, so the next-line, folded, quoted, `!!str` and anchor/alias
+  spellings all fail alike; and expression scanning is confined to `${{ }}` spans with
+  Actions string literals blanked, so a `}` inside `format('{0}', ...)` cannot end a span
+  early, `inputs.secrets` is not mistaken for the secrets context, and the word "secrets"
+  in a step name or a shell line is not a match. Anything unresolved fails closed: a missing,
+  unreadable, non-UTF-8 or unparseable file, and an unterminated `${{` span (Actions would
+  reject that workflow, and guessing where it ended used to mint a phantom secret name out of
+  a shell comment). Both tree walks carry a visited set, so a self-referencing anchor cannot
+  recurse forever and an alias-amplification document cannot burn the CI job's timeout.
+  It is still a tripwire, **not** an Actions expression
+  evaluator: it reads the workflow as written, so it cannot follow a secret name assembled
+  at runtime. The suite asserts each fixture is parseable YAML before using it, since the
+  case that motivated this (#216) was a fixture no parser accepts, which pinned nothing.
+  Then the Scoop-manifest and Homebrew-Formula
+  renderers and both strict asset-digest lookups (`sha_for` over the manifest TSV,
   `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
   the first match) unit tests, the release asset-set assertion's unit tests (the
   fail-closed-on-missing-digest branches plus the generate-mode artifact-type allowlist:
@@ -40,10 +68,12 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   asset gate's admitted type set, the snapshot sign skip, and the release workflow's OIDC
   permission, guarded steps and pinned verification identity together, since drift between
   them would first fail during a live release), the per-package changelog override renderer unit
-  tests, the shared audit-parser python syntax gate, all three connector suites' offline
+  tests, the python syntax gate (the secret-boundary checker plus the shared audit-parser
+  package), all three connector suites' offline
   audit-parser selftests, and the shared-machinery selftest).
-  Install-free: presence-checks `shellcheck`, PowerShell 7, and `python3` up front and fails with
-  an install hint otherwise. `jq` is a fourth requirement, checked one level down instead of at
+  Install-free: presence-checks `shellcheck`, PowerShell 7, `python3` and PyYAML (the
+  secret-boundary pin's YAML parser) up front and fails with
+  an install hint otherwise. `jq` is a fifth requirement, checked one level down instead of at
   the `Makefile`: the Scoop-renderer and asset-set suites each guard it themselves (a
   `FAIL: jq not found (required by ...)` line) because the production scripts they drive shell out
   to it, so a jq-less machine fails partway into `sh-test` rather than up front. The pinned
@@ -991,8 +1021,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   roster assertion, lives in `scripts/ci/ci-gate-contract.sh` and `scripts/ci/ci-gate-assert.sh`,
   each with offline unit tests gated by `make sh-test`, so it is exercised on every PR rather
   than only on a live release run; `make sh-test` also asserts the trusted-caller pin in both
-  gate workflows directly and pins the publish gate's required conjuncts (the two gate result
-  and gate_sha terms plus the non-empty release SHA) against `release.yaml`. Both scripts are
+  gate workflows directly and pins the publish gate's required conjuncts (the `macos-pkg-smoke` and
+  `archive-smoke` success terms, the two live-gate result and gate_sha terms, plus
+  the non-empty release SHA) against `release.yaml`. Both scripts are
   now shared with the LLM gate: the connector
   gate passes `DISPATCH_POLICY: filtered` (a dispatch must carry a selector from an allowlist),
   while the LLM gate passes `full-only` (a dispatch must not carry one). The
