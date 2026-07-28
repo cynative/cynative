@@ -8,7 +8,11 @@
 #   assert-assets.sh generate <dist-dir>
 #     Print the expected release-asset manifest as sorted TSV
 #     "name<TAB>sha256<TAB>path", derived from goreleaser's dist/artifacts.json.
-#     Covers exactly what goreleaser uploads: archives and the checksums file.
+#     Covers exactly what goreleaser uploads: archives, the checksums file, and the
+#     cosign bundle signing it (type "Signature"). "Certificate" is deliberately not
+#     admitted: the bundle form emits none, so if a `certificate:` field is ever added
+#     to .goreleaser.yaml's signs block the release fails closed on the surplus asset
+#     rather than publishing an unasserted one.
 #     Columns 1-2 are the assertion key (assert mode below); column 3 is the
 #     local path the release job stages into the release-artifacts hand-off
 #     (downstream consumers never dereference it).
@@ -21,7 +25,7 @@ if [ "${1:-}" = "generate" ]; then
   dist=$2
 
   jq -r '.[]
-    | select(.type == "Archive" or .type == "Checksum")
+    | select(.type == "Archive" or .type == "Checksum" or .type == "Signature")
     | [.name, .path] | @tsv' "${dist}/artifacts.json" |
     while IFS=$'\t' read -r name path; do
       # Bare assignment so a sha256sum failure aborts the script (an argument
