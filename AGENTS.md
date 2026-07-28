@@ -1021,8 +1021,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   roster assertion, lives in `scripts/ci/ci-gate-contract.sh` and `scripts/ci/ci-gate-assert.sh`,
   each with offline unit tests gated by `make sh-test`, so it is exercised on every PR rather
   than only on a live release run; `make sh-test` also asserts the trusted-caller pin in both
-  gate workflows directly and pins the publish gate's required conjuncts (the two gate result
-  and gate_sha terms plus the non-empty release SHA) against `release.yaml`. Both scripts are
+  gate workflows directly and pins the publish gate's required conjuncts (the `macos-pkg-smoke` and
+  `archive-smoke` success terms, the two live-gate result and gate_sha terms, plus
+  the non-empty release SHA) against `release.yaml`. Both scripts are
   now shared with the LLM gate: the connector
   gate passes `DISPATCH_POLICY: filtered` (a dispatch must carry a selector from an allowlist),
   while the LLM gate passes `full-only` (a dispatch must not carry one). The
