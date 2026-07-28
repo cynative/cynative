@@ -15,3 +15,5 @@ Include:
 - relevant logs.
 
 **Do not include live credentials, tokens, secrets or customer data in a report.**
+
+We aim to acknowledge reports within 3 business days and to coordinate public disclosure of confirmed vulnerabilities within 90 days.
