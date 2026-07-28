@@ -118,12 +118,18 @@ for step in 'Bootstrap pinned cosign' 'Verify the release signature'; do
 		fail "expected exactly one step named '$step' in release.yaml, found $step_count"
 		continue
 	fi
-	got=$(awk -v s="      - name: $step" -v g="        $guard" \
-		'$0==s{found=1;next} found{print ($0==g) ? "yes" : "no"; exit}' "$release")
-	if [ "$got" = "yes" ]; then
+	# Scope to this step's own block, then require the guard at step level (exactly
+	# eight spaces) anywhere inside it. Scoping stops a neighbouring step's guard from
+	# satisfying the check, while not requiring the guard to be the very next line, so
+	# a comment between `- name:` and `if:` is not a spurious failure. The eight-space
+	# anchor is what keeps the same text inside a `run:` block, which is indented
+	# deeper, from counting.
+	step_block=$(awk -v s="      - name: $step" \
+		'$0==s{f=1;next} f && /^      - name: /{f=0} f' "$release")
+	if printf '%s\n' "$step_block" | grep -qxF "        $guard"; then
 		pass "step '$step' carries the release-created guard"
 	else
-		fail "step '$step' must be immediately followed by the release-created guard, or it runs on every ordinary push to main where the checkout is skipped"
+		fail "step '$step' must carry the release-created guard, or it runs on every ordinary push to main where the checkout is skipped"
 	fi
 done
 
