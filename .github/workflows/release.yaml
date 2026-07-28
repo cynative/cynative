@@ -37,6 +37,13 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # id-token: write lets cosign mint a keyless Fulcio certificate to sign
+    # checksums.txt (the signs block in .goreleaser.yaml). A job-level permissions
+    # block REPLACES the workflow-level one rather than extending it - every
+    # permission left unnamed becomes none - so contents: read is restated here.
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       # Consumed directly by the pre-publish smoke, publish, candidate-pr,
       # and post-publish channel jobs below (each lists `release` in its own
@@ -47,7 +54,8 @@ jobs:
       release_id: ${{ steps.draft.outputs.release_id }}
     # Bound the job: the concurrency group means a wedged run blocks later
     # releases for the default 360 minutes otherwise. The budget covers the
-    # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10) plus
+    # capped long steps (goreleaser 35, pkg build/notarize 20, audit 10, cosign
+    # bootstrap 5, signature verification 5) plus
     # every short step with slack to spare, so the job limit can never fire
     # mid-step. Publish and its verification live in the downstream publish
     # job, gated on the pre-publish gates (macos-pkg-smoke, archive-smoke,
@@ -192,6 +200,46 @@ jobs:
           chmod 600 "${d}/app.p12" "${d}/app.pw"
           { echo "MACOS_SIGN_P12_FILE=${d}/app.p12"; echo "MACOS_SIGN_PASSWORD_FILE=${d}/app.pw"; } >> "${GITHUB_ENV}"
 
+      # Pinned cosign, downloaded and SHA-256 verified, mirroring ci.yaml's shellcheck
+      # bootstrap. sigstore/cosign-installer is deliberately not used: this job handles
+      # the App private key and the Apple signing material, and a pinned download does
+      # the same work without adding a third-party action to its trusted set (it is
+      # also not on the repo's Actions allowlist). The release_created guard is
+      # required: on an ordinary push the checkout above is skipped, so there would be
+      # no Makefile for `make print-*` to read.
+      - name: Bootstrap pinned cosign
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          # Version and digest come from the Makefile (single source of truth).
+          ver="$(make -s print-COSIGN_VERSION)"
+          sha="$(make -s print-COSIGN_SHA256)"
+          curl -sSfL --max-time 240 \
+            "https://github.com/sigstore/cosign/releases/download/v${ver}/cosign-linux-amd64" \
+            -o /tmp/cosign
+          echo "${sha}  /tmp/cosign" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 /tmp/cosign "$HOME/.local/bin/cosign"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # GITHUB_PATH only applies to LATER steps, so call it by path here.
+          "$HOME/.local/bin/cosign" version
+
+      # Refresh the installation token immediately before GoReleaser's uploads. The
+      # token minted at job start has a 60-minute lifetime, and the cosign bootstrap
+      # plus the signing round-trip to Fulcio and Rekor lengthen the run before the
+      # first draft-critical write. The separate pre-publish refresh further down still
+      # covers the pkg upload and the draft assertions.
+      - name: Refresh App Token (goreleaser)
+        id: goreleaser-token
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cynative
+
       # Builds and signs darwin binaries via goreleaser hooks (signing material
       # is available via MACOS_SIGN_P12_FILE/MACOS_SIGN_PASSWORD_FILE exported
       # in the previous step). GoReleaser no longer notarizes; the dedicated
@@ -203,10 +251,33 @@ jobs:
         # ever schedule (publication itself happens in the publish job).
         timeout-minutes: 35
         env:
-          GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.goreleaser-token.outputs.token }}
         run: |
           set -o pipefail
           go tool goreleaser release --clean 2>&1 | tee /tmp/goreleaser.log
+
+      # Scorecard's Signed-Releases check scores a filename and never opens the file,
+      # so a correctly named but malformed bundle would look signed while proving
+      # nothing. Verify what goreleaser just produced, pinned to this workflow's own
+      # Fulcio identity and issuer, while the release is still an editable draft: a bad
+      # bundle, a signature bound to an unexpected identity, or a missing transparency
+      # log entry stops the release here with nothing published.
+      #
+      # The identity is this workflow's job_workflow_ref, which is stable across both
+      # triggers: push runs on main, and repository_dispatch always uses the default
+      # branch's ref. Checking out the release SHA does not change it.
+      - name: Verify the release signature
+        if: ${{ steps.release-please.outputs.release_created == 'true' }}
+        timeout-minutes: 5
+        env:
+          COSIGN_IDENTITY: https://github.com/cynative/cynative/.github/workflows/release.yaml@refs/heads/main
+          COSIGN_ISSUER: https://token.actions.githubusercontent.com
+        run: |
+          set -euo pipefail
+          cosign verify-blob dist/checksums.txt \
+            --bundle dist/checksums.txt.sigstore.json \
+            --certificate-identity "${COSIGN_IDENTITY}" \
+            --certificate-oidc-issuer "${COSIGN_ISSUER}"
 
       # Assert the release binary is version-stamped, not "dev". The Go linker
       # silently ignores an unknown -X symbol path, so a typo'd, renamed, or
@@ -339,8 +410,10 @@ jobs:
       # Hand-off to the pre-publish smoke jobs and the publish job. Sole
       # producer of this artifact (downstream jobs only consume it):
       # macos-pkg-smoke consumes the pkgs, archive-smoke consumes the
-      # Linux/Windows archives plus checksums.txt, and the publish job
-      # re-asserts the draft against these manifests. "Assert exact asset
+      # Linux/Windows archives plus checksums.txt, the cosign bundle rides
+      # along unread (it is in the manifest, so the publish job's re-assert
+      # covers it), and the publish job re-asserts the draft against these
+      # manifests. "Assert exact asset
       # set" above proved the draft assets' sha256 digests equal these local
       # bytes, so smoking the artifact is provenance-equivalent to smoking
       # the draft assets, with no token handed to the smoke jobs. Staged

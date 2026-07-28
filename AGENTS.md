@@ -25,20 +25,55 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   release-gate invocation-contract and gate-assert unit tests, the llm-smoke workflow golden,
   the gate trusted-caller pin check, the release publish-gate pin check, the llm-smoke
   secret-reference pin (the sorted-unique `secrets.<NAME>` set in `llm-smoke.yaml` must be
-  exactly the two api keys, adjacent bracket-form `secrets[` is rejected since it would evade the
-  dot-form scan, and `release.yaml` must carry no `secrets: inherit`). Treat all three as
-  **tripwires for the ordinary spelling, not syntax-complete guarantees**: the greps are
-  `secrets\[` and `secrets:[[:space:]]*inherit`, so whitespace variants GitHub and YAML both
-  accept (`secrets ['K']`, `secrets : inherit`) slip past. Tighten the patterns if that matters.
+  exactly the two api keys; the `release.yaml` job that calls the gate must forward exactly
+  those two names and each as an **identity forward**, `NAME: ${{ secrets.NAME }}`; in
+  **both** workflows, bracket-form `secrets[...]` and
+  whole-object uses like `toJSON(secrets)` are rejected, as is any `secrets:` key whose
+  value is the scalar `inherit`). The forwarding arm is the load-bearing one and the one no
+  earlier version had: the exact-set arm counts references *inside* `llm-smoke.yaml`, so by
+  itself it is satisfied by a caller that forwards `OPENAI_API_KEY: ${{ secrets.APP_PRIVATE_KEY }}`
+  - the name the gate sees never changes, only the value does. It is scoped to the job whose
+  `uses:` names the gate (matched on basename, `@ref` tolerated), so the other reusable calls
+  in `release.yaml` keep their own grants; a `release.yaml` with no such job fails closed
+  rather than passing vacuously. The matched target must also be **this repo's own** workflow
+  (`./` or `cynative/cynative/`), since a basename says nothing about the owner: a call
+  retargeted at `attacker/collector/.github/workflows/llm-smoke.yaml@main` would otherwise
+  satisfy every arm while forwarding both api keys out of the repository. The checker (`scripts/ci/check-llm-smoke-secrets.py`,
+  unit-tested by `test/llm-smoke-secrets.unit.test.sh`) **parses both workflows with
+  PyYAML** (a `SafeLoader` subclass with the YAML 1.1 implicit scalar resolvers cleared, so
+  `on:` and `yes:` stay distinct string keys instead of colliding on `True` and dropping
+  whichever expression the first one held; `!!python/*` tags are still refused)
+  rather than grepping the text, which is what makes the pin hold: comments carry
+  no meaning, so prose can neither hide a reference nor invent one; `secrets: inherit` is
+  matched structurally, so the next-line, folded, quoted, `!!str` and anchor/alias
+  spellings all fail alike; and expression scanning is confined to `${{ }}` spans with
+  Actions string literals blanked, so a `}` inside `format('{0}', ...)` cannot end a span
+  early, `inputs.secrets` is not mistaken for the secrets context, and the word "secrets"
+  in a step name or a shell line is not a match. Anything unresolved fails closed: a missing,
+  unreadable, non-UTF-8 or unparseable file, and an unterminated `${{` span (Actions would
+  reject that workflow, and guessing where it ended used to mint a phantom secret name out of
+  a shell comment). Both tree walks carry a visited set, so a self-referencing anchor cannot
+  recurse forever and an alias-amplification document cannot burn the CI job's timeout.
+  It is still a tripwire, **not** an Actions expression
+  evaluator: it reads the workflow as written, so it cannot follow a secret name assembled
+  at runtime. The suite asserts each fixture is parseable YAML before using it, since the
+  case that motivated this (#216) was a fixture no parser accepts, which pinned nothing.
   Then the Scoop-manifest and Homebrew-Formula
   renderers and both strict asset-digest lookups (`sha_for` over the manifest TSV,
   `sha_for_checksums` over `checksums.txt`; each must fail on a duplicate row rather than return
-  the first match) unit tests, the release asset-set assertion's
-  fail-closed-on-missing-digest unit tests, the per-package changelog override renderer unit
-  tests, the shared audit-parser python syntax gate, all three connector suites' offline
+  the first match) unit tests, the release asset-set assertion's unit tests (the
+  fail-closed-on-missing-digest branches plus the generate-mode artifact-type allowlist:
+  Archive, Checksum and Signature, never Binary or Certificate), the release signing contract
+  pins (`test/release-signing.unit.test.sh`, tying the `.goreleaser.yaml` signs stanza, the
+  asset gate's admitted type set, the snapshot sign skip, and the release workflow's OIDC
+  permission, guarded steps and pinned verification identity together, since drift between
+  them would first fail during a live release), the per-package changelog override renderer unit
+  tests, the python syntax gate (the secret-boundary checker plus the shared audit-parser
+  package), all three connector suites' offline
   audit-parser selftests, and the shared-machinery selftest).
-  Install-free: presence-checks `shellcheck`, PowerShell 7, and `python3` up front and fails with
-  an install hint otherwise. `jq` is a fourth requirement, checked one level down instead of at
+  Install-free: presence-checks `shellcheck`, PowerShell 7, `python3` and PyYAML (the
+  secret-boundary pin's YAML parser) up front and fails with
+  an install hint otherwise. `jq` is a fifth requirement, checked one level down instead of at
   the `Makefile`: the Scoop-renderer and asset-set suites each guard it themselves (a
   `FAIL: jq not found (required by ...)` line) because the production scripts they drive shell out
   to it, so a jq-less machine fails partway into `sh-test` rather than up front. The pinned
@@ -67,8 +102,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
 - Run a single test: `go test ./internal/agent -run TestName` (add `-v` for output, `-count=1`
   to skip cache).
 - Build the binary: `go build ./cmd/cynative` (or `go run ./cmd/cynative -p "..."`).
-- `make snapshot`: builds the release archives via a goreleaser snapshot (no publish; goreleaser
-  runs no before-hook, so snapshot and release share one prep path, and dependency tidiness is
+- `make snapshot`: builds the release archives via a goreleaser snapshot (no publish, and
+  `--skip=sign` because cosign keyless signing needs a GitHub Actions OIDC token no local run
+  has; goreleaser runs no before-hook, so snapshot and release otherwise share one prep path,
+  and dependency tidiness is
   enforced separately, non-mutating, by `mod-tidy-check` in the gate). `make install-e2e`:
   standalone release-confidence check, not part of `make check`; builds the snapshot, then runs
   the real `install.sh` against a loopback fixture server (`test/install.e2e.test.sh`, needs
@@ -895,7 +932,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   degrading. `deps` commits
   still cut patch releases; `release-please-config.json` pins the visible section list
   explicitly, so re-check it when release-please is bumped. `.goreleaser.yaml` handles binary
-  builds for release tags, with four contracts worth treating as untouchable:
+  builds for release tags, with five contracts worth treating as untouchable:
   `draft: true` + `use_existing_draft: true` + `mode: keep-existing` is the **draft-adoption
   handshake** (goreleaser adopts release-please's draft, matched by draft title == the git tag
   string, keeps its changelog body, uploads, and stops; with `draft: true` its publish step is a
@@ -903,11 +940,27 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `scoops[0].skip_upload: true` makes goreleaser's local Scoop manifest inert, since
   `render-scoop.sh` is the authoritative renderer; the darwin post-build hook
   `scripts/release/sign-darwin-binary.sh` (snapshot-skips, asserts a Developer ID Application
-  cert, verifies hardened-runtime flags before replacing the binary); and
+  cert, verifies hardened-runtime flags before replacing the binary);
   `.goreleaser/entitlements.plist`'s `allow-unsigned-executable-memory` — **without it the
   notarized macOS binary is SIGKILLed on the first Bifrost JSON marshal**, because
   bytedance/sonic JIT-compiles serializers onto non-MAP_JIT executable pages that the hardened
-  runtime forbids. The Release Pipeline splits at the publish boundary: the `release`
+  runtime forbids; and the `signs:` block, which signs `checksums.txt` with cosign keyless
+  into `checksums.txt.sigstore.json`. That asset is what makes a release verifiable offline
+  without `gh`, and the only part of the integrity story OpenSSF Scorecard can see (it scores
+  filenames only, per release rather than per asset, averaged over the last five releases, so
+  the score climbs gradually and the file is never opened). Three things hold it together and
+  are pinned by `test/release-signing.unit.test.sh`: the `release` job's own `permissions:`
+  block (`contents: read` **and** `id-token: write`, since a job-level block replaces the
+  workflow-level one rather than extending it), `assert-assets.sh` admitting the `Signature`
+  artifact type (without it the bundle is surplus and the exact-asset-set gate rejects the
+  release), and the pre-publish `cosign verify-blob` pinned to this workflow's own Fulcio
+  identity, which is what stops a correctly named but worthless bundle from shipping. cosign
+  is a hand-bumped pinned binary (`COSIGN_VERSION`/`COSIGN_SHA256` in the `Makefile`,
+  downloaded and SHA-256 verified in the job) rather than an action or a `go tool`:
+  `sigstore/cosign-installer` is not on the Actions allowlist and this is the one job holding
+  the App key and the Apple signing material, while promoting cosign to the tool block would
+  add 82 module requirements and a 4-minute cold build to every release. The Release Pipeline
+  splits at the publish boundary: the `release`
   job builds, signs, and statically asserts everything, then hands the draft's exact asset set
   (pkgs, archives, manifests) to downstream jobs as the `release-artifacts` workflow artifact;
   the `macos-pkg-smoke` job (pinned `macos-26` + `macos-26-intel`, no secrets) runs
