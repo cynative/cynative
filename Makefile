@@ -130,8 +130,13 @@ pwsh-test:
 # library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
 # orchestration unit tests (test/lib/connector-e2e.sh: arbitrate + connector_run_phase
 # + e2e_pin_audit_size), the per-package changelog override renderer unit tests
-# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's
-# fail-closed-on-missing-digest unit tests (test/assert-assets.unit.test.sh), an AST
+# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's unit
+# tests (test/assert-assets.unit.test.sh: the fail-closed-on-missing-digest branches plus
+# the generate-mode artifact-type allowlist), the release signing contract pins
+# (test/release-signing.unit.test.sh: the .goreleaser.yaml signs stanza, the asset gate's
+# admitted type set, the snapshot sign skip, and the release workflow's OIDC permission,
+# guarded steps and pinned verification identity, none of which any other gate checks and
+# all of which would first fail during a live release), an AST
 # syntax check of every file in the shared connector audit-parser package
 # (test/lib/connector-audit-parser.py,
 # test/lib/connector_audit/*.py, and its specs/), all three connector suites' offline
@@ -154,6 +159,7 @@ sh-test:
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
 	@sh test/assert-assets.unit.test.sh
+	@sh test/release-signing.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
@@ -252,7 +258,7 @@ sh-test:
 		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
 		exit 1; \
 	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
