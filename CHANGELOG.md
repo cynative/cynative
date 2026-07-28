@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.8.0](https://github.com/cynative/cynative/compare/v1.7.0...v1.8.0) (2026-07-28)
+
+
+### Features
+
+* add optional --live-llm probe to cynative doctor ([#210](https://github.com/cynative/cynative/issues/210)) ([7b9d055](https://github.com/cynative/cynative/commit/7b9d055d350eb75e4e4ebb2e3c50509ea4acff9a))
+* publish a cosign signature alongside the release archives ([#224](https://github.com/cynative/cynative/issues/224)) ([ff43b4a](https://github.com/cynative/cynative/commit/ff43b4a6ecf36c51e168274fa39838e5b5c44b2b))
+
+
+### Dependencies
+
+* bump github.com/aws/smithy-go from 1.27.4 to 1.27.5 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/AzureAD/microsoft-authentication-library-for-go from 1.7.2 to 1.8.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/buger/jsonparser from 1.2.0 to 1.5.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/docker/go-connections from 0.7.0 to 0.8.0 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump github.com/docker/go-connections from 0.8.0 to 0.8.1 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/runtime from 0.32.6 to 0.33.0 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump github.com/go-openapi/runtime/server-middleware from 0.32.6 to 0.33.0 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump github.com/go-openapi/swag from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/cmdutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/conv from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/fileutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/jsonutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/loading from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/mangling from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/netutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/pools from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/stringutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/typeutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/go-openapi/swag/yamlutils from 0.27.3 to 0.28.0 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/goreleaser/goreleaser/v2 from 2.17.0 to 2.17.1 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump github.com/maximhq/bifrost/core from 1.7.3 to 1.7.4 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump github.com/moby/moby/client from 0.5.0 to 0.5.1 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump github.com/valyala/fasthttp from 1.72.0 to 1.73.0 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump github.com/yuin/goldmark from 1.8.4 to 1.8.5 ([9af52d1](https://github.com/cynative/cynative/commit/9af52d1597f144f549e4c3c9a860c39d73d3f58c))
+* bump go.yaml.in/yaml/v3 from 3.0.4 to 3.0.5 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+* bump mvdan.cc/gofumpt from 0.10.0 to 0.11.0 ([b304e27](https://github.com/cynative/cynative/commit/b304e27c89d247fe7ada6eaa614e9312b704d625))
+
 ## [1.7.0](https://github.com/cynative/cynative/compare/v1.6.0...v1.7.0) (2026-07-24)
 
 
