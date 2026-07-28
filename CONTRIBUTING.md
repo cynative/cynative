@@ -13,9 +13,11 @@ board.
   (`make check-scripts`) additionally needs `shellcheck` and PowerShell 7 with
   Pester/PSScriptAnalyzer (versions pinned in the `Makefile` and installed
   separately), `python3` (the `install.sh` loopback smoke test's fixture server),
-  and `jq` (used by the Scoop-renderer and release asset-set suites inside
-  `sh-test`; presence-checked one level down by the suites that need it).
-  `make check-scripts` prints an install hint if a required tool is missing.
+  the PyYAML package (`python3-yaml` on apt, `PyYAML` on pip; the llm-smoke
+  secret-boundary pin parses both workflows with it), and `jq` (used by the
+  Scoop-renderer and release asset-set suites inside `sh-test`; presence-checked
+  one level down by the suites that need it). `make check-scripts` prints an
+  install hint if a required tool is missing.
 
 On a fresh checkout, generate the gitignored mocks before running package tests:
 
@@ -34,11 +36,11 @@ Every PR must pass `make check`, which runs two halves:
 - `make check-scripts` — `shellcheck` over every tracked `*.sh`, PSScriptAnalyzer over
   every tracked `*.ps1`, Pester over every tracked `test/*.Tests.ps1`, and `sh-test`
   (install.sh unit + loopback smoke, e2e-guardrails / connector-e2e / render-scoop /
-  dependabot-override / assert-assets / ci-gate / llm-smoke-roster / retrigger unit
-  tests, the connector audit-parser selftests, and the release-gate pins for trusted
-  caller, publish `if:`, recovery triggers, and llm-smoke secret references). Needs
-  `python3` and `jq`; shellcheck, Pester, and PSScriptAnalyzer versions are pinned in
-  the `Makefile`.
+  dependabot-override / assert-assets / release-signing / ci-gate / llm-smoke-roster /
+  llm-smoke-secrets / retrigger unit tests, the python syntax gate, the connector
+  audit-parser selftests, and the release-gate pins for trusted caller, publish `if:`,
+  recovery triggers, and llm-smoke secret references). Needs `python3`, PyYAML, and
+  `jq`; shellcheck, Pester, and PSScriptAnalyzer versions are pinned in the `Makefile`.
 
 ```bash
 make check
