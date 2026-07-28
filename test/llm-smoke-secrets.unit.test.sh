@@ -414,6 +414,7 @@ run_raw 'unparseable YAML fails closed' 1 'not parseable YAML' "$tmp/bad.yaml" "
 run_raw 'a missing file fails closed' 1 'not readable' "$tmp/nope.yaml" "$tmp/good-release.yaml"
 run_raw 'a non-UTF-8 file fails closed' 1 'not valid UTF-8' "$tmp/binary.yaml" "$tmp/good-release.yaml"
 
+mkdir -p "$tmp/bomb"
 # Alias amplification: 13 nested levels of 4-way aliases is a few hundred bytes but
 # expands to 4^13 logical nodes. Without the visited set the walk never finishes and
 # burns the CI job's whole timeout, so pin that it terminates promptly.
@@ -425,33 +426,39 @@ run_raw 'a non-UTF-8 file fails closed' 1 'not valid UTF-8' "$tmp/binary.yaml" "
 		printf 'a%s: &a%s [*a%s, *a%s, *a%s, *a%s]\n' "$level" "$level" "$prev" "$prev" "$prev" "$prev"
 		level=$((level + 1))
 	done
-} >"$tmp/bomb.yaml"
+} >"$tmp/bomb/llm-smoke.yaml"
 # The watchdog is python rather than the `timeout` binary, which a default macOS
 # install lacks: a missing binary would exit 127 and, under an "anything but 124"
-# check, be reported as a pass. The status is asserted exactly (1, the clean
-# exact-set failure the bomb fixture produces) so a crash cannot read as success
-# either.
+# check, be reported as a pass. The child's stderr is forwarded so the verdict can
+# be asserted on the message as well as the status. Status alone is not enough: an
+# uncaught exception (a RecursionError, if the visited set ever regresses) also
+# exits 1, which would otherwise read as the clean fail-closed verdict.
 ran=$((ran + 1))
 set +e
-python3 - "$script" "$tmp/bomb.yaml" "$tmp/good-release.yaml" <<'WATCHDOG'
+bomb_out=$(python3 - "$script" "$tmp/bomb/llm-smoke.yaml" "$tmp/good-release.yaml" 2>&1 <<'WATCHDOG'
 import subprocess, sys
 
 try:
     done = subprocess.run(
         [sys.executable, "-B", sys.argv[1], sys.argv[2], sys.argv[3]],
-        capture_output=True, timeout=30, check=False,
+        capture_output=True, timeout=30, check=False, text=True,
     )
 except subprocess.TimeoutExpired:
     sys.exit(124)
+sys.stderr.write(done.stderr)
 sys.exit(done.returncode)
 WATCHDOG
+)
 bomb_rc=$?
 set -e
 if [ "$bomb_rc" -eq 124 ]; then
 	printf 'FAIL alias amplification did not terminate within 30s\n' >&2
 	fails=$((fails + 1))
 elif [ "$bomb_rc" -ne 1 ]; then
-	printf 'FAIL alias amplification exited %s, expected 1 (a clean fail-closed verdict)\n' "$bomb_rc" >&2
+	printf 'FAIL alias amplification exited %s, expected 1 (a clean fail-closed verdict)\n%s\n' "$bomb_rc" "$bomb_out" >&2
+	fails=$((fails + 1))
+elif ! printf '%s\n' "$bomb_out" | grep -F -q -- 'secrets.* references are'; then
+	printf 'FAIL alias amplification exited 1 without the expected verdict (a crash, not a clean failure)\n%s\n' "$bomb_out" >&2
 	fails=$((fails + 1))
 else
 	printf 'PASS alias amplification terminates\n'
