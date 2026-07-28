@@ -35,7 +35,10 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   - the name the gate sees never changes, only the value does. It is scoped to the job whose
   `uses:` names the gate (matched on basename, `@ref` tolerated), so the other reusable calls
   in `release.yaml` keep their own grants; a `release.yaml` with no such job fails closed
-  rather than passing vacuously. The checker (`scripts/ci/check-llm-smoke-secrets.py`,
+  rather than passing vacuously. The matched target must also be **this repo's own** workflow
+  (`./` or `cynative/cynative/`), since a basename says nothing about the owner: a call
+  retargeted at `attacker/collector/.github/workflows/llm-smoke.yaml@main` would otherwise
+  satisfy every arm while forwarding both api keys out of the repository. The checker (`scripts/ci/check-llm-smoke-secrets.py`,
   unit-tested by `test/llm-smoke-secrets.unit.test.sh`) **parses both workflows with
   PyYAML** rather than grepping the text, which is what makes the pin hold: comments carry
   no meaning, so prose can neither hide a reference nor invent one; `secrets: inherit` is

@@ -64,6 +64,10 @@ DEFAULT_RELEASE = ".github/workflows/release.yaml"
 # forward. Anything else widens the gate's secret access across workflow_call.
 ALLOWED_SMOKE_SECRETS = frozenset({"ANTHROPIC_API_KEY", "OPENAI_API_KEY"})
 
+# How the gate may be called: the local form, or this repo by full path. A `uses:`
+# whose basename matches but whose owner does not is a retarget, not the gate.
+TRUSTED_GATE_PREFIXES = ("./", "cynative/cynative/")
+
 # A `secrets` context root: the identifier, not part of a longer name. A leading
 # dot is rejected separately (see secrets_uses) so that whitespace around the dot
 # in `inputs . secrets` is handled too. Actions resolves context ids
@@ -295,6 +299,17 @@ def check_forwarding(release_path: str, release, smoke_path: str) -> None:
         if os.path.basename(target) != smoke_name:
             continue
         matched += 1
+        # The basename alone does not say whose workflow it is. Without this, a call
+        # retargeted at attacker/collector/.github/workflows/llm-smoke.yaml@main still
+        # looks like the gate, and forwarding the two identity-mapped keys to it
+        # satisfies every other arm.
+        if not target.startswith(TRUSTED_GATE_PREFIXES):
+            fail(
+                f"{release_path} job '{job_id}' calls {smoke_name} as {target!r}, which is not "
+                "this repository's own workflow; the gate must be called as "
+                f"{' or '.join(repr(p) for p in TRUSTED_GATE_PREFIXES)}, or the two api keys "
+                "would be forwarded outside the repo."
+            )
         granted = job.get("secrets")
         if not isinstance(granted, dict):
             fail(

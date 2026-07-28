@@ -350,6 +350,18 @@ run 'a pinned @ref on the gate call still matches' 1 'forwards [' \
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}'
 
+# A matching basename does not say whose workflow it is: a retarget at another owner
+# would otherwise pass every arm while forwarding both keys out of the repo.
+# shellcheck disable=SC2016 # fixtures must keep ${{ }} literal; do not expand here.
+run 'a gate call retargeted at another owner fails' 1 'not this repository' \
+	"$ok_smoke" \
+	'jobs:
+  llm-smoke:
+    uses: attacker/collector/.github/workflows/llm-smoke.yaml@main
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}'
+
 # Other reusable calls keep their own grants; only the gate call is constrained.
 run 'other reusable calls are left alone' 0 '' \
 	"$ok_smoke" \
@@ -398,13 +410,32 @@ run_raw 'a non-UTF-8 file fails closed' 1 'not valid UTF-8' "$tmp/binary.yaml" "
 		level=$((level + 1))
 	done
 } >"$tmp/bomb.yaml"
+# The watchdog is python rather than the `timeout` binary, which a default macOS
+# install lacks: a missing binary would exit 127 and, under an "anything but 124"
+# check, be reported as a pass. The status is asserted exactly (1, the clean
+# exact-set failure the bomb fixture produces) so a crash cannot read as success
+# either.
 ran=$((ran + 1))
 set +e
-timeout 30 python3 -B "$script" "$tmp/bomb.yaml" "$tmp/good-release.yaml" >/dev/null 2>&1
+python3 - "$script" "$tmp/bomb.yaml" "$tmp/good-release.yaml" <<'WATCHDOG'
+import subprocess, sys
+
+try:
+    done = subprocess.run(
+        [sys.executable, "-B", sys.argv[1], sys.argv[2], sys.argv[3]],
+        capture_output=True, timeout=30, check=False,
+    )
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+sys.exit(done.returncode)
+WATCHDOG
 bomb_rc=$?
 set -e
 if [ "$bomb_rc" -eq 124 ]; then
 	printf 'FAIL alias amplification did not terminate within 30s\n' >&2
+	fails=$((fails + 1))
+elif [ "$bomb_rc" -ne 1 ]; then
+	printf 'FAIL alias amplification exited %s, expected 1 (a clean fail-closed verdict)\n' "$bomb_rc" >&2
 	fails=$((fails + 1))
 else
 	printf 'PASS alias amplification terminates\n'
@@ -412,8 +443,8 @@ fi
 
 # The suite must never report success without having executed its cases (the
 # fail-open shape this repo has been burned by before).
-if [ "$ran" -lt 43 ]; then
-	printf 'FAIL: only %s llm-smoke secret-reference cases ran, expected at least 43\n' "$ran" >&2
+if [ "$ran" -lt 44 ]; then
+	printf 'FAIL: only %s llm-smoke secret-reference cases ran, expected at least 44\n' "$ran" >&2
 	exit 1
 fi
 if [ "$fails" -ne 0 ]; then
