@@ -12,6 +12,14 @@ SHELLCHECK_SHA256 := 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e2
 PESTER_VERSION := 5.7.1
 PSSCRIPTANALYZER_VERSION := 1.25.0
 
+# Pinned release tooling. Same story as the check-scripts pins above (no Dependabot
+# ecosystem for raw binaries, so bump by hand), but a separate block because these are
+# used by the release pipeline rather than by check-scripts. Bump to the latest cosign
+# release and take the digest from the cosign-linux-amd64 row of that release's
+# checksums file.
+COSIGN_VERSION := 3.1.2
+COSIGN_SHA256 := f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
+
 # Every workflow that is callable as a release gate. Each must carry exactly one
 # EXPECTED_CALLER pin naming TRUSTED_CALLER; sh-test enforces that.
 GATE_WORKFLOWS := .github/workflows/connector-e2e.yaml .github/workflows/llm-smoke.yaml
@@ -281,8 +289,15 @@ print-%:
 # so the local install-e2e target and the CI install-e2e jobs share one definition of
 # the goreleaser flags (no drift between the Makefile and the workflow). goreleaser
 # no longer runs a before-hook, so snapshot and release share one prep path.
+#
+# --skip=sign: the signs block in .goreleaser.yaml signs checksums.txt with cosign
+# keyless, which needs a GitHub Actions OIDC token no local run has. --snapshot only
+# implies skips for publish, announce and validate, and the sign pipe skips only on an
+# explicit --skip=sign, so without this a snapshot (and the install-e2e that shells out
+# to it) would try to sign and fail. goreleaser v2.17.1's signs schema has no `if` field
+# and rejects unknown ones, so this flag is the only route.
 snapshot:
-	go tool goreleaser release --snapshot --clean
+	go tool goreleaser release --snapshot --clean --skip=sign
 
 # install-e2e: real-artifact install e2e for release confidence (issue #41). Standalone
 # (NOT part of `make check`): builds the release archives via `snapshot`, serves the Linux
