@@ -77,7 +77,15 @@ _NAME = re.compile(r"[A-Za-z0-9_]+")
 
 
 def fail(message: str) -> None:
-    """Print a FAIL line and exit non-zero. Every check fails closed."""
+    """Print a FAIL line and exit non-zero. Every check fails closed.
+
+    Code scanning flags this sink because some messages name keys read from a
+    mapping called `secrets`. Those are secret NAMES read from a workflow file in
+    version control, never a secret VALUE: this script takes two file paths, reads
+    nothing else, and no credential is in scope at any point. Naming which key is
+    at fault is the whole diagnostic, so it stays; the values never are printed.
+    """
+    # codeql[py/clear-text-logging-sensitive-data]
     print(f"FAIL: {message}", file=sys.stderr)
     raise SystemExit(1)
 
@@ -326,9 +334,12 @@ def check_forwarding(release_path: str, release, smoke_path: str) -> None:
             )
         for key, value in granted.items():
             if not isinstance(value, str) or not _identity_forward(str(key)).match(value.strip()):
+                # The offending value is deliberately not echoed. It is workflow source,
+                # not a secret value, but a check about secret handling has no business
+                # reprinting file content when naming the job and key locates it anyway.
                 fail(
-                    f"{release_path} job '{job_id}' forwards {key} as {value!r}, not "
-                    f"'${{{{ secrets.{key} }}}}' - a secret must not cross the boundary "
+                    f"{release_path} job '{job_id}' does not forward {key} as "
+                    f"'${{{{ secrets.{key} }}}}'; a secret must not cross the boundary "
                     "under a different name."
                 )
     if matched == 0:
