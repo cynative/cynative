@@ -79,13 +79,13 @@ _NAME = re.compile(r"[A-Za-z0-9_]+")
 def fail(message: str) -> None:
     """Print a FAIL line and exit non-zero. Every check fails closed.
 
-    Code scanning flags this sink because some messages name keys read from a
-    mapping called `secrets`. Those are secret NAMES read from a workflow file in
-    version control, never a secret VALUE: this script takes two file paths, reads
-    nothing else, and no credential is in scope at any point. Naming which key is
-    at fault is the whole diagnostic, so it stays; the values never are printed.
+    Nothing read out of a workflow's `secrets:` mapping is ever interpolated into
+    a message. No secret VALUE is in scope here (the script reads two files from
+    version control and nothing else), but keeping the sink clean of that whole
+    subtree means the reporting path cannot drift into echoing one, and code
+    scanning does not have to take the distinction on trust. Messages name the
+    job and the mapping instead, which is where the reader has to look anyway.
     """
-    # codeql[py/clear-text-logging-sensitive-data]
     print(f"FAIL: {message}", file=sys.stderr)
     raise SystemExit(1)
 
@@ -325,22 +325,21 @@ def check_forwarding(release_path: str, release, smoke_path: str) -> None:
                 "secrets: mapping; the gate must be granted exactly "
                 f"[{' '.join(want)}], named one by one."
             )
-        got = sorted(str(key) for key in granted)
-        if got != want:
+        # Compared as a count and a membership test, never echoed: see fail().
+        if sorted(str(key) for key in granted) != want:
             fail(
-                f"{release_path} job '{job_id}' forwards [{' '.join(got)}] to {smoke_name}, "
-                f"expected exactly [{' '.join(want)}] - any other name crosses the "
-                "workflow_call boundary into the gate."
+                f"{release_path} job '{job_id}' forwards {len(granted)} name(s) to "
+                f"{smoke_name}, expected exactly these {len(want)}: [{' '.join(want)}]. "
+                f"Read jobs.{job_id}.secrets - any other name crosses the workflow_call "
+                "boundary into the gate."
             )
         for key, value in granted.items():
             if not isinstance(value, str) or not _identity_forward(str(key)).match(value.strip()):
-                # The offending value is deliberately not echoed. It is workflow source,
-                # not a secret value, but a check about secret handling has no business
-                # reprinting file content when naming the job and key locates it anyway.
                 fail(
-                    f"{release_path} job '{job_id}' does not forward {key} as "
-                    f"'${{{{ secrets.{key} }}}}'; a secret must not cross the boundary "
-                    "under a different name."
+                    f"{release_path} job '{job_id}' forwards a secret under a name that is "
+                    f"not its own. Every entry in jobs.{job_id}.secrets must read "
+                    "'NAME: ${{ secrets.NAME }}', or a secret crosses the boundary wearing "
+                    "an allow-listed name."
                 )
     if matched == 0:
         fail(

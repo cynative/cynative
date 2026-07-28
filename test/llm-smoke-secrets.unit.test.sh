@@ -295,7 +295,7 @@ run 'the word secrets inside a string literal is not a context' 0 '' \
 # satisfied by a caller that forwards a real secret under an allow-listed name:
 # the gate's own text never changes. These pin the forwarding itself.
 # shellcheck disable=SC2016 # fixtures must keep ${{ }} literal; do not expand here.
-run 'forwarding a secret under an allow-listed name fails' 1 'under a different name' \
+run 'forwarding a secret under an allow-listed name fails' 1 'under a name that is not its own' \
 	"$ok_smoke" \
 	'jobs:
   llm-smoke:
@@ -305,7 +305,7 @@ run 'forwarding a secret under an allow-listed name fails' 1 'under a different 
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}'
 
 # shellcheck disable=SC2016 # fixtures must keep ${{ }} literal; do not expand here.
-run 'forwarding a third name fails' 1 'forwards [' \
+run 'forwarding a third name fails' 1 'expected exactly these' \
 	"$ok_smoke" \
 	'jobs:
   llm-smoke:
@@ -316,7 +316,7 @@ run 'forwarding a third name fails' 1 'forwards [' \
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}'
 
 # shellcheck disable=SC2016 # fixtures must keep ${{ }} literal; do not expand here.
-run 'forwarding fewer than the two names fails' 1 'forwards [' \
+run 'forwarding fewer than the two names fails' 1 'expected exactly these' \
 	"$ok_smoke" \
 	'jobs:
   llm-smoke:
@@ -341,7 +341,7 @@ run 'a release with no call to the gate fails' 1 'has no job calling' \
 
 # A pinned ref on the uses: target must not defeat the match.
 # shellcheck disable=SC2016 # fixtures must keep ${{ }} literal; do not expand here.
-run 'a pinned @ref on the gate call still matches' 1 'forwards [' \
+run 'a pinned @ref on the gate call still matches' 1 'expected exactly these' \
 	"$ok_smoke" \
 	'jobs:
   llm-smoke:
