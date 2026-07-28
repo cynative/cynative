@@ -5,6 +5,7 @@
 [![CI](https://github.com/cynative/cynative/actions/workflows/ci.yaml/badge.svg)](https://github.com/cynative/cynative/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/cynative/cynative)](https://github.com/cynative/cynative/releases/latest)
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13851/badge)](https://www.bestpractices.dev/projects/13851)
 
 <!-- BEGIN agent-about -->
 **Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
@@ -103,6 +104,24 @@ scoop install cynative
 **macOS (manual):** download `cynative_Darwin_arm64.pkg` (Apple Silicon) or `cynative_Darwin_x86_64.pkg` (Intel) from the [releases page](https://github.com/cynative/cynative/releases) and install with `sudo installer -pkg <file> -target /` (or double-click). These are signed, notarized and **stapled** - no first-run Gatekeeper prompt. The raw `cynative_Darwin_*.tar.gz` archives remain for scripting/CI; a quarantined tarball binary's first GUI launch needs internet for the online notarization check (terminal/`install.sh`/Homebrew use is unaffected).
 
 **Linux / Windows (manual):** download a prebuilt binary and `checksums.txt` from the [releases page](https://github.com/cynative/cynative/releases), verify the SHA-256, and put the binary on your `PATH`. Single static binary, no dependencies.
+
+**Verify a release signature (optional).** New releases ship `checksums.txt.sigstore.json`, a [Sigstore](https://www.sigstore.dev/) bundle signing `checksums.txt` with a keyless certificate bound to this repo's release workflow. Authenticate the manifest, then check your archive against it:
+
+```bash
+cosign verify-blob checksums.txt \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity "https://github.com/cynative/cynative/.github/workflows/release.yaml@refs/heads/main" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+
+grep cynative_Linux_x86_64.tar.gz checksums.txt | sha256sum -c -      # Linux
+grep cynative_Darwin_arm64.tar.gz checksums.txt | shasum -a 256 -c -  # macOS
+```
+```powershell
+(Get-FileHash .\cynative_Windows_x86_64.zip -Algorithm SHA256).Hash.ToLower()
+Select-String -Path checksums.txt -Pattern cynative_Windows_x86_64.zip
+```
+
+This covers the archives named in `checksums.txt`. The `.pkg` installers are Developer ID signed, notarized and stapled instead, and every asset is additionally covered by the GitHub release attestation (`gh release verify <tag>`). Two limits worth knowing: `cosign` fetches Sigstore's trust root over the network unless you pass `--trusted-root`, and because the file names carry no version, the signature proves origin and integrity but not which release a loose set of files came from - the release URL or `gh release verify` is what binds a version.
 </details>
 
 ## LLM providers

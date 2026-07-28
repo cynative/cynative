@@ -12,6 +12,14 @@ SHELLCHECK_SHA256 := 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e2
 PESTER_VERSION := 5.7.1
 PSSCRIPTANALYZER_VERSION := 1.25.0
 
+# Pinned release tooling. Same story as the check-scripts pins above (no Dependabot
+# ecosystem for raw binaries, so bump by hand), but a separate block because these are
+# used by the release pipeline rather than by check-scripts. Bump to the latest cosign
+# release and take the digest from the cosign-linux-amd64 row of that release's
+# checksums file.
+COSIGN_VERSION := 3.1.2
+COSIGN_SHA256 := f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
+
 # Every workflow that is callable as a release gate. Each must carry exactly one
 # EXPECTED_CALLER pin naming TRUSTED_CALLER; sh-test enforces that.
 GATE_WORKFLOWS := .github/workflows/connector-e2e.yaml .github/workflows/llm-smoke.yaml
@@ -122,8 +130,13 @@ pwsh-test:
 # library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
 # orchestration unit tests (test/lib/connector-e2e.sh: arbitrate + connector_run_phase
 # + e2e_pin_audit_size), the per-package changelog override renderer unit tests
-# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's
-# fail-closed-on-missing-digest unit tests (test/assert-assets.unit.test.sh), an AST
+# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's unit
+# tests (test/assert-assets.unit.test.sh: the fail-closed-on-missing-digest branches plus
+# the generate-mode artifact-type allowlist), the release signing contract pins
+# (test/release-signing.unit.test.sh: the .goreleaser.yaml signs stanza, the asset gate's
+# admitted type set, the snapshot sign skip, and the release workflow's OIDC permission,
+# guarded steps and pinned verification identity, none of which any other gate checks and
+# all of which would first fail during a live release), an AST
 # syntax check of every file in the shared connector audit-parser package
 # (test/lib/connector-audit-parser.py,
 # test/lib/connector_audit/*.py, and its specs/), all three connector suites' offline
@@ -139,6 +152,7 @@ pwsh-test:
 # mirroring the shellcheck/pwsh install-free pattern.
 sh-test:
 	@command -v python3 >/dev/null 2>&1 || { echo "FAIL: python3 not found — needed by the install.sh loopback smoke test (test/install.smoke.test.sh)."; exit 1; }
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML not found, needed by the llm-smoke secret-boundary pin (scripts/ci/check-llm-smoke-secrets.py). apt: python3-yaml, pip: PyYAML."; exit 1; }
 	@sh test/install.unit.test.sh
 	@sh test/install.smoke.test.sh
 	@sh test/e2e-guardrails.unit.test.sh
@@ -146,11 +160,13 @@ sh-test:
 	@sh test/render-scoop.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
 	@sh test/assert-assets.unit.test.sh
+	@sh test/release-signing.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
+	@sh test/llm-smoke-secrets.unit.test.sh
 	@sh test/retrigger.unit.test.sh
-	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
+	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
 	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
 	 for f in $$files; do echo "  selftest $$f"; sh "$$f" --selftest || exit 1; done
@@ -224,29 +240,13 @@ sh-test:
 		esac; \
 	done
 	@# The api-key legs read exactly two secrets across the workflow_call boundary.
-	@# release.yaml forwards ONLY these two names, never secrets: inherit. Pin the
-	@# boundary from both sides, comments stripped (sed 's/#.*//') so prose never counts:
-	@#   llm-smoke.yaml - the sorted-unique set of secrets.<NAME> refs must be exactly
-	@#     the two keys, and bracket-form secrets[...] is rejected outright since it
-	@#     would evade the dot-form scan;
-	@#   release.yaml - `secrets: inherit` must never appear, or a future edit could
-	@#     hand every release secret (App key, signing, PAT) to the gate.
-	@smoke=$$(sed 's/#.*//' .github/workflows/llm-smoke.yaml); \
-	if printf '%s\n' "$$smoke" | grep -q 'secrets\['; then \
-		echo "FAIL: llm-smoke.yaml uses bracket-form secrets[...]; only dot-form secrets.NAME is allowed so this pin can enforce the exact set."; \
-		exit 1; \
-	fi; \
-	got=$$(printf '%s\n' "$$smoke" | grep -oE 'secrets\.[A-Za-z0-9_]+' | sed 's/^secrets\.//' | sort -u | xargs); \
-	want="ANTHROPIC_API_KEY OPENAI_API_KEY"; \
-	if [ "$$got" != "$$want" ]; then \
-		echo "FAIL: llm-smoke.yaml secrets.* references are [$$got], expected exactly [$$want] - a new reference would widen the gate's secret access across workflow_call."; \
-		exit 1; \
-	fi; \
-	if sed 's/#.*//' .github/workflows/release.yaml | grep -qE 'secrets:[[:space:]]*inherit'; then \
-		echo "FAIL: release.yaml uses 'secrets: inherit' - reusable gates must be granted only the exact named secrets they need, never the full set."; \
-		exit 1; \
-	fi
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@# release.yaml forwards ONLY these two names, never secrets: inherit. The checker
+	@# (scripts/ci/check-llm-smoke-secrets.py) parses both workflows rather than
+	@# grepping them, so the spellings a line-based scan misses - inherit on the
+	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
+	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
+	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
@@ -283,8 +283,15 @@ print-%:
 # so the local install-e2e target and the CI install-e2e jobs share one definition of
 # the goreleaser flags (no drift between the Makefile and the workflow). goreleaser
 # no longer runs a before-hook, so snapshot and release share one prep path.
+#
+# --skip=sign: the signs block in .goreleaser.yaml signs checksums.txt with cosign
+# keyless, which needs a GitHub Actions OIDC token no local run has. --snapshot only
+# implies skips for publish, announce and validate, and the sign pipe skips only on an
+# explicit --skip=sign, so without this a snapshot (and the install-e2e that shells out
+# to it) would try to sign and fail. goreleaser v2.17.1's signs schema has no `if` field
+# and rejects unknown ones, so this flag is the only route.
 snapshot:
-	go tool goreleaser release --snapshot --clean
+	go tool goreleaser release --snapshot --clean --skip=sign
 
 # install-e2e: real-artifact install e2e for release confidence (issue #41). Standalone
 # (NOT part of `make check`): builds the release archives via `snapshot`, serves the Linux

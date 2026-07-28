@@ -39,6 +39,34 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# Sign checksums.txt with cosign keyless (Fulcio + Rekor, authenticated by the GitHub
+# Actions OIDC token) into a single Sigstore bundle. Signing the manifest authenticates
+# every archive transitively: verify the bundle, then check an archive's sha256 against
+# its row. This is what makes a release verifiable without the gh CLI, and the only part
+# of the pipeline's integrity story that OpenSSF Scorecard can see.
+#
+# goreleaser uploads the bundle to the adopted draft alongside the archives, so it needs
+# no separate upload path, but scripts/release/assert-assets.sh must admit the
+# "Signature" artifact type or the exact-asset-set gate rejects it as surplus.
+#
+# No `certificate:` field on purpose: the bundle already carries the Fulcio certificate
+# and the transparency-log proof, and a certificate artifact is one the asset gate
+# deliberately does not admit.
+#
+# No --new-bundle-format: it exists in cosign v3.1.2 but already defaults to true and is
+# deprecated because that will become the only format. No --oidc-provider either:
+# sign-blob builds its KeyOpts without copying it (unlike `sign`), so the flag is
+# silently ignored on this path. Ambient discovery is the working route.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    artifacts: checksum
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "--yes"
+      - "${artifact}"
+
 scoops:
   - repository:
       owner: cynative
