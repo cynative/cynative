@@ -849,18 +849,23 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   same convention: `internal/auth/connector_docs_test.go` fails unless every connector id
   `GetProviders` can register has a guide at `docs/connectors/<file>.md`; when adding a
   connector, add its doc and the test-table row together.
-- **README demo assets are generated, never hand-edited.** `docs/assets/demo*` (the `.ansi`
-  capture and the three freeze-rendered column SVGs) come from `scripts/demo/capture.sh`.
-  `capture.sh all` is the leak gate: `render` + `validate` (a generic structural scan needing no
-  map, so it is fresh-checkout safe) + `validate-local` (an exact denylist from the map) when the
-  map is present. **No `make` target or CI job runs it** (`make check` only shellchecks the file),
-  so run it by hand before committing a regenerated asset. The real-to-placeholder identifier
-  pairs live only in the gitignored `scripts/demo/sanitize.map.local` (see
-  `sanitize.map.example`); the committed script carries placeholders, structural patterns, and one
-  world-fixed public Azure Reader role-definition GUID exemption, so it stays public-safe. Raw
-  captures (`docs/assets/*.raw.ansi`) contain real identifiers and are gitignored. Re-pick the
-  curated `RANGES_DEFAULT` column ranges when re-capturing (or pass `DEMO_RANGES`); `render`
-  fails closed unless they reach the capture's last line.
+- **README demo assets are generated, never hand-edited.** `docs/assets/demo.capture.ansi` is
+  written by `capture.sh sanitize` (from a raw `live` capture); the three `demo-col*.svg` are
+  freeze-rendered from it by `capture.sh render`. `capture.sh all` is the leak gate: `render` +
+  `validate` (a generic structural scan needing no map, so it is fresh-checkout safe) +
+  `validate-local` (an exact denylist from the map) when the map is present. **No `make` target or
+  CI job runs it** (`make check` only shellchecks the file), so run it by hand before committing a
+  regenerated asset. The real-to-placeholder identifier pairs live only in the gitignored
+  `scripts/demo/sanitize.map.local` (see `sanitize.map.example`); the committed script carries
+  placeholders, structural patterns, and one world-fixed public Azure Reader role-definition GUID
+  exemption, so it stays public-safe. Raw captures (`docs/assets/*.raw.ansi`) contain real
+  identifiers and are gitignored. Re-pick the curated `RANGES_DEFAULT` column ranges when
+  re-capturing (or pass `DEMO_RANGES`); `render` fails closed unless they reach the capture's last
+  line. `docs/assets/demo.gif` is the one asset outside this pipeline: it is composed from the
+  same column SVGs after they pass `validate`, by a script kept out of the repo so image tooling
+  stays out of the contributor setup for a single rendered asset. It carries no content the SVGs
+  do not, so `capture.sh` neither renders nor scans it. If `render` replaces the SVGs the GIF is
+  stale until a maintainer regenerates it — open an issue rather than editing it directly.
 
 ### CI and release
 
