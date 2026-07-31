@@ -20,9 +20,9 @@ Unlike coding agents and MCP servers, it's **read-only by construction**: every 
 <!-- END agent-about -->
 
 <p align="center">
-  <a href="docs/assets/demo-col1.svg"><img width="32%" alt="cynative auditing a repo's CI for privilege escalation: connectors, the typed question, and a code_execution that fans out over the GitHub Actions workflows with mapConcurrent" src="docs/assets/demo-col1.svg"></a>
-  <a href="docs/assets/demo-col2.svg"><img width="32%" alt="cynative fanning out across the AWS roles those workflows assume via OIDC and spotting the over-privileged one" src="docs/assets/demo-col2.svg"></a>
-  <a href="docs/assets/demo-col3.svg"><img width="32%" alt="cynative's verification panel marking the IAMFullAccess-via-OIDC full-account-takeover finding VERIFIED, with a per-role contrast table and remediation" src="docs/assets/demo-col3.svg"></a>
+  <img src="assets/cynative-demo.gif"
+       alt="cynative auditing a CI to cloud privilege escalation"
+       width="900">
 </p>
 
 ## Quickstart
