@@ -20,7 +20,7 @@ Unlike coding agents and MCP servers, it's **read-only by construction**: every 
 <!-- END agent-about -->
 
 <p align="center">
-  <img src="assets/cynative-demo.gif"
+  <img src="assets/demo.gif"
        alt="cynative auditing a CI to cloud privilege escalation"
        width="900">
 </p>
