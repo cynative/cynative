@@ -106,21 +106,90 @@ func defaultPrefixMap() map[string]string {
 //     require resourcemanager.<resource>.get — NOT a ".search" permission, which
 //     does not exist. Their search verb derives a non-existent permission and
 //     they have no high-confidence dataset entry.
+//   - the container (GKE) control-plane reads name the LEAF resource in the
+//     permission (container.clusters.*, container.operations.*) while the Discovery
+//     id nests that resource under projects.{locations,zones}, so derivation builds
+//     e.g. container.projects.locations.clusters.get and the catalog rejects it. The
+//     node-pool reads diverge further: they authorize on the PARENT cluster's
+//     container.clusters.get, and no container.nodePools.* permission exists at all.
+//     The dataset holds the right answers but only under a low-confidence
+//     methodology, so every container read was denied — including the endpoint
+//     lookup the gke connector's own documented workflow depends on. Both the
+//     locations and the legacy zones route are pinned; they are separate ids.
+//   - the container methods with CUSTOM verbs — getServerConfig (and its legacy
+//     getServerconfig spelling), checkAutopilotCompatibility, and the two
+//     fetch*UpgradeInfo pairs — are plain GETs whose verb is absent from
+//     readMethodVerbs, so without a pin they take the WRITE path and union the
+//     dataset, which holds nothing high-confidence for them. The override
+//     short-circuits before that split, so the pin alone decides. Server config
+//     requires container.clusters.list; the rest require container.clusters.get.
 //
 // Values are sourced from Google's Discovery descriptions + the live IAM API (the
 // catalog strips per-method permission data, so they cannot be validated at
-// runtime) and cover every API version sharing the id (see projects.list).
+// runtime) and cover every API version sharing the id (see projects.list). Every
+// container value is the permission named in that method's own REST-reference
+// authorization sentence, and holds for both published Discovery versions (v1 and
+// v1beta1). Most were additionally confirmed against live GKE enforcement, which
+// names the required permission in its 403: cluster and node-pool get/list,
+// operations.list, and both server-config spellings, on both routes. Two groups
+// rest on the documentation alone — operations.get, because GKE rejects a
+// synthetic operation id with a 400 before it authorizes, and the
+// compatibility/upgrade reads, which were not probed.
+//
+// FIELD-LEVEL CAVEAT: Google gates the credential fields of a cluster get/list
+// behind a CONDITIONAL container.clusters.getCredentials, which roles/viewer does
+// not grant. This gate authorizes per method, not per response field, so a
+// credential-bearing response is possible when the ambient ADC principal is
+// broader than the configured ceiling. That is a property of the gate's
+// granularity rather than of these entries — the pinned value is exactly the
+// method's documented requirement — and it is why response redaction runs on
+// every response. See docs/connectors/gcp.md.
+//
+// Deliberately absent, each a deny that must stay one: container's
+// aggregated.usableSubnetworks.list requires container.clusters.create (confirmed
+// live) despite its .list name and HTTP GET, so it is a write and pinning it would
+// break the read-only invariant below; and the v1beta1-only projects.locations.list
+// documents no permission.
 //
 // INVARIANT: every value must be a READ permission (preserving the read-only gate
 // posture; pinned by TestOverridesAreReadOnly) and must never be a strict subset
 // of the method's true required permission set (a subset could under-require and
 // false-allow). Re-verify against Google's Discovery before adding or editing.
+// The two container permissions each several container method ids map onto. Named
+// because a node-pool or server-config pin resolves to a CLUSTER permission, which
+// reads as a typo at the call site until you know that is the documented mapping.
+const (
+	permContainerClustersGet  = "container.clusters.get"
+	permContainerClustersList = "container.clusters.list"
+)
+
 var methodPermissionOverrides = map[string][]string{ //nolint:gochecknoglobals // immutable pinned set.
 	"cloudresourcemanager.projects.list":        {"resourcemanager.projects.get", "resourcemanager.projects.list"},
 	"cloudresourcemanager.projects.search":      {"resourcemanager.projects.get"},
 	"cloudresourcemanager.folders.list":         {"resourcemanager.folders.list"},
 	"cloudresourcemanager.folders.search":       {"resourcemanager.folders.get"},
 	"cloudresourcemanager.organizations.search": {"resourcemanager.organizations.get"},
+
+	"container.projects.locations.clusters.get":            {permContainerClustersGet},
+	"container.projects.locations.clusters.list":           {permContainerClustersList},
+	"container.projects.locations.clusters.nodePools.get":  {permContainerClustersGet},
+	"container.projects.locations.clusters.nodePools.list": {permContainerClustersGet},
+	"container.projects.locations.operations.get":          {"container.operations.get"},
+	"container.projects.locations.operations.list":         {"container.operations.list"},
+	"container.projects.zones.clusters.get":                {permContainerClustersGet},
+	"container.projects.zones.clusters.list":               {permContainerClustersList},
+	"container.projects.zones.clusters.nodePools.get":      {permContainerClustersGet},
+	"container.projects.zones.clusters.nodePools.list":     {permContainerClustersGet},
+	"container.projects.zones.operations.get":              {"container.operations.get"},
+	"container.projects.zones.operations.list":             {"container.operations.list"},
+	"container.projects.locations.getServerConfig":         {permContainerClustersList},
+	"container.projects.zones.getServerconfig":             {permContainerClustersList},
+
+	"container.projects.locations.clusters.checkAutopilotCompatibility":        {permContainerClustersGet},
+	"container.projects.locations.clusters.fetchClusterUpgradeInfo":            {permContainerClustersGet},
+	"container.projects.zones.clusters.fetchClusterUpgradeInfo":                {permContainerClustersGet},
+	"container.projects.locations.clusters.nodePools.fetchNodePoolUpgradeInfo": {permContainerClustersGet},
+	"container.projects.zones.clusters.nodePools.fetchNodePoolUpgradeInfo":     {permContainerClustersGet},
 }
 
 // NewPermissionCatalog builds the queryTestablePermissions-validation catalog
@@ -138,15 +207,23 @@ type permResolver struct {
 	cat       map[string]bool
 	prefixMap map[string]string
 	dataset   datasetLookuper
+	overrides map[string][]string
 }
 
 // NewPermissionResolver constructs the resolver with a validation catalog, a
 // divergence-only prefix map, and an iam-dataset lookuper (nil disables the
-// dataset tier; derive-then-validate still runs).
+// dataset tier; derive-then-validate still runs). The pinned override map is
+// carried as a field rather than read from the package global inside Resolve, so
+// tests can exercise the fail-closed guard without mutating shared state.
 func NewPermissionResolver(
 	cat map[string]bool, prefixMap map[string]string, dataset datasetLookuper,
 ) PermissionResolver {
-	return &permResolver{cat: cat, prefixMap: prefixMap, dataset: dataset}
+	return &permResolver{
+		cat:       cat,
+		prefixMap: prefixMap,
+		dataset:   dataset,
+		overrides: methodPermissionOverrides,
+	}
 }
 
 // Resolve returns the required IAM permission(s) for methodID and the source.
@@ -158,7 +235,13 @@ func (r *permResolver) Resolve(ctx context.Context, methodID string) ([]string, 
 		return nil, SourcePermissionless
 	}
 
-	if perms, ok := methodPermissionOverrides[methodID]; ok {
+	if perms, ok := r.overrides[methodID]; ok {
+		// An empty pin denies. SourceResolved with no permissions would reach
+		// roleEvaluator.AllowedAll(nil), which is vacuously true — i.e. the method
+		// would be authorized under every role. Fail closed instead.
+		if len(perms) == 0 {
+			return nil, SourceNone
+		}
 		return slices.Clone(perms), SourceResolved
 	}
 

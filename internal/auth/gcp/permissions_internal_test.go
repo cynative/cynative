@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -243,40 +244,74 @@ func TestNewPermissionCatalog(t *testing.T) {
 	}
 }
 
+// wantOverrides is the authoritative expected content of methodPermissionOverrides.
+// TestPermissionResolverOverrides asserts SET EQUALITY against the production map, so a
+// new pin cannot be added without a reviewed row here — the map is a client-side
+// authorization ceiling and every entry is hand-sourced from Google's first-party docs.
+var wantOverrides = map[string][]string{ //nolint:gochecknoglobals // immutable test fixture.
+	// projects.list requires the UNION: its id is shared by the v1 unfiltered
+	// list (true perm .get) and the v3 parent-scoped list (true perm .list).
+	"cloudresourcemanager.projects.list":        {"resourcemanager.projects.get", "resourcemanager.projects.list"},
+	"cloudresourcemanager.projects.search":      {"resourcemanager.projects.get"},
+	"cloudresourcemanager.folders.list":         {"resourcemanager.folders.list"},
+	"cloudresourcemanager.folders.search":       {"resourcemanager.folders.get"},
+	"cloudresourcemanager.organizations.search": {"resourcemanager.organizations.get"},
+
+	// Container (GKE) control-plane reads. The permission names the LEAF resource
+	// (clusters/operations) while the Discovery id nests it under projects.{locations,
+	// zones}, and node-pool reads authorize on the PARENT cluster — neither shape is
+	// derivable, so all twelve are pinned. Both the locations and the legacy zones
+	// route are pinned because they are separate Discovery ids.
+	"container.projects.locations.clusters.get":            {"container.clusters.get"},
+	"container.projects.locations.clusters.list":           {"container.clusters.list"},
+	"container.projects.locations.clusters.nodePools.get":  {"container.clusters.get"},
+	"container.projects.locations.clusters.nodePools.list": {"container.clusters.get"},
+	"container.projects.locations.operations.get":          {"container.operations.get"},
+	"container.projects.locations.operations.list":         {"container.operations.list"},
+	"container.projects.zones.clusters.get":                {"container.clusters.get"},
+	"container.projects.zones.clusters.list":               {"container.clusters.list"},
+	"container.projects.zones.clusters.nodePools.get":      {"container.clusters.get"},
+	"container.projects.zones.clusters.nodePools.list":     {"container.clusters.get"},
+	"container.projects.zones.operations.get":              {"container.operations.get"},
+	"container.projects.zones.operations.list":             {"container.operations.list"},
+
+	// These carry CUSTOM method verbs, so isReadMethod is false and they would
+	// otherwise take the write path. The override short-circuits before that split,
+	// which is what makes a read permission the right value here. Every one is a
+	// plain GET.
+	"container.projects.locations.getServerConfig":                             {"container.clusters.list"},
+	"container.projects.zones.getServerconfig":                                 {"container.clusters.list"},
+	"container.projects.locations.clusters.checkAutopilotCompatibility":        {"container.clusters.get"},
+	"container.projects.locations.clusters.fetchClusterUpgradeInfo":            {"container.clusters.get"},
+	"container.projects.zones.clusters.fetchClusterUpgradeInfo":                {"container.clusters.get"},
+	"container.projects.locations.clusters.nodePools.fetchNodePoolUpgradeInfo": {"container.clusters.get"},
+	"container.projects.zones.clusters.nodePools.fetchNodePoolUpgradeInfo":     {"container.clusters.get"},
+}
+
 // TestPermissionResolverOverrides pins the methodPermissionOverrides entries: the
 // override is consulted first and is independent of the catalog/dataset tiers (here
-// the catalog rejects everything and the dataset is empty), so each Resource Manager
-// discovery method resolves to its hand-pinned permission with SourceResolved.
+// the catalog rejects everything and the dataset is empty), so each pinned discovery
+// method resolves to its hand-pinned permission with SourceResolved. The set-equality
+// assertion makes wantOverrides authoritative: an unreviewed production entry fails here.
 func TestPermissionResolverOverrides(t *testing.T) {
 	t.Parallel()
+
+	if !maps.EqualFunc(methodPermissionOverrides, wantOverrides, slices.Equal) {
+		t.Fatalf("methodPermissionOverrides = %v, want %v", methodPermissionOverrides, wantOverrides)
+	}
 
 	cat := map[string]bool{}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), emptyDataset{})
 
-	tests := []struct {
-		methodID string
-		want     []string
-	}{
-		// projects.list requires the UNION: its id is shared by the v1 unfiltered
-		// list (true perm .get) and the v3 parent-scoped list (true perm .list).
-		{
-			"cloudresourcemanager.projects.list",
-			[]string{"resourcemanager.projects.get", "resourcemanager.projects.list"},
-		},
-		{"cloudresourcemanager.projects.search", []string{"resourcemanager.projects.get"}},
-		{"cloudresourcemanager.folders.list", []string{"resourcemanager.folders.list"}},
-		{"cloudresourcemanager.folders.search", []string{"resourcemanager.folders.get"}},
-		{"cloudresourcemanager.organizations.search", []string{"resourcemanager.organizations.get"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.methodID, func(t *testing.T) {
+	for methodID, want := range wantOverrides {
+		t.Run(methodID, func(t *testing.T) {
 			t.Parallel()
-			perms, src := r.Resolve(context.Background(), tc.methodID)
+			perms, src := r.Resolve(context.Background(), methodID)
 			if src != SourceResolved {
-				t.Fatalf("Resolve(%q) source = %v, want SourceResolved (perms=%v)", tc.methodID, src, perms)
+				t.Fatalf("Resolve(%q) source = %v, want SourceResolved (perms=%v)", methodID, src, perms)
 			}
-			if !slices.Equal(perms, tc.want) {
-				t.Errorf("Resolve(%q) perms = %v, want %v", tc.methodID, perms, tc.want)
+			if !slices.Equal(perms, want) {
+				t.Errorf("Resolve(%q) perms = %v, want %v", methodID, perms, want)
 			}
 		})
 	}
@@ -344,16 +379,96 @@ func TestPermissionResolverOverrideReturnsIndependentSlice(t *testing.T) {
 // readMethodVerbs, which also contains search/aggregatedList — valid as method
 // verbs but never as permission verbs — so a future ".search"/".aggregatedList" or
 // write-shaped override value fails closed here.
+//
+// It also pins the SHAPE of each value list — non-empty, sorted, duplicate-free —
+// because Resolve returns the pinned slice verbatim: an empty list would deny (the
+// guard in Resolve), and an unsorted or duplicated one would make the resolver's
+// output depend on hand-editing order rather than on the permission set.
 func TestOverridesAreReadOnly(t *testing.T) {
 	t.Parallel()
 
 	for methodID, perms := range methodPermissionOverrides {
+		if len(perms) == 0 {
+			t.Errorf("override %q has no permissions; an empty pin denies and is never intended", methodID)
+		}
+		if !slices.IsSorted(perms) {
+			t.Errorf("override %q -> %v is not sorted", methodID, perms)
+		}
+		// Sortedness is asserted above, so any duplicate is adjacent.
+		for i := 1; i < len(perms); i++ {
+			if perms[i] == perms[i-1] {
+				t.Errorf("override %q -> %v contains duplicates", methodID, perms)
+
+				break
+			}
+		}
 		for _, p := range perms {
 			i := strings.LastIndex(p, ".")
 			if i < 0 || !readPermVerbs[p[i+1:]] {
 				t.Errorf("override %q -> %q is not a read permission (verb not in readPermVerbs)", methodID, p)
 			}
 		}
+	}
+}
+
+// TestPermissionResolverDoesNotCollapseIntermediateSegments pins that derivation is
+// EXACT: it never drops the intermediate segments of a method id to reach a shorter,
+// catalog-valid permission. Collapsing would look attractive (it is what the container
+// pins encode by hand) but the catalog proves only that a permission string EXISTS, not
+// that it binds to this method — measured across the full GCP read surface, a collapse
+// rule resolves 38 known methods to the WRONG permission, which in an authorization gate
+// is a silent under-require. A method whose true permission is not derivable must stay
+// unresolved and be pinned deliberately.
+func TestPermissionResolverDoesNotCollapseIntermediateSegments(t *testing.T) {
+	t.Parallel()
+
+	// The collapsed candidate is the ONLY entry in the catalog, so a collapsing
+	// derivation would resolve here and a exact one cannot.
+	cat := map[string]bool{"svc.children.get": true}
+	r := NewPermissionResolver(cat, defaultPrefixMap(), emptyDataset{})
+
+	perms, src := r.Resolve(context.Background(), "svc.parents.children.get")
+	if src != SourceNone {
+		t.Fatalf("derivation must not collapse intermediate segments: src=%v perms=%v", src, perms)
+	}
+}
+
+// TestPermissionResolverUsableSubnetworksStaysUnresolved pins a deliberate NON-entry.
+// container.projects.aggregated.usableSubnetworks.list reads like a read (".list" verb,
+// HTTP GET) but Google classifies it ADMIN_WRITE requiring container.clusters.create, so
+// it must never be swept into the container read pins alongside its neighbours.
+func TestPermissionResolverUsableSubnetworksStaysUnresolved(t *testing.T) {
+	t.Parallel()
+
+	r := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), emptyDataset{})
+
+	perms, src := r.Resolve(context.Background(), "container.projects.aggregated.usableSubnetworks.list")
+	if src != SourceNone {
+		t.Fatalf("usableSubnetworks.list must stay unresolved: src=%v perms=%v", src, perms)
+	}
+}
+
+// TestPermissionResolverEmptyOverrideDenies pins the fail-closed guard on the pinned
+// map itself. An override keyed with an EMPTY permission slice must deny, not resolve:
+// roleEvaluator.AllowedAll(nil) returns true, so an empty pin that reached the caller as
+// SourceResolved would authorize the method under ANY role — an allow bypass. No
+// production entry is empty (TestOverridesAreReadOnly now rejects one statically), so
+// this is the only test that exercises the runtime guard.
+func TestPermissionResolverEmptyOverrideDenies(t *testing.T) {
+	t.Parallel()
+
+	// The catalog WOULD validate the derived permission, proving the deny comes from
+	// the guard and is not a derivation miss.
+	r := &permResolver{
+		cat:       map[string]bool{"svc.things.get": true},
+		prefixMap: defaultPrefixMap(),
+		dataset:   emptyDataset{},
+		overrides: map[string][]string{"svc.things.get": {}},
+	}
+
+	perms, src := r.Resolve(context.Background(), "svc.things.get")
+	if src != SourceNone {
+		t.Fatalf("empty override must deny: src=%v perms=%v", src, perms)
 	}
 }
 

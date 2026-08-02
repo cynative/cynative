@@ -541,3 +541,187 @@ func TestProviderAuthorizeActionCRMHierarchySearchDenied(t *testing.T) {
 		}
 	}
 }
+
+// buildContainerProvider wires a Provider over a REPRESENTATIVE SUBSET of the Container
+// catalog (flatPaths copied verbatim from the live Discovery documents, but only the
+// methods these tests exercise), assembled from BOTH published Discovery versions, which
+// is what production does — the directory is fetched unfiltered and mergeServiceDocs
+// keeps each same-id/different-path sibling. The two versions carry the same method set
+// here, differing only in the version prefix, which is the real shape for container: the
+// permission does not vary by version, unlike cloudresourcemanager.projects.list. The
+// permission catalog and the dataset are empty, so resolution flows entirely through the
+// pinned methodPermissionOverrides; granted is the role's allow-set the eval checks
+// against. Every pinned entry is asserted by TestPermissionResolverOverrides; this
+// helper covers the classify-then-authorize path around them.
+func buildContainerProvider(t *testing.T, granted map[string]bool) *Provider {
+	t.Helper()
+
+	// flatPath templates copied from the live container Discovery documents.
+	rel := map[string]string{
+		"projects.locations.clusters.get":            "projects/{projectsId}/locations/{locationsId}/clusters/{clustersId}",
+		"projects.locations.clusters.list":           "projects/{projectsId}/locations/{locationsId}/clusters",
+		"projects.locations.clusters.nodePools.list": "projects/{projectsId}/locations/{locationsId}/clusters/{clustersId}/nodePools",
+		"projects.zones.clusters.get":                "projects/{projectId}/zones/{zone}/clusters/{clusterId}",
+		"projects.locations.operations.list":         "projects/{projectsId}/locations/{locationsId}/operations",
+		"projects.locations.getServerConfig":         "projects/{projectsId}/locations/{locationsId}/serverConfig",
+		// The legacy spelling really is lowercase-c "serverconfig"; a pin keyed on the
+		// locations casing would leave this route denied.
+		"projects.zones.getServerconfig": "projects/{projectId}/zones/{zone}/serverconfig",
+	}
+	docFor := func(version string) restDoc {
+		methods := map[string]methodDoc{}
+		for name, path := range rel {
+			methods[name] = methodDoc{
+				ID:         "container." + name,
+				HTTPMethod: "GET",
+				FlatPath:   version + "/" + path,
+			}
+		}
+
+		return restDoc{RootURL: "https://container.googleapis.com/", Methods: methods}
+	}
+	data, err := assembleCatalog([]fetchedDoc{
+		{name: "container", doc: docFor("v1"), ok: true},
+		{name: "container", doc: docFor("v1beta1"), ok: true},
+	})
+	if err != nil {
+		t.Fatalf("assembleCatalog: %v", err)
+	}
+	cat := newCatalog(func(context.Context) (DiscoveryData, error) { return data, nil })
+	perms := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), emptyDataset{})
+
+	return NewProvider(cat, perms, newRoleEvaluator(granted), "roles/viewer")
+}
+
+// containerViewerGrants is the container subset of roles/viewer, the default ceiling.
+func containerViewerGrants() map[string]bool {
+	return map[string]bool{
+		"container.clusters.get":    true,
+		"container.clusters.list":   true,
+		"container.operations.get":  true,
+		"container.operations.list": true,
+	}
+}
+
+// TestProviderAuthorizeActionContainerReadsAllowed is the issue #233 regression, end to
+// end: every Container control-plane read the gke connector's documented workflow needs
+// ("first resolve the cluster endpoint via the GCP Container API") must authorize under
+// the default roles/viewer ceiling. Before the pins, derivation built the non-existent
+// container.projects.locations.clusters.get, the high-confidence dataset had no entry,
+// and every one of these failed closed with ErrPermissionUnresolved.
+func TestProviderAuthorizeActionContainerReadsAllowed(t *testing.T) {
+	t.Parallel()
+
+	p := buildContainerProvider(t, containerViewerGrants())
+
+	for _, path := range []string{
+		// The endpoint-discovery call from the issue, on both published versions.
+		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c",
+		"https://container.googleapis.com/v1beta1/projects/p/locations/us-central1-a/clusters/c",
+		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters",
+		// Node-pool reads authorize on the PARENT cluster's container.clusters.get.
+		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c/nodePools",
+		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/operations",
+		// The legacy zones route is a separate Discovery id and is pinned separately.
+		"https://container.googleapis.com/v1/projects/p/zones/us-central1-a/clusters/c",
+		// CUSTOM method verbs: isReadMethod is false for getServerConfig, so these
+		// paths authorize only because the override short-circuits the read/write
+		// split — and the legacy route's lowercase "serverconfig" is its own id.
+		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/serverConfig",
+		"https://container.googleapis.com/v1/projects/p/zones/us-central1-a/serverconfig",
+	} {
+		if err := p.AuthorizeAction(
+			context.Background(),
+			httpReq(t, "GET", path),
+			gcpArgs(t, "container"),
+		); err != nil {
+			t.Errorf("AuthorizeAction(%s) under roles/viewer grants should be authorized, got %v", path, err)
+		}
+	}
+}
+
+// TestProviderAuthorizeActionContainerNodePoolsNeedsClusterGet pins the non-obvious half
+// of the mapping: a node-pool read requires container.clusters.get on the parent cluster
+// (there is no container.nodePools.* permission at all), so a role granting only
+// container.clusters.list must NOT authorize it.
+func TestProviderAuthorizeActionContainerNodePoolsNeedsClusterGet(t *testing.T) {
+	t.Parallel()
+
+	p := buildContainerProvider(t, map[string]bool{"container.clusters.list": true}) // .list but NOT .get.
+	err := p.AuthorizeAction(
+		context.Background(),
+		httpReq(
+			t,
+			"GET",
+			"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c/nodePools",
+		),
+		gcpArgs(t, "container"),
+	)
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("nodePools.list with .list but not .get must be ErrPermissionDenied, got %v", err)
+	}
+}
+
+// TestProviderAuthorizeActionContainerMappingsAreDistinct stops a get/list mix-up from
+// hiding behind a roles/viewer-shaped grant, which holds every container read permission
+// at once. Each case grants exactly ONE permission and asserts a method that needs a
+// DIFFERENT one is denied, so swapping any of these pinned values fails here.
+func TestProviderAuthorizeActionContainerMappingsAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		granted string
+		url     string
+	}{
+		{
+			"clusters.list needs .list, not .get",
+			"container.clusters.get",
+			"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters",
+		},
+		{
+			"clusters.get needs .get, not .list",
+			"container.clusters.list",
+			"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c",
+		},
+		{
+			"operations.list needs operations.list, not clusters.list",
+			"container.clusters.list",
+			"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/operations",
+		},
+		{
+			// Server config is the one container read whose permission is .list while
+			// its sibling cluster-scoped reads use .get.
+			"getServerConfig needs clusters.list, not clusters.get",
+			"container.clusters.get",
+			"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/serverConfig",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := buildContainerProvider(t, map[string]bool{tc.granted: true})
+			err := p.AuthorizeAction(context.Background(), httpReq(t, "GET", tc.url), gcpArgs(t, "container"))
+			if !errors.Is(err, ErrPermissionDenied) {
+				t.Fatalf("%s: want ErrPermissionDenied, got %v", tc.name, err)
+			}
+		})
+	}
+}
+
+// A container read under a role that grants nothing is denied with the precise
+// ErrPermissionDenied — resolution now succeeds, so the operator sees a ceiling decision
+// rather than the ErrPermissionUnresolved that issue #233 reported.
+func TestProviderAuthorizeActionContainerReadDenied(t *testing.T) {
+	t.Parallel()
+
+	p := buildContainerProvider(t, map[string]bool{})
+	err := p.AuthorizeAction(
+		context.Background(),
+		httpReq(t, "GET", "https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c"),
+		gcpArgs(t, "container"),
+	)
+	if !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("clusters.get under an empty role should be ErrPermissionDenied, got %v", err)
+	}
+}
