@@ -506,19 +506,27 @@ func TestPermissionResolverNonOverriddenUnaffected(t *testing.T) {
 func TestPermissionResolverReadUsesReadTier(t *testing.T) {
 	t.Parallel()
 
-	cat := map[string]bool{"container.clusters.get": true}
+	const method = "certificatemanager.projects.locations.certificates.list"
+
+	// Guard: a pinned method short-circuits at the override branch and never
+	// reaches the read tier, which would make this test vacuous.
+	if _, pinned := methodPermissionOverrides[method]; pinned {
+		t.Fatalf("%s is pinned; this test must use an unpinned method to exercise the read tier", method)
+	}
+
+	cat := map[string]bool{"certificatemanager.certs.list": true}
 	ds := fakeDataset{
 		write: map[string][]string{},
-		read:  map[string][]string{"container.projects.locations.clusters.get": {"container.clusters.get"}},
+		read:  map[string][]string{method: {"certificatemanager.certs.list"}},
 	}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
 
-	perms, src := r.Resolve(t.Context(), "container.projects.locations.clusters.get")
+	perms, src := r.Resolve(t.Context(), method)
 	if src != SourceResolved {
 		t.Fatalf("src = %v, want SourceResolved", src)
 	}
-	if !slices.Equal(perms, []string{"container.clusters.get"}) {
-		t.Errorf("perms = %v, want [container.clusters.get]", perms)
+	if !slices.Equal(perms, []string{"certificatemanager.certs.list"}) {
+		t.Errorf("perms = %v, want [certificatemanager.certs.list]", perms)
 	}
 }
 
