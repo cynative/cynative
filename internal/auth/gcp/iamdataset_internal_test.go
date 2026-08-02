@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -286,4 +287,112 @@ func TestIAMDatasetRegistry_metaWriteFailureStillReturnsParsed(t *testing.T) {
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {
 		t.Errorf("Lookup = %v, want parsed despite meta write failure", got)
 	}
+}
+
+func TestParseIAMDatasetTwoTiers(t *testing.T) {
+	t.Parallel()
+
+	d, err := ParseIAMDataset(readFixture(t))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	t.Run("restcrawlv1-only lands in the read tier only", func(t *testing.T) {
+		t.Parallel()
+		if got := d.Lookup("compute.instances.lowconf"); got != nil {
+			t.Errorf("Lookup = %v, want nil (low confidence is not admitted for writes)", got)
+		}
+		want := []string{"compute.instances.lowconf"}
+		if got := d.LookupRead("compute.instances.lowconf"); !slices.Equal(got, want) {
+			t.Errorf("LookupRead = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("fuzzv1-only lands in neither tier", func(t *testing.T) {
+		t.Parallel()
+		if got := d.Lookup("compute.instances.fuzzonly"); got != nil {
+			t.Errorf("Lookup = %v, want nil", got)
+		}
+		if got := d.LookupRead("compute.instances.fuzzonly"); got != nil {
+			t.Errorf("LookupRead = %v, want nil (an unlisted tag must not be admitted)", got)
+		}
+	})
+
+	t.Run("mixed method unions for reads and subsets for writes", func(t *testing.T) {
+		t.Parallel()
+		wantWrite := []string{"compute.instances.get"}
+		if got := d.Lookup("compute.instances.mixed"); !slices.Equal(got, wantWrite) {
+			t.Errorf("Lookup = %v, want %v (high-confidence subset only)", got, wantWrite)
+		}
+		wantRead := []string{"compute.instances.get", "compute.instances.list"}
+		if got := d.LookupRead("compute.instances.mixed"); !slices.Equal(got, wantRead) {
+			t.Errorf("LookupRead = %v, want %v (union of both tiers)", got, wantRead)
+		}
+	})
+
+	t.Run("high-confidence lands in both tiers", func(t *testing.T) {
+		t.Parallel()
+		want := []string{"compute.instances.get"}
+		if got := d.Lookup("compute.instances.get"); !slices.Equal(got, want) {
+			t.Errorf("Lookup = %v, want %v", got, want)
+		}
+		if got := d.LookupRead("compute.instances.get"); !slices.Equal(got, want) {
+			t.Errorf("LookupRead = %v, want %v (reads never lose coverage)", got, want)
+		}
+	})
+
+	t.Run("unknown method misses in both tiers", func(t *testing.T) {
+		t.Parallel()
+		if got := d.LookupRead("compute.instances.unknown"); got != nil {
+			t.Errorf("LookupRead = %v, want nil", got)
+		}
+	})
+}
+
+func TestIAMDatasetRegistryLookupRead(t *testing.T) {
+	t.Parallel()
+
+	fixture := readFixture(t)
+	clock := func() time.Time { return time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC) }
+
+	t.Run("returns the read tier after a successful fetch", func(t *testing.T) {
+		t.Parallel()
+		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
+			Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Fetcher: func(context.Context) ([]byte, error) { return fixture, nil },
+		})
+		want := []string{"compute.instances.lowconf"}
+		if got := reg.LookupRead(t.Context(), "compute.instances.lowconf"); !slices.Equal(got, want) {
+			t.Errorf("LookupRead = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("degrades to nil when the dataset is unavailable", func(t *testing.T) {
+		t.Parallel()
+		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
+			Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("boom") },
+		})
+		if got := reg.LookupRead(t.Context(), "compute.instances.lowconf"); got != nil {
+			t.Errorf("degraded LookupRead = %v, want nil", got)
+		}
+	})
+
+	t.Run("both lookups share one fetch and one parse", func(t *testing.T) {
+		t.Parallel()
+		calls := 0
+		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
+			Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Fetcher: func(context.Context) ([]byte, error) {
+				calls++
+				return fixture, nil
+			},
+		})
+		_ = reg.Lookup(t.Context(), "compute.instances.get")
+		_ = reg.LookupRead(t.Context(), "compute.instances.lowconf")
+		_ = reg.Lookup(t.Context(), "compute.instances.get")
+		if calls != 1 {
+			t.Errorf("fetcher called %d times, want 1 (one cache entry backs both indexes)", calls)
+		}
+	})
 }

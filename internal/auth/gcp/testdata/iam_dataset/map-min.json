@@ -20,7 +20,18 @@
             {"name": "compute.instances.lowconf", "discoveryMethodologies": ["restcrawlv1"]}
           ]
         },
-        "compute.instances.empty": {}
+        "compute.instances.empty": {},
+        "compute.instances.mixed": {
+          "permissions": [
+            {"name": "compute.instances.get", "discoveryMethodologies": ["manual"]},
+            {"name": "compute.instances.list", "discoveryMethodologies": ["restcrawlv1"]}
+          ]
+        },
+        "compute.instances.fuzzonly": {
+          "permissions": [
+            {"name": "compute.instances.fuzzed", "discoveryMethodologies": ["fuzzv1"]}
+          ]
+        }
       }
     }
   }
