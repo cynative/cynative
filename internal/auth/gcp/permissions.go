@@ -59,6 +59,20 @@ func isReadMethod(methodID string) bool {
 	return i >= 0 && readMethodVerbs[methodID[i+1:]]
 }
 
+// mutatingReadMethods are Discovery method ids whose verb reads as a read but
+// whose operation Google authorizes as a mutation. The read-tier fallback is
+// skipped for these ENTIRELY, whichever tier holds the answer, because no
+// scraped answer may authorize a mutation; if the true permission is
+// established, pin it in methodPermissionOverrides instead.
+//
+// container's aggregated usable-subnetworks listing requires
+// container.clusters.create despite its .list name and HTTP GET, confirmed
+// against live GKE enforcement in #233. It has no dataset entry today, so this
+// entry is a tripwire against one appearing upstream, not a live suppression.
+var mutatingReadMethods = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
+	"container.projects.aggregated.usableSubnetworks.list": true,
+}
+
 // verbSkew maps a Discovery method-id verb to its IAM permission verb where the
 // two differ. Verbs absent here map to themselves (identity), which is correct
 // for the vast majority (delete→delete, update→update, custom verbs like
@@ -280,7 +294,7 @@ func (r *permResolver) datasetPerms(ctx context.Context, methodID string, read, 
 	if !read {
 		return r.dataset.Lookup(ctx, methodID)
 	}
-	if haveDerived {
+	if haveDerived || mutatingReadMethods[methodID] {
 		return nil
 	}
 	return r.dataset.LookupRead(ctx, methodID)

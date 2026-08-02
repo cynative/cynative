@@ -571,3 +571,69 @@ func TestPermissionResolverReadKeepsHighConfidenceCoverage(t *testing.T) {
 		t.Fatalf("got %v/%v, want %v/SourceResolved", got, src, perms)
 	}
 }
+
+// The denylist skips the read fallback ENTIRELY for a read-named method Google
+// implements as a mutation, whichever tier holds the answer.
+func TestPermissionResolverMutatingReadDenylist(t *testing.T) {
+	t.Parallel()
+
+	const method = "container.projects.aggregated.usableSubnetworks.list"
+
+	t.Run("suppresses a read-tier answer", func(t *testing.T) {
+		t.Parallel()
+		ds := fakeDataset{
+			write: map[string][]string{},
+			read:  map[string][]string{method: {"container.clusters.list"}},
+		}
+		r := NewPermissionResolver(map[string]bool{"container.clusters.list": true}, defaultPrefixMap(), ds)
+		perms, src := r.Resolve(t.Context(), method)
+		if src != SourceNone || perms != nil {
+			t.Fatalf("got %v/%v, want nil/SourceNone", perms, src)
+		}
+	})
+
+	// Discriminates the two possible implementations: skipping LookupRead passes,
+	// filtering it down to its high-confidence half would resolve and fail here.
+	t.Run("suppresses a high-confidence answer too", func(t *testing.T) {
+		t.Parallel()
+		perms := []string{"container.clusters.list"}
+		ds := fakeDataset{
+			write: map[string][]string{method: perms},
+			read:  map[string][]string{method: perms},
+		}
+		r := NewPermissionResolver(map[string]bool{"container.clusters.list": true}, defaultPrefixMap(), ds)
+		got, src := r.Resolve(t.Context(), method)
+		if src != SourceNone || got != nil {
+			t.Fatalf("got %v/%v, want nil/SourceNone", got, src)
+		}
+	})
+
+	// Not a general deny: a denylisted method whose derivation succeeds still
+	// resolves to the derived permission.
+	t.Run("does not suppress a successful derivation", func(t *testing.T) {
+		t.Parallel()
+		cat := map[string]bool{"container.projects.aggregated.usableSubnetworks.list": true}
+		ds := fakeDataset{write: map[string][]string{}, read: map[string][]string{}}
+		r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
+		got, src := r.Resolve(t.Context(), method)
+		if src != SourceResolved ||
+			!slices.Equal(got, []string{"container.projects.aggregated.usableSubnetworks.list"}) {
+			t.Fatalf("got %v/%v, want the derived permission/SourceResolved", got, src)
+		}
+	})
+
+	// A pinned override short-circuits before the denylist is ever consulted.
+	t.Run("an explicit override still wins", func(t *testing.T) {
+		t.Parallel()
+		ds := fakeDataset{write: map[string][]string{}, read: map[string][]string{}}
+		r, ok := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), ds).(*permResolver)
+		if !ok {
+			t.Fatalf("NewPermissionResolver did not return *permResolver")
+		}
+		r.overrides = map[string][]string{method: {"container.clusters.create"}}
+		got, src := r.Resolve(t.Context(), method)
+		if src != SourceResolved || !slices.Equal(got, []string{"container.clusters.create"}) {
+			t.Fatalf("got %v/%v, want [container.clusters.create]/SourceResolved", got, src)
+		}
+	})
+}
