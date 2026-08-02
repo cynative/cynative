@@ -8,15 +8,25 @@ import (
 	"testing"
 )
 
-// fakeDataset is the test datasetLookuper.
-type fakeDataset struct{ m map[string][]string }
+// fakeDataset is the test datasetLookuper. write is what Lookup returns (the
+// write tier); read is what LookupRead returns (the read tier, a superset).
+type fakeDataset struct {
+	write map[string][]string
+	read  map[string][]string
+}
 
-func (f fakeDataset) Lookup(_ context.Context, methodID string) []string { return f.m[methodID] }
+func (f fakeDataset) Lookup(_ context.Context, methodID string) []string { return f.write[methodID] }
 
-// emptyDataset always returns nil.
+func (f fakeDataset) LookupRead(_ context.Context, methodID string) []string {
+	return f.read[methodID]
+}
+
+// emptyDataset always returns nil from both tiers.
 type emptyDataset struct{}
 
 func (emptyDataset) Lookup(_ context.Context, _ string) []string { return nil }
+
+func (emptyDataset) LookupRead(_ context.Context, _ string) []string { return nil }
 
 // readPermVerbs backs the verbSkew invariant test. readMethodVerbs is the
 // production var (permissions.go); this file only adds the perm-verb set.
@@ -105,9 +115,10 @@ func TestPermissionResolverUnionWithDataset(t *testing.T) {
 	t.Parallel()
 
 	cat := map[string]bool{"compute.instances.create": true}
-	ds := fakeDataset{m: map[string][]string{
+	m := map[string][]string{
 		"compute.instances.insert": {"compute.instances.create", "iam.serviceAccounts.actAs"},
-	}}
+	}
+	ds := fakeDataset{write: m, read: m}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
 
 	perms, src := r.Resolve(context.Background(), "compute.instances.insert")
@@ -129,9 +140,10 @@ func TestPermissionResolverReadSkipsDataset(t *testing.T) {
 	t.Parallel()
 
 	cat := map[string]bool{"compute.instances.get": true}
-	ds := fakeDataset{m: map[string][]string{
+	m := map[string][]string{
 		"compute.instances.get": {"compute.instances.get", "compute.instances.list"},
-	}}
+	}
+	ds := fakeDataset{write: m, read: m}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
 
 	perms, src := r.Resolve(context.Background(), "compute.instances.get")
@@ -155,9 +167,10 @@ func TestPermissionResolverReadDatasetFallback(t *testing.T) {
 	// prefix is cloudsql, not in defaultPrefixMap); the dataset supplies the real
 	// permission, so the read still resolves via the fallback.
 	cat := map[string]bool{}
-	ds := fakeDataset{m: map[string][]string{
+	m := map[string][]string{
 		"sqladmin.instances.get": {"cloudsql.instances.get"},
-	}}
+	}
+	ds := fakeDataset{write: m, read: m}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
 
 	perms, src := r.Resolve(context.Background(), "sqladmin.instances.get")
@@ -172,7 +185,8 @@ func TestPermissionResolverDatasetOnly(t *testing.T) {
 	t.Parallel()
 
 	cat := map[string]bool{}
-	ds := fakeDataset{m: map[string][]string{"weird.thing.frobnicate": {"weird.thing.frobnicate"}}}
+	m := map[string][]string{"weird.thing.frobnicate": {"weird.thing.frobnicate"}}
+	ds := fakeDataset{write: m, read: m}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
 
 	perms, src := r.Resolve(context.Background(), "weird.thing.frobnicate")
@@ -335,17 +349,18 @@ func TestPermissionResolverOverrideBeatsDerivation(t *testing.T) {
 
 // TestPermissionResolverOverrideBeatsDataset proves the override wins over a
 // populated dataset that WOULD answer. The catalog is empty so derivation fails
-// (haveDerived=false) — the ONLY condition under which a read method consults the
-// dataset (the Resolve dataset gate is `r.dataset != nil && (!read || !haveDerived)`).
-// The dataset returns a different permission, yet Resolve must return the pinned
-// .get because the override short-circuits before the dataset is ever reached.
+// (haveDerived=false), and a read consults the dataset only when derivation fails;
+// see datasetPerms. The dataset returns a different permission, yet Resolve must
+// return the pinned .get because the override short-circuits before the dataset
+// is ever reached.
 func TestPermissionResolverOverrideBeatsDataset(t *testing.T) {
 	t.Parallel()
 
 	cat := map[string]bool{}
-	ds := fakeDataset{m: map[string][]string{
+	m := map[string][]string{
 		"cloudresourcemanager.projects.search": {"resourcemanager.something.else"},
-	}}
+	}
+	ds := fakeDataset{write: m, read: m}
 	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
 
 	perms, src := r.Resolve(context.Background(), "cloudresourcemanager.projects.search")
@@ -483,5 +498,68 @@ func TestPermissionResolverNonOverriddenUnaffected(t *testing.T) {
 	perms, src := r.Resolve(context.Background(), "cloudresourcemanager.projects.get")
 	if src != SourceResolved || len(perms) != 1 || perms[0] != "resourcemanager.projects.get" {
 		t.Fatalf("non-overridden projects.get must derive normally: src=%v perms=%v", src, perms)
+	}
+}
+
+// A read whose derivation fails resolves through the READ tier, which carries
+// permissions the write tier deliberately omits.
+func TestPermissionResolverReadUsesReadTier(t *testing.T) {
+	t.Parallel()
+
+	cat := map[string]bool{"container.clusters.get": true}
+	ds := fakeDataset{
+		write: map[string][]string{},
+		read:  map[string][]string{"container.projects.locations.clusters.get": {"container.clusters.get"}},
+	}
+	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
+
+	perms, src := r.Resolve(t.Context(), "container.projects.locations.clusters.get")
+	if src != SourceResolved {
+		t.Fatalf("src = %v, want SourceResolved", src)
+	}
+	if !slices.Equal(perms, []string{"container.clusters.get"}) {
+		t.Errorf("perms = %v, want [container.clusters.get]", perms)
+	}
+}
+
+// The false-allow regression pin. A WRITE whose derivation fails must NOT pick
+// up a read-tier answer: Google's apigateway...apis.create page documents only
+// apigateway.locations.get, which roles/viewer grants, so unioning it in would
+// authorize a resource-creating POST under a read-only ceiling.
+func TestPermissionResolverWriteIgnoresReadTier(t *testing.T) {
+	t.Parallel()
+
+	cat := map[string]bool{"apigateway.locations.get": true}
+	ds := fakeDataset{
+		write: map[string][]string{},
+		read:  map[string][]string{"apigateway.projects.locations.apis.create": {"apigateway.locations.get"}},
+	}
+	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
+
+	perms, src := r.Resolve(t.Context(), "apigateway.projects.locations.apis.create")
+	if src != SourceNone {
+		t.Fatalf("src = %v, want SourceNone (a write must not resolve from the read tier)", src)
+	}
+	if perms != nil {
+		t.Errorf("perms = %v, want nil", perms)
+	}
+}
+
+// Reads never lose coverage: a high-confidence-only answer still resolves,
+// because readMap is a superset of writeMap. Guards the reroute to LookupRead.
+func TestPermissionResolverReadKeepsHighConfidenceCoverage(t *testing.T) {
+	t.Parallel()
+
+	cat := map[string]bool{"cloudsql.instances.get": true}
+	perms := []string{"cloudsql.instances.get"}
+	ds := fakeDataset{
+		write: map[string][]string{"sqladmin.instances.get": perms},
+		read:  map[string][]string{"sqladmin.instances.get": perms},
+	}
+	r := NewPermissionResolver(cat, defaultPrefixMap(), ds)
+
+	got, src := r.Resolve(t.Context(), "sqladmin.instances.get")
+	if src != SourceResolved || !slices.Equal(got, perms) {
+		t.Fatalf("got %v/%v, want %v/SourceResolved", got, src, perms)
 	}
 }

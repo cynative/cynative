@@ -27,11 +27,15 @@ type PermissionResolver interface {
 	Resolve(ctx context.Context, methodID string) ([]string, PermissionSource)
 }
 
-// datasetLookuper resolves a method id to its high-confidence iam-dataset
-// permission set. Returns nil on miss/unavailable. Real impl: IAMDatasetRegistry
-// (iamdataset.go); a nil lookuper means "no dataset tier".
+// datasetLookuper resolves a method id to its iam-dataset permission set, in two
+// tiers: Lookup answers from the write tier (high-confidence methodologies
+// only), LookupRead from the read tier (which additionally admits the
+// parameter-table scrape). Both return nil on miss or when the dataset is
+// unavailable. Real impl: IAMDatasetRegistry (iamdataset.go); a nil lookuper
+// means "no dataset tier".
 type datasetLookuper interface {
 	Lookup(ctx context.Context, methodID string) []string
+	LookupRead(ctx context.Context, methodID string) []string
 }
 
 // permissionlessMethods is the pinned allow-with-empty-perms set.
@@ -252,15 +256,8 @@ func (r *permResolver) Resolve(ctx context.Context, methodID string) ([]string, 
 	if haveDerived {
 		set[derived] = struct{}{}
 	}
-	// Dataset tier. Writes UNION the dataset's secondary permissions (multi-perm /
-	// iam.serviceAccounts.actAs are real security requirements; over-require →
-	// fail-closed). Reads consult the dataset only as a FALLBACK when derivation
-	// produced nothing — derivation is precise for reads and avoids the dataset's
-	// over-listing, while the fallback recovers reads derivation can't resolve
-	// (e.g. divergent APIs absent from the prefix map). A read whose derivation
-	// succeeded uses the derived primary alone.
-	if r.dataset != nil && (!read || !haveDerived) {
-		for _, perm := range r.dataset.Lookup(ctx, methodID) {
+	if r.dataset != nil {
+		for _, perm := range r.datasetPerms(ctx, methodID, read, haveDerived) {
 			set[perm] = struct{}{}
 		}
 	}
@@ -269,6 +266,24 @@ func (r *permResolver) Resolve(ctx context.Context, methodID string) ([]string, 
 		return nil, SourceNone
 	}
 	return slices.Sorted(maps.Keys(set)), SourceResolved
+}
+
+// datasetPerms returns the dataset's contribution to methodID's required set.
+//
+// A WRITE unions the write tier in: its secondary permissions (multi-permission
+// operations, iam.serviceAccounts.actAs) are real requirements, and
+// over-requiring fails closed. A READ consults the read tier only as a FALLBACK
+// when derivation produced nothing, because derivation is precise for reads and
+// avoids the dataset's over-listing; a read whose derivation succeeded uses the
+// derived primary alone.
+func (r *permResolver) datasetPerms(ctx context.Context, methodID string, read, haveDerived bool) []string {
+	if !read {
+		return r.dataset.Lookup(ctx, methodID)
+	}
+	if haveDerived {
+		return nil
+	}
+	return r.dataset.LookupRead(ctx, methodID)
 }
 
 // derivePrimary derives <permPrefix>.<resource…>.<permVerb> and validates it
