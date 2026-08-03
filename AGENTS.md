@@ -544,7 +544,15 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   IAM permissions (pinned overrides first, then derive-and-validate against the live
   testable-permissions catalog, with the cached iam-dataset as a read-fallback and write-union
   tier), and authorizes every permission against the single configured role (default
-  `roles/viewer`; predefined or custom), failing closed on anything unresolved. I/O is lazy
+  `roles/viewer`; predefined or custom), failing closed on anything unresolved. The read
+  fallback is the tier that admits the low-confidence `restcrawlv1` scrape, so its answers are
+  held to a runtime read-only ceiling (`readOnlyPerms`): an answer is admitted only when
+  **every** permission in it ends in `get`/`list`/`getIamPolicy`, and a single write verb
+  discards the **whole** answer rather than filtering it, since keeping the read half would
+  leave a strict subset of the true required set and under-require. That ceiling is what lets
+  the twelve GKE container reads resolve from an external dataset instead of pinned constants
+  (#233); the tradeoff is that they now deny when the dataset cannot be loaded, and no test can
+  detect upstream drift in their values. I/O is lazy
   and cached under `<cache>/gcp`; the role definition is fetched live per run (no role cache);
   the `role=<configured role>` posture surfaces in the startup connector inventory.
 
