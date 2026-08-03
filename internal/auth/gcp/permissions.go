@@ -45,18 +45,61 @@ var permissionlessMethods = map[string]bool{ //nolint:gochecknoglobals // immuta
 	"discovery.apis.list":    true,
 }
 
+// verbList is the "list" verb. Named because it is shared by three pinned sets
+// below (readMethodVerbs, readPermVerbs, and verbSkew's aggregatedList target),
+// which must keep spelling it identically.
+const verbList = "list"
+
 // readMethodVerbs identifies read method-id verbs. The iam-dataset tier is
 // unioned for writes (its secondary perms — multi-perm/actAs — are real
 // requirements there) but only consulted as a FALLBACK for reads (derivation is
 // precise for reads and avoids the dataset's over-listing; see Resolve).
 var readMethodVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
-	"get": true, "list": true, "aggregatedList": true, "search": true, "getIamPolicy": true,
+	"get": true, verbList: true, "aggregatedList": true, "search": true, "getIamPolicy": true,
 }
 
 // isReadMethod reports whether methodID's verb (last dot-segment) is a read.
 func isReadMethod(methodID string) bool {
 	i := strings.LastIndex(methodID, ".")
 	return i >= 0 && readMethodVerbs[methodID[i+1:]]
+}
+
+// readPermVerbs are the verbs a READ's required IAM permission may end in. It is
+// deliberately NARROWER than readMethodVerbs, which also holds search and
+// aggregatedList: those are valid method-id verbs but no IAM permission ends in
+// them. It is the ceiling readOnlyPerms enforces on the read tier, and the pinned
+// override map is held to the same set by TestOverridesAreReadOnly.
+var readPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
+	"get": true, verbList: true, "getIamPolicy": true,
+}
+
+// readOnlyPerms is the read tier's ceiling. It admits an answer only when EVERY
+// permission in it is a read permission, and discards the WHOLE answer otherwise
+// (nil → the caller resolves nothing → SourceNone → deny).
+//
+// Discarding rather than filtering is the load-bearing half. Dropping just the
+// offending permission would leave a strict SUBSET of the true required set, which
+// is the exact under-require the override map's invariant warns about: a mutation
+// documented as needing {clusters.get, clusters.create} would authorize under a
+// role granting only clusters.get.
+//
+// This exists because the read tier's answers come from an external file cynative
+// does not control (iann0036/iam-dataset, admitted down to the low-confidence
+// restcrawlv1 parameter-table scrape) and are otherwise passed to the role
+// evaluator verbatim, with no catalog re-validation and no shape check. The pinned
+// overrides have carried a test-enforced read-only ceiling since they were
+// introduced; this gives the tier the same one at runtime. mutatingReadMethods
+// stays the answer for a read-named mutation whose documented permission IS
+// read-shaped (usableSubnetworks.list → container.clusters.create is caught here;
+// a hypothetical one requiring only a .get would not be).
+func readOnlyPerms(perms []string) []string {
+	for _, p := range perms {
+		i := strings.LastIndex(p, ".")
+		if i < 0 || !readPermVerbs[p[i+1:]] {
+			return nil
+		}
+	}
+	return perms
 }
 
 // mutatingReadMethods are Discovery method ids whose verb reads as a read but
@@ -69,6 +112,12 @@ func isReadMethod(methodID string) bool {
 // container.clusters.create despite its .list name and HTTP GET, confirmed
 // against live GKE enforcement in #233. It has no dataset entry today, so this
 // entry is a tripwire against one appearing upstream, not a live suppression.
+//
+// This list is the NARROW case and readOnlyPerms is the general one. A read-named
+// mutation whose permission is write-SHAPED (this one) is caught by readOnlyPerms
+// on its own; an id needs a row here only when its true permission is read-shaped,
+// so nothing about the string reveals the mutation. Keeping this entry costs
+// nothing and states the fact independently of the verb heuristic.
 var mutatingReadMethods = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
 	"container.projects.aggregated.usableSubnetworks.list": true,
 }
@@ -82,7 +131,7 @@ var mutatingReadMethods = map[string]bool{ //nolint:gochecknoglobals // immutabl
 var verbSkew = map[string]string{ //nolint:gochecknoglobals // immutable pinned set.
 	"insert":         "create",
 	"patch":          "update",
-	"aggregatedList": "list",
+	"aggregatedList": verbList,
 }
 
 // defaultPrefixMap reconciles API-name → IAM-permission-prefix divergence. It is
@@ -124,35 +173,53 @@ func defaultPrefixMap() map[string]string {
 //     require resourcemanager.<resource>.get — NOT a ".search" permission, which
 //     does not exist. Their search verb derives a non-existent permission and
 //     they have no high-confidence dataset entry.
-//   - the container (GKE) control-plane reads name the LEAF resource in the
-//     permission (container.clusters.*, container.operations.*) while the Discovery
-//     id nests that resource under projects.{locations,zones}, so derivation builds
-//     e.g. container.projects.locations.clusters.get and the catalog rejects it. The
-//     node-pool reads diverge further: they authorize on the PARENT cluster's
+//   - every container (GKE) method that remains pinned carries a CUSTOM verb.
+//     isReadMethod tests the method id's LAST dot-segment, and getServerConfig (with
+//     its legacy getServerconfig spelling) is as absent from readMethodVerbs as
+//     checkAutopilotCompatibility and the two fetch*UpgradeInfo pairs, so all seven
+//     are plain GETs that take the WRITE path, where only the high-confidence tier
+//     is consulted. Nothing there answers them: the compatibility and upgrade-info
+//     methods carry only the read-tier restcrawlv1 scrape, and both server-config
+//     ids appear in the dataset carrying no permissions at all. The override
+//     short-circuits before the read/write split, which is what makes a read
+//     permission the right value for a method the split would otherwise treat as a
+//     write. Server config requires container.clusters.list; the rest require
+//     container.clusters.get.
+//   - the container cluster, node-pool and operation get/list reads were pinned here
+//     too, because their permissions name the LEAF resource (container.clusters.*,
+//     container.operations.*) while the method id nests it under
+//     projects.{locations,zones}, so derivation builds e.g.
+//     container.projects.locations.clusters.get and the catalog rejects it; node-pool
+//     reads diverge further, authorizing on the PARENT cluster's
 //     container.clusters.get, and no container.nodePools.* permission exists at all.
-//     The dataset holds the right answers but only under a low-confidence
-//     methodology, so every container read was denied — including the endpoint
-//     lookup the gke connector's own documented workflow depends on. Both the
-//     locations and the legacy zones route are pinned; they are separate ids.
-//   - the container methods with CUSTOM verbs — getServerConfig (and its legacy
-//     getServerconfig spelling), checkAutopilotCompatibility, and the two
-//     fetch*UpgradeInfo pairs — are plain GETs whose verb is absent from
-//     readMethodVerbs, so without a pin they take the WRITE path and union the
-//     dataset, which holds nothing high-confidence for them. The override
-//     short-circuits before that split, so the pin alone decides. Server config
-//     requires container.clusters.list; the rest require container.clusters.get.
+//     Those twelve now resolve through the read tier, which answers them byte-exact
+//     (TestContainerReadsResolveWithoutPins). That deliberately trades a pinned
+//     constant for an external file cynative does not control: if the dataset cannot
+//     be loaded they fail closed and issue #233's symptom returns
+//     (TestContainerReadsDenyWithoutDataset pins that), and no test can detect
+//     upstream drift in their values, the accepted cost. Restore them from the
+//     verification record below rather than re-probing if the tier stops answering.
 //
 // Values are sourced from Google's Discovery descriptions + the live IAM API (the
 // catalog strips per-method permission data, so they cannot be validated at
 // runtime) and cover every API version sharing the id (see projects.list). Every
 // container value is the permission named in that method's own REST-reference
 // authorization sentence, and holds for both published Discovery versions (v1 and
-// v1beta1). Most were additionally confirmed against live GKE enforcement, which
-// names the required permission in its 403: cluster and node-pool get/list,
-// operations.list, and both server-config spellings, on both routes. Two groups
-// rest on the documentation alone — operations.get, because GKE rejects a
-// synthetic operation id with a 400 before it authorizes, and the
-// compatibility/upgrade reads, which were not probed.
+// v1beta1). Both server-config spellings were confirmed against live GKE
+// enforcement, which names the required permission in its 403. The compatibility
+// and upgrade reads rest on Google's documentation alone: they were not probed.
+//
+// VERIFICATION RECORD for the twelve reads that moved to the read tier (#233).
+// Kept here because a JSON dataset cannot carry a comment and this is now their
+// only in-tree provenance: cluster and node-pool get/list and operations.list were
+// each confirmed against live GKE enforcement on BOTH the locations and zones
+// routes, GKE naming the required permission in its 403. operations.get rests on
+// Google's documentation alone, because GKE rejects a synthetic operation id with a
+// 400 before it authorizes. The values were:
+//
+//	clusters.get, clusters.list          → container.clusters.{get,list}
+//	clusters.nodePools.get, .nodePools.list → container.clusters.get (PARENT cluster)
+//	operations.get, operations.list      → container.operations.{get,list}
 //
 // FIELD-LEVEL CAVEAT: Google gates the credential fields of a cluster get/list
 // behind a CONDITIONAL container.clusters.getCredentials, which roles/viewer does
@@ -166,8 +233,9 @@ func defaultPrefixMap() map[string]string {
 // Deliberately absent, each a deny that must stay one: container's
 // aggregated.usableSubnetworks.list requires container.clusters.create (confirmed
 // live) despite its .list name and HTTP GET, so it is a write and pinning it would
-// break the read-only invariant below; and the v1beta1-only projects.locations.list
-// documents no permission.
+// break the read-only invariant below - it is additionally listed in
+// mutatingReadMethods so no dataset tier can answer it; and the v1beta1-only
+// projects.locations.list documents no permission.
 //
 // INVARIANT: every value must be a READ permission (preserving the read-only gate
 // posture; pinned by TestOverridesAreReadOnly) and must never be a strict subset
@@ -188,20 +256,8 @@ var methodPermissionOverrides = map[string][]string{ //nolint:gochecknoglobals /
 	"cloudresourcemanager.folders.search":       {"resourcemanager.folders.get"},
 	"cloudresourcemanager.organizations.search": {"resourcemanager.organizations.get"},
 
-	"container.projects.locations.clusters.get":            {permContainerClustersGet},
-	"container.projects.locations.clusters.list":           {permContainerClustersList},
-	"container.projects.locations.clusters.nodePools.get":  {permContainerClustersGet},
-	"container.projects.locations.clusters.nodePools.list": {permContainerClustersGet},
-	"container.projects.locations.operations.get":          {"container.operations.get"},
-	"container.projects.locations.operations.list":         {"container.operations.list"},
-	"container.projects.zones.clusters.get":                {permContainerClustersGet},
-	"container.projects.zones.clusters.list":               {permContainerClustersList},
-	"container.projects.zones.clusters.nodePools.get":      {permContainerClustersGet},
-	"container.projects.zones.clusters.nodePools.list":     {permContainerClustersGet},
-	"container.projects.zones.operations.get":              {"container.operations.get"},
-	"container.projects.zones.operations.list":             {"container.operations.list"},
-	"container.projects.locations.getServerConfig":         {permContainerClustersList},
-	"container.projects.zones.getServerconfig":             {permContainerClustersList},
+	"container.projects.locations.getServerConfig": {permContainerClustersList},
+	"container.projects.zones.getServerconfig":     {permContainerClustersList},
 
 	"container.projects.locations.clusters.checkAutopilotCompatibility":        {permContainerClustersGet},
 	"container.projects.locations.clusters.fetchClusterUpgradeInfo":            {permContainerClustersGet},
@@ -289,7 +345,9 @@ func (r *permResolver) Resolve(ctx context.Context, methodID string) ([]string, 
 // over-requiring fails closed. A READ consults the read tier only as a FALLBACK
 // when derivation produced nothing, because derivation is precise for reads and
 // avoids the dataset's over-listing; a read whose derivation succeeded uses the
-// derived primary alone.
+// derived primary alone. A read-tier answer is additionally held to the read-only
+// ceiling (readOnlyPerms) before it is admitted; the write tier is not, because a
+// write's required permissions are legitimately write-shaped.
 func (r *permResolver) datasetPerms(ctx context.Context, methodID string, read, haveDerived bool) []string {
 	if !read {
 		return r.dataset.Lookup(ctx, methodID)
@@ -297,7 +355,7 @@ func (r *permResolver) datasetPerms(ctx context.Context, methodID string, read, 
 	if haveDerived || mutatingReadMethods[methodID] {
 		return nil
 	}
-	return r.dataset.LookupRead(ctx, methodID)
+	return readOnlyPerms(r.dataset.LookupRead(ctx, methodID))
 }
 
 // derivePrimary derives <permPrefix>.<resource…>.<permVerb> and validates it

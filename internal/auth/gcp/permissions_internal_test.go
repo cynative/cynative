@@ -28,10 +28,24 @@ func (emptyDataset) Lookup(_ context.Context, _ string) []string { return nil }
 
 func (emptyDataset) LookupRead(_ context.Context, _ string) []string { return nil }
 
-// readPermVerbs backs the verbSkew invariant test. readMethodVerbs is the
-// production var (permissions.go); this file only adds the perm-verb set.
-var readPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
+// wantReadPermVerbs is an INDEPENDENT copy of the production readPermVerbs, kept
+// hand-written so the invariant tests that consume it do not derive their ceiling
+// from the thing they are checking. TestReadPermVerbsMatchProduction asserts the
+// two are set-equal, so widening production without a reviewed row here fails.
+var wantReadPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
 	"get": true, "list": true, "getIamPolicy": true,
+}
+
+// TestReadPermVerbsMatchProduction pins the production read-permission ceiling
+// against the hand-written copy above. readPermVerbs now gates the iam-dataset read
+// tier at runtime (readOnlyPerms), not just the pinned override map, so silently
+// admitting another verb would widen what an external file can authorize.
+func TestReadPermVerbsMatchProduction(t *testing.T) {
+	t.Parallel()
+
+	if !maps.Equal(readPermVerbs, wantReadPermVerbs) {
+		t.Fatalf("readPermVerbs = %v, want %v", readPermVerbs, wantReadPermVerbs)
+	}
 }
 
 func TestPermissionResolverResolve(t *testing.T) {
@@ -237,7 +251,7 @@ func TestVerbSkewNoMutatingToRead(t *testing.T) {
 	t.Parallel()
 
 	for methodVerb, permVerb := range verbSkew {
-		if !readMethodVerbs[methodVerb] && readPermVerbs[permVerb] {
+		if !readMethodVerbs[methodVerb] && wantReadPermVerbs[permVerb] {
 			t.Errorf("verbSkew[%q]=%q maps a non-read method verb to a read perm verb", methodVerb, permVerb)
 		}
 	}
@@ -271,28 +285,16 @@ var wantOverrides = map[string][]string{ //nolint:gochecknoglobals // immutable 
 	"cloudresourcemanager.folders.search":       {"resourcemanager.folders.get"},
 	"cloudresourcemanager.organizations.search": {"resourcemanager.organizations.get"},
 
-	// Container (GKE) control-plane reads. The permission names the LEAF resource
-	// (clusters/operations) while the Discovery id nests it under projects.{locations,
-	// zones}, and node-pool reads authorize on the PARENT cluster — neither shape is
-	// derivable, so all twelve are pinned. Both the locations and the legacy zones
-	// route are pinned because they are separate Discovery ids.
-	"container.projects.locations.clusters.get":            {"container.clusters.get"},
-	"container.projects.locations.clusters.list":           {"container.clusters.list"},
-	"container.projects.locations.clusters.nodePools.get":  {"container.clusters.get"},
-	"container.projects.locations.clusters.nodePools.list": {"container.clusters.get"},
-	"container.projects.locations.operations.get":          {"container.operations.get"},
-	"container.projects.locations.operations.list":         {"container.operations.list"},
-	"container.projects.zones.clusters.get":                {"container.clusters.get"},
-	"container.projects.zones.clusters.list":               {"container.clusters.list"},
-	"container.projects.zones.clusters.nodePools.get":      {"container.clusters.get"},
-	"container.projects.zones.clusters.nodePools.list":     {"container.clusters.get"},
-	"container.projects.zones.operations.get":              {"container.operations.get"},
-	"container.projects.zones.operations.list":             {"container.operations.list"},
-
-	// These carry CUSTOM method verbs, so isReadMethod is false and they would
-	// otherwise take the write path. The override short-circuits before that split,
-	// which is what makes a read permission the right value here. Every one is a
-	// plain GET.
+	// Container (GKE). All seven carry CUSTOM method verbs (isReadMethod tests the
+	// LAST dot-segment, so getServerConfig/getServerconfig are as custom as
+	// checkAutopilotCompatibility), hence isReadMethod is false and they would
+	// otherwise take the write path, where the read tier is never consulted. The
+	// override short-circuits before that split, which is what makes a read
+	// permission the right value here. Every one is a plain GET. The cluster,
+	// node-pool and operation get/list reads were pinned here too until the read
+	// tier answered them; see TestContainerReadsResolveWithoutPins for the tier
+	// resolving them and TestContainerReadsDenyWithoutDataset for what happens
+	// when it cannot.
 	"container.projects.locations.getServerConfig":                             {"container.clusters.list"},
 	"container.projects.zones.getServerconfig":                                 {"container.clusters.list"},
 	"container.projects.locations.clusters.checkAutopilotCompatibility":        {"container.clusters.get"},
@@ -390,7 +392,7 @@ func TestPermissionResolverOverrideReturnsIndependentSlice(t *testing.T) {
 
 // TestOverridesAreReadOnly is the read-only-posture invariant: every override
 // value is an IAM PERMISSION string and its verb (last dot-segment) must be a read
-// PERM verb (readPermVerbs = {get,list,getIamPolicy}). It deliberately does NOT use
+// PERM verb (wantReadPermVerbs = {get,list,getIamPolicy}). It deliberately does NOT use
 // readMethodVerbs, which also contains search/aggregatedList — valid as method
 // verbs but never as permission verbs — so a future ".search"/".aggregatedList" or
 // write-shaped override value fails closed here.
@@ -419,8 +421,8 @@ func TestOverridesAreReadOnly(t *testing.T) {
 		}
 		for _, p := range perms {
 			i := strings.LastIndex(p, ".")
-			if i < 0 || !readPermVerbs[p[i+1:]] {
-				t.Errorf("override %q -> %q is not a read permission (verb not in readPermVerbs)", methodID, p)
+			if i < 0 || !wantReadPermVerbs[p[i+1:]] {
+				t.Errorf("override %q -> %q is not a read permission (verb not in wantReadPermVerbs)", methodID, p)
 			}
 		}
 	}
@@ -451,7 +453,9 @@ func TestPermissionResolverDoesNotCollapseIntermediateSegments(t *testing.T) {
 // TestPermissionResolverUsableSubnetworksStaysUnresolved pins a deliberate NON-entry.
 // container.projects.aggregated.usableSubnetworks.list reads like a read (".list" verb,
 // HTTP GET) but Google classifies it ADMIN_WRITE requiring container.clusters.create, so
-// it must never be swept into the container read pins alongside its neighbours.
+// it must never resolve alongside its container neighbours: neither by a pin (there is
+// no row for it in methodPermissionOverrides) nor by a dataset tier (mutatingReadMethods
+// skips the read fallback for it, and readOnlyPerms would reject a .create answer anyway).
 func TestPermissionResolverUsableSubnetworksStaysUnresolved(t *testing.T) {
 	t.Parallel()
 
@@ -636,4 +640,150 @@ func TestPermissionResolverMutatingReadDenylist(t *testing.T) {
 			t.Fatalf("got %v/%v, want [container.clusters.create]/SourceResolved", got, src)
 		}
 	})
+}
+
+// parsedDataset adapts a parsed *IAMDataset to the resolver's ctx-taking port,
+// so the container regression runs against the committed fixture rather than a
+// hand-written fake.
+type parsedDataset struct{ d *IAMDataset }
+
+func (p parsedDataset) Lookup(_ context.Context, methodID string) []string {
+	return p.d.Lookup(methodID)
+}
+
+func (p parsedDataset) LookupRead(_ context.Context, methodID string) []string {
+	return p.d.LookupRead(methodID)
+}
+
+// containerReadTierCases are the twelve container reads that were pinned in #233
+// and now resolve from the iam-dataset read tier, mapped to the permission each
+// pin carried. This is the same verification record kept in permissions.go: every
+// value here was confirmed against a live GKE 403 except the two operations.get
+// spellings, which rest on Google's documentation (GKE 400s a synthetic operation
+// id before it authorizes). Restore the pins from this table if the tier stops
+// answering.
+var containerReadTierCases = map[string]string{ //nolint:gochecknoglobals // immutable test fixture.
+	"container.projects.locations.clusters.get":            "container.clusters.get",
+	"container.projects.locations.clusters.list":           "container.clusters.list",
+	"container.projects.locations.clusters.nodePools.get":  "container.clusters.get",
+	"container.projects.locations.clusters.nodePools.list": "container.clusters.get",
+	"container.projects.locations.operations.get":          "container.operations.get",
+	"container.projects.locations.operations.list":         "container.operations.list",
+	"container.projects.zones.clusters.get":                "container.clusters.get",
+	"container.projects.zones.clusters.list":               "container.clusters.list",
+	"container.projects.zones.clusters.nodePools.get":      "container.clusters.get",
+	"container.projects.zones.clusters.nodePools.list":     "container.clusters.get",
+	"container.projects.zones.operations.get":              "container.operations.get",
+	"container.projects.zones.operations.list":             "container.operations.list",
+}
+
+// The twelve container pins removed in favour of the read tier must still
+// resolve to exactly what they were pinned to. These assert the resolver wiring;
+// they cannot pin the upstream dataset, which is the accepted cost of removal.
+func TestContainerReadsResolveWithoutPins(t *testing.T) {
+	t.Parallel()
+
+	d, err := ParseIAMDataset(readFixture(t))
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	// Deliberately empty: derivation must FAIL for every container method, so the
+	// read tier is the only thing that can answer.
+	r := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), parsedDataset{d: d})
+
+	for methodID, want := range containerReadTierCases {
+		t.Run(methodID, func(t *testing.T) {
+			t.Parallel()
+			if _, pinned := methodPermissionOverrides[methodID]; pinned {
+				t.Fatalf("%s is still pinned; this test proves the tier replaces the pin", methodID)
+			}
+			perms, src := r.Resolve(t.Context(), methodID)
+			if src != SourceResolved || !slices.Equal(perms, []string{want}) {
+				t.Fatalf("got %v/%v, want [%s]/SourceResolved", perms, src, want)
+			}
+		})
+	}
+}
+
+// TestContainerReadsDenyWithoutDataset states the cost of removing the twelve pins
+// outright, so it is a reviewed property rather than a surprise in the field.
+// Because the pin is gone and derivation cannot build these permissions, the read
+// tier is the ONLY thing that can answer them: when the iam-dataset is unavailable
+// every one of them fails closed, which is precisely the issue #233 symptom (the
+// gke connector's documented endpoint lookup denied). IAMDatasetRegistry.LookupRead
+// returns nil whenever its cache cannot load, so emptyDataset is a faithful model
+// of that state; nil models the tier being disabled entirely.
+//
+// A pin needs no I/O, so before this change these twelve resolved offline. Deny is
+// the safe direction (nothing is falsely allowed), but it IS an availability
+// regression, and it is untested nowhere else: buildContainerProvider now feeds the
+// fixture, so the provider-level #233 regressions no longer cover the empty case.
+func TestContainerReadsDenyWithoutDataset(t *testing.T) {
+	t.Parallel()
+
+	datasets := map[string]datasetLookuper{
+		"dataset unavailable": emptyDataset{},
+		"dataset tier off":    nil,
+	}
+	for name, ds := range datasets {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), ds)
+			for methodID := range containerReadTierCases {
+				perms, src := r.Resolve(t.Context(), methodID)
+				if src != SourceNone || perms != nil {
+					t.Errorf("%s: got %v/%v, want nil/SourceNone", methodID, perms, src)
+				}
+			}
+		})
+	}
+}
+
+// TestReadTierRejectsNonReadPermissions pins readOnlyPerms, the read-only ceiling
+// on the read tier. The tier's answers come from an external file and reach the
+// role evaluator verbatim, so this is the only thing standing between an upstream
+// edit and a write permission being authorized as a read.
+//
+// The whole-answer rejection is the half worth pinning: filtering out just the
+// write permission would leave a strict SUBSET of the true required set, so a
+// mutation needing {get, create} would authorize under a role granting only .get.
+func TestReadTierRejectsNonReadPermissions(t *testing.T) {
+	t.Parallel()
+
+	const method = "sqladmin.instances.get" // Derivation fails, so the read tier answers.
+
+	tests := []struct {
+		name string
+		read []string
+		want []string // nil => must deny.
+	}{
+		{"all read permissions are admitted", []string{"cloudsql.instances.get"}, []string{"cloudsql.instances.get"}},
+		{"a write verb rejects the whole answer", []string{"cloudsql.instances.create"}, nil},
+		{
+			"one write verb rejects its read siblings too, never a subset",
+			[]string{"cloudsql.instances.create", "cloudsql.instances.get"},
+			nil,
+		},
+		{"a permission with no verb separator is rejected", []string{"cloudsqlinstancesget"}, nil},
+		{"a method-only verb is not a permission verb", []string{"cloudsql.instances.search"}, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ds := fakeDataset{write: map[string][]string{}, read: map[string][]string{method: tc.read}}
+			r := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), ds)
+
+			perms, src := r.Resolve(t.Context(), method)
+			if tc.want == nil {
+				if src != SourceNone || perms != nil {
+					t.Fatalf("got %v/%v, want nil/SourceNone", perms, src)
+				}
+
+				return
+			}
+			if src != SourceResolved || !slices.Equal(perms, tc.want) {
+				t.Fatalf("got %v/%v, want %v/SourceResolved", perms, src, tc.want)
+			}
+		})
+	}
 }

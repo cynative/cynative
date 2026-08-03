@@ -549,10 +549,14 @@ func TestProviderAuthorizeActionCRMHierarchySearchDenied(t *testing.T) {
 // keeps each same-id/different-path sibling. The two versions carry the same method set
 // here, differing only in the version prefix, which is the real shape for container: the
 // permission does not vary by version, unlike cloudresourcemanager.projects.list. The
-// permission catalog and the dataset are empty, so resolution flows entirely through the
-// pinned methodPermissionOverrides; granted is the role's allow-set the eval checks
-// against. Every pinned entry is asserted by TestPermissionResolverOverrides; this
-// helper covers the classify-then-authorize path around them.
+// permission catalog is empty, so derivation never resolves any of these: getServerConfig
+// and its legacy getServerconfig spelling still resolve through the pins that remain in
+// methodPermissionOverrides, and the rest resolve through the read tier of a dataset
+// parsed from the committed testdata/iam_dataset/map-min.json fixture, mirroring how the
+// tier answers them in production since the twelve pins were removed (see
+// TestContainerReadsResolveWithoutPins). granted is the role's allow-set the eval checks
+// against. Every remaining pinned entry is asserted by TestPermissionResolverOverrides;
+// this helper covers the classify-then-authorize path around them.
 func buildContainerProvider(t *testing.T, granted map[string]bool) *Provider {
 	t.Helper()
 
@@ -588,7 +592,11 @@ func buildContainerProvider(t *testing.T, granted map[string]bool) *Provider {
 		t.Fatalf("assembleCatalog: %v", err)
 	}
 	cat := newCatalog(func(context.Context) (DiscoveryData, error) { return data, nil })
-	perms := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), emptyDataset{})
+	dataset, err := ParseIAMDataset(readFixture(t))
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	perms := NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), parsedDataset{d: dataset})
 
 	return NewProvider(cat, perms, newRoleEvaluator(granted), "roles/viewer")
 }
@@ -622,7 +630,7 @@ func TestProviderAuthorizeActionContainerReadsAllowed(t *testing.T) {
 		// Node-pool reads authorize on the PARENT cluster's container.clusters.get.
 		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c/nodePools",
 		"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/operations",
-		// The legacy zones route is a separate Discovery id and is pinned separately.
+		// The legacy zones route is a separate Discovery id with its own read-tier entry.
 		"https://container.googleapis.com/v1/projects/p/zones/us-central1-a/clusters/c",
 		// CUSTOM method verbs: isReadMethod is false for getServerConfig, so these
 		// paths authorize only because the override short-circuits the read/write
@@ -665,7 +673,9 @@ func TestProviderAuthorizeActionContainerNodePoolsNeedsClusterGet(t *testing.T) 
 // TestProviderAuthorizeActionContainerMappingsAreDistinct stops a get/list mix-up from
 // hiding behind a roles/viewer-shaped grant, which holds every container read permission
 // at once. Each case grants exactly ONE permission and asserts a method that needs a
-// DIFFERENT one is denied, so swapping any of these pinned values fails here.
+// DIFFERENT one is denied, so swapping any of these values fails here. Note what backs
+// each: only the getServerConfig case still exercises a pin. The three cluster and
+// operation cases now assert the read-tier values carried by the map-min.json fixture.
 func TestProviderAuthorizeActionContainerMappingsAreDistinct(t *testing.T) {
 	t.Parallel()
 

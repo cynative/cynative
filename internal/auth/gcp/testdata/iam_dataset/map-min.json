@@ -33,6 +33,47 @@
           ]
         }
       }
+    },
+    "container": {
+      "restUrl": "https://container.googleapis.com/$discovery/rest?version=v1",
+      "methods": {
+        "container.projects.locations.clusters.get": {
+          "permissions": [{"name": "container.clusters.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.locations.clusters.list": {
+          "permissions": [{"name": "container.clusters.list", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.locations.clusters.nodePools.get": {
+          "permissions": [{"name": "container.clusters.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.locations.clusters.nodePools.list": {
+          "permissions": [{"name": "container.clusters.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.locations.operations.get": {
+          "permissions": [{"name": "container.operations.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.locations.operations.list": {
+          "permissions": [{"name": "container.operations.list", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.zones.clusters.get": {
+          "permissions": [{"name": "container.clusters.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.zones.clusters.list": {
+          "permissions": [{"name": "container.clusters.list", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.zones.clusters.nodePools.get": {
+          "permissions": [{"name": "container.clusters.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.zones.clusters.nodePools.list": {
+          "permissions": [{"name": "container.clusters.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.zones.operations.get": {
+          "permissions": [{"name": "container.operations.get", "discoveryMethodologies": ["restcrawlv1"]}]
+        },
+        "container.projects.zones.operations.list": {
+          "permissions": [{"name": "container.operations.list", "discoveryMethodologies": ["restcrawlv1"]}]
+        }
+      }
     }
   }
 }
