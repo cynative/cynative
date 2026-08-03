@@ -45,17 +45,12 @@ var permissionlessMethods = map[string]bool{ //nolint:gochecknoglobals // immuta
 	"discovery.apis.list":    true,
 }
 
-// verbList is the "list" verb. Named because it is shared by three pinned sets
-// below (readMethodVerbs, readPermVerbs, and verbSkew's aggregatedList target),
-// which must keep spelling it identically.
-const verbList = "list"
-
 // readMethodVerbs identifies read method-id verbs. The iam-dataset tier is
 // unioned for writes (its secondary perms — multi-perm/actAs — are real
 // requirements there) but only consulted as a FALLBACK for reads (derivation is
 // precise for reads and avoids the dataset's over-listing; see Resolve).
 var readMethodVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
-	"get": true, verbList: true, "aggregatedList": true, "search": true, "getIamPolicy": true,
+	"get": true, "list": true, "aggregatedList": true, "search": true, "getIamPolicy": true,
 }
 
 // isReadMethod reports whether methodID's verb (last dot-segment) is a read.
@@ -64,17 +59,52 @@ func isReadMethod(methodID string) bool {
 	return i >= 0 && readMethodVerbs[methodID[i+1:]]
 }
 
-// readPermVerbs are the verbs a READ's required IAM permission may end in. It is
-// deliberately NARROWER than readMethodVerbs, which also holds search and
-// aggregatedList: those are valid method-id verbs but no IAM permission ends in
-// them. It is the ceiling readOnlyPerms enforces on the read tier, and the pinned
-// override map is held to the same set by TestOverridesAreReadOnly.
-var readPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
-	"get": true, verbList: true, "getIamPolicy": true,
+// mutatingPermVerbs are IAM permission verb PREFIXES that denote a mutation or a
+// privilege escalation. readOnlyPerms rejects a read-tier answer containing one.
+//
+// This is a DENYLIST, and the direction is deliberate. An allowlist of read verbs
+// is the obvious shape and it is wrong: GCP read permissions have an open verb
+// vocabulary, so {get,list,getIamPolicy} would reject bigquery.jobs.listAll,
+// bigquery.models.getMetadata, logging.views.listLogs,
+// containeranalysis.notes.listOccurrences, datastore.databases.getMetadata,
+// aiplatform.migratableResources.search and many more. Measured against the live
+// dataset, an allowlist rejects 44 read methods (19 of which resolve today from
+// the high-confidence tier alone, i.e. it would be a regression, not a
+// tightening); this denylist rejects 3, each a method whose scraped answer names
+// a .delete or .create alongside its .get, which is noise that SHOULD be refused.
+//
+// The tradeoff of a denylist is that an unrecognized future mutation verb passes.
+// That is acceptable here because this is defense in depth, not the boundary: the
+// configured role is still consulted, so a genuine write permission is refused
+// under any read-only ceiling. Matching is prefix + camelCase boundary, so "set"
+// catches setIamPolicy without catching a permission ending in "settings".
+var mutatingPermVerbs = []string{ //nolint:gochecknoglobals // immutable pinned set.
+	"create", "delete", "update", "insert", "patch", "set", "add", "remove",
+	"undelete", "write", "attach", "detach", "enable", "disable", "move",
+	"restore", "import", "upload", "publish", "purge", "truncate", "drop",
+	"reset", "cancel", "stop", "start", "deploy", "undeploy", "migrate",
+	"promote", "rollback", "approve", "reject", "run", "execute", "invoke",
+	"use", "actAs", "impersonate", "sign", "mint", "generate", "rotate",
 }
 
-// readOnlyPerms is the read tier's ceiling. It admits an answer only when EVERY
-// permission in it is a read permission, and discards the WHOLE answer otherwise
+// isMutatingVerb reports whether an IAM permission's verb (its last dot-segment)
+// begins with a mutating verb at a camelCase boundary.
+func isMutatingVerb(verb string) bool {
+	for _, prefix := range mutatingPermVerbs {
+		rest, ok := strings.CutPrefix(verb, prefix)
+		if !ok {
+			continue
+		}
+		if rest == "" || (rest[0] >= 'A' && rest[0] <= 'Z') {
+			return true
+		}
+	}
+
+	return false
+}
+
+// readOnlyPerms is the read tier's ceiling. It admits an answer only when NO
+// permission in it names a mutation, and discards the WHOLE answer otherwise
 // (nil → the caller resolves nothing → SourceNone → deny).
 //
 // Discarding rather than filtering is the load-bearing half. Dropping just the
@@ -86,19 +116,17 @@ var readPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinn
 // This exists because the read tier's answers come from an external file cynative
 // does not control (iann0036/iam-dataset, admitted down to the low-confidence
 // restcrawlv1 parameter-table scrape) and are otherwise passed to the role
-// evaluator verbatim, with no catalog re-validation and no shape check. The pinned
-// overrides have carried a test-enforced read-only ceiling since they were
-// introduced; this gives the tier the same one at runtime. mutatingReadMethods
-// stays the answer for a read-named mutation whose documented permission IS
-// read-shaped (usableSubnetworks.list → container.clusters.create is caught here;
-// a hypothetical one requiring only a .get would not be).
+// evaluator verbatim, with no catalog re-validation and no shape check.
+// mutatingReadMethods remains the answer for a read-named mutation whose
+// documented permission is itself read-shaped, which no verb rule can catch.
 func readOnlyPerms(perms []string) []string {
 	for _, p := range perms {
 		i := strings.LastIndex(p, ".")
-		if i < 0 || !readPermVerbs[p[i+1:]] {
+		if i < 0 || isMutatingVerb(p[i+1:]) {
 			return nil
 		}
 	}
+
 	return perms
 }
 
@@ -131,7 +159,7 @@ var mutatingReadMethods = map[string]bool{ //nolint:gochecknoglobals // immutabl
 var verbSkew = map[string]string{ //nolint:gochecknoglobals // immutable pinned set.
 	"insert":         "create",
 	"patch":          "update",
-	"aggregatedList": verbList,
+	"aggregatedList": "list",
 }
 
 // defaultPrefixMap reconciles API-name → IAM-permission-prefix divergence. It is

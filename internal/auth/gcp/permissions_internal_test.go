@@ -28,24 +28,15 @@ func (emptyDataset) Lookup(_ context.Context, _ string) []string { return nil }
 
 func (emptyDataset) LookupRead(_ context.Context, _ string) []string { return nil }
 
-// wantReadPermVerbs is an INDEPENDENT copy of the production readPermVerbs, kept
-// hand-written so the invariant tests that consume it do not derive their ceiling
-// from the thing they are checking. TestReadPermVerbsMatchProduction asserts the
-// two are set-equal, so widening production without a reviewed row here fails.
-var wantReadPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
+// readPermVerbs is the read-verb set the HAND-PINNED override map is held to
+// (TestOverridesAreReadOnly). It is deliberately not used against the iam-dataset
+// read tier: GCP read permissions have an open verb vocabulary (listAll,
+// getMetadata, listLogs, listOccurrences, search), so this set is a reasonable
+// standard for values a human wrote and reviewed, and much too narrow for values
+// scraped from Google's docs. readOnlyPerms fences the tier the other way round,
+// with a denylist of mutating verbs.
+var readPermVerbs = map[string]bool{ //nolint:gochecknoglobals // immutable pinned set.
 	"get": true, "list": true, "getIamPolicy": true,
-}
-
-// TestReadPermVerbsMatchProduction pins the production read-permission ceiling
-// against the hand-written copy above. readPermVerbs now gates the iam-dataset read
-// tier at runtime (readOnlyPerms), not just the pinned override map, so silently
-// admitting another verb would widen what an external file can authorize.
-func TestReadPermVerbsMatchProduction(t *testing.T) {
-	t.Parallel()
-
-	if !maps.Equal(readPermVerbs, wantReadPermVerbs) {
-		t.Fatalf("readPermVerbs = %v, want %v", readPermVerbs, wantReadPermVerbs)
-	}
 }
 
 func TestPermissionResolverResolve(t *testing.T) {
@@ -251,7 +242,7 @@ func TestVerbSkewNoMutatingToRead(t *testing.T) {
 	t.Parallel()
 
 	for methodVerb, permVerb := range verbSkew {
-		if !readMethodVerbs[methodVerb] && wantReadPermVerbs[permVerb] {
+		if !readMethodVerbs[methodVerb] && readPermVerbs[permVerb] {
 			t.Errorf("verbSkew[%q]=%q maps a non-read method verb to a read perm verb", methodVerb, permVerb)
 		}
 	}
@@ -392,7 +383,7 @@ func TestPermissionResolverOverrideReturnsIndependentSlice(t *testing.T) {
 
 // TestOverridesAreReadOnly is the read-only-posture invariant: every override
 // value is an IAM PERMISSION string and its verb (last dot-segment) must be a read
-// PERM verb (wantReadPermVerbs = {get,list,getIamPolicy}). It deliberately does NOT use
+// PERM verb (readPermVerbs = {get,list,getIamPolicy}). It deliberately does NOT use
 // readMethodVerbs, which also contains search/aggregatedList — valid as method
 // verbs but never as permission verbs — so a future ".search"/".aggregatedList" or
 // write-shaped override value fails closed here.
@@ -421,8 +412,8 @@ func TestOverridesAreReadOnly(t *testing.T) {
 		}
 		for _, p := range perms {
 			i := strings.LastIndex(p, ".")
-			if i < 0 || !wantReadPermVerbs[p[i+1:]] {
-				t.Errorf("override %q -> %q is not a read permission (verb not in wantReadPermVerbs)", methodID, p)
+			if i < 0 || !readPermVerbs[p[i+1:]] {
+				t.Errorf("override %q -> %q is not a read permission (verb not in readPermVerbs)", methodID, p)
 			}
 		}
 	}
@@ -744,9 +735,12 @@ func TestContainerReadsDenyWithoutDataset(t *testing.T) {
 // role evaluator verbatim, so this is the only thing standing between an upstream
 // edit and a write permission being authorized as a read.
 //
-// The whole-answer rejection is the half worth pinning: filtering out just the
+// Two halves are worth pinning. The whole-answer rejection: filtering out just the
 // write permission would leave a strict SUBSET of the true required set, so a
 // mutation needing {get, create} would authorize under a role granting only .get.
+// And the admit cases: the ceiling is a mutating-verb denylist rather than a
+// read-verb allowlist, because an allowlist denies the many legitimate GCP read
+// permissions whose verb is not get/list/getIamPolicy.
 func TestReadTierRejectsNonReadPermissions(t *testing.T) {
 	t.Parallel()
 
@@ -757,7 +751,7 @@ func TestReadTierRejectsNonReadPermissions(t *testing.T) {
 		read []string
 		want []string // nil => must deny.
 	}{
-		{"all read permissions are admitted", []string{"cloudsql.instances.get"}, []string{"cloudsql.instances.get"}},
+		{"a plain read is admitted", []string{"cloudsql.instances.get"}, []string{"cloudsql.instances.get"}},
 		{"a write verb rejects the whole answer", []string{"cloudsql.instances.create"}, nil},
 		{
 			"one write verb rejects its read siblings too, never a subset",
@@ -765,7 +759,30 @@ func TestReadTierRejectsNonReadPermissions(t *testing.T) {
 			nil,
 		},
 		{"a permission with no verb separator is rejected", []string{"cloudsqlinstancesget"}, nil},
-		{"a method-only verb is not a permission verb", []string{"cloudsql.instances.search"}, nil},
+		{"setIamPolicy is a mutation despite the get-like shape", []string{"cloudsql.instances.setIamPolicy"}, nil},
+		// The reason this is a mutating-verb DENYLIST and not a read-verb allowlist:
+		// GCP read permissions have an open verb vocabulary. Each of these resolves
+		// today from the dataset and an allowlist of {get,list,getIamPolicy} would
+		// deny it. They are real permissions on real read methods, taken from the
+		// live dataset (bigquery.jobs.list, bigquery.models.get, logging …logs.list,
+		// containeranalysis …occurrences.list, firestore …databases.get,
+		// aiplatform …migratableResources.search).
+		{"listAll is a read", []string{"bigquery.jobs.listAll"}, []string{"bigquery.jobs.listAll"}},
+		{"getMetadata is a read", []string{"bigquery.models.getMetadata"}, []string{"bigquery.models.getMetadata"}},
+		{"listLogs is a read", []string{"logging.views.listLogs"}, []string{"logging.views.listLogs"}},
+		{
+			"listOccurrences is a read",
+			[]string{"containeranalysis.notes.listOccurrences"},
+			[]string{"containeranalysis.notes.listOccurrences"},
+		},
+		{
+			"a search permission is a read",
+			[]string{"aiplatform.migratableResources.search"},
+			[]string{"aiplatform.migratableResources.search"},
+		},
+		// Prefix matching is camelCase-bounded, so a read whose verb merely STARTS
+		// with the letters of a mutating verb is not swept up.
+		{"settings is not set", []string{"svc.res.settings"}, []string{"svc.res.settings"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
