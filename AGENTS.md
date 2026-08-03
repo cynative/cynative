@@ -552,7 +552,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   and under-require. The check is a denylist of mutating verb prefixes, deliberately not an
   allowlist of read verbs: GCP read permissions have an open verb vocabulary (`listAll`,
   `getMetadata`, `listLogs`, `listOccurrences`, `search`), so an allowlist measured against
-  the live dataset denies 44 read methods, 19 of them resolvable today. That ceiling is what lets
+  the live dataset denies 44 read methods, 19 of them resolvable today. The cost of that
+  direction is that an unrecognized future mutation verb passes, so the ceiling is defense in
+  depth and the configured role remains the boundary. That ceiling is what lets
   the twelve GKE container reads resolve from an external dataset instead of pinned constants
   (#233); the tradeoff is that they now deny when the dataset cannot be loaded, and no test can
   detect upstream drift in their values. I/O is lazy
