@@ -115,7 +115,7 @@ type RequestArgs struct {
 
 	URL string `json:"url" jsonschema_description:"The full URL to request (e.g. \"https://api.example.com:8080/v1/users?q=hello\"). Must not embed userinfo (user:pass@): credentials are injected automatically by the auth_provider and model-supplied ones are rejected."` //nolint:lll // struct tags are indivisible
 
-	Headers []KeyValue `json:"headers,omitempty" jsonschema_description:"List of HTTP headers. Omit if none. Never include Host (the authority is taken from url) or credential headers (Authorization, Proxy-Authorization, X-Ms-Authorization-Auxiliary, Private-Token, Job-Token): these are set automatically by the auth_provider and model-supplied ones are rejected."` //nolint:lll // struct tags are indivisible
+	Headers []KeyValue `json:"headers,omitempty" jsonschema_description:"List of HTTP headers. Omit if none. Never include Host: the request authority is derived from url, and a model-supplied Host header is rejected. Never include credential headers (Authorization, Proxy-Authorization, X-Ms-Authorization-Auxiliary, Private-Token, Job-Token): credentials are injected automatically by the auth_provider and model-supplied ones are rejected."` //nolint:lll // struct tags are indivisible
 	Body    string     `json:"body,omitempty"    jsonschema_description:"The request body as a string. Omit if none."`
 
 	TimeoutSeconds      int `json:"timeout_seconds,omitempty"        jsonschema_description:"Request timeout in seconds (1-60, default 20)."`
