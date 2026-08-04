@@ -414,13 +414,13 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 
 - **`internal/transport`**: executes `http_request` calls. The gauntlet, in order: parse args
   (the model must name an `auth_provider`, one of `github`/`gitlab`/`aws`/`eks`/`gcp`/`gke`/
-  `azure`/`aks`/`kubernetes`), clamp timeout and body limits, **reject any non-`https` URL**
-  (credentials never traverse plaintext), never follow redirects (`CheckRedirect` returns
-  `http.ErrUseLastResponse`, so a 3xx is surfaced to the model and any follow-up hop is a
-  fresh, fully-gated request), **reject a model-supplied `Host` header** (`ErrReservedHeader`), since Go derives the
-  wire authority from the URL and admitting a second one is what let the classified
-  authority and the sent authority diverge (a `forbidigo` pin forbids `http.Request.Host`
-  repo-wide so no connector can reintroduce it), then run
+  `azure`/`aks`/`kubernetes`), clamp timeout and body limits, **reject a model-supplied `Host`
+  header** (`ErrReservedHeader`), since Go derives the wire authority from the URL and admitting
+  a second one is what let the classified authority and the sent authority diverge (a
+  `forbidigo` pin forbids `http.Request.Host` repo-wide so no connector can reintroduce it),
+  **reject any non-`https` URL** (credentials never traverse plaintext), never follow redirects
+  (`CheckRedirect` returns `http.ErrUseLastResponse`, so a 3xx is surfaced to the model and any
+  follow-up hop is a fresh, fully-gated request), then run
   the three auth gates: `auth.AuthorizeHost`, `auth.AuthorizeAction`, `auth.Inject`.
   `configureTransport` installs a fresh per-request `*http.Transport` built from scratch, never
   the shared default (Proxy intentionally nil, no inherited DialTLS, so an embedding process

@@ -172,10 +172,34 @@ func TestGithubProvider_downloadHostGetOnly(t *testing.T) {
 	); err != nil {
 		t.Errorf("download GET = %v, want nil", err)
 	}
+	// net/url preserves host case, so effectiveDownloadHost must lower-case the
+	// hostname before matching it against the download-host set.
+	if err := p.AuthorizeAction(
+		context.Background(), req(t, "GET", "https://CODELOAD.GitHub.com/o/r/tarball/main"), nil,
+	); err != nil {
+		t.Errorf("download GET (upper-case host) = %v, want nil", err)
+	}
 	if err := p.AuthorizeAction(
 		context.Background(), req(t, "POST", "https://codeload.github.com/o/r/x"), nil,
-	); err == nil {
-		t.Error("download POST = nil, want denied")
+	); !errors.Is(err, githubhardening.ErrExposureExceeded) {
+		t.Errorf("download POST = %v, want ErrExposureExceeded", err)
+	}
+}
+
+// TestGithubAuthorizeAction_GraphQLDeniedOnDownloadHost pins the ordering of the
+// GraphQL check and the download-host fast path. IsGraphQLEndpoint matches on the
+// path only, so if the download branch ran first a /graphql request to a download
+// host would take the table-free GET fast path and return nil with the token
+// attached.
+func TestGithubAuthorizeAction_GraphQLDeniedOnDownloadHost(t *testing.T) {
+	t.Parallel()
+
+	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
+	err := p.AuthorizeAction(
+		context.Background(), req(t, "GET", "https://codeload.github.com/graphql"), nil,
+	)
+	if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
+		t.Fatalf("AuthorizeAction(GET codeload /graphql) err = %v, want ErrGraphQLUnsupported", err)
 	}
 }
 

@@ -167,6 +167,22 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
+        # The selector pattern below is proven live by the one
+        # //nolint:forbidigo directive in
+        # internal/transport/transport_internal_test.go, since nolintlint
+        # reports an unused directive; that test reads r.Host on the inbound
+        # (server) side, which is what the directive excuses.
+        #
+        # The composite-literal pattern has no in-tree canary: nothing in
+        # this codebase legitimately sets http.Request.Host today. If the
+        # linter is upgraded, re-verify it by hand with a throwaway probe
+        # rather than trusting a green run.
+        #
+        # Neither pattern catches: a field promoted through an embedded
+        # *http.Request, a defined type over http.Request accessed in
+        # selector form, or reflection. Each of those requires deliberately
+        # introducing a wrapper or a type conversion, so none is a silent
+        # change.
         - pattern: '^http\.Request\.Host$'
           msg: 'The wire authority is transport-owned and derived from the URL; never read or write Request.Host (see cynative#243). Matches selectors on *http.Request, not fields promoted through an embedded one.'
         - pattern: '^http\.Host$'
