@@ -199,10 +199,11 @@ func TestGCPAuthorizesHost_InvalidHost(t *testing.T) {
 	}
 }
 
-// TestGCPAuthorizesHost_WWWSentinel covers the www.googleapis.com branch in
-// AuthorizesHost: Layer 3 must accept the host unconditionally (return true,
-// nil) so that Layer 2 can perform the path-based service resolution and claim
-// check on the full request.
+// TestGCPAuthorizesHost_WWWSentinel asserts Layer 3 accepts the www.googleapis.com
+// compound host without resolving a service, because the service is path-dependent
+// and only Layer 2 sees the path. The transport rejects a model-supplied Host
+// header, so the authority accepted here is the one Layer 2 classifies and the one
+// sent on the wire.
 func TestGCPAuthorizesHost_WWWSentinel(t *testing.T) {
 	t.Parallel()
 	p := newTestGCPProvider(&fakeTokenSource{"tok"})

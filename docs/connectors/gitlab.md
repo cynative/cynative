@@ -151,7 +151,7 @@ Like the cloud connectors — where `connectors.aws.policy`, `connectors.gcp.rol
 
 Host pinning allows only the configured `host` (default `gitlab.com`), or `api_host` when set. Requests to any other host are rejected. Because the credential is attached to every request, every allow-listed host must be the operator-configured GitLab instance.
 
-The request's TLS **port** is pinned too: both the request URL's port and a model-supplied `Host` header override's port must match the configured `host`/`api_host` port (or `443` when none is configured). This stops a request from attaching the Bearer token to a different service co-located on the same host/IP at another port. For a self-managed instance on a non-default port, configure it as `host: gitlab.internal:8443`.
+The request's TLS **port** is pinned too: the request URL's port must match the configured `host`/`api_host` port (or `443` when none is configured). This stops a request from attaching the Bearer token to a different service co-located on the same host/IP at another port. A model-supplied `Host` header is rejected by the transport, so the authority always comes from the URL. For a self-managed instance on a non-default port, configure it as `host: gitlab.internal:8443`.
 
 The connector serves the `/api/v4` REST API only. A request whose path is not under `/api/v4` — a web-UI page or a `/-/jobs/artifacts/...`, `/uploads/...`, or `/<group>/<project>/-/raw/...` download link — is not category-classifiable and fails closed (`ErrUnclassifiable`), regardless of the configured ceiling. Use the `/api/v4` artifact and release REST endpoints to fetch those resources instead.
 

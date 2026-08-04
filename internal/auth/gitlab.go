@@ -412,10 +412,10 @@ func bodyMultipartHasCredential(body string) bool {
 }
 
 // AuthorizeAction enforces the per-category exposure ceiling. It rejects smuggled
-// controls and a port/Host-override mismatch, denies the GraphQL endpoint
-// unconditionally, rejects a smuggled body credential, then classifies the
-// request to its GitLab category and required level and allows it only when the
-// configured ceiling permits that level. A request that cannot be classified (any
+// controls and a port mismatch, denies the GraphQL endpoint unconditionally,
+// rejects a smuggled body credential, then classifies the request to its GitLab
+// category and required level and allows it only when the configured ceiling
+// permits that level. A request that cannot be classified (any
 // non-/api/v4 path fails closed here), a missing table, an unknown configured key,
 // or an exceeded ceiling all fail closed. Runs before InjectAuth.
 func (p *gitlabProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {

@@ -417,8 +417,10 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `azure`/`aks`/`kubernetes`), clamp timeout and body limits, **reject any non-`https` URL**
   (credentials never traverse plaintext), never follow redirects (`CheckRedirect` returns
   `http.ErrUseLastResponse`, so a 3xx is surfaced to the model and any follow-up hop is a
-  fresh, fully-gated request), authorize a model-supplied `Host` header override through
-  `auth.AuthorizeHost` like the URL host (the wire authority cannot slip host pinning), then run
+  fresh, fully-gated request), **reject a model-supplied `Host` header** (`ErrReservedHeader`), since Go derives the
+  wire authority from the URL and admitting a second one is what let the classified
+  authority and the sent authority diverge (a `forbidigo` pin forbids `http.Request.Host`
+  repo-wide so no connector can reintroduce it), then run
   the three auth gates: `auth.AuthorizeHost`, `auth.AuthorizeAction`, `auth.Inject`.
   `configureTransport` installs a fresh per-request `*http.Transport` built from scratch, never
   the shared default (Proxy intentionally nil, no inherited DialTLS, so an embedding process
@@ -605,7 +607,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   secret-leak-on-read category: the mapping happens at distill time on the trusted spec
   templates (so a `variables` path-parameter value cannot inherit an opened ceiling) and
   `AdmitTable` rejects a table that downgrades a `variables` template (cache-poison defense).
-  `AuthorizeAction` also pins the request/Host-override port to the configured port and
+  `AuthorizeAction` also pins the request port to the configured port and
   rejects sudo impersonation and smuggled credential params (`token`/`private_token`/
   `access_token`/`job_token` in query and urlencoded/multipart/JSON bodies, matched on the base
   name so Rack `[...]` and `_`/`-` folding can't evade it). `AuthorizesAddr` denies internal

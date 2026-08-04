@@ -80,11 +80,13 @@ func parseGCPArgs(rawArgs json.RawMessage) (*GCPAuthArgs, error) {
 
 // AuthorizesHost runs Layer 3: parse args → ParseHost → catalog.ResolveService →
 // Verify. The catalog is available pre-lazy so host gating works before ready.
-// For www.googleapis.com (the wwwCompoundSentinel), Layer 3 accepts the host
-// unconditionally — the authoritative service resolution and claim check happen
-// in Layer 2 (AuthorizeAction), which has access to the full request path.
-// For all other googleapis.com hosts, the service is resolved here and verified
-// against the gcp_auth.service claim as usual.
+// For www.googleapis.com (the wwwCompoundSentinel) the service is path-dependent,
+// so Layer 3 accepts the host and Layer 2 (AuthorizeAction) resolves the service
+// from the path and checks it against the gcp_auth.service claim. That division is
+// only sound because the transport rejects a model-supplied Host header, so the
+// host Layer 3 is asked about is always the host Layer 2 classifies and the wire
+// sends. For all other googleapis.com hosts the service is resolved here and
+// verified against the claim as usual.
 func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
 	args, err := parseGCPArgs(rawArgs)
 	if err != nil {
@@ -94,8 +96,9 @@ func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, rawArgs j
 	if err != nil {
 		return false, err
 	}
-	// www.googleapis.com service is path-dependent; Layer 2 (AuthorizeAction)
-	// has the full request and performs the claim check there.
+	// www.googleapis.com service is path-dependent; Layer 2 (AuthorizeAction) has
+	// the full request and performs the claim check there. Sound only because the
+	// transport rejects a Host header, so this host is the one Layer 2 classifies.
 	if parsed.Service == gcphardening.WWWCompoundSentinel() {
 		return true, nil
 	}
