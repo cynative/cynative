@@ -421,26 +421,113 @@ func TestExecute_InvalidMethod(t *testing.T) {
 	}
 }
 
-func TestExecute_HostHeader(t *testing.T) {
+// hostGateSpy fails the test if any auth gate runs. The Host rejection is an
+// argument-validation failure and must precede every gate.
+type hostGateSpy struct{ t *testing.T }
+
+func (s *hostGateSpy) Name() string        { return "spy" }
+func (s *hostGateSpy) Description() string { return "fails if any auth gate runs" }
+
+func (s *hostGateSpy) InjectAuth(*http.Request, json.RawMessage) error {
+	s.t.Error("InjectAuth ran; the Host rejection must precede every auth gate")
+	return nil
+}
+
+func (s *hostGateSpy) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+	s.t.Error("AuthorizesHost ran; the Host rejection must precede every auth gate")
+	return true, nil
+}
+
+// TestExecute_HostHeaderRejected asserts the transport refuses a model-supplied
+// Host header under any spelling, so the classified authority and the wire
+// authority can never diverge.
+func TestExecute_HostHeaderRejected(t *testing.T) {
 	t.Parallel()
 
-	srv, providers := newTLSTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "host=%s", r.Host)
-	})
+	cases := map[string][]any{
+		"canonical":  {map[string]any{"key": "Host", "value": "evil.example.com"}},
+		"lowercase":  {map[string]any{"key": "host", "value": "evil.example.com"}},
+		"uppercase":  {map[string]any{"key": "HOST", "value": "evil.example.com"}},
+		"mixed case": {map[string]any{"key": "HoSt", "value": "evil.example.com"}},
+		"duplicate": {
+			map[string]any{"key": "Host", "value": "a.example.com"},
+			map[string]any{"key": "Host", "value": "b.example.com"},
+		},
+		"alongside a benign header": {
+			map[string]any{"key": "Accept", "value": "application/json"},
+			map[string]any{"key": "Host", "value": "evil.example.com"},
+		},
+		"value equal to the url host": {
+			map[string]any{"key": "Host", "value": "api.github.com"},
+		},
+	}
 
+	for name, headers := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			providers := []auth.Provider{&hostGateSpy{t: t}}
+			args := makeArgs(t, map[string]any{
+				"url":           "https://api.github.com/meta",
+				"auth_provider": "spy",
+				"headers":       headers,
+			})
+
+			_, _, err := NewClient().Execute(context.Background(), args, providers)
+			if !errors.Is(err, ErrReservedHeader) {
+				t.Fatalf("Execute() err = %v, want ErrReservedHeader", err)
+			}
+			if !strings.Contains(err.Error(), "url") {
+				t.Errorf("denial should tell the model to put the authority in url, got: %v", err)
+			}
+		})
+	}
+}
+
+// TestExecute_HeaderKeyNearMissFailsClosed documents that a key that misses
+// EqualFold ("Host " with a trailing space) is not silently accepted: Go's own
+// header-name validation rejects the request before it is sent.
+func TestExecute_HeaderKeyNearMissFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	srv, providers := newTLSTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 	args := makeArgs(t, map[string]any{
 		"url":           srv.URL + "/",
-		"headers":       []any{map[string]any{"key": "Host", "value": "evil.example.com"}},
+		"auth_provider": "loopback",
+		"headers":       []any{map[string]any{"key": "Host ", "value": "evil.example.com"}},
+	})
+
+	if _, _, err := NewClient().Execute(context.Background(), args, providers); err == nil {
+		t.Fatal("Execute() err = nil, want an invalid-header-field-name failure")
+	}
+}
+
+// TestExecute_WireAuthorityFollowsURL asserts the authority actually sent equals
+// the URL authority. This is the positive form of the invariant the whole change
+// exists to establish, and its r.Host read becomes the liveness canary for the
+// forbidigo pin once Task 6 adds that rule.
+func TestExecute_WireAuthorityFollowsURL(t *testing.T) {
+	t.Parallel()
+
+	got := make(chan string, 1)
+	srv, providers := newTLSTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Host
+		w.WriteHeader(http.StatusOK)
+	})
+	args := makeArgs(t, map[string]any{
+		"url":           srv.URL + "/x",
 		"auth_provider": "loopback",
 	})
 
-	result, _, err := NewClient().Execute(context.Background(), args, providers)
-	if err != nil {
+	if _, _, err := NewClient().Execute(context.Background(), args, providers); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !strings.Contains(result, "host=evil.example.com") {
-		t.Errorf("expected custom Host header via req.Host, got: %q", result)
+	want := strings.TrimPrefix(srv.URL, "https://")
+	if sent := <-got; sent != want {
+		t.Errorf("wire authority = %q, want the URL authority %q", sent, want)
 	}
 }
 
@@ -1800,83 +1887,6 @@ func TestExecuteStructured_RedirectSurfaced(t *testing.T) {
 
 	if loc := resp.Headers["Location"]; len(loc) != 1 || loc[0] != "https://example.com/next" {
 		t.Errorf("Location = %v, want [https://example.com/next]", loc)
-	}
-}
-
-// pinnedHostProvider authorizes exactly one host, for exercising the
-// Host-header override gate (the loopback double authorizes everything).
-type pinnedHostProvider struct{ allowed string }
-
-func (p *pinnedHostProvider) Name() string        { return "pinned" }
-func (p *pinnedHostProvider) Description() string { return "authorizes a single pinned host" }
-func (p *pinnedHostProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
-	return nil
-}
-
-func (p *pinnedHostProvider) AuthorizesHost(_ context.Context, host string, _ json.RawMessage) (bool, error) {
-	return host == p.allowed, nil
-}
-
-func TestExecute_HostHeaderOverrideNotAuthorized(t *testing.T) {
-	t.Parallel()
-
-	providers := []auth.Provider{&pinnedHostProvider{allowed: "api.github.com"}}
-	args := makeArgs(t, map[string]any{
-		"url":           "https://api.github.com/meta",
-		"auth_provider": "pinned",
-		"headers":       []any{map[string]any{"key": "Host", "value": "evil.example.com"}},
-	})
-
-	_, _, err := NewClient().Execute(context.Background(), args, providers)
-	if !errors.Is(err, auth.ErrHostNotAuthorized) {
-		t.Fatalf("expected ErrHostNotAuthorized for the Host override, got %v", err)
-	}
-
-	if err != nil && !strings.Contains(err.Error(), "evil.example.com") {
-		t.Errorf("denial should name the override host, got: %v", err)
-	}
-}
-
-func TestExecute_HostHeaderOverrideAuthorized(t *testing.T) {
-	t.Parallel()
-
-	srv, providers := newTLSTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("host=" + r.Host))
-	})
-
-	args := makeArgs(t, map[string]any{
-		"url":           srv.URL + "/x",
-		"auth_provider": "loopback",
-		"headers":       []any{map[string]any{"key": "Host", "value": "internal.example.com:8443"}},
-	})
-
-	result, _, err := NewClient().Execute(context.Background(), args, providers)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !strings.Contains(result, "host=internal.example.com:8443") {
-		t.Errorf("expected override sent verbatim on the wire, got: %q", result)
-	}
-}
-
-func TestHostnameOnly(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]string{
-		"example.com":      "example.com",
-		"example.com:8443": "example.com",
-		"[::1]":            "::1",
-		"[::1]:8443":       "::1",
-		"allowed.com]":     "allowed.com]",
-		"[allowed.com":     "[allowed.com",
-		"[[::1]]":          "[::1]",
-		"a:b:c":            "a:b:c",
-	}
-	for in, want := range cases {
-		if got := hostnameOnly(in); got != want {
-			t.Errorf("hostnameOnly(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
