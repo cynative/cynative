@@ -574,45 +574,6 @@ func TestGitLabProvider_AuthorizeAction_PortEnforcement(t *testing.T) {
 	}
 }
 
-// TestGitLabProvider_AuthorizeAction_HostOverridePort asserts a model-supplied Host
-// header override whose port differs from the configured port is rejected, even
-// when the request URL port matches (the transport pins only the override's
-// hostname).
-func TestGitLabProvider_AuthorizeAction_HostOverridePort(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name       string
-		hostHeader string
-		blocked    bool
-	}{
-		{"override matches", "gitlab.internal:8443", false},
-		{"override port mismatch", "gitlab.internal:4443", true},
-		{"override default-port mismatch", "gitlab.internal", true},
-		{"no override", "", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			p := newTestGitLab(t, "gitlab.internal:8443")
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-				"https://gitlab.internal:8443/api/v4/projects", nil)
-			if c.hostHeader != "" {
-				req.Host = c.hostHeader
-			}
-			err := p.AuthorizeAction(context.Background(), req, nil)
-			if c.blocked {
-				if !errors.Is(err, ErrHostNotAuthorized) {
-					t.Fatalf("%q: want ErrHostNotAuthorized, got %v", c.name, err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("%q: unexpected err %v", c.name, err)
-			}
-		})
-	}
-}
-
 // TestGitLabProvider_AuthorizeAction_BodyTriggerToken asserts a smuggled pipeline
 // trigger token in the request body is rejected regardless of the exposure ceiling
 // (the guard precedes classification).

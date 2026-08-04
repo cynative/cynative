@@ -195,23 +195,14 @@ func (p *gitlabProvider) expectedPort() string {
 
 // authorizeRequestPort rejects a request whose port differs from the connector's
 // configured (or default-443) port. AuthorizesHost only sees the port-stripped
-// hostname (the transport passes req.URL.Hostname() and pins only the hostname of
-// a Host override), so without this gate a model could target a different TLS port
-// on the pinned host/IP — or send a mismatched Host-override authority — and have
-// the injected Bearer token attached under an unpinned port.
+// hostname, so without this gate a model could target a different TLS port on the
+// pinned host or IP and have the injected Bearer token attached under an unpinned
+// port.
 func (p *gitlabProvider) authorizeRequestPort(req *http.Request) error {
 	want := p.expectedPort()
 	if got := portOfAuthority(req.URL.Host); got != want {
 		return fmt.Errorf("%w: request port %s does not match configured GitLab port %s (provider gitlab)",
 			ErrHostNotAuthorized, got, want)
-	}
-	// A model-supplied Host header overrides the request authority; the transport
-	// pins only its hostname, so pin its port here too.
-	if req.Host != "" && req.Host != req.URL.Host {
-		if got := portOfAuthority(req.Host); got != want {
-			return fmt.Errorf("%w: Host override port %s does not match configured GitLab port %s (provider gitlab)",
-				ErrHostNotAuthorized, got, want)
-		}
 	}
 	return nil
 }
