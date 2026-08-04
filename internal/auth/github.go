@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -96,33 +95,18 @@ func isGithubDownloadHost(host string) bool {
 	return false
 }
 
-// normalizeAuthority lower-cases a request authority and strips an optional port
-// and IPv6 brackets, mirroring the form AuthorizesHost receives. The bracket trim
-// is deliberately broader than transport's hostnameOnly: over-matching here only
-// widens the deny-side download-host gate, never a grant.
-func normalizeAuthority(authority string) string {
-	if host, _, err := net.SplitHostPort(authority); err == nil {
-		authority = host
-	} else {
-		authority = strings.Trim(authority, "[]")
-	}
-	return strings.ToLower(authority)
-}
-
 func (p *githubProvider) AuthorizesHost(_ context.Context, host string, _ json.RawMessage) (bool, error) {
 	return host == "api.github.com" || isGithubDownloadHost(host), nil
 }
 
 // effectiveDownloadHost returns the download host the request targets, or "" when
-// it is not a download host. The Host override (when set) is the served authority
-// on GitHub's shared infrastructure, so it takes precedence over the URL hostname.
-// A codeload URL with a Host: api.github.com override therefore falls through to
-// classification rather than taking the download fast-path.
+// it is not a download host. The URL host is the only authority: the transport
+// rejects a model-supplied Host header, so the host classified here is always the
+// host dialed and authorized. url.Hostname already strips the port and any IPv6
+// brackets; the lower-casing is still required because net/url preserves host
+// case and AuthorizeAction receives the raw request.
 func effectiveDownloadHost(req *http.Request) string {
-	authority := normalizeAuthority(req.URL.Hostname())
-	if req.Host != "" {
-		authority = normalizeAuthority(req.Host) // Host override is the served authority.
-	}
+	authority := strings.ToLower(req.URL.Hostname())
 	if isGithubDownloadHost(authority) {
 		return authority
 	}
@@ -130,10 +114,10 @@ func effectiveDownloadHost(req *http.Request) string {
 }
 
 // AuthorizeAction enforces the exposure ceiling. GraphQL is denied unconditionally
-// (before the download-host check, so a Host: override cannot bypass it). Download
-// hosts are GET/HEAD-only and table-independent; api.github.com requests are
-// classified against the live table and allowed iff the configured ceiling permits
-// the required level. A missing table fails closed (category table not ready). Runs before InjectAuth.
+// and is unsupported on every host. Download hosts are GET/HEAD-only and
+// table-independent; api.github.com requests are classified against the live table
+// and allowed iff the configured ceiling permits the required level. A missing
+// table fails closed (category table not ready). Runs before InjectAuth.
 func (p *githubProvider) AuthorizeAction(ctx context.Context, req *http.Request, _ json.RawMessage) error {
 	if githubhardening.IsGraphQLEndpoint(req.URL.EscapedPath()) {
 		return fmt.Errorf("%w: %s %s", githubhardening.ErrGraphQLUnsupported, req.Method, req.URL.EscapedPath())
