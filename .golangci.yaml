@@ -167,6 +167,10 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
+        - pattern: '^http\.Request\.Host$'
+          msg: 'The wire authority is transport-owned and derived from the URL; never read or write Request.Host (see cynative#243). Matches selectors on *http.Request, not fields promoted through an embedded one.'
+        - pattern: '^http\.Host$'
+          msg: 'Do not set Host in an http.Request literal; the wire authority is derived from the URL (see cynative#243).'
         - pattern: '\bt\.Setenv\b'
           msg: 't.Setenv forbids t.Parallel; inject a lookupEnv seam (config shell) instead.'
         - pattern: '\bos\.(Getenv|LookupEnv|Environ)\b'
@@ -486,5 +490,6 @@ linters:
           - wrapcheck
       - path: '(_shell\.go|internal/cli/root\.go|internal/cli/wire_shell\.go)$'
         linters: [ forbidigo ]
+        text: 'lookupEnv seam'
       - path: '_shell_test\.go$'
         linters: [ paralleltest ]

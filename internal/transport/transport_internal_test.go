@@ -513,6 +513,7 @@ func TestExecute_WireAuthorityFollowsURL(t *testing.T) {
 
 	got := make(chan string, 1)
 	srv, providers := newTLSTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		//nolint:forbidigo // Server-side inbound request: asserting the wire authority is the point of this test.
 		got <- r.Host
 		w.WriteHeader(http.StatusOK)
 	})
