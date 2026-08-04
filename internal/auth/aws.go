@@ -153,14 +153,14 @@ func (p *awsProvider) InjectAuth(req *http.Request, rawArgs json.RawMessage) err
 }
 
 // signingRegion resolves the SigV4 signing region for a request. It is
-// host-authoritative: for any parseable effective-authority host the region
-// comes from the host (regional → the host's own region; global → the
-// partition's canonical region), never from the model's claim, so an omitted or
+// host-authoritative: for any parseable request host the region comes from
+// the host (regional → the host's own region; global → the partition's
+// canonical region), never from the model's claim, so an omitted or
 // alias/cross-partition claim cannot mis-sign. Only an unparseable host falls
 // back to the claim-or-SDK behavior. Verify (run before InjectAuth) guarantees a
 // non-empty claim already equals a regional host's region.
 func signingRegion(awsArgs *AWSAuthArgs, req *http.Request, sdkRegion string) string {
-	host := strings.ToLower(awshardening.EffectiveAuthorityHost(req))
+	host := strings.ToLower(req.URL.Hostname())
 	ph, err := awshardening.ParseHost(host)
 	if err != nil {
 		return resolveRegion(awsArgs.Region, sdkRegion)

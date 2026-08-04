@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -68,7 +67,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 	if args.AWSAuth == nil {
 		return errors.New("aws_hardening: aws_auth is required")
 	}
-	parsed, err := ParseHost(strings.ToLower(EffectiveAuthorityHost(req)))
+	parsed, err := ParseHost(strings.ToLower(req.URL.Hostname()))
 	if err != nil {
 		return err
 	}
@@ -112,23 +111,6 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 		return fmt.Errorf("%w: %v denied by policy %s", ErrPolicyDenied, required, p.policyARN)
 	}
 	return nil
-}
-
-// EffectiveAuthorityHost returns the host AWS actually serves and SigV4-signs:
-// the model-supplied Host header override (req.Host) when present, otherwise the
-// URL host. The transport authorizes the override (authorizeHostOverride) and the
-// signer signs req.Host, so the override is the wire authority and action
-// classification must follow it — otherwise a path-style URL plus a virtual-hosted
-// Host override would be classified path-style and gate the wrong IAM action
-// (mirrors the GitHub provider's served-authority handling). The :port (and any
-// IPv6 brackets) are stripped via (*url.URL).Hostname — the same normalization
-// req.URL.Hostname already applies — because ParseHost rejects any colon-bearing
-// host as an IP literal before it can normalize. Pure: no I/O.
-func EffectiveAuthorityHost(req *http.Request) string {
-	if req.Host != "" {
-		return (&url.URL{Host: req.Host}).Hostname()
-	}
-	return req.URL.Hostname()
 }
 
 // ResolveSigningName maps a request host to the SigV4 signing name declared by
