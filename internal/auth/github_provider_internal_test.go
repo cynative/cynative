@@ -255,7 +255,7 @@ func TestGithubProvider_AuthorizeAction_escapedPath(t *testing.T) {
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	// A URL with %2F in the branch segment: GET /repos/o/r/branches/feature%2Ffoo/protection.
 	// The view's Path decodes to "/repos/o/r/branches/feature/foo/protection" (too many
-	// segments), but its EscapedPath preserves "%2F" as one segment — matching the template.
+	// segments), but its EscapedPath preserves "%2F" as one segment, matching the template.
 	v := actionView(t, "GET", "https://api.github.com/repos/o/r/branches/feature%2Ffoo/protection")
 	if err := p.AuthorizeAction(context.Background(), v, nil); err != nil {
 		t.Fatalf("AuthorizeAction with %%2F branch = %v, want nil (read allowed)", err)

@@ -355,13 +355,13 @@ func TestClassifyQuery_postDuplicateBodyAction(t *testing.T) {
 	}
 }
 
-func TestClassifyQuery_postNilBody(t *testing.T) {
+func TestClassifyQuery_postEmptyBody(t *testing.T) {
 	t.Parallel()
 	model := iamMinModel()
-	// POST, no URL Action, nil body → distinct nil-body branch.
+	// POST, no URL Action, empty body string -> distinct empty-body branch.
 	v := newClassifyView(t, http.MethodPost, "https://iam.amazonaws.com/")
 	if _, err := classifyQuery(model, v); !errors.Is(err, ErrClassifierUnknownOp) {
-		t.Errorf("err = %v, want deny (POST nil body)", err)
+		t.Errorf("err = %v, want deny (POST empty body)", err)
 	}
 }
 
