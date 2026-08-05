@@ -1764,6 +1764,83 @@ func (p *denyingActionProvider) AuthorizesAddr(
 	return true, nil
 }
 
+// spyProvider is a minimal auth.Provider + auth.ActionAuthorizer fake that
+// records whether AuthorizeAction ran, for tests that must prove a gate never
+// reaches authorization at all (as opposed to orderingProvider/
+// denyingActionProvider above, which prove the order among the gates that do
+// run).
+type spyProvider struct {
+	name   string
+	called *bool
+}
+
+// newSpyProvider returns a Provider named name whose AuthorizeAction sets
+// *called = true.
+func newSpyProvider(name string, called *bool) auth.Provider {
+	return &spyProvider{name: name, called: called}
+}
+
+func (p *spyProvider) Name() string        { return p.name }
+func (p *spyProvider) Description() string { return "records whether AuthorizeAction ran" }
+
+func (p *spyProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+	return true, nil
+}
+
+func (p *spyProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+	*p.called = true
+
+	return nil
+}
+
+func (p *spyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
+	return nil
+}
+
+// TestDoRejectsNonHTTPSBeforeAuthorization pins the ordering the request view
+// depends on: the view carries no scheme, so gates that assume https rely on
+// the transport having already refused anything else.
+func TestDoRejectsNonHTTPSBeforeAuthorization(t *testing.T) {
+	t.Parallel()
+
+	var gateCalled bool
+
+	providers := []auth.Provider{newSpyProvider("gitlab", &gateCalled)}
+
+	c := NewClient()
+	args := `{"method":"GET","url":"http://example.com/api/v4/user","auth_provider":"gitlab"}`
+
+	if _, _, _, err := c.do(t.Context(), args, providers); err == nil {
+		t.Fatal("do() error = nil, want a scheme rejection")
+	}
+
+	if gateCalled {
+		t.Error("authorization ran on a non-https URL; the scheme check must come first")
+	}
+}
+
+// TestDoRejectsMalformedArgsBeforeAuthorization replaces the deleted
+// TestGitLabProvider_AuthorizeAction_BadRawArgs. That test covered an unmarshal
+// branch inside a gate; the property it stood in for is that malformed
+// http_request JSON never reaches a gate at all, which is asserted here.
+func TestDoRejectsMalformedArgsBeforeAuthorization(t *testing.T) {
+	t.Parallel()
+
+	var gateCalled bool
+
+	providers := []auth.Provider{newSpyProvider("gitlab", &gateCalled)}
+
+	c := NewClient()
+
+	if _, _, _, err := c.do(t.Context(), `{"method":"GET",`, providers); err == nil {
+		t.Fatal("do() error = nil, want a JSON parse failure")
+	}
+
+	if gateCalled {
+		t.Error("authorization ran on unparseable arguments")
+	}
+}
+
 func TestRequestArgs_ParsesGCPAuth(t *testing.T) {
 	t.Parallel()
 
@@ -2158,5 +2235,59 @@ func TestExecute_invokesResponseAuditor(t *testing.T) {
 
 	if !ap.audited {
 		t.Error("ResponseAuditor.AuditResponse was not invoked after a successful response")
+	}
+}
+
+// TestRequestConstructionNormalizesEmptyPort pins the net/http behavior the
+// GitLab port check relies on: an authority with an explicit-but-empty port is
+// normalized before any gate sees it, so the view's Port is "" for it exactly
+// as for an absent port, and both mean the https default.
+func TestRequestConstructionNormalizesEmptyPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rawURL   string
+		wantHost string
+		wantPort string
+	}{
+		{name: "absent port", rawURL: "https://example.com/p", wantHost: "example.com", wantPort: ""},
+		{name: "empty port is trimmed", rawURL: "https://example.com:/p", wantHost: "example.com", wantPort: ""},
+		{
+			name:     "real port survives",
+			rawURL:   "https://example.com:8080/p",
+			wantHost: "example.com:8080",
+			wantPort: "8080",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tt.rawURL, nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			if got := req.URL.Host; got != tt.wantHost {
+				t.Errorf("req.URL.Host = %q, want %q", got, tt.wantHost)
+			}
+
+			if got := req.URL.Port(); got != tt.wantPort {
+				t.Errorf("req.URL.Port() = %q, want %q", got, tt.wantPort)
+			}
+		})
+	}
+}
+
+// TestRequestConstructionRejectsMalformedPort pins that a non-numeric port
+// never reaches a gate, as it does not today.
+func TestRequestConstructionRejectsMalformedPort(t *testing.T) {
+	t.Parallel()
+
+	_, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com:abc/p", nil)
+	if err == nil {
+		t.Fatal("new request error = nil, want a parse failure on a malformed port")
 	}
 }
