@@ -144,6 +144,21 @@ type Response struct {
 	Truncated  bool                `json:"truncated"`
 }
 
+// bodyForRequest derives the two representations of a request body from one
+// value: the reader net/http sends, and the string the authorization gates
+// judge. Both come from here so no edit can change one and miss the other.
+//
+// An empty body yields a nil reader rather than an empty [strings.Reader],
+// preserving what the code this replaced did: net/http leaves the request body
+// nil, and the SigV4 payload hash takes its empty-payload path.
+func bodyForRequest(body string) (io.Reader, string) {
+	if body == "" {
+		return nil, ""
+	}
+
+	return strings.NewReader(body), body
+}
+
 // do parses arguments, clamps limits, builds and sends the HTTP request, and
 // returns the live [*http.Response], the clamped max-bytes limit, and a cleanup
 // func that releases the per-request transport's idle connections. cleanup is
@@ -178,10 +193,8 @@ func (c *Client) do(
 		return nil, 0, noop, fmt.Errorf("auth_provider is required (available: %s)", providerNames(providers))
 	}
 
-	var reqBody io.Reader
-	if args.Body != "" {
-		reqBody = strings.NewReader(args.Body)
-	}
+	reqBody, viewBody := bodyForRequest(args.Body)
+	_ = viewBody // Consumed by the request view in the next change.
 
 	req, err := http.NewRequestWithContext(ctx, args.Method, args.URL, reqBody)
 	if err != nil {

@@ -241,6 +241,47 @@ func TestExecute_PostWithBody(t *testing.T) {
 	}
 }
 
+func TestBodyForRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		in         string
+		wantNil    bool
+		wantString string
+	}{
+		{name: "empty body yields a nil reader", in: "", wantNil: true, wantString: ""},
+		{name: "non-empty body yields both representations", in: `{"a":1}`, wantNil: false, wantString: `{"a":1}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			reader, s := bodyForRequest(tt.in)
+
+			if (reader == nil) != tt.wantNil {
+				t.Errorf("reader nil = %v, want %v", reader == nil, tt.wantNil)
+			}
+
+			if s != tt.wantString {
+				t.Errorf("string = %q, want %q", s, tt.wantString)
+			}
+
+			if reader != nil {
+				got, err := io.ReadAll(reader)
+				if err != nil {
+					t.Fatalf("read: %v", err)
+				}
+
+				if string(got) != tt.wantString {
+					t.Errorf("reader contents = %q, want %q", got, tt.wantString)
+				}
+			}
+		})
+	}
+}
+
 func TestExecute_QueryParams(t *testing.T) {
 	t.Parallel()
 
