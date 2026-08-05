@@ -286,12 +286,12 @@ func githubDialAllowed(ip netip.Addr) bool {
 // AuditResponse compares GitHub's authoritative required-permission header against
 // our classified level and logs a one-line drift warning when read may have been
 // insufficient. Advisory only; never blocks or consumes the body.
-func (p *githubProvider) AuditResponse(req *http.Request, header http.Header) {
+func (p *githubProvider) AuditResponse(v authreq.AuditView, header http.Header) {
 	accepted := header.Get("X-Accepted-Github-Permissions")
 	if accepted == "" {
 		return
 	}
-	level, err := githubhardening.RequiredLevel(req.Method, req.URL.EscapedPath())
+	level, err := githubhardening.RequiredLevel(v.Method, v.EscapedPath)
 	if err != nil {
 		return
 	}

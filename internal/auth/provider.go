@@ -291,19 +291,19 @@ func AuthorizeAction(
 // X-Accepted-GitHub-Permissions header against the classified access level). It
 // must not block and must not consume the body.
 type ResponseAuditor interface {
-	AuditResponse(req *http.Request, header http.Header)
+	AuditResponse(v authreq.AuditView, header http.Header)
 }
 
 // AuditResponse dispatches a post-response audit to the named provider when it
 // implements ResponseAuditor. It is best-effort: unknown provider or no
 // capability is a silent no-op (auditing never affects the response).
-func AuditResponse(name string, req *http.Request, header http.Header, providers []Provider) {
+func AuditResponse(name string, v authreq.AuditView, header http.Header, providers []Provider) {
 	p, err := find(providers, name)
 	if err != nil {
 		return
 	}
 	if ra, ok := p.(ResponseAuditor); ok {
-		ra.AuditResponse(req, header)
+		ra.AuditResponse(v, header)
 	}
 }
 

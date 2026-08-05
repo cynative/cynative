@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	"github.com/cynative/cynative/internal/cache"
@@ -41,7 +42,8 @@ func testGithubProvider(
 func okFetch(context.Context) ([]byte, error) { return []byte(provFixtureOpenAPI), nil }
 
 // getReq builds a GET request for the paths that still need a live request
-// (InjectAuth, AuditResponse); the action gate takes a view instead.
+// (InjectAuth, and AuditResponse's view projection); the action gate takes a
+// view instead.
 func getReq(t *testing.T, rawurl string) *http.Request {
 	t.Helper()
 	r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawurl, nil)
@@ -160,7 +162,7 @@ func TestGithubProvider_AuditResponse_nilErrOut(t *testing.T) {
 	p.errOut = nil // nil writer — out() must substitute io.Discard, no panic.
 	h := http.Header{}
 	h.Set("X-Accepted-Github-Permissions", "issues=write") // GET classified read but GitHub wants write → drift.
-	p.AuditResponse(getReq(t, "https://api.github.com/repos/o/r/issues/1"), h)
+	p.AuditResponse(authreq.NewAuditView(getReq(t, "https://api.github.com/repos/o/r/issues/1")), h)
 }
 
 func TestGithubProvider_downloadHostGetOnly(t *testing.T) {
@@ -278,7 +280,7 @@ func TestGithubProvider_AuditResponse_drift(t *testing.T) {
 	p, buf := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	h := http.Header{}
 	h.Set("X-Accepted-Github-Permissions", "issues=write") // GET classified read but GitHub wants write.
-	p.AuditResponse(getReq(t, "https://api.github.com/repos/o/r/issues/1"), h)
+	p.AuditResponse(authreq.NewAuditView(getReq(t, "https://api.github.com/repos/o/r/issues/1")), h)
 	if !strings.Contains(buf.String(), "github_hardening") {
 		t.Errorf("expected drift warning, got %q", buf.String())
 	}
@@ -289,13 +291,13 @@ func TestGithubProvider_AuditResponse_noop(t *testing.T) {
 
 	p, buf := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	// No header → nothing logged.
-	p.AuditResponse(getReq(t, "https://api.github.com/user"), http.Header{})
+	p.AuditResponse(authreq.NewAuditView(getReq(t, "https://api.github.com/user")), http.Header{})
 	// Unrecognized method → RequiredLevel errors → nothing logged.
 	bad := getReq(t, "https://api.github.com/user")
 	bad.Method = "WAT"
 	withHdr := http.Header{}
 	withHdr.Set("X-Accepted-Github-Permissions", "issues=write")
-	p.AuditResponse(bad, withHdr)
+	p.AuditResponse(authreq.NewAuditView(bad), withHdr)
 	if buf.Len() != 0 {
 		t.Errorf("expected no audit output, got %q", buf.String())
 	}
@@ -315,17 +317,17 @@ func (plainProvider) AuthorizesHost(context.Context, string, json.RawMessage) (b
 func TestAuditResponse_dispatcher(t *testing.T) {
 	t.Parallel()
 
-	r := getReq(t, "https://api.github.com/repos/o/r/issues/1")
+	v := authreq.NewAuditView(getReq(t, "https://api.github.com/repos/o/r/issues/1"))
 	// Unknown provider name → silent no-op (find returns an error).
-	AuditResponse("nonexistent", r, http.Header{}, nil)
+	AuditResponse("nonexistent", v, http.Header{}, nil)
 	// Found but not a ResponseAuditor → silent no-op (assertion fails).
-	AuditResponse("plain", r, http.Header{}, []Provider{plainProvider{}})
+	AuditResponse("plain", v, http.Header{}, []Provider{plainProvider{}})
 
 	// Found AND a ResponseAuditor → the audit runs (drift warning emitted).
 	gh, buf := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	h := http.Header{}
 	h.Set("X-Accepted-Github-Permissions", "issues=write")
-	AuditResponse("github", r, h, []Provider{gh})
+	AuditResponse("github", v, h, []Provider{gh})
 	if !strings.Contains(buf.String(), "github_hardening") {
 		t.Errorf("dispatcher must run the auditor, got %q", buf.String())
 	}

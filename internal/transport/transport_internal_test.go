@@ -2319,7 +2319,7 @@ type auditProvider struct {
 	audited bool
 }
 
-func (a *auditProvider) AuditResponse(_ *http.Request, _ http.Header) { a.audited = true }
+func (a *auditProvider) AuditResponse(_ authreq.AuditView, _ http.Header) { a.audited = true }
 
 func TestExecute_invokesResponseAuditor(t *testing.T) {
 	t.Parallel()

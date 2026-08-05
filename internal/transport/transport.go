@@ -270,7 +270,7 @@ func (c *Client) do(
 	// Post-response, advisory: lets a provider compare the response against its
 	// classification (e.g. GitHub's X-Accepted-GitHub-Permissions). No-op for
 	// providers without the capability; never blocks, never consumes the body.
-	auth.AuditResponse(args.AuthProvider, req, resp.Header, providers)
+	auth.AuditResponse(args.AuthProvider, authreq.NewAuditView(req), resp.Header, providers)
 
 	return resp, args.MaxResponseBodySize, cleanup, nil
 }
