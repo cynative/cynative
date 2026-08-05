@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // buildProvider builds a Provider wired with a catalog that carries the full
@@ -53,7 +55,7 @@ func gcpArgs(t *testing.T, svc string) json.RawMessage {
 	return b
 }
 
-func httpReq(t *testing.T, method, rawurl string) *http.Request {
+func providerView(t *testing.T, method, rawurl string) authreq.View {
 	t.Helper()
 
 	u, err := url.Parse(rawurl)
@@ -61,7 +63,7 @@ func httpReq(t *testing.T, method, rawurl string) *http.Request {
 		t.Fatalf("url: %v", err)
 	}
 
-	return (&http.Request{Method: method, URL: u, Header: http.Header{}}).WithContext(context.Background())
+	return authreq.NewView(&http.Request{Method: method, URL: u, Header: http.Header{}}, "")
 }
 
 func TestProviderAuthorizeActionAllowRead(t *testing.T) {
@@ -71,7 +73,7 @@ func TestProviderAuthorizeActionAllowRead(t *testing.T) {
 
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 		gcpArgs(t, "compute"),
 	); err != nil {
 		t.Fatalf("allowed read errored: %v", err)
@@ -86,7 +88,7 @@ func TestProviderAuthorizeActionDenyWrite(t *testing.T) {
 	// DELETE is a write — PermissionResolver returns SourceNone → ErrPermissionUnresolved.
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "DELETE", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i"),
+		providerView(t, "DELETE", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i"),
 		gcpArgs(t, "compute"),
 	)
 	if !errors.Is(err, ErrPermissionUnresolved) && !errors.Is(err, ErrPermissionDenied) {
@@ -102,7 +104,7 @@ func TestProviderAuthorizeActionMissingGCPAuth(t *testing.T) {
 	// {} has no gcp_auth key → nil struct → explicit error (A15).
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 		json.RawMessage(`{}`),
 	); err == nil {
 		t.Fatal("missing gcp_auth should error")
@@ -117,7 +119,7 @@ func TestProviderAuthorizeActionUnknownHost(t *testing.T) {
 	// madeupservice is not in the catalog → fail closed.
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://madeupservice.googleapis.com/x"),
+		providerView(t, "GET", "https://madeupservice.googleapis.com/x"),
 		gcpArgs(t, "madeupservice"),
 	); err == nil {
 		t.Fatal("unknown host should fail closed")
@@ -146,7 +148,7 @@ func TestProviderAuthorizeActionPermissionDenied(t *testing.T) {
 
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 		gcpArgs(t, "compute"),
 	)
 	if !errors.Is(err, ErrPermissionDenied) {
@@ -164,7 +166,7 @@ func TestProviderAuthorizeActionWWWPath(t *testing.T) {
 	// oauth2.tokeninfo is permissionless → should succeed.
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://www.googleapis.com/oauth2/v2/tokeninfo"),
+		providerView(t, "GET", "https://www.googleapis.com/oauth2/v2/tokeninfo"),
 		gcpArgs(t, "oauth2"),
 	); err != nil {
 		t.Fatalf("www-path oauth2 tokeninfo should succeed, got %v", err)
@@ -182,7 +184,7 @@ func TestProviderAuthorizeActionWWWClaimMismatch(t *testing.T) {
 	// Path resolves to "oauth2" (servicePath oauth2/v2/) but claim says "storage".
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://www.googleapis.com/oauth2/v2/tokeninfo"),
+		providerView(t, "GET", "https://www.googleapis.com/oauth2/v2/tokeninfo"),
 		gcpArgs(t, "storage"),
 	)
 	if !errors.Is(err, ErrHostClaimMismatch) {
@@ -198,7 +200,7 @@ func TestProviderAuthorizeActionWWWPathUnknown(t *testing.T) {
 	// www.googleapis.com path does not match any servicePath → fail closed.
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://www.googleapis.com/notaservice/v9/x"),
+		providerView(t, "GET", "https://www.googleapis.com/notaservice/v9/x"),
 		gcpArgs(t, "notaservice"),
 	); err == nil {
 		t.Fatal("unknown www path should fail closed")
@@ -212,7 +214,7 @@ func TestProviderAuthorizeActionBadJSON(t *testing.T) {
 
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 		json.RawMessage(`not json`),
 	); err == nil {
 		t.Fatal("bad JSON should error")
@@ -233,7 +235,7 @@ func TestProviderAuthorizeActionNonCatalogWWW(t *testing.T) {
 
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://www.googleapis.com/oauth2/v2/tokeninfo"),
+		providerView(t, "GET", "https://www.googleapis.com/oauth2/v2/tokeninfo"),
 		gcpArgs(t, "oauth2"),
 	); !errors.Is(err, ErrHostPattern) {
 		t.Fatalf("non-catalog www should return ErrHostPattern, got %v", err)
@@ -248,7 +250,7 @@ func TestProviderAuthorizeActionBadHost(t *testing.T) {
 	// localhost is rejected by ParseHost (SSRF guard) → line 84 error branch.
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://localhost/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://localhost/compute/v1/projects/p/zones/z/instances"),
 		gcpArgs(t, "compute"),
 	); err == nil {
 		t.Fatal("localhost host should fail closed")
@@ -284,7 +286,7 @@ func TestProviderAuthorizeActionMethodIndexError(t *testing.T) {
 
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 		gcpArgs(t, "compute"),
 	)
 	if err == nil {
@@ -314,7 +316,7 @@ func TestProviderAuthorizeActionClassifyError(t *testing.T) {
 
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 		gcpArgs(t, "compute"),
 	)
 	if !errors.Is(err, ErrClassifierUnknownOp) {
@@ -439,7 +441,7 @@ func TestProviderAuthorizeActionCRMProjectsListV1Allowed(t *testing.T) {
 	} {
 		if aerr := p.AuthorizeAction(
 			context.Background(),
-			httpReq(t, "GET", path),
+			providerView(t, "GET", path),
 			gcpArgs(t, "cloudresourcemanager"),
 		); aerr != nil {
 			t.Errorf("AuthorizeAction(%s) under a granting role should be authorized, got %v", path, aerr)
@@ -459,7 +461,7 @@ func TestProviderAuthorizeActionCRMProjectsListAllowed(t *testing.T) {
 	})
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
+		providerView(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
 		gcpArgs(t, "cloudresourcemanager"),
 	); err != nil {
 		t.Fatalf("projects.list under a granting role should be authorized, got %v", err)
@@ -480,7 +482,7 @@ func TestProviderAuthorizeActionCRMProjectsListRequiresGet(t *testing.T) {
 	p := buildCRMProvider(t, map[string]bool{"resourcemanager.projects.list": true}) // .list but NOT .get.
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
+		providerView(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
 		gcpArgs(t, "cloudresourcemanager"),
 	)
 	if !errors.Is(err, ErrPermissionDenied) {
@@ -496,7 +498,7 @@ func TestProviderAuthorizeActionCRMProjectsListDenied(t *testing.T) {
 	p := buildCRMProvider(t, map[string]bool{})
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
+		providerView(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects"),
 		gcpArgs(t, "cloudresourcemanager"),
 	)
 	if !errors.Is(err, ErrPermissionDenied) {
@@ -511,7 +513,7 @@ func TestProviderAuthorizeActionCRMProjectsSearchAllowed(t *testing.T) {
 	p := buildCRMProvider(t, map[string]bool{"resourcemanager.projects.get": true})
 	if err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects:search"),
+		providerView(t, "GET", "https://cloudresourcemanager.googleapis.com/v3/projects:search"),
 		gcpArgs(t, "cloudresourcemanager"),
 	); err != nil {
 		t.Fatalf("projects.search under a granting role should be authorized, got %v", err)
@@ -533,7 +535,7 @@ func TestProviderAuthorizeActionCRMHierarchySearchDenied(t *testing.T) {
 	} {
 		err := p.AuthorizeAction(
 			context.Background(),
-			httpReq(t, "GET", path),
+			providerView(t, "GET", path),
 			gcpArgs(t, "cloudresourcemanager"),
 		)
 		if !errors.Is(err, ErrPermissionDenied) {
@@ -632,7 +634,7 @@ func TestProviderAuthorizeActionContainerReadsAllowed(t *testing.T) {
 	} {
 		if err := p.AuthorizeAction(
 			context.Background(),
-			httpReq(t, "GET", path),
+			providerView(t, "GET", path),
 			gcpArgs(t, "container"),
 		); err != nil {
 			t.Errorf("AuthorizeAction(%s) under roles/viewer grants should be authorized, got %v", path, err)
@@ -650,7 +652,7 @@ func TestProviderAuthorizeActionContainerNodePoolsNeedsClusterGet(t *testing.T) 
 	p := buildContainerProvider(t, map[string]bool{"container.clusters.list": true}) // .list but NOT .get.
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(
+		providerView(
 			t,
 			"GET",
 			"https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c/nodePools",
@@ -701,7 +703,7 @@ func TestProviderAuthorizeActionContainerMappingsAreDistinct(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			p := buildContainerProvider(t, map[string]bool{tc.granted: true})
-			err := p.AuthorizeAction(context.Background(), httpReq(t, "GET", tc.url), gcpArgs(t, "container"))
+			err := p.AuthorizeAction(context.Background(), providerView(t, "GET", tc.url), gcpArgs(t, "container"))
 			if !errors.Is(err, ErrPermissionDenied) {
 				t.Fatalf("%s: want ErrPermissionDenied, got %v", tc.name, err)
 			}
@@ -718,7 +720,7 @@ func TestProviderAuthorizeActionContainerReadDenied(t *testing.T) {
 	p := buildContainerProvider(t, map[string]bool{})
 	err := p.AuthorizeAction(
 		context.Background(),
-		httpReq(t, "GET", "https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c"),
+		providerView(t, "GET", "https://container.googleapis.com/v1/projects/p/locations/us-central1-a/clusters/c"),
 		gcpArgs(t, "container"),
 	)
 	if !errors.Is(err, ErrPermissionDenied) {

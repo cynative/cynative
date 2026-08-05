@@ -11,6 +11,8 @@ import (
 	"golang.org/x/oauth2"
 	container "google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 const gkeProviderName = "gke"
@@ -154,13 +156,13 @@ func (p *gkeProvider) resolveCluster(ctx context.Context, args *GKEAuthArgs) (cl
 // AuthorizeAction enforces the read-only ClusterRole posture for GKE Kubernetes API
 // requests via the shared k8sGate. It implements the optional
 // auth.ActionAuthorizer interface.
-func (p *gkeProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *gkeProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	args, err := parseGKEArgs(rawArgs)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, req, args)
+	return p.authorizeAction(ctx, v, args)
 }
 
 func (p *gkeProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error) {

@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // Provider is the composed pure Layer-2 provider that internal/auth/gcp.go
@@ -48,7 +49,7 @@ type gcpArgsShape struct {
 // For www.googleapis.com, the service is resolved from the PATH (via
 // resolveService) and then verified against the gcp_auth.service claim here —
 // because Layer 3 (AuthorizesHost) cannot do that check without the path.
-func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	var args gcpArgsShape
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
 		return fmt.Errorf("gcp_hardening: parse gcp_auth: %w", err)
@@ -58,10 +59,9 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 		return errors.New("gcp_hardening: gcp_auth.service is required")
 	}
 
-	host := strings.ToLower(req.URL.Hostname())
-	isWWW := host == wwwGoogleapisHost
+	isWWW := v.Hostname == wwwGoogleapisHost
 
-	service, err := p.resolveService(ctx, req)
+	service, err := p.resolveService(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 		return err
 	}
 
-	methodID, err := Classify(idx, req)
+	methodID, err := Classify(idx, v)
 	if err != nil {
 		return err
 	}
@@ -100,22 +100,20 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 
 // resolveService derives the service from the request HOST only, handling the
 // www.googleapis.com compound case by falling back to path-based resolution.
-func (p *Provider) resolveService(ctx context.Context, req *http.Request) (string, error) {
-	host := strings.ToLower(req.URL.Hostname())
-
-	parsed, err := ParseHost(host)
+func (p *Provider) resolveService(ctx context.Context, v authreq.View) (string, error) {
+	parsed, err := ParseHost(v.Hostname)
 	if err != nil {
 		return "", err
 	}
 
 	if parsed.Service == wwwCompoundSentinel {
-		svc, ok := p.catalog.ResolveWWWService(ctx, req.URL.Path)
+		svc, ok := p.catalog.ResolveWWWService(ctx, v.Path)
 		if !ok {
-			return "", fmt.Errorf("%w: %q (www path service not in catalog)", ErrHostPattern, req.URL.Path)
+			return "", fmt.Errorf("%w: %q (www path service not in catalog)", ErrHostPattern, v.Path)
 		}
 
 		return svc, nil
 	}
 
-	return p.catalog.ResolveService(ctx, parsed, host)
+	return p.catalog.ResolveService(ctx, parsed, v.Hostname)
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cynative/cynative/internal/auth"
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/redact"
 )
 
@@ -144,6 +145,21 @@ type Response struct {
 	Truncated  bool                `json:"truncated"`
 }
 
+// bodyForRequest derives the two representations of a request body from one
+// value: the reader net/http sends, and the string the authorization gates
+// judge. Both come from here so no edit can change one and miss the other.
+//
+// An empty body yields a nil reader rather than an empty [strings.Reader],
+// preserving what the code this replaced did: net/http leaves the request body
+// nil, and the SigV4 payload hash takes its empty-payload path.
+func bodyForRequest(body string) (io.Reader, string) {
+	if body == "" {
+		return nil, ""
+	}
+
+	return strings.NewReader(body), body
+}
+
 // do parses arguments, clamps limits, builds and sends the HTTP request, and
 // returns the live [*http.Response], the clamped max-bytes limit, and a cleanup
 // func that releases the per-request transport's idle connections. cleanup is
@@ -178,10 +194,7 @@ func (c *Client) do(
 		return nil, 0, noop, fmt.Errorf("auth_provider is required (available: %s)", providerNames(providers))
 	}
 
-	var reqBody io.Reader
-	if args.Body != "" {
-		reqBody = strings.NewReader(args.Body)
-	}
+	reqBody, viewBody := bodyForRequest(args.Body)
 
 	req, err := http.NewRequestWithContext(ctx, args.Method, args.URL, reqBody)
 	if err != nil {
@@ -218,11 +231,13 @@ func (c *Client) do(
 	// so it is computed once here.
 	rawArgs := json.RawMessage(arguments)
 
+	v := authreq.NewView(req, viewBody)
+
 	if hostErr := auth.AuthorizeHost(ctx, args.AuthProvider, req.URL.Hostname(), providers, rawArgs); hostErr != nil {
 		return nil, 0, noop, hostErr
 	}
 
-	if actionErr := auth.AuthorizeAction(ctx, args.AuthProvider, req, providers, rawArgs); actionErr != nil {
+	if actionErr := auth.AuthorizeAction(ctx, args.AuthProvider, v, providers, rawArgs); actionErr != nil {
 		return nil, 0, noop, actionErr
 	}
 
@@ -255,7 +270,7 @@ func (c *Client) do(
 	// Post-response, advisory: lets a provider compare the response against its
 	// classification (e.g. GitHub's X-Accepted-GitHub-Permissions). No-op for
 	// providers without the capability; never blocks, never consumes the body.
-	auth.AuditResponse(args.AuthProvider, req, resp.Header, providers)
+	auth.AuditResponse(args.AuthProvider, authreq.NewAuditView(req), resp.Header, providers)
 
 	return resp, args.MaxResponseBodySize, cleanup, nil
 }

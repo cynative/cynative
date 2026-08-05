@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // providerFakeCatalog wires both ResourceTypes (for derivation) and
@@ -90,13 +92,13 @@ func azArgs(t *testing.T, service string) json.RawMessage {
 	return b
 }
 
-func areq(t *testing.T, method, rawurl string) *http.Request {
+func providerView(t *testing.T, method, rawurl string) authreq.View {
 	t.Helper()
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		t.Fatalf("url: %v", err)
 	}
-	return (&http.Request{Method: method, URL: u, Header: http.Header{}}).WithContext(context.Background())
+	return authreq.NewView(&http.Request{Method: method, URL: u, Header: http.Header{}}, "")
 }
 
 func TestProviderAuthorizeAction(t *testing.T) {
@@ -149,7 +151,7 @@ func TestProviderAuthorizeAction(t *testing.T) {
 			t.Parallel()
 
 			p := buildProvider(t)
-			err := p.AuthorizeAction(context.Background(), areq(t, tc.method, tc.url), azArgs(t, tc.service))
+			err := p.AuthorizeAction(context.Background(), providerView(t, tc.method, tc.url), azArgs(t, tc.service))
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("AuthorizeAction err = %v, want %v", err, tc.wantErr)
@@ -167,9 +169,15 @@ func TestProviderMissingAzureAuth(t *testing.T) {
 	t.Parallel()
 
 	p := buildProvider(t)
-	if err := p.AuthorizeAction(context.Background(),
-		areq(t, "GET", "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines"),
-		json.RawMessage(`{}`)); err == nil {
+	if err := p.AuthorizeAction(
+		context.Background(),
+		providerView(
+			t,
+			"GET",
+			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines",
+		),
+		json.RawMessage(`{}`),
+	); err == nil {
 		t.Fatal("missing azure_auth must error")
 	}
 }
@@ -178,9 +186,15 @@ func TestProviderInvalidJSON(t *testing.T) {
 	t.Parallel()
 
 	p := buildProvider(t)
-	err := p.AuthorizeAction(context.Background(),
-		areq(t, "GET", "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines"),
-		json.RawMessage(`not-json`))
+	err := p.AuthorizeAction(
+		context.Background(),
+		providerView(
+			t,
+			"GET",
+			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines",
+		),
+		json.RawMessage(`not-json`),
+	)
 	if err == nil {
 		t.Fatal("invalid JSON must error")
 	}
@@ -205,9 +219,15 @@ func TestProviderValidateActionError(t *testing.T) {
 	eval := NewRoleEvaluator(RolePermissions{Actions: []string{"*/read"}})
 	p := NewProvider(cat, eval, "Reader")
 
-	err := p.AuthorizeAction(context.Background(),
-		areq(t, "GET", "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines"),
-		azArgs(t, "Microsoft.Compute"))
+	err := p.AuthorizeAction(
+		context.Background(),
+		providerView(
+			t,
+			"GET",
+			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines",
+		),
+		azArgs(t, "Microsoft.Compute"),
+	)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Fatalf("expected ErrActionUnresolved, got %v", err)
 	}

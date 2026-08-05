@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
 )
 
@@ -257,7 +258,7 @@ type fakeHardeningProvider struct {
 	retErr error
 }
 
-func (f *fakeHardeningProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (f *fakeHardeningProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	f.called = true
 	return f.retErr
 }
@@ -275,10 +276,10 @@ func TestGCPAuthorizeAction_Delegates(t *testing.T) {
 		return nil
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://compute.googleapis.com/", nil)
+	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/")
 	if err := p.AuthorizeAction(
 		context.Background(),
-		req,
+		v,
 		json.RawMessage(`{"gcp_auth":{"service":"compute"}}`),
 	); err != nil {
 		t.Fatalf("AuthorizeAction = %v", err)
@@ -292,8 +293,8 @@ func TestGCPAuthorizeAction_LazyError(t *testing.T) {
 	t.Parallel()
 	p := newTestGCPProviderLazyErr("init-failed")
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://compute.googleapis.com/", nil)
-	if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{}`)); err == nil {
+	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/")
+	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
 		t.Error("AuthorizeAction should error when lazy init fails")
 	}
 }
@@ -310,8 +311,8 @@ func TestGCPAuthorizeAction_NilHardening(t *testing.T) {
 		return nil
 	}
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://compute.googleapis.com/", nil)
-	if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{}`)); err == nil {
+	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/")
+	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
 		t.Error("AuthorizeAction should error when hardeningAction is nil")
 	}
 }

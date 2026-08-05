@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 	"github.com/cynative/cynative/internal/cache"
@@ -198,13 +199,25 @@ func (p *gitlabProvider) expectedPort() string {
 // hostname, so without this gate a model could target a different TLS port on the
 // pinned host or IP and have the injected Bearer token attached under an unpinned
 // port.
-func (p *gitlabProvider) authorizeRequestPort(req *http.Request) error {
+func (p *gitlabProvider) authorizeRequestPort(v authreq.View) error {
 	want := p.expectedPort()
-	if got := portOfAuthority(req.URL.Host); got != want {
+	if got := defaultedPort(v.Port); got != want {
 		return fmt.Errorf("%w: request port %s does not match configured GitLab port %s (provider gitlab)",
 			ErrHostNotAuthorized, got, want)
 	}
 	return nil
+}
+
+// defaultedPort returns port, or "443" (the https default) when empty. The view
+// reports an absent port as "", and [net/http] normalizes an explicit-but-empty
+// port to the same thing before any gate runs, so "" here means "no port given"
+// exactly as portOfAuthority's error branch did.
+func defaultedPort(port string) string {
+	if port == "" {
+		return "443"
+	}
+
+	return port
 }
 
 // Description returns a human-readable description of the provider's posture. It
@@ -271,11 +284,11 @@ var errGitLabSudoBlocked = errors.New(
 // "Sudo" header — admin-token impersonation, blocked regardless of exposure),
 // or the "token" query parameter that GitLab's pipeline-trigger endpoints
 // authenticate with (a smuggled credential alongside the injected Bearer).
-func rejectGitLabSmuggledControls(req *http.Request) error {
-	// Parse RawQuery explicitly and fail closed on error: req.URL.Query() silently
-	// drops pairs on a ";"-separated query that GitLab/Rack still honors, which
-	// would hide a smuggled sudo/token parameter.
-	params, err := url.ParseQuery(req.URL.RawQuery)
+func rejectGitLabSmuggledControls(v authreq.View) error {
+	// Parse RawQuery explicitly and fail closed on error: a lenient parse
+	// silently drops pairs on a ";"-separated query that GitLab/Rack still
+	// honors, which would hide a smuggled sudo/token parameter.
+	params, err := url.ParseQuery(v.RawQuery)
 	if err != nil {
 		return fmt.Errorf("%w: unparseable URL query (provider gitlab): %w", ErrModelSuppliedCredential, err)
 	}
@@ -287,7 +300,7 @@ func rejectGitLabSmuggledControls(req *http.Request) error {
 			return fmt.Errorf("%w: token query parameter present (provider gitlab)", ErrModelSuppliedCredential)
 		}
 	}
-	for key := range req.Header {
+	for key := range v.Header {
 		if strings.EqualFold(key, "Sudo") {
 			return fmt.Errorf("%w (Sudo header)", errGitLabSudoBlocked)
 		}
@@ -418,25 +431,17 @@ func bodyMultipartHasCredential(body string) bool {
 // permits that level. A request that cannot be classified (any
 // non-/api/v4 path fails closed here), a missing table, an unknown configured key,
 // or an exceeded ceiling all fail closed. Runs before InjectAuth.
-func (p *gitlabProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
-	if err := rejectGitLabSmuggledControls(req); err != nil {
+func (p *gitlabProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ json.RawMessage) error {
+	if err := rejectGitLabSmuggledControls(v); err != nil {
 		return err
 	}
-	if err := p.authorizeRequestPort(req); err != nil {
+	if err := p.authorizeRequestPort(v); err != nil {
 		return err
 	}
-	if gitlabclass.IsGraphQLEndpoint(req.URL.EscapedPath()) {
-		return fmt.Errorf("%w: %s", gitlabclass.ErrGraphQLUnsupported, req.URL.EscapedPath())
+	if gitlabclass.IsGraphQLEndpoint(v.EscapedPath) {
+		return fmt.Errorf("%w: %s", gitlabclass.ErrGraphQLUnsupported, v.EscapedPath)
 	}
-	var parsed struct {
-		Body string `json:"body"`
-	}
-	if len(rawArgs) > 0 {
-		if err := json.Unmarshal(rawArgs, &parsed); err != nil {
-			return fmt.Errorf("failed to parse http_request args for classification: %w", err)
-		}
-	}
-	if err := rejectGitLabBodyCredential(parsed.Body); err != nil {
+	if err := rejectGitLabBodyCredential(v.Body); err != nil {
 		return err
 	}
 
@@ -450,15 +455,15 @@ func (p *gitlabProvider) AuthorizeAction(ctx context.Context, req *http.Request,
 		return err
 	}
 
-	// Classify on the ESCAPED path: req.URL.Path is percent-decoded, so a write to
-	// a repository-files path whose encoded segment decodes to end with a
+	// Classify on the ESCAPED path: the decoded path is percent-decoded, so a
+	// write to a repository-files path whose encoded segment decodes to end with a
 	// read-only endpoint (e.g. .../files/x%2Fapi%2Fv4%2Fmarkdown) would otherwise
-	// forge the read suffix; EscapedPath keeps %2F encoded so only real endpoints
-	// match. The variables→ci-variables override lives at distill-time (over the
-	// trusted spec template), so a "variables" value in a path PARAMETER does not
-	// inherit the sensitive ceiling here.
-	escaped := req.URL.EscapedPath()
-	access, cerr := gitlabclass.ClassifyRequest(table, req.Method, escaped)
+	// forge the read suffix; the escaped path keeps %2F encoded so only real
+	// endpoints match. The variables→ci-variables override lives at distill-time
+	// (over the trusted spec template), so a "variables" value in a path PARAMETER
+	// does not inherit the sensitive ceiling here.
+	escaped := v.EscapedPath
+	access, cerr := gitlabclass.ClassifyRequest(table, v.Method, escaped)
 	if cerr != nil {
 		return cerr
 	}
@@ -466,7 +471,7 @@ func (p *gitlabProvider) AuthorizeAction(ctx context.Context, req *http.Request,
 	ceiling := gitlabclass.Resolve(p.exposure, category)
 	if !exposure.Allows(ceiling, access.Level) {
 		return fmt.Errorf("%w: %s %s needs %s on %q (ceiling %s)",
-			gitlabclass.ErrExposureExceeded, req.Method, escaped,
+			gitlabclass.ErrExposureExceeded, v.Method, escaped,
 			exposure.LevelName(access.Level), category, exposure.LevelName(ceiling))
 	}
 	return nil

@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4signer "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 )
 
@@ -173,14 +174,14 @@ func signingRegion(awsArgs *AWSAuthArgs, req *http.Request, sdkRegion string) st
 
 // AuthorizeAction implements the auth.ActionAuthorizer optional interface,
 // delegating to the composed awshardening.Provider.
-func (p *awsProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *awsProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
 	if p.actionProvider == nil {
 		return errors.New("aws_hardening: action authorizer not initialized")
 	}
-	return p.actionProvider.AuthorizeAction(ctx, req, rawArgs)
+	return p.actionProvider.AuthorizeAction(ctx, v, rawArgs)
 }
 
 func (p *awsProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {

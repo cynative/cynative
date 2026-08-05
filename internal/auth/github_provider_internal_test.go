@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	"github.com/cynative/cynative/internal/cache"
@@ -40,9 +41,12 @@ func testGithubProvider(
 
 func okFetch(context.Context) ([]byte, error) { return []byte(provFixtureOpenAPI), nil }
 
-func req(t *testing.T, method, rawurl string) *http.Request {
+// getReq builds a GET request for the paths that still need a live request
+// (InjectAuth, and AuditResponse's view projection); the action gate takes a
+// view instead.
+func getReq(t *testing.T, rawurl string) *http.Request {
 	t.Helper()
-	r, err := http.NewRequestWithContext(context.Background(), method, rawurl, nil)
+	r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawurl, nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -80,7 +84,7 @@ func TestGithubProvider_AuthorizeAction(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			p, _ := testGithubProvider(t, c.exposure, okFetch)
-			err := p.AuthorizeAction(context.Background(), req(t, c.method, c.url), nil)
+			err := p.AuthorizeAction(context.Background(), actionView(t, c.method, c.url), nil)
 			if c.wantErr == nil && err != nil {
 				t.Fatalf("AuthorizeAction = %v, want nil", err)
 			}
@@ -100,7 +104,7 @@ func TestGithubProvider_AuthorizeAction_unknownKeyFatal(t *testing.T) {
 		exposure.Exposure{"default": exposure.LevelWrite, "issuez": exposure.LevelNone},
 	)
 	p, _ := testGithubProvider(t, exp, okFetch)
-	err := p.AuthorizeAction(context.Background(), req(t, "GET", "https://api.github.com/user"), nil)
+	err := p.AuthorizeAction(context.Background(), actionView(t, "GET", "https://api.github.com/user"), nil)
 	if !errors.Is(err, githubhardening.ErrUnknownKey) {
 		t.Fatalf("AuthorizeAction = %v, want ErrUnknownKey", err)
 	}
@@ -112,10 +116,7 @@ func TestGithubAuthorizeAction_DeniesGraphQL(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			t.Parallel()
 			p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
-			req, _ := http.NewRequestWithContext(
-				context.Background(), method, "https://api.github.com/graphql", nil,
-			)
-			err := p.AuthorizeAction(context.Background(), req, nil)
+			err := p.AuthorizeAction(context.Background(), actionView(t, method, "https://api.github.com/graphql"), nil)
 			if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
 				t.Fatalf("AuthorizeAction(%s /graphql) err = %v, want ErrGraphQLUnsupported", method, err)
 			}
@@ -131,10 +132,11 @@ func TestGithubAuthorizeAction_DeniesGraphQL(t *testing.T) {
 func TestGithubAuthorizeAction_EncodedGraphQLFailsClosed(t *testing.T) {
 	t.Parallel()
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
-	req, _ := http.NewRequestWithContext(
-		context.Background(), http.MethodPost, "https://api.github.com/%67raphql", nil,
+	err := p.AuthorizeAction(
+		context.Background(),
+		actionView(t, http.MethodPost, "https://api.github.com/%67raphql"),
+		nil,
 	)
-	err := p.AuthorizeAction(context.Background(), req, nil)
 	if !errors.Is(err, githubhardening.ErrUnclassifiable) {
 		t.Fatalf("AuthorizeAction(POST /%%67raphql) err = %v, want ErrUnclassifiable (fail-closed)", err)
 	}
@@ -145,7 +147,7 @@ func TestGithubProvider_notReadyWhenNoTable(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(),
 		func(context.Context) ([]byte, error) { return nil, errors.New("offline") })
-	err := p.AuthorizeAction(context.Background(), req(t, "GET", "https://api.github.com/user"), nil)
+	err := p.AuthorizeAction(context.Background(), actionView(t, "GET", "https://api.github.com/user"), nil)
 	if !errors.Is(err, githubhardening.ErrTableNotReady) {
 		t.Fatalf("AuthorizeAction = %v, want ErrTableNotReady", err)
 	}
@@ -160,7 +162,7 @@ func TestGithubProvider_AuditResponse_nilErrOut(t *testing.T) {
 	p.errOut = nil // nil writer — out() must substitute io.Discard, no panic.
 	h := http.Header{}
 	h.Set("X-Accepted-Github-Permissions", "issues=write") // GET classified read but GitHub wants write → drift.
-	p.AuditResponse(req(t, "GET", "https://api.github.com/repos/o/r/issues/1"), h)
+	p.AuditResponse(authreq.NewAuditView(getReq(t, "https://api.github.com/repos/o/r/issues/1")), h)
 }
 
 func TestGithubProvider_downloadHostGetOnly(t *testing.T) {
@@ -168,19 +170,19 @@ func TestGithubProvider_downloadHostGetOnly(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	if err := p.AuthorizeAction(
-		context.Background(), req(t, "GET", "https://codeload.github.com/o/r/tarball/main"), nil,
+		context.Background(), actionView(t, "GET", "https://codeload.github.com/o/r/tarball/main"), nil,
 	); err != nil {
 		t.Errorf("download GET = %v, want nil", err)
 	}
-	// net/url preserves host case, so effectiveDownloadHost must lower-case the
-	// hostname before matching it against the download-host set.
+	// The view lower-cases the hostname at projection, so a mixed-case authority
+	// still matches the download-host set.
 	if err := p.AuthorizeAction(
-		context.Background(), req(t, "GET", "https://CODELOAD.GitHub.com/o/r/tarball/main"), nil,
+		context.Background(), actionView(t, "GET", "https://CODELOAD.GitHub.com/o/r/tarball/main"), nil,
 	); err != nil {
 		t.Errorf("download GET (upper-case host) = %v, want nil", err)
 	}
 	if err := p.AuthorizeAction(
-		context.Background(), req(t, "POST", "https://codeload.github.com/o/r/x"), nil,
+		context.Background(), actionView(t, "POST", "https://codeload.github.com/o/r/x"), nil,
 	); !errors.Is(err, githubhardening.ErrExposureExceeded) {
 		t.Errorf("download POST = %v, want ErrExposureExceeded", err)
 	}
@@ -196,7 +198,7 @@ func TestGithubAuthorizeAction_GraphQLDeniedOnDownloadHost(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	err := p.AuthorizeAction(
-		context.Background(), req(t, "GET", "https://codeload.github.com/graphql"), nil,
+		context.Background(), actionView(t, "GET", "https://codeload.github.com/graphql"), nil,
 	)
 	if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
 		t.Fatalf("AuthorizeAction(GET codeload /graphql) err = %v, want ErrGraphQLUnsupported", err)
@@ -228,7 +230,7 @@ func TestGithubProvider_InjectAuth_stripsAPIVersion(t *testing.T) {
 	t.Parallel()
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
-	r := req(t, "GET", "https://api.github.com/user")
+	r := getReq(t, "https://api.github.com/user")
 	r.Header.Set("X-Github-Api-Version", "1999-01-01") // model-supplied — must be removed.
 	if err := p.InjectAuth(r, nil); err != nil {
 		t.Fatalf("InjectAuth: %v", err)
@@ -252,10 +254,10 @@ func TestGithubProvider_AuthorizeAction_escapedPath(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	// A URL with %2F in the branch segment: GET /repos/o/r/branches/feature%2Ffoo/protection.
-	// req.URL.Path decodes to "/repos/o/r/branches/feature/foo/protection" (too many segments),
-	// but req.URL.EscapedPath() preserves "%2F" as one segment — matching the template.
-	r := req(t, "GET", "https://api.github.com/repos/o/r/branches/feature%2Ffoo/protection")
-	if err := p.AuthorizeAction(context.Background(), r, nil); err != nil {
+	// The view's Path decodes to "/repos/o/r/branches/feature/foo/protection" (too many
+	// segments), but its EscapedPath preserves "%2F" as one segment, matching the template.
+	v := actionView(t, "GET", "https://api.github.com/repos/o/r/branches/feature%2Ffoo/protection")
+	if err := p.AuthorizeAction(context.Background(), v, nil); err != nil {
 		t.Fatalf("AuthorizeAction with %%2F branch = %v, want nil (read allowed)", err)
 	}
 }
@@ -278,7 +280,7 @@ func TestGithubProvider_AuditResponse_drift(t *testing.T) {
 	p, buf := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	h := http.Header{}
 	h.Set("X-Accepted-Github-Permissions", "issues=write") // GET classified read but GitHub wants write.
-	p.AuditResponse(req(t, "GET", "https://api.github.com/repos/o/r/issues/1"), h)
+	p.AuditResponse(authreq.NewAuditView(getReq(t, "https://api.github.com/repos/o/r/issues/1")), h)
 	if !strings.Contains(buf.String(), "github_hardening") {
 		t.Errorf("expected drift warning, got %q", buf.String())
 	}
@@ -289,13 +291,13 @@ func TestGithubProvider_AuditResponse_noop(t *testing.T) {
 
 	p, buf := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	// No header → nothing logged.
-	p.AuditResponse(req(t, "GET", "https://api.github.com/user"), http.Header{})
+	p.AuditResponse(authreq.NewAuditView(getReq(t, "https://api.github.com/user")), http.Header{})
 	// Unrecognized method → RequiredLevel errors → nothing logged.
-	bad := req(t, "GET", "https://api.github.com/user")
+	bad := getReq(t, "https://api.github.com/user")
 	bad.Method = "WAT"
 	withHdr := http.Header{}
 	withHdr.Set("X-Accepted-Github-Permissions", "issues=write")
-	p.AuditResponse(bad, withHdr)
+	p.AuditResponse(authreq.NewAuditView(bad), withHdr)
 	if buf.Len() != 0 {
 		t.Errorf("expected no audit output, got %q", buf.String())
 	}
@@ -315,17 +317,17 @@ func (plainProvider) AuthorizesHost(context.Context, string, json.RawMessage) (b
 func TestAuditResponse_dispatcher(t *testing.T) {
 	t.Parallel()
 
-	r := req(t, "GET", "https://api.github.com/repos/o/r/issues/1")
+	v := authreq.NewAuditView(getReq(t, "https://api.github.com/repos/o/r/issues/1"))
 	// Unknown provider name → silent no-op (find returns an error).
-	AuditResponse("nonexistent", r, http.Header{}, nil)
+	AuditResponse("nonexistent", v, http.Header{}, nil)
 	// Found but not a ResponseAuditor → silent no-op (assertion fails).
-	AuditResponse("plain", r, http.Header{}, []Provider{plainProvider{}})
+	AuditResponse("plain", v, http.Header{}, []Provider{plainProvider{}})
 
 	// Found AND a ResponseAuditor → the audit runs (drift warning emitted).
 	gh, buf := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	h := http.Header{}
 	h.Set("X-Accepted-Github-Permissions", "issues=write")
-	AuditResponse("github", r, h, []Provider{gh})
+	AuditResponse("github", v, h, []Provider{gh})
 	if !strings.Contains(buf.String(), "github_hardening") {
 		t.Errorf("dispatcher must run the auditor, got %q", buf.String())
 	}

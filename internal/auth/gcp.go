@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/oauth2"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
 )
 
@@ -111,14 +112,14 @@ func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, rawArgs j
 
 // AuthorizeAction implements auth.ActionAuthorizer, delegating to the composed
 // Layer 2 provider after lazy init.
-func (p *gcpProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *gcpProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
 	if p.hardeningAction == nil {
 		return errors.New("gcp_hardening: action authorizer not initialized")
 	}
-	return p.hardeningAction.AuthorizeAction(ctx, req, rawArgs)
+	return p.hardeningAction.AuthorizeAction(ctx, v, rawArgs)
 }
 
 // InjectAuth attaches the raw ADC bearer token. Read-only and host gating are

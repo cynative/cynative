@@ -10,6 +10,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	azurehardening "github.com/cynative/cynative/internal/auth/azure"
 )
 
@@ -105,14 +106,14 @@ func (p *azureProvider) AuthorizesHost(ctx context.Context, host string, rawArgs
 
 // AuthorizeAction implements auth.ActionAuthorizer, delegating to the composed
 // Layer 1 + Layer 2 provider after lazy init.
-func (p *azureProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *azureProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
 	if p.hardeningAction == nil {
 		return errors.New("azure_hardening: action authorizer not initialized")
 	}
-	return p.hardeningAction.AuthorizeAction(ctx, req, rawArgs)
+	return p.hardeningAction.AuthorizeAction(ctx, v, rawArgs)
 }
 
 // InjectAuth rejects a model-supplied SAS credential (the generic credential

@@ -167,11 +167,14 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        # The selector pattern below is proven live by the one
-        # //nolint:forbidigo directive in
-        # internal/transport/transport_internal_test.go, since nolintlint
-        # reports an unused directive; that test reads r.Host on the inbound
-        # (server) side, which is what the directive excuses.
+        # The selector pattern below is proven live by two
+        # //nolint:forbidigo directives, since nolintlint reports an unused
+        # directive if either pattern stops matching:
+        #   - internal/transport/transport_internal_test.go reads r.Host on
+        #     the inbound (server) side.
+        #   - internal/auth/authreq/export_test.go writes req.Host to a
+        #     value that disagrees with the URL, proving the request view
+        #     ignores the field rather than trusting it.
         #
         # The composite-literal pattern has no in-tree canary: nothing in
         # this codebase legitimately sets http.Request.Host today. If the

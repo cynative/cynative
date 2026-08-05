@@ -10,6 +10,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	azurehardening "github.com/cynative/cynative/internal/auth/azure"
 )
 
@@ -79,7 +80,7 @@ type fakeAzureAction struct {
 	retErr error
 }
 
-func (f *fakeAzureAction) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (f *fakeAzureAction) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	f.called = true
 	return f.retErr
 }
@@ -193,9 +194,8 @@ func TestAzureAuthorizeAction_Delegates(t *testing.T) {
 	t.Parallel()
 	fake := &fakeAzureAction{} //nolint:exhaustruct // retErr nil.
 	p := newTestAzureProvider(fakeAzureCred{token: "tok"}, fake)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"https://management.azure.com/subscriptions", nil)
-	if err := p.AuthorizeAction(context.Background(), req,
+	v := actionView(t, http.MethodGet, "https://management.azure.com/subscriptions")
+	if err := p.AuthorizeAction(context.Background(), v,
 		json.RawMessage(`{"azure_auth":{"service":"Microsoft.Resources"}}`)); err != nil {
 		t.Fatalf("AuthorizeAction = %v", err)
 	}
@@ -207,8 +207,8 @@ func TestAzureAuthorizeAction_Delegates(t *testing.T) {
 func TestAzureAuthorizeAction_LazyError(t *testing.T) {
 	t.Parallel()
 	p := newTestAzureProviderLazyErr("init-failed")
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://management.azure.com/x", nil)
-	if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{}`)); err == nil {
+	v := actionView(t, http.MethodGet, "https://management.azure.com/x")
+	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
 		t.Error("AuthorizeAction should error on lazy failure")
 	}
 }
@@ -219,8 +219,8 @@ func TestAzureAuthorizeAction_NilHardening(t *testing.T) {
 		catalog: fakeAzureCatalog{},
 	}
 	p.doLazyResolve = func(_ context.Context) error { return nil } // leaves hardeningAction nil.
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://management.azure.com/x", nil)
-	if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{}`)); err == nil {
+	v := actionView(t, http.MethodGet, "https://management.azure.com/x")
+	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
 		t.Error("AuthorizeAction should error when hardeningAction is nil")
 	}
 }
@@ -258,8 +258,12 @@ func TestAzureInjectAuth_UsesResolvedScope(t *testing.T) {
 	var p *azureProvider
 	p = newAzureProvider(fakeAzureCatalog{}, "https://management.usgovcloudapi.net/.default",
 		func(_ context.Context) error { p.scopedCredential = cred; return nil })
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"https://management.usgovcloudapi.net/x", nil)
+	req, _ := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"https://management.usgovcloudapi.net/x",
+		nil,
+	)
 	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("InjectAuth = %v", err)
 	}
@@ -289,8 +293,12 @@ func TestAzureInjectAuth_TokenError(t *testing.T) {
 func TestAzureInjectAuth_RejectsModelSAS(t *testing.T) {
 	t.Parallel()
 	p := newTestAzureProvider(fakeAzureCred{token: "scoped-token"}, &fakeAzureAction{})
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"https://management.azure.com/x?sig=abc&sv=2021", nil)
+	req, _ := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		"https://management.azure.com/x?sig=abc&sv=2021",
+		nil,
+	)
 	err := p.InjectAuth(req, json.RawMessage(`{}`))
 	if !errors.Is(err, azurehardening.ErrModelSuppliedCredential) {
 		t.Errorf("InjectAuth SAS = %v, want ErrModelSuppliedCredential", err)

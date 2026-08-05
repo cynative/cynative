@@ -15,6 +15,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	smithymiddleware "github.com/aws/smithy-go/middleware"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 const eksProviderName = "eks"
@@ -156,13 +158,13 @@ func (p *eksProvider) resolveCluster(ctx context.Context, args *EKSAuthArgs) (cl
 // AuthorizeAction enforces the read-only ClusterRole posture for EKS Kubernetes API
 // requests via the shared k8sGate. It implements the optional
 // auth.ActionAuthorizer interface.
-func (p *eksProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *eksProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	args, err := parseEKSArgs(rawArgs)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, req, args)
+	return p.authorizeAction(ctx, v, args)
 }
 
 func (p *eksProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error) {

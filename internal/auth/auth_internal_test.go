@@ -27,6 +27,7 @@ import (
 	container "google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
@@ -3349,20 +3350,33 @@ func TestAuthorizeHost_CaseInsensitive(t *testing.T) {
 
 // --- AuthorizeAction dispatcher tests ---
 
+// actionView builds the narrowed view the action gates take, projecting a
+// request constructed the way the transport constructs one.
+func actionView(t *testing.T, method, rawurl string) authreq.View {
+	t.Helper()
+
+	r, err := http.NewRequestWithContext(t.Context(), method, rawurl, nil)
+	if err != nil {
+		t.Fatalf("new request %q: %v", rawurl, err)
+	}
+
+	return authreq.NewView(r, "")
+}
+
 func TestAuthorizeAction_callsProviderImplementingActionAuthorizer(t *testing.T) {
 	t.Parallel()
 
 	called := false
 	provider := &fakeAuthorizingProvider{
 		name: "aws",
-		authorizeAction: func(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 			called = true
 			return nil
 		},
 	}
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example/", nil)
+	v := actionView(t, http.MethodGet, "https://example/")
 
-	err := AuthorizeAction(t.Context(), "aws", req, []Provider{provider}, json.RawMessage(`{}`))
+	err := AuthorizeAction(t.Context(), "aws", v, []Provider{provider}, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("AuthorizeAction returned err: %v", err)
 	}
@@ -3375,9 +3389,9 @@ func TestAuthorizeAction_passesThroughWhenProviderDoesNotImplement(t *testing.T)
 	t.Parallel()
 
 	provider := &fakeProviderNoActionAuth{name: "gcp"}
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example/", nil)
+	v := actionView(t, http.MethodGet, "https://example/")
 
-	err := AuthorizeAction(t.Context(), "gcp", req, []Provider{provider}, json.RawMessage(`{}`))
+	err := AuthorizeAction(t.Context(), "gcp", v, []Provider{provider}, json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("AuthorizeAction returned err for non-implementer: %v", err)
 	}
@@ -3386,9 +3400,9 @@ func TestAuthorizeAction_passesThroughWhenProviderDoesNotImplement(t *testing.T)
 func TestAuthorizeAction_unknownProviderReturnsError(t *testing.T) {
 	t.Parallel()
 
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example/", nil)
+	v := actionView(t, http.MethodGet, "https://example/")
 
-	err := AuthorizeAction(t.Context(), "nope", req, []Provider{}, json.RawMessage(`{}`))
+	err := AuthorizeAction(t.Context(), "nope", v, []Provider{}, json.RawMessage(`{}`))
 	if !errors.Is(err, ErrUnknownProvider) {
 		t.Fatalf("expected ErrUnknownProvider, got %v", err)
 	}
@@ -3399,13 +3413,13 @@ func TestAuthorizeAction_propagatesActionAuthorizerError(t *testing.T) {
 
 	provider := &fakeAuthorizingProvider{
 		name: "aws",
-		authorizeAction: func(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 			return errors.New("action denied")
 		},
 	}
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example/", nil)
+	v := actionView(t, http.MethodGet, "https://example/")
 
-	err := AuthorizeAction(t.Context(), "aws", req, []Provider{provider}, json.RawMessage(`{}`))
+	err := AuthorizeAction(t.Context(), "aws", v, []Provider{provider}, json.RawMessage(`{}`))
 
 	if err == nil {
 		t.Fatalf("expected error from ActionAuthorizer, got nil")
@@ -3426,13 +3440,13 @@ func TestAuthorizeAction_DispatchesAzure(t *testing.T) {
 	called := false
 	prov := &fakeAuthorizingProvider{
 		name: "azure",
-		authorizeAction: func(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 			called = true
 			return nil
 		},
 	}
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://management.azure.com/x", nil)
-	if err := AuthorizeAction(t.Context(), "azure", req, []Provider{prov}, nil); err != nil {
+	v := actionView(t, http.MethodGet, "https://management.azure.com/x")
+	if err := AuthorizeAction(t.Context(), "azure", v, []Provider{prov}, nil); err != nil {
 		t.Fatalf("AuthorizeAction: %v", err)
 	}
 	if !called {
@@ -3443,7 +3457,7 @@ func TestAuthorizeAction_DispatchesAzure(t *testing.T) {
 // fakeAuthorizingProvider satisfies both Provider and ActionAuthorizer.
 type fakeAuthorizingProvider struct {
 	name            string
-	authorizeAction func(context.Context, *http.Request, json.RawMessage) error
+	authorizeAction func(context.Context, authreq.View, json.RawMessage) error
 }
 
 func (f *fakeAuthorizingProvider) Name() string                                        { return f.name }
@@ -3454,8 +3468,8 @@ func (f *fakeAuthorizingProvider) AuthorizesHost(_ context.Context, _ string, _ 
 	return true, nil
 }
 
-func (f *fakeAuthorizingProvider) AuthorizeAction(ctx context.Context, req *http.Request, raw json.RawMessage) error {
-	return f.authorizeAction(ctx, req, raw)
+func (f *fakeAuthorizingProvider) AuthorizeAction(ctx context.Context, v authreq.View, raw json.RawMessage) error {
+	return f.authorizeAction(ctx, v, raw)
 }
 
 type fakeProviderNoActionAuth struct{ name string }
@@ -3480,13 +3494,13 @@ func TestAuthorizeAction_DispatchesGCP(t *testing.T) {
 	called := false
 	prov := &fakeAuthorizingProvider{
 		name: "gcp",
-		authorizeAction: func(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 			called = true
 			return nil
 		},
 	}
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://compute.googleapis.com/x", nil)
-	if err := AuthorizeAction(t.Context(), "gcp", req, []Provider{prov}, nil); err != nil {
+	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/x")
+	if err := AuthorizeAction(t.Context(), "gcp", v, []Provider{prov}, nil); err != nil {
 		t.Fatalf("AuthorizeAction: %v", err)
 	}
 	if !called {
@@ -3497,8 +3511,8 @@ func TestAuthorizeAction_DispatchesGCP(t *testing.T) {
 func TestAWSProvider_AuthorizeAction_nilActionProviderReturnsError(t *testing.T) {
 	t.Parallel()
 	p := newAWSProvider(aws.Config{}, func(_ context.Context) error { return nil })
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://s3.us-east-1.amazonaws.com/", nil)
-	err := p.AuthorizeAction(t.Context(), req, json.RawMessage(`{}`))
+	v := actionView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
+	err := p.AuthorizeAction(t.Context(), v, json.RawMessage(`{}`))
 	if err == nil {
 		t.Errorf("expected error when actionProvider is nil")
 	}
@@ -3513,9 +3527,9 @@ func TestAWSProvider_AuthorizeAction_delegatesToActionProvider(t *testing.T) {
 		&fakeActionEvaluator{allow: false},
 		"arn:aws:iam::aws:policy/SecurityAudit",
 	)
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://s3.us-east-1.amazonaws.com/", nil)
+	v := actionView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
 	raw := json.RawMessage(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
-	err := p.AuthorizeAction(t.Context(), req, raw)
+	err := p.AuthorizeAction(t.Context(), v, raw)
 	if !errors.Is(err, awshardening.ErrPolicyDenied) {
 		t.Errorf("err = %v, want ErrPolicyDenied (delegated)", err)
 	}
@@ -3597,10 +3611,10 @@ func TestAWSProvider_AuthorizeAction_triggersLazyOnce(t *testing.T) {
 		calls++
 		return nil
 	})
-	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	v := actionView(t, http.MethodGet, "https://example.com/")
 	rawArgs := json.RawMessage(`{}`)
-	_ = p.AuthorizeAction(t.Context(), req, rawArgs)
-	_ = p.AuthorizeAction(t.Context(), req, rawArgs)
+	_ = p.AuthorizeAction(t.Context(), v, rawArgs)
+	_ = p.AuthorizeAction(t.Context(), v, rawArgs)
 	if calls != 1 {
 		t.Errorf("doLazyResolve called %d times across 2 AuthorizeAction calls, want 1", calls)
 	}
@@ -3757,9 +3771,9 @@ func TestAWSProvider_AuthorizeAction_returnsLazyError(t *testing.T) {
 	p := newAWSProvider(aws.Config{}, func(_ context.Context) error {
 		return wantErr
 	})
-	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
+	v := actionView(t, http.MethodGet, "https://example.com/")
 	rawArgs := json.RawMessage(`{}`)
-	err := p.AuthorizeAction(t.Context(), req, rawArgs)
+	err := p.AuthorizeAction(t.Context(), v, rawArgs)
 	if !errors.Is(err, wantErr) {
 		t.Errorf("AuthorizeAction err = %v, want wrapped %v", err, wantErr)
 	}
@@ -3784,8 +3798,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/namespaces/d/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); err != nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/namespaces/d/pods")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); err != nil {
 			t.Fatalf("list pods should be allowed: %v", err)
 		}
 	})
@@ -3794,8 +3808,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/namespaces/d/secrets", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/namespaces/d/secrets")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("list secrets should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3807,8 +3821,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		p.fetchView = func(_ context.Context, _ *EKSAuthArgs) (*k8sauthz.ViewPolicy, error) {
 			return nil, errors.New("boom")
 		}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); err == nil {
 			t.Fatal("fetch error must deny (fail closed)")
 		}
 	})
@@ -3817,8 +3831,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{}`)); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
 			t.Fatal("missing cluster_name must error")
 		}
 	})
@@ -3827,8 +3841,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{`)); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})
@@ -3837,8 +3851,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodPost, "https://example/api/v1/namespaces/d/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodPost, "https://example/api/v1/namespaces/d/pods")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("POST pods should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3847,8 +3861,8 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/metrics", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodGet, "https://example/metrics")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("GET /metrics (non-resource) should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3877,8 +3891,8 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/apis/apps/v1/namespaces/d/deployments", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); err != nil {
+		v := actionView(t, http.MethodGet, "https://example/apis/apps/v1/namespaces/d/deployments")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); err != nil {
 			t.Fatalf("list deployments should be allowed: %v", err)
 		}
 	})
@@ -3887,8 +3901,8 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodPost, "https://example/apis/apps/v1/namespaces/d/deployments", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodPost, "https://example/apis/apps/v1/namespaces/d/deployments")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("create should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3897,8 +3911,8 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/namespaces/d/secrets", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/namespaces/d/secrets")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("secrets should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3910,8 +3924,8 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		p.fetchView = func(_ context.Context, _ *GKEAuthArgs) (*k8sauthz.ViewPolicy, error) {
 			return nil, errors.New("boom")
 		}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); err == nil {
 			t.Fatal("fetch error must deny (fail closed)")
 		}
 	})
@@ -3920,8 +3934,8 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{}`)); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
 			t.Fatal("missing gke args must error")
 		}
 	})
@@ -3930,8 +3944,8 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{`)); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})
@@ -3956,8 +3970,8 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); err != nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); err != nil {
 			t.Fatalf("list pods should be allowed: %v", err)
 		}
 	})
@@ -3966,8 +3980,8 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodPost, "https://example/api/v1/namespaces/d/pods/web/exec", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodPost, "https://example/api/v1/namespaces/d/pods/web/exec")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("pods/exec should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3976,8 +3990,8 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/namespaces/d/secrets", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/namespaces/d/secrets")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("secrets should be ErrForbidden, got %v", err)
 		}
 	})
@@ -3989,8 +4003,8 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		p.fetchView = func(_ context.Context, _ *AKSAuthArgs) (*k8sauthz.ViewPolicy, error) {
 			return nil, errors.New("boom")
 		}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); err == nil {
 			t.Fatal("fetch error must deny (fail closed)")
 		}
 	})
@@ -3999,9 +4013,9 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
 		if err := p.AuthorizeAction(
-			context.Background(), req,
+			context.Background(), v,
 			json.RawMessage(`{"aks_auth":{"cluster_name":"c"}}`),
 		); err == nil {
 			t.Fatal("missing resource_group and subscription_id must error")
@@ -4012,8 +4026,8 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := p.AuthorizeAction(context.Background(), req, json.RawMessage(`{`)); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})
@@ -4022,8 +4036,8 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://example/metrics", nil)
-		if err := p.AuthorizeAction(context.Background(), req, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodGet, "https://example/metrics")
+		if err := p.AuthorizeAction(context.Background(), v, rawArgs); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("GET /metrics (non-resource) should be ErrForbidden, got %v", err)
 		}
 	})

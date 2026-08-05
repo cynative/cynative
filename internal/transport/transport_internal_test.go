@@ -32,6 +32,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/auth"
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
 	"github.com/cynative/cynative/internal/redact"
 )
@@ -238,6 +239,47 @@ func TestExecute_PostWithBody(t *testing.T) {
 
 	if !strings.Contains(result, `{"key":"value"}`) {
 		t.Errorf("expected echoed body in result, got: %q", result)
+	}
+}
+
+func TestBodyForRequest(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		in         string
+		wantNil    bool
+		wantString string
+	}{
+		{name: "empty body yields a nil reader", in: "", wantNil: true, wantString: ""},
+		{name: "non-empty body yields both representations", in: `{"a":1}`, wantNil: false, wantString: `{"a":1}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			reader, s := bodyForRequest(tt.in)
+
+			if (reader == nil) != tt.wantNil {
+				t.Errorf("reader nil = %v, want %v", reader == nil, tt.wantNil)
+			}
+
+			if s != tt.wantString {
+				t.Errorf("string = %q, want %q", s, tt.wantString)
+			}
+
+			if reader != nil {
+				got, err := io.ReadAll(reader)
+				if err != nil {
+					t.Fatalf("read: %v", err)
+				}
+
+				if string(got) != tt.wantString {
+					t.Errorf("reader contents = %q, want %q", got, tt.wantString)
+				}
+			}
+		})
 	}
 }
 
@@ -1627,7 +1669,7 @@ func (p *orderingProvider) AuthorizesHost(_ context.Context, _ string, _ json.Ra
 	return true, nil
 }
 
-func (p *orderingProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (p *orderingProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	*p.calls = append(*p.calls, "action")
 
 	return nil
@@ -1742,7 +1784,7 @@ func (p *denyingActionProvider) AuthorizesHost(_ context.Context, _ string, _ js
 	return true, nil
 }
 
-func (p *denyingActionProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (p *denyingActionProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	*p.calls = append(*p.calls, "action")
 
 	return errors.New("action denied")
@@ -1762,6 +1804,150 @@ func (p *denyingActionProvider) AuthorizesAddr(
 	_ context.Context, _ netip.Addr, _ json.RawMessage,
 ) (bool, error) {
 	return true, nil
+}
+
+// spyProvider is a minimal auth.Provider + auth.ActionAuthorizer fake that
+// records whether AuthorizeAction ran, for tests that must prove a gate never
+// reaches authorization at all (as opposed to orderingProvider/
+// denyingActionProvider above, which prove the order among the gates that do
+// run).
+type spyProvider struct {
+	name   string
+	called *bool
+}
+
+// newSpyProvider returns a Provider named name whose AuthorizeAction sets
+// *called = true.
+func newSpyProvider(name string, called *bool) auth.Provider {
+	return &spyProvider{name: name, called: called}
+}
+
+func (p *spyProvider) Name() string        { return p.name }
+func (p *spyProvider) Description() string { return "records whether AuthorizeAction ran" }
+
+func (p *spyProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+	return true, nil
+}
+
+func (p *spyProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+	*p.called = true
+
+	return nil
+}
+
+func (p *spyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
+	return nil
+}
+
+// bodySpyProvider is a LoopbackProvider that also records the body its action
+// gate was handed, so a test can compare what the gate judged against what the
+// server received.
+type bodySpyProvider struct {
+	*authtest.LoopbackProvider
+
+	seen *string
+}
+
+func (p *bodySpyProvider) AuthorizeAction(_ context.Context, v authreq.View, _ json.RawMessage) error {
+	*p.seen = v.Body
+
+	return nil
+}
+
+// TestDoGateAndWireSeeTheSameBody pins the body's two representations to one
+// origin: the view the gate judges and the payload the server receives must be
+// the same bytes.
+func TestDoGateAndWireSeeTheSameBody(t *testing.T) {
+	t.Parallel()
+
+	const sentinel = `{"sentinel":"a1b2c3"}`
+
+	var gotByGate string
+
+	onWire := make(chan string, 1)
+
+	srv, providers := newTLSTestServer(t, func(_ http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		onWire <- string(raw)
+	})
+
+	loopback, ok := providers[0].(*authtest.LoopbackProvider)
+	if !ok {
+		t.Fatalf("expected LoopbackProvider, got %T", providers[0])
+	}
+
+	loopback.ProviderName = "spy"
+	spy := []auth.Provider{&bodySpyProvider{LoopbackProvider: loopback, seen: &gotByGate}}
+
+	c := NewClient()
+	args := fmt.Sprintf(`{"method":"POST","url":%q,"body":%q,"auth_provider":"spy"}`,
+		srv.URL+"/v1/things", sentinel)
+
+	resp, _, cleanup, err := c.do(t.Context(), args, spy)
+	defer cleanup()
+
+	if err != nil {
+		t.Fatalf("do() error = %v", err)
+	}
+
+	defer resp.Body.Close()
+
+	if gotByGate != sentinel {
+		t.Errorf("gate saw body %q, want %q", gotByGate, sentinel)
+	}
+
+	if gotOnWire := <-onWire; gotOnWire != sentinel {
+		t.Errorf("wire carried body %q, want %q", gotOnWire, sentinel)
+	}
+}
+
+// TestDoRejectsNonHTTPSBeforeAuthorization pins the ordering the request view
+// depends on: the view carries no scheme, so gates that assume https rely on
+// the transport having already refused anything else.
+func TestDoRejectsNonHTTPSBeforeAuthorization(t *testing.T) {
+	t.Parallel()
+
+	var gateCalled bool
+
+	providers := []auth.Provider{newSpyProvider("gitlab", &gateCalled)}
+
+	c := NewClient()
+	args := `{"method":"GET","url":"http://example.com/api/v4/user","auth_provider":"gitlab"}`
+
+	if _, _, _, err := c.do(t.Context(), args, providers); err == nil {
+		t.Fatal("do() error = nil, want a scheme rejection")
+	}
+
+	if gateCalled {
+		t.Error("authorization ran on a non-https URL; the scheme check must come first")
+	}
+}
+
+// TestDoRejectsMalformedArgsBeforeAuthorization replaces the deleted
+// TestGitLabProvider_AuthorizeAction_BadRawArgs. That test covered an unmarshal
+// branch inside a gate; the property it stood in for is that malformed
+// http_request JSON never reaches a gate at all, which is asserted here.
+func TestDoRejectsMalformedArgsBeforeAuthorization(t *testing.T) {
+	t.Parallel()
+
+	var gateCalled bool
+
+	providers := []auth.Provider{newSpyProvider("gitlab", &gateCalled)}
+
+	c := NewClient()
+
+	// The literal carries a valid auth_provider and https url ahead of the syntax
+	// error, so the rejection can only come from the parse and not from a later
+	// missing-field or scheme check.
+	const malformed = `{"auth_provider":"gitlab","url":"https://gitlab.com/api/v4/user","method":"GET",`
+
+	if _, _, _, err := c.do(t.Context(), malformed, providers); err == nil {
+		t.Fatal("do() error = nil, want a JSON parse failure")
+	}
+
+	if gateCalled {
+		t.Error("authorization ran on unparseable arguments")
+	}
 }
 
 func TestRequestArgs_ParsesGCPAuth(t *testing.T) {
@@ -2133,7 +2319,7 @@ type auditProvider struct {
 	audited bool
 }
 
-func (a *auditProvider) AuditResponse(_ *http.Request, _ http.Header) { a.audited = true }
+func (a *auditProvider) AuditResponse(_ authreq.AuditView, _ http.Header) { a.audited = true }
 
 func TestExecute_invokesResponseAuditor(t *testing.T) {
 	t.Parallel()
@@ -2158,5 +2344,59 @@ func TestExecute_invokesResponseAuditor(t *testing.T) {
 
 	if !ap.audited {
 		t.Error("ResponseAuditor.AuditResponse was not invoked after a successful response")
+	}
+}
+
+// TestRequestConstructionNormalizesEmptyPort pins the net/http behavior the
+// GitLab port check relies on: an authority with an explicit-but-empty port is
+// normalized before any gate sees it, so the view's Port is "" for it exactly
+// as for an absent port, and both mean the https default.
+func TestRequestConstructionNormalizesEmptyPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rawURL   string
+		wantHost string
+		wantPort string
+	}{
+		{name: "absent port", rawURL: "https://example.com/p", wantHost: "example.com", wantPort: ""},
+		{name: "empty port is trimmed", rawURL: "https://example.com:/p", wantHost: "example.com", wantPort: ""},
+		{
+			name:     "real port survives",
+			rawURL:   "https://example.com:8080/p",
+			wantHost: "example.com:8080",
+			wantPort: "8080",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tt.rawURL, nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+
+			if got := req.URL.Host; got != tt.wantHost {
+				t.Errorf("req.URL.Host = %q, want %q", got, tt.wantHost)
+			}
+
+			if got := req.URL.Port(); got != tt.wantPort {
+				t.Errorf("req.URL.Port() = %q, want %q", got, tt.wantPort)
+			}
+		})
+	}
+}
+
+// TestRequestConstructionRejectsMalformedPort pins that a non-numeric port
+// never reaches a gate, as it does not today.
+func TestRequestConstructionRejectsMalformedPort(t *testing.T) {
+	t.Parallel()
+
+	_, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com:abc/p", nil)
+	if err == nil {
+		t.Fatal("new request error = nil, want a parse failure on a malformed port")
 	}
 }

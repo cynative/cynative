@@ -17,6 +17,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"golang.org/x/oauth2"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // Provider defines an extensible interface for injecting API credentials securely.
@@ -254,9 +256,11 @@ func GetServerNameData(
 
 // ActionAuthorizer is optionally implemented by providers that perform per-request
 // action-level authorization beyond host gating. transport.do calls it via
-// AuthorizeAction after AuthorizeHost and before InjectAuth.
+// AuthorizeAction after AuthorizeHost and before InjectAuth. It receives a
+// narrowed, read-only view rather than the live request, so a gate cannot alter
+// what it is judging; InjectAuth keeps the request itself.
 type ActionAuthorizer interface {
-	AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error
+	AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error
 }
 
 // AuthorizeAction dispatches to the named provider's ActionAuthorizer if it
@@ -264,7 +268,7 @@ type ActionAuthorizer interface {
 func AuthorizeAction(
 	ctx context.Context,
 	name string,
-	req *http.Request,
+	v authreq.View,
 	providers []Provider,
 	rawArgs json.RawMessage,
 ) error {
@@ -274,7 +278,7 @@ func AuthorizeAction(
 	}
 
 	if ap, ok := p.(ActionAuthorizer); ok {
-		if authErr := ap.AuthorizeAction(ctx, req, rawArgs); authErr != nil {
+		if authErr := ap.AuthorizeAction(ctx, v, rawArgs); authErr != nil {
 			return fmt.Errorf("auth: authorize action for provider %s: %w", name, authErr)
 		}
 	}
@@ -287,19 +291,19 @@ func AuthorizeAction(
 // X-Accepted-GitHub-Permissions header against the classified access level). It
 // must not block and must not consume the body.
 type ResponseAuditor interface {
-	AuditResponse(req *http.Request, header http.Header)
+	AuditResponse(v authreq.AuditView, header http.Header)
 }
 
 // AuditResponse dispatches a post-response audit to the named provider when it
 // implements ResponseAuditor. It is best-effort: unknown provider or no
 // capability is a silent no-op (auditing never affects the response).
-func AuditResponse(name string, req *http.Request, header http.Header, providers []Provider) {
+func AuditResponse(name string, v authreq.AuditView, header http.Header, providers []Provider) {
 	p, err := find(providers, name)
 	if err != nil {
 		return
 	}
 	if ra, ok := p.(ResponseAuditor); ok {
-		ra.AuditResponse(req, header)
+		ra.AuditResponse(v, header)
 	}
 }
 

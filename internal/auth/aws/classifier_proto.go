@@ -2,17 +2,18 @@ package aws
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // classifyJSONRPC identifies the operation for AWS JSON RPC services
 // (awsJson1_0, awsJson1_1). The operation is encoded in the X-Amz-Target
 // header as "<ServiceName>.<Operation>".
-func classifyJSONRPC(model *ServiceModel, req *http.Request) (string, error) {
-	target := req.Header.Get("X-Amz-Target")
+func classifyJSONRPC(model *ServiceModel, v authreq.View) (string, error) {
+	target := v.Header.Get("X-Amz-Target")
 	if target == "" {
 		return "", fmt.Errorf("%w: X-Amz-Target header missing", ErrClassifierUnknownOp)
 	}
@@ -33,23 +34,26 @@ func classifyJSONRPC(model *ServiceModel, req *http.Request) (string, error) {
 // runs the operation named by the form-body Action on a POST and the URL-query
 // Action on a (legacy) GET, so classification follows the channel AWS executes
 // and fails closed on any ambiguity: exactly one Action, in exactly one place.
-// The method is case-normalized because req.Method is model-supplied and Go does
-// not canonicalize it.
-func classifyQuery(model *ServiceModel, req *http.Request) (string, error) {
-	switch strings.ToUpper(req.Method) {
+// The method is case-normalized because the request method is model-supplied and
+// Go does not canonicalize it.
+func classifyQuery(model *ServiceModel, v authreq.View) (string, error) {
+	switch strings.ToUpper(v.Method) {
 	case http.MethodPost:
-		return classifyQueryBody(model, req)
+		return classifyQueryBody(model, v)
 	case http.MethodGet:
-		return classifyQueryURL(model, req)
+		return classifyQueryURL(model, v)
 	default:
-		return "", fmt.Errorf("%w: method %q not used by the query protocol", ErrClassifierUnknownOp, req.Method)
+		return "", fmt.Errorf("%w: method %q not used by the query protocol", ErrClassifierUnknownOp, v.Method)
 	}
 }
 
 // classifyQueryURL classifies a GET: the URL query is authoritative. Exactly one
-// Action value is required (duplicates deny).
-func classifyQueryURL(model *ServiceModel, req *http.Request) (string, error) {
-	op, err := singleAction(req.URL.Query(), "URL query")
+// Action value is required (duplicates deny). The lenient parse is what
+// [net/url.URL.Query] did.
+func classifyQueryURL(model *ServiceModel, v authreq.View) (string, error) {
+	vals, _ := url.ParseQuery(v.RawQuery)
+
+	op, err := singleAction(vals, "URL query")
 	if err != nil {
 		return "", err
 	}
@@ -58,21 +62,17 @@ func classifyQueryURL(model *ServiceModel, req *http.Request) (string, error) {
 
 // classifyQueryBody classifies a POST: the form body is authoritative and any
 // Action in the URL query is rejected as a smuggling tell (AWS ignores it). The
-// body is rewound for the downstream SigV4 signer.
-func classifyQueryBody(model *ServiceModel, req *http.Request) (string, error) {
-	if req.URL.Query().Has("Action") {
+// body arrives as a string on the view, so this no longer consumes and repairs
+// the request the signer still needs.
+func classifyQueryBody(model *ServiceModel, v authreq.View) (string, error) {
+	query, _ := url.ParseQuery(v.RawQuery)
+	if query.Has("Action") {
 		return "", fmt.Errorf("%w: Action in URL query on a POST (body is authoritative)", ErrClassifierUnknownOp)
 	}
-	if req.Body == nil {
+	if v.Body == "" {
 		return "", fmt.Errorf("%w: POST has no body", ErrClassifierUnknownOp)
 	}
-	body, err := io.ReadAll(req.Body)
-	_ = req.Body.Close()
-	if err != nil {
-		return "", fmt.Errorf("%w: read body: %w", ErrClassifierUnknownOp, err)
-	}
-	req.Body = io.NopCloser(strings.NewReader(string(body)))
-	parsed, err := url.ParseQuery(string(body))
+	parsed, err := url.ParseQuery(v.Body)
 	if err != nil {
 		return "", fmt.Errorf("%w: parse body: %w", ErrClassifierUnknownOp, err)
 	}
@@ -115,14 +115,14 @@ func knownOp(model *ServiceModel, op string) (string, error) {
 // (bucket in the host) match the path-style URI templates; the non-REST
 // classifiers do not use parsed (S3 is the only virtual-hosted service and it is
 // REST). Returns ErrClassifierUnknownOp on no match.
-func ClassifyOperation(model *ServiceModel, req *http.Request, parsed ParsedHost) (string, error) {
+func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) (string, error) {
 	switch model.Protocol {
 	case ProtocolRestXML, ProtocolRestJSON1:
-		return classifyREST(model, req, classificationPath(parsed, req.URL.Path))
+		return classifyREST(model, v, classificationPath(parsed, v.Path))
 	case ProtocolAWSJSON10, ProtocolAWSJSON11:
-		return classifyJSONRPC(model, req)
+		return classifyJSONRPC(model, v)
 	case ProtocolAWSQuery, ProtocolEC2Query:
-		return classifyQuery(model, req)
+		return classifyQuery(model, v)
 	case ProtocolUnknown:
 		return "", fmt.Errorf("%w: unknown service protocol", ErrClassifierUnknownOp)
 	default:

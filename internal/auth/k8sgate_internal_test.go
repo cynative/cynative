@@ -56,8 +56,8 @@ func TestK8sGate_authorizeAction(t *testing.T) {
 
 			return nil, nil //nolint:nilnil // unreachable after t.Fatal; stub never runs.
 		}}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		if err := g.authorizeAction(context.Background(), req, args); err == nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := g.authorizeAction(context.Background(), v, args); err == nil {
 			t.Fatal("validate failure must error")
 		}
 	})
@@ -69,8 +69,8 @@ func TestK8sGate_authorizeAction(t *testing.T) {
 		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
 			return nil, errors.New("boom")
 		}}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		err := g.authorizeAction(context.Background(), req, args)
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		err := g.authorizeAction(context.Background(), v, args)
 		if err == nil || !strings.Contains(err.Error(), `k8s_hardening: cannot resolve clusterrole "view" policy`) {
 			t.Fatalf("want wrapped resolve error, got %v", err)
 		}
@@ -85,8 +85,8 @@ func TestK8sGate_authorizeAction(t *testing.T) {
 				"%w: reading clusterrole %q returned k8s API 401 Unauthorized", ErrClusterAccessDenied, "view",
 			)
 		}}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/pods", nil)
-		err := g.authorizeAction(context.Background(), req, args)
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		err := g.authorizeAction(context.Background(), v, args)
 		if !errors.Is(err, ErrClusterAccessDenied) {
 			t.Fatalf("want ErrClusterAccessDenied surfaced, got %v", err)
 		}
@@ -102,8 +102,8 @@ func TestK8sGate_authorizeAction(t *testing.T) {
 		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
 			return viewPolicyAllowingPods(), nil
 		}}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/namespaces/d/pods", nil)
-		if err := g.authorizeAction(context.Background(), req, args); err != nil {
+		v := actionView(t, http.MethodGet, "https://example/api/v1/namespaces/d/pods")
+		if err := g.authorizeAction(context.Background(), v, args); err != nil {
 			t.Fatalf("list pods should be allowed: %v", err)
 		}
 	})
@@ -115,8 +115,8 @@ func TestK8sGate_authorizeAction(t *testing.T) {
 		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
 			return viewPolicyAllowingPods(), nil
 		}}
-		req, _ := http.NewRequest(http.MethodGet, "https://example/api/v1/namespaces/d/secrets", nil)
-		err := g.authorizeAction(context.Background(), req, args)
+		v := actionView(t, http.MethodGet, "https://example/api/v1/namespaces/d/secrets")
+		err := g.authorizeAction(context.Background(), v, args)
 		if !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("list secrets should be ErrForbidden, got %v", err)
 		}

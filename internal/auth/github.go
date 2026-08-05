@@ -7,8 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
-	"strings"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	"github.com/cynative/cynative/internal/cache"
@@ -99,16 +99,13 @@ func (p *githubProvider) AuthorizesHost(_ context.Context, host string, _ json.R
 	return host == "api.github.com" || isGithubDownloadHost(host), nil
 }
 
-// effectiveDownloadHost returns the download host the request targets, or "" when
-// it is not a download host. The URL host is the only authority: the transport
-// rejects a model-supplied Host header, so the host classified here is always the
-// host dialed and authorized. url.Hostname already strips the port and any IPv6
-// brackets; the lower-casing is still required because net/url preserves host
-// case and AuthorizeAction receives the raw request.
-func effectiveDownloadHost(req *http.Request) string {
-	authority := strings.ToLower(req.URL.Hostname())
-	if isGithubDownloadHost(authority) {
-		return authority
+// effectiveDownloadHost returns hostname when it is one of GitHub's download
+// hosts, else "". The view lower-cases the hostname at projection and the
+// transport rejects a model-supplied authority, so the host classified here is
+// always the host dialed and authorized.
+func effectiveDownloadHost(hostname string) string {
+	if isGithubDownloadHost(hostname) {
+		return hostname
 	}
 	return ""
 }
@@ -118,17 +115,17 @@ func effectiveDownloadHost(req *http.Request) string {
 // table-independent; api.github.com requests are classified against the live table
 // and allowed iff the configured ceiling permits the required level. A missing
 // table fails closed (category table not ready). Runs before InjectAuth.
-func (p *githubProvider) AuthorizeAction(ctx context.Context, req *http.Request, _ json.RawMessage) error {
-	if githubhardening.IsGraphQLEndpoint(req.URL.EscapedPath()) {
-		return fmt.Errorf("%w: %s %s", githubhardening.ErrGraphQLUnsupported, req.Method, req.URL.EscapedPath())
+func (p *githubProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ json.RawMessage) error {
+	if githubhardening.IsGraphQLEndpoint(v.EscapedPath) {
+		return fmt.Errorf("%w: %s %s", githubhardening.ErrGraphQLUnsupported, v.Method, v.EscapedPath)
 	}
 
-	if host := effectiveDownloadHost(req); host != "" {
-		if req.Method == http.MethodGet || req.Method == http.MethodHead {
+	if host := effectiveDownloadHost(v.Hostname); host != "" {
+		if v.Method == http.MethodGet || v.Method == http.MethodHead {
 			return nil
 		}
 		return fmt.Errorf("%w: %s %s to %s (download hosts are GET/HEAD-only)",
-			githubhardening.ErrExposureExceeded, req.Method, req.URL.Path, host)
+			githubhardening.ErrExposureExceeded, v.Method, v.Path, host)
 	}
 
 	table := p.tables.Get(ctx)
@@ -144,7 +141,7 @@ func (p *githubProvider) AuthorizeAction(ctx context.Context, req *http.Request,
 
 	// Use EscapedPath so a branch name like feature%2Ffoo stays as one segment and
 	// matches its template (decoded "/" would split into extra segments → no match).
-	access, err := githubhardening.ClassifyRequest(table, req.Method, req.URL.EscapedPath())
+	access, err := githubhardening.ClassifyRequest(table, v.Method, v.EscapedPath)
 	if err != nil {
 		return err
 	}
@@ -152,7 +149,7 @@ func (p *githubProvider) AuthorizeAction(ctx context.Context, req *http.Request,
 	ceiling := githubhardening.Resolve(p.exposure, access.Route.Category, access.Route.Subcategory)
 	if !exposure.Allows(ceiling, access.Level) {
 		return fmt.Errorf("%w: %s %s needs %s on %q (ceiling %s)",
-			githubhardening.ErrExposureExceeded, req.Method, req.URL.EscapedPath(),
+			githubhardening.ErrExposureExceeded, v.Method, v.EscapedPath,
 			exposure.LevelName(access.Level), access.Route.Category, exposure.LevelName(ceiling))
 	}
 	return nil
@@ -289,12 +286,12 @@ func githubDialAllowed(ip netip.Addr) bool {
 // AuditResponse compares GitHub's authoritative required-permission header against
 // our classified level and logs a one-line drift warning when read may have been
 // insufficient. Advisory only; never blocks or consumes the body.
-func (p *githubProvider) AuditResponse(req *http.Request, header http.Header) {
+func (p *githubProvider) AuditResponse(v authreq.AuditView, header http.Header) {
 	accepted := header.Get("X-Accepted-Github-Permissions")
 	if accepted == "" {
 		return
 	}
-	level, err := githubhardening.RequiredLevel(req.Method, req.URL.EscapedPath())
+	level, err := githubhardening.RequiredLevel(v.Method, v.EscapedPath)
 	if err != nil {
 		return
 	}

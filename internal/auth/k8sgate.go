@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/netip"
+	"net/url"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
 )
 
@@ -38,7 +39,7 @@ type k8sGate[A any] struct {
 // Kubernetes API request: it validates the args, resolves (and caches) the
 // cluster's configured ClusterRole policy, classifies the request, and authorizes
 // it — failing closed on any resolution error and naming the cluster_role on denial.
-func (g *k8sGate[A]) authorizeAction(ctx context.Context, req *http.Request, args *A) error {
+func (g *k8sGate[A]) authorizeAction(ctx context.Context, v authreq.View, args *A) error {
 	if err := g.validate(args); err != nil {
 		return err
 	}
@@ -51,7 +52,11 @@ func (g *k8sGate[A]) authorizeAction(ctx context.Context, req *http.Request, arg
 		return fmt.Errorf("k8s_hardening: cannot resolve clusterrole %q policy: %w", g.clusterRole, err)
 	}
 
-	ri := k8sauthz.Classify(req.Method, req.URL.Path, req.URL.Query())
+	// Lenient parse, matching kube-apiserver's own r.URL.Query(): the server is
+	// itself Go, so a pair Go drops is a pair the server drops.
+	query, _ := url.ParseQuery(v.RawQuery)
+
+	ri := k8sauthz.Classify(v.Method, v.Path, query)
 
 	if authErr := k8sauthz.Authorize(ri, vp); authErr != nil {
 		return fmt.Errorf("cluster_role=%q: %w", g.clusterRole, authErr)
