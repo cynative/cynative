@@ -477,20 +477,21 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     don't implement it inherit the fail-safe default: deny internal ranges, loopback,
     link-local including cloud metadata, RFC1918, ULA, IPv4-mapped forms, plus the exact Azure
     WireServer and Alibaba metadata addresses; allow everything else).
-  - The read-only gates take a narrowed value view, not the request.
-    `ActionAuthorizer.AuthorizeAction` and `ResponseAuditor.AuditResponse`
-    receive `authreq.View` / `authreq.AuditView`, projected once in
-    `transport.do` from `req.URL`, a cloned header, and the same string the
-    request body was built from. `InjectAuth` keeps the real `*http.Request`,
-    since it mutates headers and AWS SigV4 signs during it. The view lives in
-    the stdlib-only leaf `internal/auth/authreq` because `internal/auth`
-    imports its own aws/gcp/azure subpackages. It carries `RawQuery` and no
-    query helper on purpose: GitLab parses fail-closed against Rack's `;`
-    handling while the K8s and AWS gates match their Go upstreams' lenient
-    parse. It carries both `Path` and `EscapedPath` because Azure compares them
-    to reject a percent-encoded slash. `rawArgs` is still the full tool-call
-    JSON, so it remains a second full-fidelity channel; narrowing it is
-    separate work.
+  - The read-only gates take a narrowed value view, not the full request, and the two
+    views differ. `ActionAuthorizer.AuthorizeAction` receives `authreq.View`, projected
+    once in `transport.do` before the auth gates run, from `req.URL`, a cloned header,
+    and the same string the request body was built from. `ResponseAuditor.AuditResponse`
+    receives the smaller `authreq.AuditView` instead, carrying only `Method` and
+    `EscapedPath` (no header, no body), built separately after `auth.Inject` runs so the
+    audit observes the request as sent rather than as authorized. `InjectAuth` keeps the
+    real `*http.Request` throughout, since it mutates headers and AWS SigV4 signs during
+    it. Both views live in the stdlib-only leaf `internal/auth/authreq` because
+    `internal/auth` imports its own aws/gcp/azure subpackages. `View` carries `RawQuery`
+    and no query helper on purpose: GitLab parses fail-closed against Rack's `;` handling
+    while the K8s and AWS gates match their Go upstreams' lenient parse. It carries both
+    `Path` and `EscapedPath` because Azure compares them to reject a percent-encoded
+    slash. `rawArgs` is still the full tool-call JSON, so it remains a second
+    full-fidelity channel; narrowing it is separate work.
   - `auth.Inject`, the dispatcher every credentialed request flows through, rejects
     model-supplied credentials before dispatching (`ErrModelSuppliedCredential`):
     `Authorization`/`Proxy-Authorization`/`X-Ms-Authorization-Auxiliary` header values and URL
