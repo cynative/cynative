@@ -360,7 +360,7 @@ func TestAssembleCatalogMultiVersionSameID(t *testing.T) {
 		"https://cloudresourcemanager.googleapis.com/v1/projects",
 		"https://cloudresourcemanager.googleapis.com/v3/projects",
 	} {
-		got, cerr := Classify(idx, req(t, "GET", path))
+		got, cerr := Classify(idx, classifyView(t, "GET", path))
 		if cerr != nil || got != "cloudresourcemanager.projects.list" {
 			t.Errorf("Classify(%s) = %q err=%v, want cloudresourcemanager.projects.list", path, got, cerr)
 		}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // Action is the derived RBAC Action. Full is the canonical
@@ -53,20 +55,20 @@ var pollSegments = map[string]bool{"operations": true, "operationstatuses": true
 // resource names.
 const typeNameStride = 2
 
-// DeriveAction resolves req to exactly one candidate RBAC Action, deny-on-ambiguity.
-// Pure modulo the injected Catalog port. The service is never read from the claim —
+// DeriveAction resolves v to exactly one candidate RBAC Action, deny-on-ambiguity.
+// Pure modulo the injected Catalog port. The service is never read from the claim -
 // the namespace comes from the URL path (the last /providers/ segment).
-func DeriveAction(ctx context.Context, req *http.Request, cat Catalog) (Action, error) {
-	method := strings.ToUpper(req.Method)
-	segs := splitPath(req.URL.Path)
+func DeriveAction(ctx context.Context, v authreq.View, cat Catalog) (Action, error) {
+	method := strings.ToUpper(v.Method)
+	segs := splitPath(v.Path)
 
 	// Reject any non-canonical path segment before classification: both the
 	// provider-less template alignment and the poll even/odd parity rely on
-	// segment positions, and req.URL.Path reaches us verbatim (no upstream
+	// segment positions, and the decoded path reaches us verbatim (no upstream
 	// path.Clean), so an empty, ".", or ".." segment, or a percent-encoded
 	// slash (%2F), could otherwise skew parity or diverge decoded/wire form.
-	if nonCanonicalPath(req.URL.EscapedPath(), segs) {
-		return Action{}, fmt.Errorf("%w: non-canonical path %q", ErrActionUnresolved, req.URL.EscapedPath())
+	if nonCanonicalPath(v.EscapedPath, segs) {
+		return Action{}, fmt.Errorf("%w: non-canonical path %q", ErrActionUnresolved, v.EscapedPath)
 	}
 
 	namespace, rest, ok := resolveNamespace(segs)

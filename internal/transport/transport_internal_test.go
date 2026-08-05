@@ -32,6 +32,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/auth"
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
 	"github.com/cynative/cynative/internal/redact"
 )
@@ -1668,7 +1669,7 @@ func (p *orderingProvider) AuthorizesHost(_ context.Context, _ string, _ json.Ra
 	return true, nil
 }
 
-func (p *orderingProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (p *orderingProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	*p.calls = append(*p.calls, "action")
 
 	return nil
@@ -1783,7 +1784,7 @@ func (p *denyingActionProvider) AuthorizesHost(_ context.Context, _ string, _ js
 	return true, nil
 }
 
-func (p *denyingActionProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (p *denyingActionProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	*p.calls = append(*p.calls, "action")
 
 	return errors.New("action denied")
@@ -1828,7 +1829,7 @@ func (p *spyProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMess
 	return true, nil
 }
 
-func (p *spyProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json.RawMessage) error {
+func (p *spyProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
 	*p.called = true
 
 	return nil
@@ -1836,6 +1837,68 @@ func (p *spyProvider) AuthorizeAction(_ context.Context, _ *http.Request, _ json
 
 func (p *spyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
 	return nil
+}
+
+// bodySpyProvider is a LoopbackProvider that also records the body its action
+// gate was handed, so a test can compare what the gate judged against what the
+// server received.
+type bodySpyProvider struct {
+	*authtest.LoopbackProvider
+
+	seen *string
+}
+
+func (p *bodySpyProvider) AuthorizeAction(_ context.Context, v authreq.View, _ json.RawMessage) error {
+	*p.seen = v.Body
+
+	return nil
+}
+
+// TestDoGateAndWireSeeTheSameBody pins the body's two representations to one
+// origin: the view the gate judges and the payload the server receives must be
+// the same bytes.
+func TestDoGateAndWireSeeTheSameBody(t *testing.T) {
+	t.Parallel()
+
+	const sentinel = `{"sentinel":"a1b2c3"}`
+
+	var gotByGate string
+
+	onWire := make(chan string, 1)
+
+	srv, providers := newTLSTestServer(t, func(_ http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		onWire <- string(raw)
+	})
+
+	loopback, ok := providers[0].(*authtest.LoopbackProvider)
+	if !ok {
+		t.Fatalf("expected LoopbackProvider, got %T", providers[0])
+	}
+
+	loopback.ProviderName = "spy"
+	spy := []auth.Provider{&bodySpyProvider{LoopbackProvider: loopback, seen: &gotByGate}}
+
+	c := NewClient()
+	args := fmt.Sprintf(`{"method":"POST","url":%q,"body":%q,"auth_provider":"spy"}`,
+		srv.URL+"/v1/things", sentinel)
+
+	resp, _, cleanup, err := c.do(t.Context(), args, spy)
+	defer cleanup()
+
+	if err != nil {
+		t.Fatalf("do() error = %v", err)
+	}
+
+	defer resp.Body.Close()
+
+	if gotByGate != sentinel {
+		t.Errorf("gate saw body %q, want %q", gotByGate, sentinel)
+	}
+
+	if gotOnWire := <-onWire; gotOnWire != sentinel {
+		t.Errorf("wire carried body %q, want %q", gotOnWire, sentinel)
+	}
 }
 
 // TestDoRejectsNonHTTPSBeforeAuthorization pins the ordering the request view
@@ -1873,7 +1936,12 @@ func TestDoRejectsMalformedArgsBeforeAuthorization(t *testing.T) {
 
 	c := NewClient()
 
-	if _, _, _, err := c.do(t.Context(), `{"method":"GET",`, providers); err == nil {
+	// The literal carries a valid auth_provider and https url ahead of the syntax
+	// error, so the rejection can only come from the parse and not from a later
+	// missing-field or scheme check.
+	const malformed = `{"auth_provider":"gitlab","url":"https://gitlab.com/api/v4/user","method":"GET",`
+
+	if _, _, _, err := c.do(t.Context(), malformed, providers); err == nil {
 		t.Fatal("do() error = nil, want a JSON parse failure")
 	}
 

@@ -3,16 +3,17 @@ package gcp
 import (
 	"fmt"
 	"maps"
-	"net/http"
 	"slices"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
-// Classify resolves req to exactly one Discovery method id from idx, or returns
+// Classify resolves v to exactly one Discovery method id from idx, or returns
 // ErrClassifierUnknownOp on zero or multiple survivors. Deterministic. Pure.
-func Classify(idx MethodIndex, req *http.Request) (string, error) {
-	method := strings.ToUpper(req.Method)
-	path := strings.Trim(req.URL.Path, "/")
+func Classify(idx MethodIndex, v authreq.View) (string, error) {
+	method := strings.ToUpper(v.Method)
+	path := strings.Trim(v.Path, "/")
 
 	keys := slices.Sorted(maps.Keys(idx)) // deterministic iteration.
 
@@ -41,14 +42,14 @@ func Classify(idx MethodIndex, req *http.Request) (string, error) {
 	case 1:
 		return survivors[0], nil
 	case 0:
-		return "", fmt.Errorf("%w: no method matches %s %s", ErrClassifierUnknownOp, method, req.URL.Path)
+		return "", fmt.Errorf("%w: no method matches %s %s", ErrClassifierUnknownOp, method, v.Path)
 	default:
 		return "", fmt.Errorf(
 			"%w: %d methods match %s %s (ambiguous)",
 			ErrClassifierUnknownOp,
 			len(survivors),
 			method,
-			req.URL.Path,
+			v.Path,
 		)
 	}
 }

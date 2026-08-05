@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cynative/cynative/internal/auth"
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/redact"
 )
 
@@ -194,7 +195,6 @@ func (c *Client) do(
 	}
 
 	reqBody, viewBody := bodyForRequest(args.Body)
-	_ = viewBody // Consumed by the request view in the next change.
 
 	req, err := http.NewRequestWithContext(ctx, args.Method, args.URL, reqBody)
 	if err != nil {
@@ -231,11 +231,13 @@ func (c *Client) do(
 	// so it is computed once here.
 	rawArgs := json.RawMessage(arguments)
 
+	v := authreq.NewView(req, viewBody)
+
 	if hostErr := auth.AuthorizeHost(ctx, args.AuthProvider, req.URL.Hostname(), providers, rawArgs); hostErr != nil {
 		return nil, 0, noop, hostErr
 	}
 
-	if actionErr := auth.AuthorizeAction(ctx, args.AuthProvider, req, providers, rawArgs); actionErr != nil {
+	if actionErr := auth.AuthorizeAction(ctx, args.AuthProvider, v, providers, rawArgs); actionErr != nil {
 		return nil, 0, noop, actionErr
 	}
 

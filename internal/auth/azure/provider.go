@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // Provider is the composed pure Layer-2 provider that internal/auth/azure.go
@@ -41,7 +42,7 @@ type azureArgsShape struct {
 // The service is derived from the URL path (the last /providers/ namespace);
 // azure_auth.service is only verified against it, never used as a source.
 // Fails closed on any unresolved step.
-func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	var args azureArgsShape
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
 		return fmt.Errorf("azure_hardening: parse azure_auth: %w", err)
@@ -51,7 +52,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 	}
 
 	// Layer 2: structural action derivation (service from URL path only).
-	action, err := DeriveAction(ctx, req, p.catalog)
+	action, err := DeriveAction(ctx, v, p.catalog)
 	if err != nil {
 		return err
 	}

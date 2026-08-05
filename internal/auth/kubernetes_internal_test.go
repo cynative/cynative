@@ -813,8 +813,8 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://h/api/v1/namespaces/d/pods", nil)
-		if err := p.AuthorizeAction(ctx, req, nil); err != nil {
+		v := actionView(t, http.MethodGet, "https://h/api/v1/namespaces/d/pods")
+		if err := p.AuthorizeAction(ctx, v, nil); err != nil {
 			t.Fatalf("list pods should be allowed: %v", err)
 		}
 	})
@@ -823,8 +823,8 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://h/api/v1/nodes", nil)
-		if err := p.AuthorizeAction(ctx, req, nil); !errors.Is(err, k8sauthz.ErrForbidden) {
+		v := actionView(t, http.MethodGet, "https://h/api/v1/nodes")
+		if err := p.AuthorizeAction(ctx, v, nil); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("get nodes should be ErrForbidden, got %v", err)
 		}
 	})
@@ -836,8 +836,8 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
 			return nil, errors.New("boom")
 		}
-		req, _ := http.NewRequest(http.MethodGet, "https://h/api/v1/pods", nil)
-		if err := p.AuthorizeAction(ctx, req, nil); err == nil {
+		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
+		if err := p.AuthorizeAction(ctx, v, nil); err == nil {
 			t.Fatal("fetch error must deny (fail closed)")
 		}
 	})
@@ -846,8 +846,8 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		req, _ := http.NewRequest(http.MethodGet, "https://h/api/v1/pods", nil)
-		if err := p.AuthorizeAction(ctx, req, json.RawMessage(`{`)); err == nil {
+		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
+		if err := p.AuthorizeAction(ctx, v, json.RawMessage(`{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})

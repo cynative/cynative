@@ -16,6 +16,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v9"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 const aksProviderName = "aks"
@@ -207,13 +209,13 @@ func (p *aksProvider) InjectAuth(req *http.Request, rawArgs json.RawMessage) err
 // AuthorizeAction enforces the read-only ClusterRole posture for AKS Kubernetes API
 // requests via the shared k8sGate. It implements the optional
 // auth.ActionAuthorizer interface.
-func (p *aksProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *aksProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	args, err := parseAKSArgs(rawArgs)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, req, args)
+	return p.authorizeAction(ctx, v, args)
 }
 
 func (p *aksProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error) {

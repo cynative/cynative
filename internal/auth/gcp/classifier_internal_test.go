@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
-func req(t *testing.T, method, rawurl string) *http.Request {
+func classifyView(t *testing.T, method, rawurl string) authreq.View {
 	t.Helper()
 
 	u, err := url.Parse(rawurl)
@@ -15,7 +17,7 @@ func req(t *testing.T, method, rawurl string) *http.Request {
 		t.Fatalf("parse url: %v", err)
 	}
 
-	return &http.Request{Method: method, URL: u, Header: http.Header{}}
+	return authreq.NewView(&http.Request{Method: method, URL: u, Header: http.Header{}}, "")
 }
 
 func computeIndex() MethodIndex {
@@ -83,56 +85,60 @@ func TestClassify(t *testing.T) {
 	tests := []struct {
 		name    string
 		idx     MethodIndex
-		req     *http.Request
+		v       authreq.View
 		want    string
 		wantErr bool
 	}{
 		{
 			name: "list",
 			idx:  computeIndex(),
-			req:  req(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+			v:    classifyView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 			want: "compute.instances.list",
 		},
 		{
 			name: "insert same template POST",
 			idx:  computeIndex(),
-			req:  req(t, "POST", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+			v:    classifyView(t, "POST", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
 			want: "compute.instances.insert",
 		},
 		{
 			name: "get vs delete by method GET",
 			idx:  computeIndex(),
-			req:  req(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i"),
+			v:    classifyView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i"),
 			want: "compute.instances.get",
 		},
 		{
 			name: "delete",
 			idx:  computeIndex(),
-			req:  req(t, "DELETE", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i"),
+			v:    classifyView(t, "DELETE", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i"),
 			want: "compute.instances.delete",
 		},
 		{
 			name: "literal verb start",
 			idx:  computeIndex(),
-			req:  req(t, "POST", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i/start"),
+			v: classifyView(
+				t,
+				"POST",
+				"https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/i/start",
+			),
 			want: "compute.instances.start",
 		},
 		{
 			name: "storage list fallback",
 			idx:  storageIndex(),
-			req:  req(t, "GET", "https://storage.googleapis.com/storage/v1/b"),
+			v:    classifyView(t, "GET", "https://storage.googleapis.com/storage/v1/b"),
 			want: "storage.buckets.list",
 		},
 		{
 			name: "media upload",
 			idx:  storageIndex(),
-			req:  req(t, "POST", "https://storage.googleapis.com/upload/storage/v1/b/mybucket/o"),
+			v:    classifyView(t, "POST", "https://storage.googleapis.com/upload/storage/v1/b/mybucket/o"),
 			want: "storage.objects.insert",
 		},
 		{
 			name:    "zero match fails",
 			idx:     computeIndex(),
-			req:     req(t, "GET", "https://compute.googleapis.com/compute/v1/nope"),
+			v:       classifyView(t, "GET", "https://compute.googleapis.com/compute/v1/nope"),
 			wantErr: true,
 		},
 	}
@@ -141,7 +147,7 @@ func TestClassify(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := Classify(tc.idx, tc.req)
+			got, err := Classify(tc.idx, tc.v)
 			if tc.wantErr {
 				if !errors.Is(err, ErrClassifierUnknownOp) {
 					t.Fatalf("Classify err = %v, want ErrClassifierUnknownOp", err)
@@ -165,7 +171,7 @@ func TestClassifyColonVerb(t *testing.T) {
 	t.Parallel()
 
 	idx := storageIndex()
-	got, err := Classify(idx, req(t, "GET", "https://storage.googleapis.com/storage/v1/b/mybucket/iam"))
+	got, err := Classify(idx, classifyView(t, "GET", "https://storage.googleapis.com/storage/v1/b/mybucket/iam"))
 	if err != nil || got != "storage.buckets.getIamPolicy" {
 		t.Fatalf("getIamPolicy classify = %q err=%v", got, err)
 	}
@@ -180,7 +186,7 @@ func TestClassifyAmbiguousFailClosed(t *testing.T) {
 		"svc.bar.get": {ID: "svc.bar.get", HTTPMethod: "GET", FlatPath: "v1/projects/{project}/foo/{foo}"},
 	}
 
-	_, err := Classify(ambiguous, req(t, "GET", "https://example.googleapis.com/v1/projects/p/foo/f"))
+	_, err := Classify(ambiguous, classifyView(t, "GET", "https://example.googleapis.com/v1/projects/p/foo/f"))
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("ambiguous match must return ErrClassifierUnknownOp, got %v", err)
 	}
@@ -196,7 +202,7 @@ func TestClassifyLiteralMismatch(t *testing.T) {
 	// the literal "v1" segment will not match "v2", so no survivor → fail closed.
 	_, err := Classify(
 		computeIndex(),
-		req(t, "GET", "https://compute.googleapis.com/compute/v2/projects/p/zones/z/instances"),
+		classifyView(t, "GET", "https://compute.googleapis.com/compute/v2/projects/p/zones/z/instances"),
 	)
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("literal mismatch must return ErrClassifierUnknownOp, got %v", err)
@@ -225,19 +231,28 @@ func TestClassifyColonVerbCustom(t *testing.T) {
 	}
 
 	// Placeholder-base colon-verb: verb matches, base is placeholder → match.
-	got, err := Classify(idx, req(t, "POST", "https://example.googleapis.com/v1/projects/p/resources/r:setIamPolicy"))
+	got, err := Classify(
+		idx,
+		classifyView(t, "POST", "https://example.googleapis.com/v1/projects/p/resources/r:setIamPolicy"),
+	)
 	if err != nil || got != "svc.res.setIamPolicy" {
 		t.Fatalf("placeholder colon-verb: got %q err=%v", got, err)
 	}
 
 	// Mismatched colon-verb: request has :getIamPolicy but only :setIamPolicy exists → fail closed.
-	_, err = Classify(idx, req(t, "POST", "https://example.googleapis.com/v1/projects/p/resources/r:getIamPolicy"))
+	_, err = Classify(
+		idx,
+		classifyView(t, "POST", "https://example.googleapis.com/v1/projects/p/resources/r:getIamPolicy"),
+	)
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("mismatched colon-verb must return ErrClassifierUnknownOp, got %v", err)
 	}
 
 	// Literal-base colon-verb: template literal "myRes" matches request literal exactly.
-	got, err = Classify(idx, req(t, "POST", "https://example.googleapis.com/v1/globalResources/myRes:testPermissions"))
+	got, err = Classify(
+		idx,
+		classifyView(t, "POST", "https://example.googleapis.com/v1/globalResources/myRes:testPermissions"),
+	)
 	if err != nil || got != "svc.globalRes.testPermissions" {
 		t.Fatalf("literal colon-verb: got %q err=%v", got, err)
 	}
@@ -257,7 +272,10 @@ func TestClassifyRealFlatPathShape(t *testing.T) {
 			ServicePath: "compute/v1/",
 		},
 	}
-	got, err := Classify(idx, req(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"))
+	got, err := Classify(
+		idx,
+		classifyView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
+	)
 	if err != nil || got != "compute.instances.list" {
 		t.Fatalf("real-shape classify: got=%q err=%v, want compute.instances.list", got, err)
 	}
@@ -273,12 +291,12 @@ func TestClassifySplitSegmentsEmpty(t *testing.T) {
 		"svc.root.get": {ID: "svc.root.get", HTTPMethod: "GET", FlatPath: ""},
 	}
 	// A request to the root "/" path (trimmed → "") must match.
-	got, err := Classify(idx, req(t, "GET", "https://example.googleapis.com/"))
+	got, err := Classify(idx, classifyView(t, "GET", "https://example.googleapis.com/"))
 	if err != nil || got != "svc.root.get" {
 		t.Fatalf("empty flatPath root match: got %q err=%v", got, err)
 	}
 	// A request with any non-empty path must not match.
-	_, err = Classify(idx, req(t, "GET", "https://example.googleapis.com/v1/something"))
+	_, err = Classify(idx, classifyView(t, "GET", "https://example.googleapis.com/v1/something"))
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("non-empty path vs empty template must fail closed, got %v", err)
 	}
@@ -299,7 +317,10 @@ func TestClassifyBarePlaceholderRejectsCustomVerb(t *testing.T) {
 		},
 	}
 
-	_, err := Classify(idx, req(t, "POST", "https://example.googleapis.com/v1/projects/p/resources/r:customVerb"))
+	_, err := Classify(
+		idx,
+		classifyView(t, "POST", "https://example.googleapis.com/v1/projects/p/resources/r:customVerb"),
+	)
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("custom-verb request must not match a bare-placeholder template, got %v", err)
 	}

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // classifierFakeCatalog is a hand-written Catalog fake for the pure classifier tests.
@@ -72,13 +74,13 @@ func classifierCatalog() classifierFakeCatalog {
 	}
 }
 
-func creq(t *testing.T, method, rawurl string) *http.Request {
+func deriveView(t *testing.T, method, rawurl string) authreq.View {
 	t.Helper()
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		t.Fatalf("parse url: %v", err)
 	}
-	return &http.Request{Method: method, URL: u, Header: http.Header{}}
+	return authreq.NewView(&http.Request{Method: method, URL: u, Header: http.Header{}}, "")
 }
 
 func TestDeriveAction(t *testing.T) {
@@ -87,13 +89,13 @@ func TestDeriveAction(t *testing.T) {
 	cat := classifierCatalog()
 	tests := []struct {
 		name     string
-		req      *http.Request
+		v        authreq.View
 		wantFull string
 		wantErr  error
 	}{
 		{
 			name: "GET get → read",
-			req: creq(
+			v: deriveView(
 				t,
 				"GET",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm?api-version=2023-03-01",
@@ -102,7 +104,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "GET list → read (shared with get)",
-			req: creq(
+			v: deriveView(
 				t,
 				"GET",
 				"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines",
@@ -111,7 +113,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "PUT → write",
-			req: creq(
+			v: deriveView(
 				t,
 				"PUT",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm",
@@ -120,7 +122,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "PATCH → write",
-			req: creq(
+			v: deriveView(
 				t,
 				"PATCH",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm",
@@ -129,7 +131,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "DELETE → delete",
-			req: creq(
+			v: deriveView(
 				t,
 				"DELETE",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm",
@@ -138,7 +140,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "POST instance action → action",
-			req: creq(
+			v: deriveView(
 				t,
 				"POST",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm/runCommand",
@@ -147,7 +149,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "Storage listKeys POST → /action (NOT /read), isDataAction irrelevant",
-			req: creq(
+			v: deriveView(
 				t,
 				"POST",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Storage/storageAccounts/a/listKeys",
@@ -156,12 +158,12 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name:     "ResourceGraph POST-read → resources/read (allow-list)",
-			req:      creq(t, "POST", "https://management.azure.com/providers/Microsoft.ResourceGraph/resources"),
+			v:        deriveView(t, "POST", "https://management.azure.com/providers/Microsoft.ResourceGraph/resources"),
 			wantFull: "Microsoft.ResourceGraph/resources/read",
 		},
 		{
 			name: "nested /providers/ namespace shift → last /providers/ wins",
-			req: creq(
+			v: deriveView(
 				t,
 				"GET",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.OperationalInsights/workspaces/w/providers/Microsoft.SecurityInsights/incidents/i",
@@ -170,12 +172,12 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name:     "provider-less subscriptions root → Microsoft.Resources read",
-			req:      creq(t, "GET", "https://management.azure.com/subscriptions"),
+			v:        deriveView(t, "GET", "https://management.azure.com/subscriptions"),
 			wantFull: "Microsoft.Resources/subscriptions/read",
 		},
 		{
 			name: "GET async poll shape → scope-level read",
-			req: creq(
+			v: deriveView(
 				t,
 				"GET",
 				"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/locations/eastus/operations/op123",
@@ -184,7 +186,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "Cosmos readonlykeys POST dual → ambiguity DENY",
-			req: creq(
+			v: deriveView(
 				t,
 				"POST",
 				"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.DocumentDB/databaseAccounts/a/readonlykeys",
@@ -193,7 +195,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "unknown resource type → unresolved",
-			req: creq(
+			v: deriveView(
 				t,
 				"GET",
 				"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/widgets/w",
@@ -202,7 +204,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "GET unregistered segment trailing a known type → unresolved",
-			req: creq(
+			v: deriveView(
 				t,
 				"GET",
 				"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines/vm/bogus/x",
@@ -211,7 +213,7 @@ func TestDeriveAction(t *testing.T) {
 		},
 		{
 			name: "POST two unregistered trailing segments → unresolved",
-			req: creq(
+			v: deriveView(
 				t,
 				"POST",
 				"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines/vm/bogus/b/doThing",
@@ -224,7 +226,7 @@ func TestDeriveAction(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := DeriveAction(context.Background(), tc.req, cat)
+			got, err := DeriveAction(context.Background(), tc.v, cat)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("DeriveAction err = %v, want %v", err, tc.wantErr)
@@ -248,7 +250,7 @@ func TestDeriveActionRunCommandVsRunCommands(t *testing.T) {
 
 	cat := classifierCatalog()
 
-	action, err := DeriveAction(context.Background(), creq(
+	action, err := DeriveAction(context.Background(), deriveView(
 		t,
 		"POST",
 		"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm/runCommand",
@@ -257,7 +259,7 @@ func TestDeriveActionRunCommandVsRunCommands(t *testing.T) {
 		t.Fatalf("runCommand action = %q err=%v", action.Full, err)
 	}
 
-	child, err := DeriveAction(context.Background(), creq(
+	child, err := DeriveAction(context.Background(), deriveView(
 		t,
 		"GET",
 		"https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm/runCommands/rc",
@@ -275,7 +277,7 @@ func TestDeriveActionCoverageGaps(t *testing.T) {
 	ctx := context.Background()
 
 	// providerLessAction: POST on a provider-less path → ErrActionUnresolved (line 82).
-	_, err := DeriveAction(ctx, creq(t, "POST", "https://management.azure.com/subscriptions"), cat)
+	_, err := DeriveAction(ctx, deriveView(t, "POST", "https://management.azure.com/subscriptions"), cat)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("provider-less POST: want ErrActionUnresolved, got %v", err)
 	}
@@ -283,13 +285,13 @@ func TestDeriveActionCoverageGaps(t *testing.T) {
 	// providerLessAction: bare /managementGroups is NOT a real ARM route (real
 	// route is provider-ful /providers/Microsoft.Management/managementGroups), so
 	// it now fails closed. Do NOT re-add a managementgroups branch.
-	_, mgErr := DeriveAction(ctx, creq(t, "GET", "https://management.azure.com/managementGroups"), cat)
+	_, mgErr := DeriveAction(ctx, deriveView(t, "GET", "https://management.azure.com/managementGroups"), cat)
 	if !errors.Is(mgErr, ErrActionUnresolved) {
 		t.Errorf("bare managementGroups: want ErrActionUnresolved, got %v", mgErr)
 	}
 
 	// providerLessAction: unknown root → ErrActionUnresolved (line 91).
-	_, err = DeriveAction(ctx, creq(t, "GET", "https://management.azure.com/unknown"), cat)
+	_, err = DeriveAction(ctx, deriveView(t, "GET", "https://management.azure.com/unknown"), cat)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("provider-less unknown root: want ErrActionUnresolved, got %v", err)
 	}
@@ -302,7 +304,7 @@ func TestDeriveActionCoverageGaps(t *testing.T) {
 	}
 	// Use a catalog that injects an error via a wrapper that implements Catalog.
 	catErr := errFetchCatalog{}
-	_, err = DeriveAction(ctx, creq(t, "GET",
+	_, err = DeriveAction(ctx, deriveView(t, "GET",
 		"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines/vm"), catErr)
 	if !errors.Is(err, ErrCatalogUnavailable) {
 		t.Errorf("ResourceTypes fetch error: want ErrCatalogUnavailable, got %v", err)
@@ -310,7 +312,7 @@ func TestDeriveActionCoverageGaps(t *testing.T) {
 	_ = errCat // used above to document intent; errFetchCatalog is the real injector.
 
 	// verbAction unsupported method (line 168).
-	_, err = DeriveAction(ctx, creq(t, "HEAD",
+	_, err = DeriveAction(ctx, deriveView(t, "HEAD",
 		"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines/vm"), cat)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("HEAD method: want ErrActionUnresolved, got %v", err)
@@ -319,7 +321,7 @@ func TestDeriveActionCoverageGaps(t *testing.T) {
 	// postAction catalog lookup error (line 177): ResourceTypes must succeed (so
 	// resolveResourceType finds the type) but LookupOperation fails.
 	catLookupErr := lookupErrCatalog{}
-	_, err = DeriveAction(ctx, creq(
+	_, err = DeriveAction(ctx, deriveView(
 		t,
 		"POST",
 		"https://management.azure.com/subscriptions/s/providers/Microsoft.Storage/storageAccounts/a/listKeys",
@@ -329,7 +331,7 @@ func TestDeriveActionCoverageGaps(t *testing.T) {
 	}
 
 	// splitPath empty path (line 211): provider-less root with empty path → segs nil → len==0.
-	_, err = DeriveAction(ctx, creq(t, "GET", "https://management.azure.com/"), cat)
+	_, err = DeriveAction(ctx, deriveView(t, "GET", "https://management.azure.com/"), cat)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("empty path: want ErrActionUnresolved, got %v", err)
 	}
@@ -374,7 +376,7 @@ func TestDeriveAction_emptySegmentRejected(t *testing.T) {
 	for _, u := range cases {
 		t.Run(u, func(t *testing.T) {
 			t.Parallel()
-			if _, err := DeriveAction(ctx, creq(t, "GET", u), cat); !errors.Is(err, ErrActionUnresolved) {
+			if _, err := DeriveAction(ctx, deriveView(t, "GET", u), cat); !errors.Is(err, ErrActionUnresolved) {
 				t.Errorf("empty segment %q: want ErrActionUnresolved, got %v", u, err)
 			}
 		})
@@ -399,7 +401,7 @@ func TestDeriveAction_nonCanonicalPathRejected(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := DeriveAction(ctx, creq(t, "GET", c.url), cat); !errors.Is(err, ErrActionUnresolved) {
+			if _, err := DeriveAction(ctx, deriveView(t, "GET", c.url), cat); !errors.Is(err, ErrActionUnresolved) {
 				t.Errorf("%s (%s): want ErrActionUnresolved, got %v", c.name, c.url, err)
 			}
 		})
@@ -456,7 +458,7 @@ func TestProviderLessAction_routeTable(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
-			got, err := DeriveAction(ctx, creq(t, "GET", c.url), cat)
+			got, err := DeriveAction(ctx, deriveView(t, "GET", c.url), cat)
 			if err != nil || got.Full != c.wantFull {
 				t.Errorf("derive %s: got %q err=%v, want %q", c.url, got.Full, err, c.wantFull)
 			}
@@ -480,7 +482,7 @@ func TestProviderLessAction_failsClosed(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := DeriveAction(ctx, creq(t, c.method, c.url), cat); !errors.Is(err, ErrActionUnresolved) {
+			if _, err := DeriveAction(ctx, deriveView(t, c.method, c.url), cat); !errors.Is(err, ErrActionUnresolved) {
 				t.Errorf("%s: want ErrActionUnresolved, got %v", c.name, err)
 			}
 		})
@@ -565,7 +567,7 @@ func TestPollAction_positionalShapes(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := DeriveAction(ctx, creq(t, "GET", c.url), cat)
+			got, err := DeriveAction(ctx, deriveView(t, "GET", c.url), cat)
 			if c.wantErr {
 				if !errors.Is(err, ErrActionUnresolved) {
 					t.Errorf("%s: want ErrActionUnresolved, got %q err=%v", c.name, got.Full, err)
@@ -587,7 +589,7 @@ func TestPollAction_bareMarkerAtInstancePositionFallsThrough(t *testing.T) {
 	// and not the namespace root → must fall through to resolveResourceType. The
 	// catalog has no virtualMachines/operations type, so it fails closed.
 	u := "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines/vm/operations"
-	if _, err := DeriveAction(ctx, creq(t, "GET", u), cat); !errors.Is(err, ErrActionUnresolved) {
+	if _, err := DeriveAction(ctx, deriveView(t, "GET", u), cat); !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("bare marker at instance position: want ErrActionUnresolved (not a poll), got %v", err)
 	}
 }
@@ -618,7 +620,7 @@ func TestProviderLessAction_emittedActionsValidateAgainstCatalog(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
-			a, err := DeriveAction(ctx, creq(t, "GET", c.url), cat)
+			a, err := DeriveAction(ctx, deriveView(t, "GET", c.url), cat)
 			if err != nil || a.Full != c.wantFull {
 				t.Fatalf("derive %s: got %q err=%v, want %q", c.url, a.Full, err, c.wantFull)
 			}

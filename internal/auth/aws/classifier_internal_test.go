@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 func TestMatchURITemplate(t *testing.T) {
@@ -42,8 +44,8 @@ func TestMatchURITemplate(t *testing.T) {
 func TestClassifyREST_ListBucketsAtRoot(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
-	req := newClassifyReq(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	op, err := classifyREST(model, req, req.URL.Path)
+	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
+	op, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -55,8 +57,8 @@ func TestClassifyREST_ListBucketsAtRoot(t *testing.T) {
 func TestClassifyREST_GetObject(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
-	req := newClassifyReq(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/my-bucket/path/to/key")
-	op, err := classifyREST(model, req, req.URL.Path)
+	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/my-bucket/path/to/key")
+	op, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -88,8 +90,8 @@ func TestClassifyREST_QueryDisambiguator(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
-			req := newClassifyReq(t, http.MethodGet, c.url)
-			op, err := classifyREST(model, req, req.URL.Path)
+			v := newClassifyView(t, http.MethodGet, c.url)
+			op, err := classifyREST(model, v, v.Path)
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -103,8 +105,8 @@ func TestClassifyREST_QueryDisambiguator(t *testing.T) {
 func TestClassifyREST_NoMatchReturnsUnknown(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
-	req := newClassifyReq(t, http.MethodPost, "https://s3.us-east-1.amazonaws.com/foo")
-	_, err := classifyREST(model, req, req.URL.Path)
+	v := newClassifyView(t, http.MethodPost, "https://s3.us-east-1.amazonaws.com/foo")
+	_, err := classifyREST(model, v, v.Path)
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Errorf("err = %v, want ErrClassifierUnknownOp", err)
 	}
@@ -122,8 +124,8 @@ func TestClassifyREST_HigherScoreCandidateWinsOverEarlierAlphabetical(t *testing
 			"ZZZ": {HTTPMethod: "GET", URITemplate: "/{Bucket}?flag"},
 		},
 	}
-	req := newClassifyReq(t, http.MethodGet, "https://x.amazonaws.com/foo?flag")
-	op, err := classifyREST(model, req, req.URL.Path)
+	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/foo?flag")
+	op, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -141,8 +143,8 @@ func TestClassifyREST_SkipsOperationsWithoutHTTPMethod(t *testing.T) {
 			"WithGet": {HTTPMethod: "GET", URITemplate: "/"},
 		},
 	}
-	req := newClassifyReq(t, http.MethodGet, "https://x.amazonaws.com/")
-	op, err := classifyREST(model, req, req.URL.Path)
+	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/")
+	op, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -237,11 +239,11 @@ func TestClassifyREST_MemberBoundDiscriminators(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.method+c.url+c.copySource, func(t *testing.T) {
 			t.Parallel()
-			req := newClassifyReq(t, c.method, c.url)
+			v := newClassifyView(t, c.method, c.url)
 			if c.copySource != "" {
-				req.Header.Set("X-Amz-Copy-Source", c.copySource)
+				v.Header.Set("X-Amz-Copy-Source", c.copySource)
 			}
-			op, err := classifyREST(model, req, req.URL.Path)
+			op, err := classifyREST(model, v, v.Path)
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -271,8 +273,8 @@ func TestClassifyREST_XIDOnlyDiscriminatorMatchesCanonicalRequest(t *testing.T) 
 	for _, c := range cases {
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
-			req := newClassifyReq(t, http.MethodGet, c.url)
-			op, err := classifyREST(model, req, req.URL.Path)
+			v := newClassifyView(t, http.MethodGet, c.url)
+			op, err := classifyREST(model, v, v.Path)
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -337,8 +339,8 @@ func TestClassifyOperation_virtualHostedSynthesizesBucket(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			req := newClassifyReq(t, http.MethodGet, c.url)
-			op, err := ClassifyOperation(model, req, parsed)
+			v := newClassifyView(t, http.MethodGet, c.url)
+			op, err := ClassifyOperation(model, v, parsed)
 			if err != nil {
 				t.Fatalf("ClassifyOperation: %v", err)
 			}
@@ -370,8 +372,8 @@ func TestClassifyOperation_pathStyleUnchanged(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			req := newClassifyReq(t, http.MethodGet, c.url)
-			op, err := ClassifyOperation(model, req, parsed)
+			v := newClassifyView(t, http.MethodGet, c.url)
+			op, err := ClassifyOperation(model, v, parsed)
 			if err != nil {
 				t.Fatalf("ClassifyOperation: %v", err)
 			}
@@ -403,8 +405,8 @@ func TestVhostPlaceholder_NoLiteralFirstSegmentCollision(t *testing.T) {
 			"WriteGetObjectResponse": {HTTPMethod: "POST", URITemplate: "/WriteGetObjectResponse"},
 		},
 	}
-	req := newClassifyReq(t, http.MethodPost, "https://my-bucket.s3.us-east-1.amazonaws.com/")
-	_, err := ClassifyOperation(model, req, ParsedHost{Service: "s3", BucketInHost: true})
+	v := newClassifyView(t, http.MethodPost, "https://my-bucket.s3.us-east-1.amazonaws.com/")
+	_, err := ClassifyOperation(model, v, ParsedHost{Service: "s3", BucketInHost: true})
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Errorf("err = %v, want ErrClassifierUnknownOp (placeholder must not match the literal op)", err)
 	}
@@ -423,11 +425,11 @@ func s3MinModel(t *testing.T) *ServiceModel {
 	return m
 }
 
-func newClassifyReq(t *testing.T, method, url string) *http.Request {
+func newClassifyView(t *testing.T, method, rawurl string) authreq.View {
 	t.Helper()
-	req, err := http.NewRequestWithContext(t.Context(), method, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), method, rawurl, nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	return req
+	return authreq.NewView(req, "")
 }

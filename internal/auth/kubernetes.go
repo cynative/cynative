@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // kubernetesProviderName is the connector id the model selects via auth_provider.
@@ -479,11 +481,11 @@ func (p *kubernetesProvider) probeAndSeedView(ctx context.Context) error {
 }
 
 // AuthorizeAction enforces the read-only ClusterRole posture via the shared k8sGate.
-func (p *kubernetesProvider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *kubernetesProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	args, err := parseKubernetesArgs(rawArgs)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, req, args)
+	return p.authorizeAction(ctx, v, args)
 }

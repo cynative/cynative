@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // vhostBucketPlaceholder is the synthetic {Bucket} path segment prepended for
@@ -33,13 +36,14 @@ func classificationPath(parsed ParsedHost, rawPath string) string {
 	return "/" + vhostBucketPlaceholder + rawPath
 }
 
-// classifyREST identifies which operation in model matches req. Matching uses
+// classifyREST identifies which operation in model matches v. Matching uses
 // (method, URI template); among multiple matches, the one whose query-flag
-// set is the longest subset of req's query parameters wins. path is the
+// set is the longest subset of the request's query parameters wins. path is the
 // effective classification path (already normalized by classificationPath).
-func classifyREST(model *ServiceModel, req *http.Request, path string) (string, error) {
-	method := strings.ToUpper(req.Method)
-	reqQuery := req.URL.Query()
+func classifyREST(model *ServiceModel, v authreq.View, path string) (string, error) {
+	method := strings.ToUpper(v.Method)
+	// Lenient parse, matching what [net/url.URL.Query] did here before the view.
+	reqQuery, _ := url.ParseQuery(v.RawQuery)
 
 	type candidate struct {
 		name  string
@@ -63,7 +67,7 @@ func classifyREST(model *ServiceModel, req *http.Request, path string) (string, 
 		if !matchURITemplate(tplPath, path) {
 			continue
 		}
-		score, ok := scoreDiscriminators(op, tplQuery, reqQuery, req.Header)
+		score, ok := scoreDiscriminators(op, tplQuery, reqQuery, v.Header)
 		if !ok {
 			continue
 		}

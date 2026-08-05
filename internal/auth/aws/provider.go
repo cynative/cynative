@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // ModelResolver resolves a host endpoint prefix to every modeled service that
@@ -59,7 +60,7 @@ type argsShape struct {
 // matched but contributes no required action. Multiple matches occur only for
 // prefix collisions (e.g. email→ses/sesv2). Fail closed on any unresolved
 // candidate.
-func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawArgs json.RawMessage) error {
+func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
 	var args argsShape
 	if err := json.Unmarshal(rawArgs, &args); err != nil {
 		return fmt.Errorf("aws_hardening: parse aws_auth: %w", err)
@@ -67,7 +68,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 	if args.AWSAuth == nil {
 		return errors.New("aws_hardening: aws_auth is required")
 	}
-	parsed, err := ParseHost(strings.ToLower(req.URL.Hostname()))
+	parsed, err := ParseHost(v.Hostname)
 	if err != nil {
 		return err
 	}
@@ -82,7 +83,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, req *http.Request, rawAr
 		if !strings.EqualFold(model.EndpointPrefix, parsed.Service) {
 			continue // defensive: index/parse drift.
 		}
-		op, opErr := ClassifyOperation(model, req, parsed)
+		op, opErr := ClassifyOperation(model, v, parsed)
 		if opErr != nil {
 			// Every classifier error means this candidate does not serve the
 			// operation (ClassifyOperation only ever wraps ErrClassifierUnknownOp),
