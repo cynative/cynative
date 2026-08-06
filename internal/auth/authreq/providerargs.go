@@ -76,20 +76,19 @@ func Parse[T any](a ProviderArgs) (*T, error) {
 		return nil, nil //nolint:nilnil // the zero value is the absent state; callers enforce required fields.
 	}
 
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(a.toolCall, &fields); err != nil {
+	block, err := projectBlock(a.toolCall, a.key)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse %s args: %w", a.key, err)
 	}
 
-	// A top-level null decodes into a nil map, which reads as "key absent" and
-	// matches how the tool call's own arguments have always been treated.
-	block, ok := fields[a.key]
-	if !ok || string(block) == "null" {
+	// An explicit null is the absent state too, matching how the tool call's own
+	// arguments have always been treated.
+	if block == nil || string(block) == "null" {
 		return nil, nil //nolint:nilnil // absent args are not an error; callers enforce required fields.
 	}
 
 	var args T
-	if err := json.Unmarshal(block, &args); err != nil {
+	if err = json.Unmarshal(block, &args); err != nil {
 		return nil, fmt.Errorf("failed to parse %s args: %w", a.key, err)
 	}
 

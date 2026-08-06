@@ -504,7 +504,18 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     building one costs nothing. Most gates read no arguments at all (github across three,
     gitlab across five, one of them per dial attempt), and extracting eagerly would scan
     and copy the whole tool call, model-authored body included, once per gate for
-    arguments nobody reads. `Parse` telling the zero value from a constructed one by an
+    arguments nobody reads. The extraction itself (`project.go`) slices the block out of
+    the tool call in place rather than decoding into a `map[string]json.RawMessage`, which
+    would copy every top-level value to retain one: `json.Valid` scans without allocating,
+    so the walk only has to find boundaries in a document already known to be well formed,
+    and the whole projection is allocation-free. It is the one hand-written JSON walk in
+    the auth path, so `FuzzProjectBlock` pins it **differentially** against the map decode
+    it replaced, on both the error verdict and the extracted bytes. Two things that walk
+    must match and would be silently wrong otherwise: a duplicate key resolves to the
+    **last** occurrence, as `encoding/json` does, so a gate cannot be shown one block while
+    the tool schema decoded another; and a member name is compared raw only when it is
+    unescaped **and** valid UTF-8, since `encoding/json` substitutes U+FFFD for an invalid
+    byte. `Parse` telling the zero value from a constructed one by an
     empty key is what makes the suffix append unconditional: a nameless provider looks for
     `_auth` and fails closed, rather than inheriting "absent means allow". The key is
     **derived**, never looked up, so a connector whose model-facing block were tagged
@@ -858,12 +869,16 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `make test` import check.
 - **Fuzz targets guard the parsers on the trust boundary**, named `*_fuzz_test.go` /
   `*_fuzz_internal_test.go`: the redactor, the untrusted-output fencing, sandbox output
-  finalization, AWS `ParseHost`, the K8s classifier and ClusterRole parser, and the github and
+  finalization, AWS `ParseHost`, the K8s classifier and ClusterRole parser, the auth
+  provider-args projection, and the github and
   gitlab classifiers (route lookup, request classification, level derivation, GraphQL-endpoint
   detection, OpenAPI distillation). Each pins panic-freedom; most also pin a fail-closed
   contract, but the two `IsGraphQLEndpoint` targets and github's `FuzzLookup` discard their
   results and pin panic-freedom alone (gitlab's `FuzzLookup`, by contrast, asserts the root
-  anchor). No corpus is committed and `make check` never
+  anchor). `FuzzProjectBlock` is the one **differential** target: its contract is agreement
+  with `encoding/json`, not a one-sided property, because the walk it guards exists only to
+  avoid that decode's allocation and any divergence between the two is a gate reading
+  something other than what the tool schema decoded. No corpus is committed and `make check` never
   passes `-fuzz`, so **the `f.Add` seeds are the whole gate**: they must cover the interesting
   branches, since that is all CI executes. Extended fuzzing is a manual
   `go test -fuzz=FuzzX -fuzztime=…` run.
