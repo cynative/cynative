@@ -496,12 +496,19 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     tool call: each dispatcher resolves the provider first and then projects the call down
     to that provider's own `<name>_auth` block via `authreq.NewProviderArgs(rawArgs,
     p.Name())`, so a gate cannot take a second, un-narrowed view of the request alongside
-    `View`. `authreq.Parse[T]` decodes the block, distinguishing absent (`nil, nil`;
-    callers enforce their own required fields) from a projection error, and the zero
-    `ProviderArgs` is the absent state, which is why `kubernetes`, whose action
-    validation is a deliberate no-op, treats it as allow. The key is **derived**, never
-    looked up, so a connector whose model-facing block were tagged anything but
-    `<name>_auth` would be handed absent args on every request instead of failing:
+    `View`. `authreq.Parse[T]` is the **only** accessor and decodes exactly one key,
+    distinguishing absent (`nil, nil`; callers enforce their own required fields) from a
+    projection error, and the zero `ProviderArgs` is the absent state, which is why
+    `kubernetes`, whose action validation is a deliberate no-op, treats it as allow.
+    `Parse` is also where the extraction happens: `NewProviderArgs` only binds the key, so
+    building one costs nothing. Most gates read no arguments at all (github across three,
+    gitlab across five, one of them per dial attempt), and extracting eagerly would scan
+    and copy the whole tool call, model-authored body included, once per gate for
+    arguments nobody reads. `Parse` telling the zero value from a constructed one by an
+    empty key is what makes the suffix append unconditional: a nameless provider looks for
+    `_auth` and fails closed, rather than inheriting "absent means allow". The key is
+    **derived**, never looked up, so a connector whose model-facing block were tagged
+    anything but `<name>_auth` would be handed absent args on every request instead of failing:
     `connector_args_test.go` pins the two together in both directions against
     `transport.RequestArgs`, and `argsnarrowing_internal_test.go` drives one tool call
     through all seven dispatchers and asserts the provider sees its own block and neither

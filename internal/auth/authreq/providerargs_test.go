@@ -103,6 +103,28 @@ func TestProviderArgs_ZeroValueIsAbsent(t *testing.T) {
 	}
 }
 
+// TestNewProviderArgs_EmptyProviderIsNotAbsent guards the discriminator between
+// the zero value and a constructed one. Parse tells them apart by an empty key,
+// which works only because the constructor always appends the suffix. A
+// nameless provider must therefore still look for its (nonsense) "_auth" block
+// and fail closed on a malformed call, never inherit the zero value's "absent
+// means allow".
+func TestNewProviderArgs_EmptyProviderIsNotAbsent(t *testing.T) {
+	t.Parallel()
+
+	if _, err := authreq.Parse[block](authreq.NewProviderArgs(json.RawMessage(`{`), "")); err == nil {
+		t.Error("Parse() error = nil, want an error: a nameless provider must not read as absent")
+	}
+
+	got, err := authreq.Parse[block](authreq.NewProviderArgs(json.RawMessage(`{"_auth":{"marker":"x"}}`), ""))
+	if err != nil {
+		t.Fatalf("Parse() error = %v, want nil", err)
+	}
+	if got == nil || got.Marker != "x" {
+		t.Errorf("Parse() = %v, want the \"_auth\" block: the suffix is appended unconditionally", got)
+	}
+}
+
 func TestNewProviderArgs_SiblingBlindness(t *testing.T) {
 	t.Parallel()
 
