@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
@@ -10,6 +11,12 @@ import (
 	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
+// awsToolCall projects a whole http_request tool call down to the aws_auth
+// block, exactly as auth's dispatcher does before it calls a gate.
+func awsToolCall(toolCall string) authreq.ProviderArgs {
+	return authreq.NewProviderArgs(json.RawMessage(toolCall), "aws")
+}
+
 func TestProvider_AuthorizeAction_happyPath(t *testing.T) {
 	t.Parallel()
 	p := newTestProvider(t, providerTestSetup{
@@ -17,7 +24,7 @@ func TestProvider_AuthorizeAction_happyPath(t *testing.T) {
 		smithyEndpointPrefix: "",
 	})
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	if err := p.AuthorizeAction(t.Context(), v, raw); err != nil {
 		t.Fatalf("AuthorizeAction: %v", err)
 	}
@@ -35,7 +42,7 @@ func TestProvider_AuthorizeAction_permissionlessAllowed(t *testing.T) {
 		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 	}
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	if err := p.AuthorizeAction(t.Context(), v, raw); err != nil {
 		t.Fatalf("AuthorizeAction (permissionless must allow): %v", err)
 	}
@@ -45,7 +52,7 @@ func TestProvider_AuthorizeAction_deniedAction(t *testing.T) {
 	t.Parallel()
 	p := newTestProvider(t, providerTestSetup{allowed: map[string]bool{}, smithyEndpointPrefix: ""})
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if !errors.Is(err, ErrPolicyDenied) {
 		t.Errorf("err = %v, want ErrPolicyDenied", err)
@@ -62,7 +69,7 @@ func TestProvider_AuthorizeAction_endpointPrefixMismatchSkips(t *testing.T) {
 		smithyEndpointPrefix: "NOT-s3",
 	})
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("err = %v, want ErrActionUnresolved (mismatched candidate skipped)", err)
@@ -73,7 +80,7 @@ func TestProvider_AuthorizeAction_malformedJSON(t *testing.T) {
 	t.Parallel()
 	p := newTestProvider(t, providerTestSetup{allowed: nil, smithyEndpointPrefix: ""})
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	err := p.AuthorizeAction(t.Context(), v, []byte(`{bad`))
+	err := p.AuthorizeAction(t.Context(), v, awsToolCall(`{bad`))
 	if err == nil {
 		t.Errorf("expected JSON parse error")
 	}
@@ -83,7 +90,7 @@ func TestProvider_AuthorizeAction_missingAWSAuth(t *testing.T) {
 	t.Parallel()
 	p := newTestProvider(t, providerTestSetup{allowed: nil, smithyEndpointPrefix: ""})
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	err := p.AuthorizeAction(t.Context(), v, []byte(`{}`))
+	err := p.AuthorizeAction(t.Context(), v, awsToolCall(`{}`))
 	if err == nil {
 		t.Errorf("expected missing aws_auth error")
 	}
@@ -93,7 +100,7 @@ func TestProvider_AuthorizeAction_unrecognizedHost(t *testing.T) {
 	t.Parallel()
 	p := newTestProvider(t, providerTestSetup{allowed: nil, smithyEndpointPrefix: ""})
 	v := mustProviderView(t, http.MethodGet, "https://attacker.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if !errors.Is(err, ErrHostPattern) {
 		t.Errorf("err = %v, want ErrHostPattern", err)
@@ -109,7 +116,7 @@ func TestProvider_AuthorizeAction_modelResolveFails(t *testing.T) {
 		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 	}
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if err == nil {
 		t.Errorf("expected archive error")
@@ -129,7 +136,7 @@ func TestProvider_AuthorizeAction_classifierUnknownOpSkips(t *testing.T) {
 		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 	}
 	v := mustProviderView(t, http.MethodPost, "https://s3.us-east-1.amazonaws.com/foo")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("err = %v, want ErrActionUnresolved (unknown-op candidate skipped)", err)
@@ -145,7 +152,7 @@ func TestProvider_AuthorizeAction_evaluatorFails(t *testing.T) {
 		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 	}
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if err == nil {
 		t.Errorf("expected evaluator error")
@@ -161,7 +168,7 @@ func TestProvider_AuthorizeAction_unresolvedDenies(t *testing.T) {
 		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 	}
 	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	if err := p.AuthorizeAction(t.Context(), v, raw); !errors.Is(err, ErrActionUnresolved) {
 		t.Errorf("err = %v, want ErrActionUnresolved", err)
 	}
@@ -189,7 +196,7 @@ func TestProvider_AuthorizeAction_collisionUnion(t *testing.T) {
 		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 	}
 	v := mustProviderView(t, http.MethodGet, "https://email.us-east-1.amazonaws.com/")
-	raw := []byte(`{"aws_auth":{"service":"email","region":"us-east-1"}}`)
+	raw := awsToolCall(`{"aws_auth":{"service":"email","region":"us-east-1"}}`)
 	if err := p.AuthorizeAction(t.Context(), v, raw); err != nil {
 		t.Fatalf("AuthorizeAction: %v", err)
 	}
@@ -249,7 +256,7 @@ func TestProvider_AuthorizeAction_virtualHostedClassifiesObjectOps(t *testing.T)
 				policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
 			}
 			v := mustProviderView(t, http.MethodGet, c.url)
-			raw := []byte(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+			raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 			if err := p.AuthorizeAction(t.Context(), v, raw); err != nil {
 				t.Fatalf("AuthorizeAction: %v", err)
 			}

@@ -490,8 +490,22 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     and no query helper on purpose: GitLab parses fail-closed against Rack's `;` handling
     while the K8s and AWS gates match their Go upstreams' lenient parse. It carries both
     `Path` and `EscapedPath` because Azure compares them to reject a percent-encoded
-    slash. `rawArgs` is still the full tool-call JSON, so it remains a second
-    full-fidelity channel; narrowing it is separate work.
+    slash.
+  - The per-call arguments are narrowed the same way. All seven provider-facing methods
+    (the six read-only gates plus `InjectAuth`) take an `authreq.ProviderArgs`, never the
+    tool call: each dispatcher resolves the provider first and then projects the call down
+    to that provider's own `<name>_auth` block via `authreq.NewProviderArgs(rawArgs,
+    p.Name())`, so a gate cannot take a second, un-narrowed view of the request alongside
+    `View`. `authreq.Parse[T]` decodes the block, distinguishing absent (`nil, nil`;
+    callers enforce their own required fields) from a projection error, and the zero
+    `ProviderArgs` is the absent state, which is why `kubernetes`, whose action
+    validation is a deliberate no-op, treats it as allow. The key is **derived**, never
+    looked up, so a connector whose model-facing block were tagged anything but
+    `<name>_auth` would be handed absent args on every request instead of failing:
+    `connector_args_test.go` pins the two together in both directions against
+    `transport.RequestArgs`, and `argsnarrowing_internal_test.go` drives one tool call
+    through all seven dispatchers and asserts the provider sees its own block and neither
+    the request nor a sibling's.
   - `auth.Inject`, the dispatcher every credentialed request flows through, rejects
     model-supplied credentials before dispatching (`ErrModelSuppliedCredential`):
     `Authorization`/`Proxy-Authorization`/`X-Ms-Authorization-Auxiliary` header values and URL
@@ -863,9 +877,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   and every catalog entry has a `docs/providers/<name>.md` guide; chat capability is not
   mechanically verifiable, so re-check each provider's `ChatCompletion` body on every Bifrost
   bump and update the exclusions, env row, and doc together. The connector registry has the
-  same convention: `internal/auth/connector_docs_test.go` fails unless every connector id
-  `GetProviders` can register has a guide at `docs/connectors/<file>.md`; when adding a
-  connector, add its doc and the test-table row together.
+  same convention, in two tables that must stay key-for-key identical (a test asserts it):
+  `internal/auth/connector_docs_test.go` fails unless every connector id `GetProviders` can
+  register has a guide at `docs/connectors/<file>.md`, and `connector_args_test.go` fails
+  unless its per-call arguments block in `transport.RequestArgs` is tagged exactly
+  `<id>_auth` (or it declares that the connector takes none). When adding a connector, add
+  its doc and both test-table rows together.
 - **README demo assets are generated, never hand-edited.** `docs/assets/demo.capture.ansi` is
   written by `capture.sh sanitize` (from a raw `live` capture); the three `demo-col*.svg` are
   freeze-rendered from it by `capture.sh render`. `capture.sh all` is the leak gate: `render` +

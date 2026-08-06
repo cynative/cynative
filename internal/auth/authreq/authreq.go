@@ -1,8 +1,9 @@
-// Package authreq holds the narrowed, read-only projections of an outbound
-// HTTP request that the authorization gates receive instead of a live
-// [http.Request]. It is a stdlib-only leaf: internal/auth imports its own
-// aws/gcp/azure subpackages, so a type declared there could not be shared with
-// them without an import cycle.
+// Package authreq holds the narrowed, read-only projections the authorization
+// gates receive in place of the two things they must never hold whole: the
+// outbound [http.Request] the transport will send ([View] and the smaller
+// [AuditView]), and the model's tool call ([ProviderArgs]). It is a stdlib-only
+// leaf: internal/auth imports its own aws/gcp/azure subpackages, so a type
+// declared there could not be shared with them without an import cycle.
 package authreq
 
 import (

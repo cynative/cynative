@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -87,18 +86,6 @@ func (p *aksProvider) Description() string {
 		"Requires aks_auth.cluster_name, resource_group, and subscription_id."
 }
 
-// parseAKSArgs unmarshals the aks_auth arguments from the raw JSON, returning
-// the typed args (nil when the aks_auth key is absent or the input is empty),
-// matching the eks/gke nil convention; callers run validate to enforce required
-// fields.
-func parseAKSArgs(rawArgs json.RawMessage) (*AKSAuthArgs, error) {
-	if len(rawArgs) == 0 {
-		return nil, nil //nolint:nilnil // empty input means absent args, not an error; matches the eks/gke nil convention.
-	}
-
-	return parseAuthArgs[AKSAuthArgs](rawArgs, "aks_auth")
-}
-
 // aksClusterTLSMaterial base64-encodes the cluster CA and (for local-account
 // mTLS) the client cert+key from the AKS rest.Config. It returns
 // (caData, clientCert, clientKey); each is "" when its material is absent, and
@@ -162,8 +149,8 @@ func (p *aksProvider) getClusterConfig(ctx context.Context, args *AKSAuthArgs) (
 	})
 }
 
-func (p *aksProvider) InjectAuth(req *http.Request, rawArgs json.RawMessage) error {
-	aksArgs, err := parseAKSArgs(rawArgs)
+func (p *aksProvider) InjectAuth(req *http.Request, args authreq.ProviderArgs) error {
+	aksArgs, err := authreq.Parse[AKSAuthArgs](args)
 	if err != nil {
 		return err
 	}
@@ -209,17 +196,17 @@ func (p *aksProvider) InjectAuth(req *http.Request, rawArgs json.RawMessage) err
 // AuthorizeAction enforces the read-only ClusterRole posture for AKS Kubernetes API
 // requests via the shared k8sGate. It implements the optional
 // auth.ActionAuthorizer interface.
-func (p *aksProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	args, err := parseAKSArgs(rawArgs)
+func (p *aksProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	aksArgs, err := authreq.Parse[AKSAuthArgs](args)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, v, args)
+	return p.authorizeAction(ctx, v, aksArgs)
 }
 
-func (p *aksProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error) {
-	aksArgs, err := parseAKSArgs(rawArgs)
+func (p *aksProvider) CACertData(ctx context.Context, args authreq.ProviderArgs) (string, error) {
+	aksArgs, err := authreq.Parse[AKSAuthArgs](args)
 	if err != nil {
 		return "", err
 	}
@@ -240,8 +227,8 @@ func (p *aksProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (
 	return base64.StdEncoding.EncodeToString(cfg.CAData), nil
 }
 
-func (p *aksProvider) ClientCertData(ctx context.Context, rawArgs json.RawMessage) (string, string, error) {
-	aksArgs, err := parseAKSArgs(rawArgs)
+func (p *aksProvider) ClientCertData(ctx context.Context, args authreq.ProviderArgs) (string, string, error) {
+	aksArgs, err := authreq.Parse[AKSAuthArgs](args)
 	if err != nil {
 		return "", "", err
 	}
@@ -271,8 +258,8 @@ func (p *aksProvider) resolveHost(ctx context.Context, args *AKSAuthArgs) (strin
 	return hostFromEndpoint(cfg.Host), nil
 }
 
-func (p *aksProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
-	return p.authorizesHost(ctx, host, rawArgs, parseAKSArgs, (*AKSAuthArgs).validate, p.resolveHost)
+func (p *aksProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
+	return p.authorizesHost(ctx, host, args, authreq.Parse[AKSAuthArgs], (*AKSAuthArgs).validate, p.resolveHost)
 }
 
 // authorizesDialIP reports whether ip may be dialed for this cluster: it denies
@@ -308,8 +295,8 @@ func (p *aksProvider) authorizesDialIP(ctx context.Context, ip netip.Addr, args 
 
 // AuthorizesAddr pins the dial to the cluster endpoint's exact resolved IP(s),
 // after the unconditional link-local floor in authorizesDialIP.
-func (p *aksProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, rawArgs json.RawMessage) (bool, error) {
-	return p.authorizesAddr(ctx, ip, rawArgs, parseAKSArgs, (*AKSAuthArgs).validate, p.authorizesDialIP)
+func (p *aksProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, args authreq.ProviderArgs) (bool, error) {
+	return p.authorizesAddr(ctx, ip, args, authreq.Parse[AKSAuthArgs], (*AKSAuthArgs).validate, p.authorizesDialIP)
 }
 
 func defaultAKSNewManagedClustersClient(

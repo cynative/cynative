@@ -2,11 +2,12 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/netip"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // addrFakeProvider is a minimal Provider that optionally implements AddrAuthorizer.
@@ -16,11 +17,12 @@ type addrFakeProvider struct {
 	addrErr     error
 }
 
-func (p *addrFakeProvider) Name() string                                        { return p.name }
-func (p *addrFakeProvider) Description() string                                 { return "addr fake" }
-func (p *addrFakeProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+func (p *addrFakeProvider) Name() string { return p.name }
 
-func (p *addrFakeProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *addrFakeProvider) Description() string                                      { return "addr fake" }
+func (p *addrFakeProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
+
+func (p *addrFakeProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
@@ -30,7 +32,7 @@ type addrAuthProvider struct {
 }
 
 func (p *addrAuthProvider) AuthorizesAddr(
-	_ context.Context, _ netip.Addr, _ json.RawMessage,
+	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return p.addrAllowed, p.addrErr
 }

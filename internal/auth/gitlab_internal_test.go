@@ -106,7 +106,7 @@ func TestGitLabProvider_NameAndInjectAuth(t *testing.T) {
 	}
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"https://gitlab.com/api/v4/user", nil)
-	if err := p.InjectAuth(req, nil); err != nil {
+	if err := p.InjectAuth(req, noArgs()); err != nil {
 		t.Fatalf("InjectAuth: %v", err)
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer tok" {
@@ -118,11 +118,11 @@ func TestGitLabProvider_AuthorizesHost(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.example.com")
 	p.apiHost = "api.gitlab.example.com"
-	ok, _ := p.AuthorizesHost(context.Background(), "api.gitlab.example.com", nil)
+	ok, _ := p.AuthorizesHost(context.Background(), "api.gitlab.example.com", noArgs())
 	if !ok {
 		t.Fatal("served (api) host should be allowed")
 	}
-	denied, _ := p.AuthorizesHost(context.Background(), "evil.com", nil)
+	denied, _ := p.AuthorizesHost(context.Background(), "evil.com", noArgs())
 	if denied {
 		t.Fatal("foreign host must be denied")
 	}
@@ -170,7 +170,7 @@ func TestGitLabProvider_AuthorizeAction_Exposure(t *testing.T) {
 			t.Parallel()
 			p := newTestGitLabExposure(t, "gitlab.com", c.exposure, okGitLabFetch)
 			v := actionView(t, c.method, c.url)
-			err := p.AuthorizeAction(context.Background(), v, nil)
+			err := p.AuthorizeAction(context.Background(), v, noArgs())
 			if c.wantErr == nil && err != nil {
 				t.Fatalf("AuthorizeAction = %v, want nil", err)
 			}
@@ -219,13 +219,14 @@ func TestAuthorizeAction_VariablesParamValueNoBypass(t *testing.T) {
 	// (a) The file literally named "variables" must NOT inherit the ci-variables
 	// write ceiling: its true category is repository-files under default:read.
 	v := actionView(t, http.MethodPut, "https://gitlab.com/api/v4/projects/1/repository/files/variables")
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, gitlabclass.ErrExposureExceeded) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, gitlabclass.ErrExposureExceeded) {
 		t.Fatalf("PUT repository-files/variables must be denied with ErrExposureExceeded (no bypass), got %v", err)
 	}
 
 	// (b) A real CI-variable write is allowed under ci-variables:write.
 	postView := actionView(t, http.MethodPost, "https://gitlab.com/api/v4/projects/1/variables")
-	if err := p.AuthorizeAction(context.Background(), postView, nil); err != nil {
+	if err = p.AuthorizeAction(context.Background(), postView, noArgs()); err != nil {
 		t.Fatalf("POST projects/1/variables (real ci-variable write) must be allowed, got %v", err)
 	}
 }
@@ -237,7 +238,8 @@ func TestAuthorizeAction_NilTableDenies(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLabExposure(t, "gitlab.com", gitlabclass.BaselineExposure(), errGitLabFetch)
 	v := actionView(t, http.MethodGet, "https://gitlab.com/api/v4/projects")
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, gitlabclass.ErrTableNotReady) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, gitlabclass.ErrTableNotReady) {
 		t.Fatalf("nil table must deny with ErrTableNotReady, got %v", err)
 	}
 }
@@ -253,7 +255,8 @@ func TestGitLabProvider_AuthorizeAction_UnknownKeyFatal(t *testing.T) {
 	)
 	p := newTestGitLabExposure(t, "gitlab.com", exp, okGitLabFetch)
 	v := actionView(t, http.MethodGet, "https://gitlab.com/api/v4/projects")
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, gitlabclass.ErrUnknownKey) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, gitlabclass.ErrUnknownKey) {
 		t.Fatalf("AuthorizeAction = %v, want ErrUnknownKey", err)
 	}
 }
@@ -261,7 +264,7 @@ func TestGitLabProvider_AuthorizeAction_UnknownKeyFatal(t *testing.T) {
 func TestGitLabProvider_AuthorizesAddr_DefaultDeniesInternal(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com") // allowPrivateNetwork=false.
-	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.5"), nil)
+	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.5"), noArgs())
 	if err != nil || ok {
 		t.Fatalf("internal IP must be denied by default: ok=%v err=%v", ok, err)
 	}
@@ -274,12 +277,12 @@ func TestGitLabProvider_AuthorizesAddr_PrivateOptInPins(t *testing.T) {
 	p.resolver = func(_ context.Context, _ string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.5")}, nil
 	}
-	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.5"), nil)
+	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.5"), noArgs())
 	if err != nil || !ok {
 		t.Fatalf("pinned private IP should be allowed with opt-in: ok=%v err=%v", ok, err)
 	}
 	// Floor (metadata) always denied even with opt-in.
-	metaDenied, _ := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("169.254.169.254"), nil)
+	metaDenied, _ := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("169.254.169.254"), noArgs())
 	if metaDenied {
 		t.Fatal("link-local metadata must always be denied")
 	}
@@ -289,7 +292,7 @@ func TestGitLabProvider_CACertData(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com")
 	p.caData = "BASE64PEM"
-	got, err := p.CACertData(context.Background(), nil)
+	got, err := p.CACertData(context.Background(), noArgs())
 	if err != nil || got != "BASE64PEM" {
 		t.Fatalf("CACertData = %q, %v", got, err)
 	}
@@ -302,7 +305,8 @@ func TestGitLabProvider_AuthorizeAction_GraphQLDenied(t *testing.T) {
 	p := newTestGitLab(t, "gitlab.com")
 	v := actionView(t, http.MethodPost, "https://gitlab.com/api/graphql")
 	v.Body = `{"query":"mutation { x }"}`
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, gitlabclass.ErrGraphQLUnsupported) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, gitlabclass.ErrGraphQLUnsupported) {
 		t.Fatalf("graphql request must be denied with ErrGraphQLUnsupported, got %v", err)
 	}
 }
@@ -344,7 +348,7 @@ func TestGitLabProvider_AuthorizesAddr_ResolverError(t *testing.T) {
 		return nil, resolveErr
 	}
 	// Use a public IP that passes the floor check.
-	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("93.184.216.34"), nil)
+	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("93.184.216.34"), noArgs())
 	if ok || err == nil {
 		t.Fatalf("resolver error must return (false, err): ok=%v err=%v", ok, err)
 	}
@@ -361,7 +365,7 @@ func TestGitLabProvider_AuthorizesAddr_PinMiss(t *testing.T) {
 	p.resolver = func(_ context.Context, _ string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.5")}, nil
 	}
-	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.6"), nil)
+	ok, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.6"), noArgs())
 	if ok || err != nil {
 		t.Fatalf("pin miss must return (false, nil): ok=%v err=%v", ok, err)
 	}
@@ -375,7 +379,7 @@ func TestGitLabProvider_AuthorizeAction_EncodedSlashNoMarkdownBypass(t *testing.
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com")
 	v := actionView(t, http.MethodPost, "https://gitlab.com/api/v4/projects/1/repository/files/x%2Fapi%2Fv4%2Fmarkdown")
-	if err := p.AuthorizeAction(context.Background(), v, nil); err == nil {
+	if err := p.AuthorizeAction(context.Background(), v, noArgs()); err == nil {
 		t.Fatal("encoded-slash write must be blocked, not classified as the markdown read")
 	}
 }
@@ -386,7 +390,8 @@ func TestGitLabProvider_AuthorizeAction_GraphQLGetDenied(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com")
 	v := actionView(t, http.MethodGet, "https://gitlab.com/api/graphql?query=mutation%20%7B%20x%20%7D")
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, gitlabclass.ErrGraphQLUnsupported) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, gitlabclass.ErrGraphQLUnsupported) {
 		t.Fatalf("graphql GET must be denied with ErrGraphQLUnsupported, got %v", err)
 	}
 }
@@ -439,7 +444,8 @@ func TestGitLabProvider_AuthorizeAction_SudoRejected(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com")
 	v := actionView(t, http.MethodGet, "https://gitlab.com/api/v4/projects?sudo=alice")
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, errGitLabSudoBlocked) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, errGitLabSudoBlocked) {
 		t.Fatalf("sudo must be rejected, got %v", err)
 	}
 }
@@ -451,7 +457,7 @@ func TestGitLabProvider_AuthorizeAction_UnclassifiableMethod(t *testing.T) {
 	p := newTestGitLab(t, "gitlab.com")
 	// FROBNICATE is not a recognized HTTP method; classifier returns ErrUnclassifiable.
 	v := actionView(t, "FROBNICATE", "https://gitlab.com/api/v4/projects")
-	err := p.AuthorizeAction(context.Background(), v, nil)
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
 	if err == nil {
 		t.Fatal("unclassifiable method must return error")
 	}
@@ -536,7 +542,7 @@ func TestGitLabProvider_AuthorizeAction_PortEnforcement(t *testing.T) {
 			t.Parallel()
 			p := newTestGitLab(t, c.host)
 			v := actionView(t, http.MethodGet, c.url)
-			err := p.AuthorizeAction(context.Background(), v, nil)
+			err := p.AuthorizeAction(context.Background(), v, noArgs())
 			if c.blocked {
 				if !errors.Is(err, ErrHostNotAuthorized) {
 					t.Fatalf("%q: want ErrHostNotAuthorized, got %v", c.name, err)
@@ -558,7 +564,7 @@ func TestGitLabProvider_AuthorizeAction_BodyTriggerToken(t *testing.T) {
 	p := newTestGitLab(t, "gitlab.com")
 	v := actionView(t, http.MethodPost, "https://gitlab.com/api/v4/projects/1/trigger/pipeline")
 	v.Body = "token=secret&ref=main"
-	err := p.AuthorizeAction(context.Background(), v, nil)
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
 	if !errors.Is(err, ErrModelSuppliedCredential) {
 		t.Fatalf("body trigger token must be rejected, got %v", err)
 	}
@@ -570,11 +576,11 @@ func TestGitLabProvider_AuthorizeAction_BodyTriggerToken(t *testing.T) {
 func TestGitLabProvider_AuthorizesHost_HostPort(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.internal:8443")
-	ok, _ := p.AuthorizesHost(context.Background(), "gitlab.internal", nil)
+	ok, _ := p.AuthorizesHost(context.Background(), "gitlab.internal", noArgs())
 	if !ok {
 		t.Fatal("port-stripped served host should authorize the bare hostname")
 	}
-	denied, _ := p.AuthorizesHost(context.Background(), "gitlab.internal:8443", nil)
+	denied, _ := p.AuthorizesHost(context.Background(), "gitlab.internal:8443", noArgs())
 	if denied {
 		t.Fatal("the transport never passes a :port host; a host with one must not match")
 	}
@@ -591,7 +597,7 @@ func TestGitLabProvider_AuthorizesAddr_HostPortResolvesHostname(t *testing.T) {
 		gotHost = host
 		return []netip.Addr{netip.MustParseAddr("10.0.0.5")}, nil
 	}
-	if _, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.5"), nil); err != nil {
+	if _, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("10.0.0.5"), noArgs()); err != nil {
 		t.Fatalf("AuthorizesAddr: %v", err)
 	}
 	if gotHost != "gitlab.internal" {
@@ -622,7 +628,7 @@ func TestGitlabAuthorizeAction_DeniesGraphQL(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLab(t, "gitlab.com")
 	v := actionView(t, http.MethodPost, "https://gitlab.com/api/graphql")
-	err := p.AuthorizeAction(context.Background(), v, nil)
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
 	if !errors.Is(err, gitlabclass.ErrGraphQLUnsupported) {
 		t.Fatalf("AuthorizeAction(/api/graphql) err = %v, want ErrGraphQLUnsupported", err)
 	}
@@ -638,7 +644,7 @@ func TestGitLabProvider_InjectAuth_TokenSourceError(t *testing.T) {
 	p.tokenSource = errTokenSource{err: srcErr}
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"https://gitlab.com/api/v4/user", nil)
-	err := p.InjectAuth(req, nil)
+	err := p.InjectAuth(req, noArgs())
 	if err == nil {
 		t.Fatal("InjectAuth must return error when token source fails")
 	}
@@ -660,7 +666,8 @@ func TestAuthorizeAction_NonAPIPath_FailsClosed(t *testing.T) {
 	t.Parallel()
 	p := newTestGitLabExposure(t, "gitlab.com", gitlabclass.BaselineExposure(), okGitLabFetch)
 	v := actionView(t, http.MethodGet, "https://gitlab.com/-/jobs/artifacts/x")
-	if err := p.AuthorizeAction(context.Background(), v, nil); !errors.Is(err, gitlabclass.ErrUnclassifiable) {
+	err := p.AuthorizeAction(context.Background(), v, noArgs())
+	if !errors.Is(err, gitlabclass.ErrUnclassifiable) {
 		t.Fatalf("AuthorizeAction(/-/jobs/artifacts/x) = %v, want ErrUnclassifiable", err)
 	}
 }

@@ -2,7 +2,6 @@ package azure
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -29,11 +28,10 @@ func NewProvider(cat Catalog, eval RoleEvaluator, roleDefinition string) *Provid
 }
 
 // azureArgsShape decodes only the service claim Layer 2 verifies against the URL
-// path; the cloud claim is verified separately at Layer 3 (azure.go AuthorizesHost).
+// path out of the azure_auth block; the cloud claim is verified separately at
+// Layer 3 (azure.go AuthorizesHost).
 type azureArgsShape struct {
-	AzureAuth *struct {
-		Service string `json:"service"`
-	} `json:"azure_auth"`
+	Service string `json:"service"`
 }
 
 // AuthorizeAction runs the Layer 2 pipeline:
@@ -42,12 +40,12 @@ type azureArgsShape struct {
 // The service is derived from the URL path (the last /providers/ namespace);
 // azure_auth.service is only verified against it, never used as a source.
 // Fails closed on any unresolved step.
-func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	var args azureArgsShape
-	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		return fmt.Errorf("azure_hardening: parse azure_auth: %w", err)
+func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	azureAuth, err := authreq.Parse[azureArgsShape](args)
+	if err != nil {
+		return fmt.Errorf("azure_hardening: %w", err)
 	}
-	if args.AzureAuth == nil || args.AzureAuth.Service == "" {
+	if azureAuth == nil || azureAuth.Service == "" {
 		return errors.New("azure_hardening: azure_auth.service is required")
 	}
 
@@ -58,9 +56,9 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs 
 	}
 
 	// Verify the model's claimed service against the path-derived namespace.
-	if !strings.EqualFold(action.Namespace, args.AzureAuth.Service) {
+	if !strings.EqualFold(action.Namespace, azureAuth.Service) {
 		return fmt.Errorf("%w: path namespace %q != azure_auth.service %q",
-			ErrHostClaimMismatch, action.Namespace, args.AzureAuth.Service)
+			ErrHostClaimMismatch, action.Namespace, azureAuth.Service)
 	}
 
 	// Catalog validation: Action exists, isDataAction=false.

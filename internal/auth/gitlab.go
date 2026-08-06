@@ -235,7 +235,7 @@ func (p *gitlabProvider) Description() string {
 // glab OAuth credential) and sets Authorization: Bearer. Bearer authenticates
 // PAT/project/group AND OAuth tokens. A token-resolution failure fails closed:
 // the token is never attached.
-func (p *gitlabProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *gitlabProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	accessToken, err := p.currentToken()
 	if err != nil {
 		return err
@@ -262,13 +262,13 @@ func (p *gitlabProvider) currentToken() (string, error) {
 // AuthorizesHost reports whether host is the provider's served host. The
 // transport passes a port-stripped, lower-cased host, so the comparison is
 // against the port-stripped served hostname and is case-insensitive.
-func (p *gitlabProvider) AuthorizesHost(_ context.Context, host string, _ json.RawMessage) (bool, error) {
+func (p *gitlabProvider) AuthorizesHost(_ context.Context, host string, _ authreq.ProviderArgs) (bool, error) {
 	return host == strings.ToLower(p.servedHostname()), nil
 }
 
 // CACertData returns the base64-encoded PEM CA certificate for the provider's
 // host, or "" when system roots should be used.
-func (p *gitlabProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *gitlabProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.caData, nil
 }
 
@@ -431,7 +431,7 @@ func bodyMultipartHasCredential(body string) bool {
 // permits that level. A request that cannot be classified (any
 // non-/api/v4 path fails closed here), a missing table, an unknown configured key,
 // or an exceeded ceiling all fail closed. Runs before InjectAuth.
-func (p *gitlabProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ json.RawMessage) error {
+func (p *gitlabProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ authreq.ProviderArgs) error {
 	if err := rejectGitLabSmuggledControls(v); err != nil {
 		return err
 	}
@@ -508,6 +508,6 @@ func (p *gitlabProvider) authorizesDialIP(ctx context.Context, ip netip.Addr) (b
 }
 
 // AuthorizesAddr implements AddrAuthorizer by delegating to authorizesDialIP.
-func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ json.RawMessage) (bool, error) {
+func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ authreq.ProviderArgs) (bool, error) {
 	return p.authorizesDialIP(ctx, ip)
 }

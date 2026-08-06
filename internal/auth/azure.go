@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -72,24 +71,24 @@ func (p *azureProvider) Description() string {
 		"operator's raw home-tenant ARM bearer. Requires azure_auth field with service."
 }
 
-// parseAzureArgs unmarshals azure_auth; fails closed when nil or Service empty.
-func parseAzureArgs(rawArgs json.RawMessage) (*AzureAuthArgs, error) {
-	args, err := parseAuthArgs[AzureAuthArgs](rawArgs, "azure_auth")
+// parseAzureArgs decodes azure_auth; fails closed when absent or Service empty.
+func parseAzureArgs(args authreq.ProviderArgs) (*AzureAuthArgs, error) {
+	azureArgs, err := authreq.Parse[AzureAuthArgs](args)
 	if err != nil {
 		return nil, err
 	}
-	if args == nil || args.Service == "" {
+	if azureArgs == nil || azureArgs.Service == "" {
 		return nil, errors.New("azure_auth.service is required")
 	}
-	return args, nil
+	return azureArgs, nil
 }
 
 // AuthorizesHost runs Layer 3: parse args → ParseHost → catalog.ResolveCloud →
 // Verify. The catalog is available pre-lazy so host gating works before ready.
 // The service is verified at Layer 2 against the URL path; Layer 3 verifies
 // only the host↔cloud pin via Verify.
-func (p *azureProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
-	args, err := parseAzureArgs(rawArgs)
+func (p *azureProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
+	azureArgs, err := parseAzureArgs(args)
 	if err != nil {
 		return false, err
 	}
@@ -101,26 +100,26 @@ func (p *azureProvider) AuthorizesHost(ctx context.Context, host string, rawArgs
 	if err != nil {
 		return false, err
 	}
-	return true, azurehardening.Verify(resolved, args.Cloud)
+	return true, azurehardening.Verify(resolved, azureArgs.Cloud)
 }
 
 // AuthorizeAction implements auth.ActionAuthorizer, delegating to the composed
 // Layer 1 + Layer 2 provider after lazy init.
-func (p *azureProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
+func (p *azureProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
 	if p.hardeningAction == nil {
 		return errors.New("azure_hardening: action authorizer not initialized")
 	}
-	return p.hardeningAction.AuthorizeAction(ctx, v, rawArgs)
+	return p.hardeningAction.AuthorizeAction(ctx, v, args)
 }
 
 // InjectAuth rejects a model-supplied SAS credential (the generic credential
 // headers are rejected earlier, by auth.Inject), then sets the operator's raw
 // home-tenant ARM bearer. Our injector is the sole setter of
 // Authorization: Bearer.
-func (p *azureProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *azureProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	if err := p.ensureReady(req.Context()); err != nil {
 		return err
 	}

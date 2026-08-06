@@ -114,13 +114,15 @@ func TestNewGCPProviderConstructor(t *testing.T) {
 func TestParseGCPArgs(t *testing.T) {
 	t.Parallel()
 
-	if _, err := parseGCPArgs(json.RawMessage(`{}`)); err == nil {
+	if _, err := parseGCPArgs(providerArgs(gcpProviderName, `{}`)); err == nil {
 		t.Error("missing gcp_auth should error")
 	}
-	if _, err := parseGCPArgs(json.RawMessage(`{"gcp_auth":{"service":""}}`)); err == nil {
+	if _, err := parseGCPArgs(providerArgs(gcpProviderName, `{"gcp_auth":{"service":""}}`)); err == nil {
 		t.Error("empty service should error")
 	}
-	args, err := parseGCPArgs(json.RawMessage(`{"gcp_auth":{"service":"compute","location":"us-central1"}}`))
+	args, err := parseGCPArgs(
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"compute","location":"us-central1"}}`),
+	)
 	if err != nil || args.Service != "compute" || args.Location != "us-central1" {
 		t.Fatalf("parseGCPArgs = %+v err=%v", args, err)
 	}
@@ -129,7 +131,7 @@ func TestParseGCPArgs(t *testing.T) {
 func TestParseGCPArgs_InvalidJSON(t *testing.T) {
 	t.Parallel()
 
-	if _, err := parseGCPArgs(json.RawMessage(`not json`)); err == nil {
+	if _, err := parseGCPArgs(providerArgs(gcpProviderName, `not json`)); err == nil {
 		t.Error("invalid JSON should error")
 	}
 }
@@ -157,18 +159,18 @@ func TestGCPAuthorizesHost(t *testing.T) {
 	ctx := context.Background()
 	// Happy path: compute.googleapis.com with claim service=compute.
 	ok, err := p.AuthorizesHost(ctx, "compute.googleapis.com",
-		json.RawMessage(`{"gcp_auth":{"service":"compute"}}`))
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"compute"}}`))
 	if err != nil || !ok {
 		t.Fatalf("AuthorizesHost accept = %v err=%v", ok, err)
 	}
 	// A1: claim lies about service.
 	_, mismatchErr := p.AuthorizesHost(ctx, "compute.googleapis.com",
-		json.RawMessage(`{"gcp_auth":{"service":"iam"}}`))
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"iam"}}`))
 	if mismatchErr == nil {
 		t.Error("A1 mismatch should error")
 	}
 	// A15: missing gcp_auth.
-	_, missingErr := p.AuthorizesHost(ctx, "compute.googleapis.com", json.RawMessage(`{}`))
+	_, missingErr := p.AuthorizesHost(ctx, "compute.googleapis.com", providerArgs(gcpProviderName, `{}`))
 	if missingErr == nil {
 		t.Error("A15 missing gcp_auth should error")
 	}
@@ -181,7 +183,7 @@ func TestGCPAuthorizesHost_UnknownService(t *testing.T) {
 	ctx := context.Background()
 	// "storage" is not in the fake catalog → ResolveService returns error.
 	_, err := p.AuthorizesHost(ctx, "storage.googleapis.com",
-		json.RawMessage(`{"gcp_auth":{"service":"storage"}}`))
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"storage"}}`))
 	if err == nil {
 		t.Error("unknown service in catalog should error")
 	}
@@ -194,7 +196,7 @@ func TestGCPAuthorizesHost_InvalidHost(t *testing.T) {
 	ctx := context.Background()
 	// localhost is rejected by ParseHost.
 	_, err := p.AuthorizesHost(ctx, "localhost",
-		json.RawMessage(`{"gcp_auth":{"service":"compute"}}`))
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"compute"}}`))
 	if err == nil {
 		t.Error("localhost should be rejected by ParseHost")
 	}
@@ -213,7 +215,7 @@ func TestGCPAuthorizesHost_WWWSentinel(t *testing.T) {
 	// www.googleapis.com is the compound sentinel: Layer 3 accepts it without
 	// resolving the service (that happens in AuthorizeAction with the full path).
 	ok, err := p.AuthorizesHost(ctx, "www.googleapis.com",
-		json.RawMessage(`{"gcp_auth":{"service":"oauth2"}}`))
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"oauth2"}}`))
 	if err != nil || !ok {
 		t.Fatalf("AuthorizesHost www sentinel = ok=%v err=%v, want true/nil", ok, err)
 	}
@@ -224,7 +226,7 @@ func TestGCPInjectAuth_Success(t *testing.T) {
 	p := newTestGCPProvider(&fakeTokenSource{"scoped-token"})
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://compute.googleapis.com/", nil)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err != nil {
+	if err := p.InjectAuth(req, providerArgs(gcpProviderName, `{}`)); err != nil {
 		t.Fatalf("InjectAuth = %v", err)
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer scoped-token" {
@@ -237,7 +239,7 @@ func TestGCPInjectAuth_LazyError(t *testing.T) {
 	p := newTestGCPProviderLazyErr("init-failed")
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://compute.googleapis.com/", nil)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err == nil {
+	if err := p.InjectAuth(req, providerArgs(gcpProviderName, `{}`)); err == nil {
 		t.Error("InjectAuth should error when lazy init fails")
 	}
 }
@@ -247,7 +249,7 @@ func TestGCPInjectAuth_TokenError(t *testing.T) {
 	p := newTestGCPProvider(fakeErrorTokenSource{})
 
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://compute.googleapis.com/", nil)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err == nil {
+	if err := p.InjectAuth(req, providerArgs(gcpProviderName, `{}`)); err == nil {
 		t.Error("InjectAuth should propagate token error")
 	}
 }
@@ -258,7 +260,7 @@ type fakeHardeningProvider struct {
 	retErr error
 }
 
-func (f *fakeHardeningProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+func (f *fakeHardeningProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 	f.called = true
 	return f.retErr
 }
@@ -280,7 +282,7 @@ func TestGCPAuthorizeAction_Delegates(t *testing.T) {
 	if err := p.AuthorizeAction(
 		context.Background(),
 		v,
-		json.RawMessage(`{"gcp_auth":{"service":"compute"}}`),
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"compute"}}`),
 	); err != nil {
 		t.Fatalf("AuthorizeAction = %v", err)
 	}
@@ -294,7 +296,7 @@ func TestGCPAuthorizeAction_LazyError(t *testing.T) {
 	p := newTestGCPProviderLazyErr("init-failed")
 
 	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/")
-	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
+	if err := p.AuthorizeAction(context.Background(), v, providerArgs(gcpProviderName, `{}`)); err == nil {
 		t.Error("AuthorizeAction should error when lazy init fails")
 	}
 }
@@ -312,7 +314,7 @@ func TestGCPAuthorizeAction_NilHardening(t *testing.T) {
 	}
 
 	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/")
-	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
+	if err := p.AuthorizeAction(context.Background(), v, providerArgs(gcpProviderName, `{}`)); err == nil {
 		t.Error("AuthorizeAction should error when hardeningAction is nil")
 	}
 }

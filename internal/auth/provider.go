@@ -22,15 +22,21 @@ import (
 )
 
 // Provider defines an extensible interface for injecting API credentials securely.
+//
+// Every method that receives per-call arguments receives [authreq.ProviderArgs]:
+// that provider's own "<name>_auth" block, projected by the dispatcher below,
+// and never the whole tool call. A provider therefore cannot read the request
+// out of its arguments, which keeps the narrowed [authreq.View] the gates judge
+// from being one of two available views of the same request.
 type Provider interface {
 	Name() string
 	Description() string
-	InjectAuth(req *http.Request, rawArgs json.RawMessage) error
+	InjectAuth(req *http.Request, args authreq.ProviderArgs) error
 	// AuthorizesHost reports whether this provider permits requests to host
-	// (already lower-cased and port-stripped), consulting rawArgs where needed.
+	// (already lower-cased and port-stripped), consulting args where needed.
 	// K8s providers may await a cached cloud-API lookup to resolve the cluster's
 	// real endpoint. Any returned error is treated by callers as "denied".
-	AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error)
+	AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error)
 }
 
 // tokenCredential mirrors [azcore.TokenCredential]'s method set so moq can
@@ -77,7 +83,7 @@ func Inject(req *http.Request, name string, providers []Provider, rawArgs json.R
 		return credErr
 	}
 
-	if injErr := p.InjectAuth(req, rawArgs); injErr != nil {
+	if injErr := p.InjectAuth(req, authreq.NewProviderArgs(rawArgs, p.Name())); injErr != nil {
 		return fmt.Errorf("failed to inject auth for provider %s: %w", name, injErr)
 	}
 
@@ -164,7 +170,7 @@ func getProviderData[C, T any](
 	name string,
 	providers []Provider,
 	rawArgs json.RawMessage,
-	call func(context.Context, C, json.RawMessage) (T, error),
+	call func(context.Context, C, authreq.ProviderArgs) (T, error),
 ) (T, error) {
 	var zero T
 	if name == "" {
@@ -177,7 +183,7 @@ func getProviderData[C, T any](
 	}
 
 	if cp, ok := p.(C); ok {
-		return call(ctx, cp, rawArgs)
+		return call(ctx, cp, authreq.NewProviderArgs(rawArgs, p.Name()))
 	}
 
 	return zero, nil
@@ -187,7 +193,7 @@ func getProviderData[C, T any](
 // API server uses a non-public CA (e.g. EKS clusters with private CAs).
 // The returned value must be a base64-encoded PEM certificate.
 type CACertProvider interface {
-	CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error)
+	CACertData(ctx context.Context, args authreq.ProviderArgs) (string, error)
 }
 
 // GetCACertData returns the base64-encoded PEM CA certificate from the named
@@ -195,7 +201,7 @@ type CACertProvider interface {
 // name is non-empty but no provider with that name exists.
 func GetCACertData(ctx context.Context, name string, providers []Provider, rawArgs json.RawMessage) (string, error) {
 	return getProviderData(ctx, name, providers, rawArgs,
-		func(ctx context.Context, cp CACertProvider, args json.RawMessage) (string, error) {
+		func(ctx context.Context, cp CACertProvider, args authreq.ProviderArgs) (string, error) {
 			return cp.CACertData(ctx, args)
 		})
 }
@@ -204,7 +210,7 @@ func GetCACertData(ctx context.Context, name string, providers []Provider, rawAr
 // API server uses mTLS authentication.
 // The returned values must be base64-encoded PEM certificate and key.
 type ClientCertProvider interface {
-	ClientCertData(ctx context.Context, rawArgs json.RawMessage) (cert string, key string, err error)
+	ClientCertData(ctx context.Context, args authreq.ProviderArgs) (cert string, key string, err error)
 }
 
 // clientCertData pairs a client certificate and key so the two-value
@@ -221,7 +227,7 @@ func GetClientCertData(
 	rawArgs json.RawMessage,
 ) (string, string, error) {
 	cc, err := getProviderData(ctx, name, providers, rawArgs,
-		func(ctx context.Context, cp ClientCertProvider, args json.RawMessage) (clientCertData, error) {
+		func(ctx context.Context, cp ClientCertProvider, args authreq.ProviderArgs) (clientCertData, error) {
 			cert, key, certErr := cp.ClientCertData(ctx, args)
 
 			return clientCertData{cert: cert, key: key}, certErr
@@ -236,7 +242,7 @@ func GetClientCertData(
 // only DNS SANs. The returned value, when non-empty, is set as
 // tls.Config.ServerName for the per-request transport.
 type ServerNameProvider interface {
-	ServerNameData(ctx context.Context, rawArgs json.RawMessage) (string, error)
+	ServerNameData(ctx context.Context, args authreq.ProviderArgs) (string, error)
 }
 
 // GetServerNameData returns the TLS ServerName override from the named provider,
@@ -249,7 +255,7 @@ func GetServerNameData(
 	rawArgs json.RawMessage,
 ) (string, error) {
 	return getProviderData(ctx, name, providers, rawArgs,
-		func(ctx context.Context, sp ServerNameProvider, args json.RawMessage) (string, error) {
+		func(ctx context.Context, sp ServerNameProvider, args authreq.ProviderArgs) (string, error) {
 			return sp.ServerNameData(ctx, args)
 		})
 }
@@ -260,7 +266,7 @@ func GetServerNameData(
 // narrowed, read-only view rather than the live request, so a gate cannot alter
 // what it is judging; InjectAuth keeps the request itself.
 type ActionAuthorizer interface {
-	AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error
+	AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error
 }
 
 // AuthorizeAction dispatches to the named provider's ActionAuthorizer if it
@@ -278,7 +284,7 @@ func AuthorizeAction(
 	}
 
 	if ap, ok := p.(ActionAuthorizer); ok {
-		if authErr := ap.AuthorizeAction(ctx, v, rawArgs); authErr != nil {
+		if authErr := ap.AuthorizeAction(ctx, v, authreq.NewProviderArgs(rawArgs, p.Name())); authErr != nil {
 			return fmt.Errorf("auth: authorize action for provider %s: %w", name, authErr)
 		}
 	}
@@ -338,7 +344,7 @@ func AuthorizeHost(ctx context.Context, name, host string, providers []Provider,
 		return err
 	}
 
-	ok, err := p.AuthorizesHost(ctx, host, rawArgs)
+	ok, err := p.AuthorizesHost(ctx, host, authreq.NewProviderArgs(rawArgs, p.Name()))
 	if err != nil {
 		return fmt.Errorf("auth: authorize host %q for provider %s: %w", host, name, err)
 	}

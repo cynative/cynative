@@ -2,7 +2,6 @@ package aws
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -47,11 +46,9 @@ func NewProvider(models ModelResolver, resolver Resolver, evaluator Evaluator, p
 	}
 }
 
-// argsShape decodes only whether the aws_auth block is present; the service is
-// derived from the request host via ParseHost, not from these args.
-type argsShape struct {
-	AWSAuth *struct{} `json:"aws_auth"`
-}
+// argsShape decodes no field: only the presence of the aws_auth block matters
+// here, since the service is derived from the request host via ParseHost.
+type argsShape struct{}
 
 // AuthorizeAction resolves the prefix to candidate models, classifies the
 // operation against each, and requires the conservative UNION of every matched
@@ -60,12 +57,12 @@ type argsShape struct {
 // matched but contributes no required action. Multiple matches occur only for
 // prefix collisions (e.g. email→ses/sesv2). Fail closed on any unresolved
 // candidate.
-func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	var args argsShape
-	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		return fmt.Errorf("aws_hardening: parse aws_auth: %w", err)
+func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	awsAuth, err := authreq.Parse[argsShape](args)
+	if err != nil {
+		return fmt.Errorf("aws_hardening: %w", err)
 	}
-	if args.AWSAuth == nil {
+	if awsAuth == nil {
 		return errors.New("aws_hardening: aws_auth is required")
 	}
 	parsed, err := ParseHost(v.Hostname)

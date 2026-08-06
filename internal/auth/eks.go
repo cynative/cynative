@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -81,12 +80,6 @@ func (p *eksProvider) Description() string {
 		"The CA certificate is auto-resolved from the EKS DescribeCluster API; do NOT provide it."
 }
 
-// parseEKSArgs unmarshals the eks_auth arguments from the raw JSON.
-// Both InjectAuth and CACertData need the same parse, so this avoids duplication.
-func parseEKSArgs(rawArgs json.RawMessage) (*EKSAuthArgs, error) {
-	return parseAuthArgs[EKSAuthArgs](rawArgs, "eks_auth")
-}
-
 // eksBearerToken assembles the k8s-aws-v1 bearer token from a presigned STS URL.
 // Shared by InjectAuth and the bootstrap view fetch (defaultFetchView) so the two
 // stay byte-for-byte identical.
@@ -111,8 +104,8 @@ func (a *EKSAuthArgs) validate() error {
 	return nil
 }
 
-func (p *eksProvider) InjectAuth(req *http.Request, rawArgs json.RawMessage) error {
-	eksArgs, err := parseEKSArgs(rawArgs)
+func (p *eksProvider) InjectAuth(req *http.Request, args authreq.ProviderArgs) error {
+	eksArgs, err := authreq.Parse[EKSAuthArgs](args)
 	if err != nil {
 		return err
 	}
@@ -158,17 +151,17 @@ func (p *eksProvider) resolveCluster(ctx context.Context, args *EKSAuthArgs) (cl
 // AuthorizeAction enforces the read-only ClusterRole posture for EKS Kubernetes API
 // requests via the shared k8sGate. It implements the optional
 // auth.ActionAuthorizer interface.
-func (p *eksProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	args, err := parseEKSArgs(rawArgs)
+func (p *eksProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	eksArgs, err := authreq.Parse[EKSAuthArgs](args)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, v, args)
+	return p.authorizeAction(ctx, v, eksArgs)
 }
 
-func (p *eksProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error) {
-	eksArgs, err := parseEKSArgs(rawArgs)
+func (p *eksProvider) CACertData(ctx context.Context, args authreq.ProviderArgs) (string, error) {
+	eksArgs, err := authreq.Parse[EKSAuthArgs](args)
 	if err != nil {
 		return "", err
 	}
@@ -194,8 +187,8 @@ func (p *eksProvider) resolveHost(ctx context.Context, args *EKSAuthArgs) (strin
 	return ct.host, nil
 }
 
-func (p *eksProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
-	return p.authorizesHost(ctx, host, rawArgs, parseEKSArgs, (*EKSAuthArgs).validate, p.resolveHost)
+func (p *eksProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
+	return p.authorizesHost(ctx, host, args, authreq.Parse[EKSAuthArgs], (*EKSAuthArgs).validate, p.resolveHost)
 }
 
 // authorizesDialIP reports whether ip may be dialed for this cluster: it denies
@@ -229,8 +222,8 @@ func (p *eksProvider) authorizesDialIP(ctx context.Context, ip netip.Addr, args 
 
 // AuthorizesAddr pins the dial to the cluster endpoint's exact resolved IP(s),
 // after the unconditional link-local floor in authorizesDialIP.
-func (p *eksProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, rawArgs json.RawMessage) (bool, error) {
-	return p.authorizesAddr(ctx, ip, rawArgs, parseEKSArgs, (*EKSAuthArgs).validate, p.authorizesDialIP)
+func (p *eksProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, args authreq.ProviderArgs) (bool, error) {
+	return p.authorizesAddr(ctx, ip, args, authreq.Parse[EKSAuthArgs], (*EKSAuthArgs).validate, p.authorizesDialIP)
 }
 
 func defaultEKSDescribeCluster(ctx context.Context, cfg aws.Config, clusterName string) (clusterTLS, error) {

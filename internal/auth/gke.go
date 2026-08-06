@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -105,12 +104,6 @@ func (p *gkeProvider) Description() string {
 		"The CA certificate is auto-resolved from the GKE API; do NOT provide it."
 }
 
-// parseGKEArgs unmarshals the gke_auth arguments from the raw JSON.
-// Both InjectAuth and CACertData need the same parse, so this avoids duplication.
-func parseGKEArgs(rawArgs json.RawMessage) (*GKEAuthArgs, error) {
-	return parseAuthArgs[GKEAuthArgs](rawArgs, "gke_auth")
-}
-
 // gkeClusterConn assembles the cluster connection for the GKE view fetch. GKE
 // authenticates by OAuth bearer token only, so it carries no client cert or
 // serverName.
@@ -130,10 +123,10 @@ func (a *GKEAuthArgs) validate() error {
 }
 
 // InjectAuth sets the Authorization header using the GCP OAuth2 token.
-// The rawArgs parameter is intentionally unused here — GKE auth reuses
+// The args parameter is intentionally unused here: GKE auth reuses
 // the same Application Default Credentials as the GCP provider. The
-// rawArgs only carry CA-related fields consumed by CACertData.
-func (p *gkeProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+// args only carry CA-related fields consumed by CACertData.
+func (p *gkeProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	token, err := p.tokenSource.Token()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve GCP token for GKE: %w", err)
@@ -156,17 +149,17 @@ func (p *gkeProvider) resolveCluster(ctx context.Context, args *GKEAuthArgs) (cl
 // AuthorizeAction enforces the read-only ClusterRole posture for GKE Kubernetes API
 // requests via the shared k8sGate. It implements the optional
 // auth.ActionAuthorizer interface.
-func (p *gkeProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	args, err := parseGKEArgs(rawArgs)
+func (p *gkeProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	gkeArgs, err := authreq.Parse[GKEAuthArgs](args)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, v, args)
+	return p.authorizeAction(ctx, v, gkeArgs)
 }
 
-func (p *gkeProvider) CACertData(ctx context.Context, rawArgs json.RawMessage) (string, error) {
-	gkeArgs, err := parseGKEArgs(rawArgs)
+func (p *gkeProvider) CACertData(ctx context.Context, args authreq.ProviderArgs) (string, error) {
+	gkeArgs, err := authreq.Parse[GKEAuthArgs](args)
 	if err != nil {
 		return "", err
 	}
@@ -192,8 +185,8 @@ func (p *gkeProvider) resolveHost(ctx context.Context, args *GKEAuthArgs) (strin
 	return ct.host, nil
 }
 
-func (p *gkeProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
-	return p.authorizesHost(ctx, host, rawArgs, parseGKEArgs, (*GKEAuthArgs).validate, p.resolveHost)
+func (p *gkeProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
+	return p.authorizesHost(ctx, host, args, authreq.Parse[GKEAuthArgs], (*GKEAuthArgs).validate, p.resolveHost)
 }
 
 // authorizesDialIP reports whether ip may be dialed for this cluster: it denies
@@ -226,8 +219,8 @@ func (p *gkeProvider) authorizesDialIP(ctx context.Context, ip netip.Addr, args 
 
 // AuthorizesAddr pins the dial to the cluster endpoint's authoritative IP, after
 // the unconditional link-local floor in authorizesDialIP.
-func (p *gkeProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, rawArgs json.RawMessage) (bool, error) {
-	return p.authorizesAddr(ctx, ip, rawArgs, parseGKEArgs, (*GKEAuthArgs).validate, p.authorizesDialIP)
+func (p *gkeProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, args authreq.ProviderArgs) (bool, error) {
+	return p.authorizesAddr(ctx, ip, args, authreq.Parse[GKEAuthArgs], (*GKEAuthArgs).validate, p.authorizesDialIP)
 }
 
 func defaultGKENewContainerService(ctx context.Context, ts oauth2.TokenSource) (*container.Service, error) {

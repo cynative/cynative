@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,54 +13,6 @@ import (
 
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
 )
-
-func TestParseKubernetesArgs(t *testing.T) {
-	t.Parallel()
-
-	t.Run("absent key yields nil, no error", func(t *testing.T) {
-		t.Parallel()
-
-		args, err := parseKubernetesArgs(json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if args != nil {
-			t.Fatalf("want nil args for absent key, got %+v", args)
-		}
-	})
-
-	t.Run("empty input yields nil, no error", func(t *testing.T) {
-		t.Parallel()
-
-		args, err := parseKubernetesArgs(nil)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if args != nil {
-			t.Fatalf("want nil args for empty input, got %+v", args)
-		}
-	})
-
-	t.Run("present empty object yields non-nil", func(t *testing.T) {
-		t.Parallel()
-
-		args, err := parseKubernetesArgs(json.RawMessage(`{"kubernetes_auth":{}}`))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if args == nil {
-			t.Fatal("want non-nil args for present key")
-		}
-	})
-
-	t.Run("malformed JSON errors", func(t *testing.T) {
-		t.Parallel()
-
-		if _, err := parseKubernetesArgs(json.RawMessage(`{`)); err == nil {
-			t.Fatal("malformed args must error")
-		}
-	})
-}
 
 func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with many subtests by design.
 	t.Parallel()
@@ -598,7 +549,7 @@ func TestKubernetesProvider_InjectAuth(t *testing.T) {
 
 		p := newKubernetesProvider(resolvedCluster{mode: credBearer, token: "abc"})
 		req := newReq()
-		if err := p.InjectAuth(req, nil); err != nil {
+		if err := p.InjectAuth(req, noArgs()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got := req.Header.Get("Authorization"); got != "Bearer abc" {
@@ -617,7 +568,7 @@ func TestKubernetesProvider_InjectAuth(t *testing.T) {
 			return []byte("file-token\n"), nil
 		}
 		req := newReq()
-		if err := p.InjectAuth(req, nil); err != nil {
+		if err := p.InjectAuth(req, noArgs()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got := req.Header.Get("Authorization"); got != "Bearer file-token" {
@@ -630,7 +581,7 @@ func TestKubernetesProvider_InjectAuth(t *testing.T) {
 
 		p := newKubernetesProvider(resolvedCluster{mode: credBearer, tokenFile: "/run/token"})
 		p.readFile = func(string) ([]byte, error) { return nil, errors.New("gone") }
-		if err := p.InjectAuth(newReq(), nil); err == nil {
+		if err := p.InjectAuth(newReq(), noArgs()); err == nil {
 			t.Fatal("tokenFile read error must propagate")
 		}
 	})
@@ -640,7 +591,7 @@ func TestKubernetesProvider_InjectAuth(t *testing.T) {
 
 		p := newKubernetesProvider(resolvedCluster{mode: credMTLS, clientCert: "c", clientKey: "k"})
 		req := newReq()
-		if err := p.InjectAuth(req, nil); err != nil {
+		if err := p.InjectAuth(req, noArgs()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got := req.Header.Get("Authorization"); got != "" {
@@ -666,7 +617,7 @@ func TestKubernetesProvider_TLSMaterialAndHost(t *testing.T) {
 	t.Run("CACertData", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := p.CACertData(ctx, nil)
+		got, err := p.CACertData(ctx, noArgs())
 		if err != nil || got != "Y2E=" {
 			t.Fatalf("CACertData = %q, %v", got, err)
 		}
@@ -675,7 +626,7 @@ func TestKubernetesProvider_TLSMaterialAndHost(t *testing.T) {
 	t.Run("ClientCertData", func(t *testing.T) {
 		t.Parallel()
 
-		cert, key, err := p.ClientCertData(ctx, nil)
+		cert, key, err := p.ClientCertData(ctx, noArgs())
 		if err != nil || cert != "Y2VydA==" || key != "a2V5" {
 			t.Fatalf("ClientCertData = %q, %q, %v", cert, key, err)
 		}
@@ -684,7 +635,7 @@ func TestKubernetesProvider_TLSMaterialAndHost(t *testing.T) {
 	t.Run("ServerNameData", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := p.ServerNameData(ctx, nil)
+		got, err := p.ServerNameData(ctx, noArgs())
 		if err != nil || got != "api.internal" {
 			t.Fatalf("ServerNameData = %q, %v", got, err)
 		}
@@ -693,7 +644,7 @@ func TestKubernetesProvider_TLSMaterialAndHost(t *testing.T) {
 	t.Run("AuthorizesHost match", func(t *testing.T) {
 		t.Parallel()
 
-		ok, err := p.AuthorizesHost(ctx, "10.0.0.1", nil)
+		ok, err := p.AuthorizesHost(ctx, "10.0.0.1", noArgs())
 		if err != nil || !ok {
 			t.Fatalf("AuthorizesHost(match) = %v, %v", ok, err)
 		}
@@ -702,7 +653,7 @@ func TestKubernetesProvider_TLSMaterialAndHost(t *testing.T) {
 	t.Run("AuthorizesHost mismatch", func(t *testing.T) {
 		t.Parallel()
 
-		ok, err := p.AuthorizesHost(ctx, "evil.example", nil)
+		ok, err := p.AuthorizesHost(ctx, "evil.example", noArgs())
 		if err != nil || ok {
 			t.Fatalf("AuthorizesHost(mismatch) = %v, %v", ok, err)
 		}
@@ -718,7 +669,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newKubernetesProvider(resolvedCluster{host: "203.0.113.7", mode: credBearer, token: "t"})
-		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.7"), nil)
+		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.7"), noArgs())
 		if err != nil || !ok {
 			t.Fatalf("exact IP: ok=%v err=%v", ok, err)
 		}
@@ -728,7 +679,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newKubernetesProvider(resolvedCluster{host: "10.0.0.5", mode: credBearer, token: "t"})
-		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("10.0.0.5"), nil)
+		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("10.0.0.5"), noArgs())
 		if err != nil || !ok {
 			t.Fatalf("private IP: ok=%v err=%v", ok, err)
 		}
@@ -738,7 +689,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newKubernetesProvider(resolvedCluster{host: "203.0.113.7", mode: credBearer, token: "t"})
-		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.8"), nil)
+		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.8"), noArgs())
 		if err != nil || ok {
 			t.Fatalf("mismatch IP: ok=%v err=%v", ok, err)
 		}
@@ -748,7 +699,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newKubernetesProvider(resolvedCluster{host: "169.254.169.254", mode: credBearer, token: "t"})
-		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("169.254.169.254"), nil)
+		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("169.254.169.254"), noArgs())
 		if err != nil || ok {
 			t.Fatalf("metadata IP must be denied by floor: ok=%v err=%v", ok, err)
 		}
@@ -761,7 +712,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		p.resolver = func(context.Context, string) ([]netip.Addr, error) {
 			return []netip.Addr{netip.MustParseAddr("203.0.113.7")}, nil
 		}
-		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.7"), nil)
+		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.7"), noArgs())
 		if err != nil || !ok {
 			t.Fatalf("in-set: ok=%v err=%v", ok, err)
 		}
@@ -774,7 +725,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		p.resolver = func(context.Context, string) ([]netip.Addr, error) {
 			return []netip.Addr{netip.MustParseAddr("203.0.113.7")}, nil
 		}
-		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.9"), nil)
+		ok, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.9"), noArgs())
 		if err != nil || ok {
 			t.Fatalf("out-of-set: ok=%v err=%v", ok, err)
 		}
@@ -787,7 +738,7 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 		p.resolver = func(context.Context, string) ([]netip.Addr, error) {
 			return nil, errors.New("dns boom")
 		}
-		_, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.7"), nil)
+		_, err := p.AuthorizesAddr(ctx, netip.MustParseAddr("203.0.113.7"), noArgs())
 		if err == nil {
 			t.Fatal("resolver error must deny (fail closed)")
 		}
@@ -814,7 +765,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://h/api/v1/namespaces/d/pods")
-		if err := p.AuthorizeAction(ctx, v, nil); err != nil {
+		if err := p.AuthorizeAction(ctx, v, noArgs()); err != nil {
 			t.Fatalf("list pods should be allowed: %v", err)
 		}
 	})
@@ -824,7 +775,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://h/api/v1/nodes")
-		if err := p.AuthorizeAction(ctx, v, nil); !errors.Is(err, k8sauthz.ErrForbidden) {
+		if err := p.AuthorizeAction(ctx, v, noArgs()); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("get nodes should be ErrForbidden, got %v", err)
 		}
 	})
@@ -837,8 +788,19 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 			return nil, errors.New("boom")
 		}
 		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
-		if err := p.AuthorizeAction(ctx, v, nil); err == nil {
+		if err := p.AuthorizeAction(ctx, v, noArgs()); err == nil {
 			t.Fatal("fetch error must deny (fail closed)")
+		}
+	})
+
+	t.Run("accepts a present kubernetes_auth block", func(t *testing.T) {
+		t.Parallel()
+
+		p := newProv()
+		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
+		args := providerArgs(kubernetesProviderName, `{"kubernetes_auth":{}}`)
+		if err := p.AuthorizeAction(ctx, v, args); err != nil {
+			t.Fatalf("present kubernetes_auth = %v, want nil", err)
 		}
 	})
 
@@ -847,7 +809,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
-		if err := p.AuthorizeAction(ctx, v, json.RawMessage(`{`)); err == nil {
+		if err := p.AuthorizeAction(ctx, v, providerArgs(kubernetesProviderName, `{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -79,8 +78,8 @@ func (g *k8sGate[A]) resolveViewPolicy(ctx context.Context, args *A) (*k8sauthz.
 func (g *k8sGate[A]) authorizesHost(
 	ctx context.Context,
 	host string,
-	rawArgs json.RawMessage,
-	parse func(json.RawMessage) (*A, error),
+	rawArgs authreq.ProviderArgs,
+	parse func(authreq.ProviderArgs) (*A, error),
 	validate func(*A) error,
 	resolveHost func(context.Context, *A) (string, error),
 ) (bool, error) {
@@ -107,8 +106,8 @@ func (g *k8sGate[A]) authorizesHost(
 func (g *k8sGate[A]) authorizesAddr(
 	ctx context.Context,
 	ip netip.Addr,
-	rawArgs json.RawMessage,
-	parse func(json.RawMessage) (*A, error),
+	rawArgs authreq.ProviderArgs,
+	parse func(authreq.ProviderArgs) (*A, error),
 	validate func(*A) error,
 	dial func(context.Context, netip.Addr, *A) (bool, error),
 ) (bool, error) {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // AddrAuthorizer is optionally implemented by providers that need to authorize a
@@ -16,7 +18,7 @@ import (
 // Providers that do not implement it inherit the default internal-range deny in
 // AuthorizeAddr.
 type AddrAuthorizer interface {
-	AuthorizesAddr(ctx context.Context, ip netip.Addr, rawArgs json.RawMessage) (bool, error)
+	AuthorizesAddr(ctx context.Context, ip netip.Addr, args authreq.ProviderArgs) (bool, error)
 }
 
 // ErrAddrNotAuthorized is returned when a request's resolved IP is rejected.
@@ -93,7 +95,7 @@ func AuthorizeAddr(
 	}
 
 	if aa, ok := p.(AddrAuthorizer); ok {
-		allowed, addrErr := aa.AuthorizesAddr(ctx, ip, rawArgs)
+		allowed, addrErr := aa.AuthorizesAddr(ctx, ip, authreq.NewProviderArgs(rawArgs, p.Name()))
 		if addrErr != nil {
 			return fmt.Errorf("auth: authorize addr %s for provider %s: %w", ip, name, addrErr)
 		}
