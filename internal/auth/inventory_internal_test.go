@@ -2,13 +2,13 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
@@ -185,10 +185,10 @@ func TestEmitOutcome(t *testing.T) {
 // can assert the RETURNED provider order is registrar order (deterministic).
 type nameProv struct{ n string }
 
-func (p nameProv) Name() string                                    { return p.n }
-func (p nameProv) Description() string                             { return "" }
-func (p nameProv) InjectAuth(*http.Request, json.RawMessage) error { return nil }
-func (p nameProv) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (p nameProv) Name() string                                         { return p.n }
+func (p nameProv) Description() string                                  { return "" }
+func (p nameProv) InjectAuth(*http.Request, authreq.ProviderArgs) error { return nil }
+func (p nameProv) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	return false, nil
 }
 

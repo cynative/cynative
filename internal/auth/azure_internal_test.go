@@ -80,7 +80,7 @@ type fakeAzureAction struct {
 	retErr error
 }
 
-func (f *fakeAzureAction) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+func (f *fakeAzureAction) AuthorizeAction(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 	f.called = true
 	return f.retErr
 }
@@ -127,16 +127,18 @@ func TestNewAzureProviderConstructor(t *testing.T) {
 
 func TestParseAzureArgs(t *testing.T) {
 	t.Parallel()
-	if _, err := parseAzureArgs(json.RawMessage(`{}`)); err == nil {
+	if _, err := parseAzureArgs(providerArgs(azureProviderName, `{}`)); err == nil {
 		t.Error("missing azure_auth should error")
 	}
-	if _, err := parseAzureArgs(json.RawMessage(`{"azure_auth":{"service":""}}`)); err == nil {
+	if _, err := parseAzureArgs(providerArgs(azureProviderName, `{"azure_auth":{"service":""}}`)); err == nil {
 		t.Error("empty service should error")
 	}
-	if _, err := parseAzureArgs(json.RawMessage(`{bad`)); err == nil {
+	if _, err := parseAzureArgs(providerArgs(azureProviderName, `{bad`)); err == nil {
 		t.Error("invalid JSON should error")
 	}
-	args, err := parseAzureArgs(json.RawMessage(`{"azure_auth":{"service":"Microsoft.Compute","cloud":"AzureCloud"}}`))
+	args, err := parseAzureArgs(
+		providerArgs(azureProviderName, `{"azure_auth":{"service":"Microsoft.Compute","cloud":"AzureCloud"}}`),
+	)
 	if err != nil || args.Service != "Microsoft.Compute" {
 		t.Fatalf("parseAzureArgs = %+v err=%v", args, err)
 	}
@@ -159,23 +161,29 @@ func TestAzureAuthorizesHost(t *testing.T) {
 	ctx := context.Background()
 	// Happy: control-plane host, cloud claim matches.
 	ok, err := p.AuthorizesHost(ctx, "management.azure.com",
-		json.RawMessage(`{"azure_auth":{"service":"Microsoft.Compute","cloud":"AzureCloud"}}`))
+		providerArgs(azureProviderName, `{"azure_auth":{"service":"Microsoft.Compute","cloud":"AzureCloud"}}`))
 	if err != nil || !ok {
 		t.Fatalf("AuthorizesHost accept = %v err=%v", ok, err)
 	}
 	// Missing azure_auth → fail closed.
-	if _, mErr := p.AuthorizesHost(ctx, "management.azure.com", json.RawMessage(`{}`)); mErr == nil {
+	if _, mErr := p.AuthorizesHost(ctx, "management.azure.com", providerArgs(azureProviderName, `{}`)); mErr == nil {
 		t.Error("missing azure_auth should error")
 	}
 	// Data-plane host → rejected by ParseHost (before the catalog is consulted).
 	if _, uErr := p.AuthorizesHost(ctx, "myvault.vault.azure.net",
-		json.RawMessage(`{"azure_auth":{"service":"Microsoft.KeyVault"}}`)); uErr == nil {
+		providerArgs(azureProviderName, `{"azure_auth":{"service":"Microsoft.KeyVault"}}`)); uErr == nil {
 		t.Error("data-plane host should be rejected")
 	}
 	// Valid control-plane host the fake catalog does not resolve → ResolveCloud
 	// rejects (exercises the post-ResolveCloud error branch).
-	if _, rErr := p.AuthorizesHost(ctx, "management.usgovcloudapi.net",
-		json.RawMessage(`{"azure_auth":{"service":"Microsoft.Compute","cloud":"AzureUSGovernment"}}`)); rErr == nil {
+	if _, rErr := p.AuthorizesHost(
+		ctx,
+		"management.usgovcloudapi.net",
+		providerArgs(
+			azureProviderName,
+			`{"azure_auth":{"service":"Microsoft.Compute","cloud":"AzureUSGovernment"}}`,
+		),
+	); rErr == nil {
 		t.Error("catalog ResolveCloud rejection should propagate")
 	}
 }
@@ -185,7 +193,7 @@ func TestAzureAuthorizesHost_InvalidHost(t *testing.T) {
 	p := newTestAzureProvider(fakeAzureCred{token: "tok"}, &fakeAzureAction{})
 	// localhost is rejected by ParseHost before the catalog is consulted.
 	if _, err := p.AuthorizesHost(context.Background(), "localhost",
-		json.RawMessage(`{"azure_auth":{"service":"Microsoft.Compute"}}`)); err == nil {
+		providerArgs(azureProviderName, `{"azure_auth":{"service":"Microsoft.Compute"}}`)); err == nil {
 		t.Error("localhost should be rejected by ParseHost")
 	}
 }
@@ -196,7 +204,7 @@ func TestAzureAuthorizeAction_Delegates(t *testing.T) {
 	p := newTestAzureProvider(fakeAzureCred{token: "tok"}, fake)
 	v := actionView(t, http.MethodGet, "https://management.azure.com/subscriptions")
 	if err := p.AuthorizeAction(context.Background(), v,
-		json.RawMessage(`{"azure_auth":{"service":"Microsoft.Resources"}}`)); err != nil {
+		providerArgs(azureProviderName, `{"azure_auth":{"service":"Microsoft.Resources"}}`)); err != nil {
 		t.Fatalf("AuthorizeAction = %v", err)
 	}
 	if !fake.called {
@@ -208,7 +216,7 @@ func TestAzureAuthorizeAction_LazyError(t *testing.T) {
 	t.Parallel()
 	p := newTestAzureProviderLazyErr("init-failed")
 	v := actionView(t, http.MethodGet, "https://management.azure.com/x")
-	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
+	if err := p.AuthorizeAction(context.Background(), v, providerArgs(azureProviderName, `{}`)); err == nil {
 		t.Error("AuthorizeAction should error on lazy failure")
 	}
 }
@@ -220,7 +228,7 @@ func TestAzureAuthorizeAction_NilHardening(t *testing.T) {
 	}
 	p.doLazyResolve = func(_ context.Context) error { return nil } // leaves hardeningAction nil.
 	v := actionView(t, http.MethodGet, "https://management.azure.com/x")
-	if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
+	if err := p.AuthorizeAction(context.Background(), v, providerArgs(azureProviderName, `{}`)); err == nil {
 		t.Error("AuthorizeAction should error when hardeningAction is nil")
 	}
 }
@@ -229,7 +237,7 @@ func TestAzureInjectAuth_Success(t *testing.T) {
 	t.Parallel()
 	p := newTestAzureProvider(fakeAzureCred{token: "scoped-token"}, &fakeAzureAction{})
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://management.azure.com/x", nil)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err != nil {
+	if err := p.InjectAuth(req, providerArgs(azureProviderName, `{}`)); err != nil {
 		t.Fatalf("InjectAuth = %v", err)
 	}
 	if got := req.Header.Get("Authorization"); got != "Bearer scoped-token" {
@@ -264,7 +272,7 @@ func TestAzureInjectAuth_UsesResolvedScope(t *testing.T) {
 		"https://management.usgovcloudapi.net/x",
 		nil,
 	)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err != nil {
+	if err := p.InjectAuth(req, providerArgs(azureProviderName, `{}`)); err != nil {
 		t.Fatalf("InjectAuth = %v", err)
 	}
 	if cred.gotScope != "https://management.usgovcloudapi.net/.default" {
@@ -276,7 +284,7 @@ func TestAzureInjectAuth_LazyError(t *testing.T) {
 	t.Parallel()
 	p := newTestAzureProviderLazyErr("init-failed")
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://management.azure.com/x", nil)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err == nil {
+	if err := p.InjectAuth(req, providerArgs(azureProviderName, `{}`)); err == nil {
 		t.Error("InjectAuth should error on lazy failure")
 	}
 }
@@ -285,7 +293,7 @@ func TestAzureInjectAuth_TokenError(t *testing.T) {
 	t.Parallel()
 	p := newTestAzureProvider(fakeAzureCred{tokenErr: errors.New("boom")}, &fakeAzureAction{})
 	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://management.azure.com/x", nil)
-	if err := p.InjectAuth(req, json.RawMessage(`{}`)); err == nil {
+	if err := p.InjectAuth(req, providerArgs(azureProviderName, `{}`)); err == nil {
 		t.Error("InjectAuth should propagate token error")
 	}
 }
@@ -299,7 +307,7 @@ func TestAzureInjectAuth_RejectsModelSAS(t *testing.T) {
 		"https://management.azure.com/x?sig=abc&sv=2021",
 		nil,
 	)
-	err := p.InjectAuth(req, json.RawMessage(`{}`))
+	err := p.InjectAuth(req, providerArgs(azureProviderName, `{}`))
 	if !errors.Is(err, azurehardening.ErrModelSuppliedCredential) {
 		t.Errorf("InjectAuth SAS = %v, want ErrModelSuppliedCredential", err)
 	}

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,7 +68,7 @@ func (p *githubProvider) Description() string {
 		"Allows reading private GitHub repositories." + githubDownloadHostsNote
 }
 
-func (p *githubProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *githubProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	// Strip any model-supplied version so GitHub uses its current default, which the
 	// live-fetched OpenAPI spec (raw.githubusercontent.com main branch) describes.
@@ -95,7 +94,7 @@ func isGithubDownloadHost(host string) bool {
 	return false
 }
 
-func (p *githubProvider) AuthorizesHost(_ context.Context, host string, _ json.RawMessage) (bool, error) {
+func (p *githubProvider) AuthorizesHost(_ context.Context, host string, _ authreq.ProviderArgs) (bool, error) {
 	return host == "api.github.com" || isGithubDownloadHost(host), nil
 }
 
@@ -115,7 +114,7 @@ func effectiveDownloadHost(hostname string) string {
 // table-independent; api.github.com requests are classified against the live table
 // and allowed iff the configured ceiling permits the required level. A missing
 // table fails closed (category table not ready). Runs before InjectAuth.
-func (p *githubProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ json.RawMessage) error {
+func (p *githubProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ authreq.ProviderArgs) error {
 	if githubhardening.IsGraphQLEndpoint(v.EscapedPath) {
 		return fmt.Errorf("%w: %s %s", githubhardening.ErrGraphQLUnsupported, v.Method, v.EscapedPath)
 	}

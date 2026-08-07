@@ -490,8 +490,40 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     and no query helper on purpose: GitLab parses fail-closed against Rack's `;` handling
     while the K8s and AWS gates match their Go upstreams' lenient parse. It carries both
     `Path` and `EscapedPath` because Azure compares them to reject a percent-encoded
-    slash. `rawArgs` is still the full tool-call JSON, so it remains a second
-    full-fidelity channel; narrowing it is separate work.
+    slash.
+  - The per-call arguments are narrowed the same way. All seven provider-facing methods
+    (the six read-only gates plus `InjectAuth`) take an `authreq.ProviderArgs`, never the
+    tool call: each dispatcher resolves the provider first and then projects the call down
+    to that provider's own `<name>_auth` block via `authreq.NewProviderArgs(rawArgs,
+    p.Name())`, so a gate cannot take a second, un-narrowed view of the request alongside
+    `View`. `authreq.Parse[T]` is the **only** accessor and decodes exactly one key,
+    distinguishing absent (`nil, nil`; callers enforce their own required fields) from a
+    projection error, and the zero `ProviderArgs` is the absent state, which is why
+    `kubernetes`, whose action validation is a deliberate no-op, treats it as allow.
+    `Parse` is also where the extraction happens: `NewProviderArgs` only binds the key, so
+    building one costs nothing. Most gates read no arguments at all (github across three,
+    gitlab across five, one of them per dial attempt), and extracting eagerly would scan
+    and copy the whole tool call, model-authored body included, once per gate for
+    arguments nobody reads. The extraction itself (`project.go`) slices the block out of
+    the tool call in place rather than decoding into a `map[string]json.RawMessage`, which
+    would copy every top-level value to retain one: `json.Valid` scans without allocating,
+    so the walk only has to find boundaries in a document already known to be well formed,
+    and the whole projection is allocation-free. It is the one hand-written JSON walk in
+    the auth path, so `FuzzProjectBlock` pins it **differentially** against the map decode
+    it replaced, on both the error verdict and the extracted bytes. Two things that walk
+    must match and would be silently wrong otherwise: a duplicate key resolves to the
+    **last** occurrence, as `encoding/json` does, so a gate cannot be shown one block while
+    the tool schema decoded another; and a member name is compared raw only when it is
+    unescaped **and** valid UTF-8, since `encoding/json` substitutes U+FFFD for an invalid
+    byte. `Parse` telling the zero value from a constructed one by an
+    empty key is what makes the suffix append unconditional: a nameless provider looks for
+    `_auth` and fails closed, rather than inheriting "absent means allow". The key is
+    **derived**, never looked up, so a connector whose model-facing block were tagged
+    anything but `<name>_auth` would be handed absent args on every request instead of failing:
+    `connector_args_test.go` pins the two together in both directions against
+    `transport.RequestArgs`, and `argsnarrowing_internal_test.go` drives one tool call
+    through all seven dispatchers and asserts the provider sees its own block and neither
+    the request nor a sibling's.
   - `auth.Inject`, the dispatcher every credentialed request flows through, rejects
     model-supplied credentials before dispatching (`ErrModelSuppliedCredential`):
     `Authorization`/`Proxy-Authorization`/`X-Ms-Authorization-Auxiliary` header values and URL
@@ -837,12 +869,16 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   `make test` import check.
 - **Fuzz targets guard the parsers on the trust boundary**, named `*_fuzz_test.go` /
   `*_fuzz_internal_test.go`: the redactor, the untrusted-output fencing, sandbox output
-  finalization, AWS `ParseHost`, the K8s classifier and ClusterRole parser, and the github and
+  finalization, AWS `ParseHost`, the K8s classifier and ClusterRole parser, the auth
+  provider-args projection, and the github and
   gitlab classifiers (route lookup, request classification, level derivation, GraphQL-endpoint
   detection, OpenAPI distillation). Each pins panic-freedom; most also pin a fail-closed
   contract, but the two `IsGraphQLEndpoint` targets and github's `FuzzLookup` discard their
   results and pin panic-freedom alone (gitlab's `FuzzLookup`, by contrast, asserts the root
-  anchor). No corpus is committed and `make check` never
+  anchor). `FuzzProjectBlock` is the one **differential** target: its contract is agreement
+  with `encoding/json`, not a one-sided property, because the walk it guards exists only to
+  avoid that decode's allocation and any divergence between the two is a gate reading
+  something other than what the tool schema decoded. No corpus is committed and `make check` never
   passes `-fuzz`, so **the `f.Add` seeds are the whole gate**: they must cover the interesting
   branches, since that is all CI executes. Extended fuzzing is a manual
   `go test -fuzz=FuzzX -fuzztime=…` run.
@@ -863,9 +899,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   and every catalog entry has a `docs/providers/<name>.md` guide; chat capability is not
   mechanically verifiable, so re-check each provider's `ChatCompletion` body on every Bifrost
   bump and update the exclusions, env row, and doc together. The connector registry has the
-  same convention: `internal/auth/connector_docs_test.go` fails unless every connector id
-  `GetProviders` can register has a guide at `docs/connectors/<file>.md`; when adding a
-  connector, add its doc and the test-table row together.
+  same convention, in two tables that must stay key-for-key identical (a test asserts it):
+  `internal/auth/connector_docs_test.go` fails unless every connector id `GetProviders` can
+  register has a guide at `docs/connectors/<file>.md`, and `connector_args_test.go` fails
+  unless its per-call arguments block in `transport.RequestArgs` is tagged exactly
+  `<id>_auth` (or it declares that the connector takes none). When adding a connector, add
+  its doc and both test-table rows together.
 - **README demo assets are generated, never hand-edited.** `docs/assets/demo.capture.ansi` is
   written by `capture.sh sanitize` (from a raw `live` capture); the three `demo-col*.svg` are
   freeze-rendered from it by `capture.sh render`. `capture.sh all` is the leak gate: `render` +

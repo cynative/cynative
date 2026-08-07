@@ -46,7 +46,7 @@ type githubTestProvider struct {
 
 func (p *githubTestProvider) Name() string        { return "github" }
 func (p *githubTestProvider) Description() string { return "Test GitHub" }
-func (p *githubTestProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *githubTestProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	if req.Header.Get("X-Github-Api-Version") == "" {
 		req.Header.Set("X-Github-Api-Version", "2022-11-28")
@@ -55,16 +55,16 @@ func (p *githubTestProvider) InjectAuth(req *http.Request, _ json.RawMessage) er
 	return nil
 }
 
-func (p *githubTestProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *githubTestProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *githubTestProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *githubTestProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.caCert, nil
 }
 
 func (p *githubTestProvider) AuthorizesAddr(
-	_ context.Context, _ netip.Addr, _ json.RawMessage,
+	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return true, nil
 }
@@ -470,12 +470,12 @@ type hostGateSpy struct{ t *testing.T }
 func (s *hostGateSpy) Name() string        { return "spy" }
 func (s *hostGateSpy) Description() string { return "fails if any auth gate runs" }
 
-func (s *hostGateSpy) InjectAuth(*http.Request, json.RawMessage) error {
+func (s *hostGateSpy) InjectAuth(*http.Request, authreq.ProviderArgs) error {
 	s.t.Error("InjectAuth ran; the Host rejection must precede every auth gate")
 	return nil
 }
 
-func (s *hostGateSpy) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (s *hostGateSpy) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	s.t.Error("AuthorizesHost ran; the Host rejection must precede every auth gate")
 	return true, nil
 }
@@ -783,10 +783,10 @@ func TestExecute_HostNotAuthorized(t *testing.T) {
 
 type denyProvider struct{}
 
-func (p *denyProvider) Name() string                                        { return "deny" }
-func (p *denyProvider) Description() string                                 { return "denies all hosts" }
-func (p *denyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
-func (p *denyProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *denyProvider) Name() string                                             { return "deny" }
+func (p *denyProvider) Description() string                                      { return "denies all hosts" }
+func (p *denyProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
+func (p *denyProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return false, nil
 }
 
@@ -1016,14 +1016,14 @@ type hostOnlyProvider struct {
 
 func (p *hostOnlyProvider) Name() string { return "host-only" }
 
-func (p *hostOnlyProvider) Description() string                                 { return "authorizes host only" }
-func (p *hostOnlyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+func (p *hostOnlyProvider) Description() string                                      { return "authorizes host only" }
+func (p *hostOnlyProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
 
-func (p *hostOnlyProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *hostOnlyProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *hostOnlyProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *hostOnlyProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.caCert, nil
 }
 
@@ -1036,19 +1036,19 @@ type addrAllowProvider struct {
 
 func (p *addrAllowProvider) Name() string { return "addr-allow" }
 
-func (p *addrAllowProvider) Description() string                                 { return "allows hosts and addrs" }
-func (p *addrAllowProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+func (p *addrAllowProvider) Description() string                                      { return "allows hosts and addrs" }
+func (p *addrAllowProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
 
-func (p *addrAllowProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *addrAllowProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *addrAllowProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *addrAllowProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.caCert, nil
 }
 
 func (p *addrAllowProvider) AuthorizesAddr(
-	_ context.Context, _ netip.Addr, _ json.RawMessage,
+	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return true, nil
 }
@@ -1438,11 +1438,11 @@ type errorCertProvider struct {
 }
 
 func (p *errorCertProvider) Name() string { return "error-cert" }
-func (p *errorCertProvider) ClientCertData(_ context.Context, _ json.RawMessage) (string, string, error) {
+func (p *errorCertProvider) ClientCertData(_ context.Context, _ authreq.ProviderArgs) (string, string, error) {
 	return "", "", errors.New("client cert retrieval failed")
 }
 
-func (p *errorCertProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *errorCertProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return "", nil
 }
 
@@ -1521,14 +1521,14 @@ type errServerNameProvider struct{}
 
 func (p *errServerNameProvider) Name() string { return "kubernetes" }
 
-func (p *errServerNameProvider) Description() string                             { return "err sni" }
-func (p *errServerNameProvider) InjectAuth(*http.Request, json.RawMessage) error { return nil }
+func (p *errServerNameProvider) Description() string                                  { return "err sni" }
+func (p *errServerNameProvider) InjectAuth(*http.Request, authreq.ProviderArgs) error { return nil }
 
-func (p *errServerNameProvider) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (p *errServerNameProvider) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *errServerNameProvider) ServerNameData(context.Context, json.RawMessage) (string, error) {
+func (p *errServerNameProvider) ServerNameData(context.Context, authreq.ProviderArgs) (string, error) {
 	return "", errors.New("sni boom")
 }
 
@@ -1552,23 +1552,25 @@ type serverNameTestProvider struct {
 	serverName string
 }
 
-func (p *serverNameTestProvider) Name() string                                    { return "kubernetes" }
-func (p *serverNameTestProvider) Description() string                             { return "test" }
-func (p *serverNameTestProvider) InjectAuth(*http.Request, json.RawMessage) error { return nil }
+func (p *serverNameTestProvider) Name() string { return "kubernetes" }
 
-func (p *serverNameTestProvider) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (p *serverNameTestProvider) Description() string { return "test" }
+
+func (p *serverNameTestProvider) InjectAuth(*http.Request, authreq.ProviderArgs) error { return nil }
+
+func (p *serverNameTestProvider) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *serverNameTestProvider) CACertData(context.Context, json.RawMessage) (string, error) {
+func (p *serverNameTestProvider) CACertData(context.Context, authreq.ProviderArgs) (string, error) {
 	return p.caData, nil
 }
 
-func (p *serverNameTestProvider) ServerNameData(context.Context, json.RawMessage) (string, error) {
+func (p *serverNameTestProvider) ServerNameData(context.Context, authreq.ProviderArgs) (string, error) {
 	return p.serverName, nil
 }
 
-func (p *serverNameTestProvider) AuthorizesAddr(context.Context, netip.Addr, json.RawMessage) (bool, error) {
+func (p *serverNameTestProvider) AuthorizesAddr(context.Context, netip.Addr, authreq.ProviderArgs) (bool, error) {
 	return true, nil // test server is loopback; allow so the handshake runs.
 }
 
@@ -1663,19 +1665,19 @@ type orderingProvider struct {
 func (p *orderingProvider) Name() string        { return "ordering" }
 func (p *orderingProvider) Description() string { return "records call order" }
 
-func (p *orderingProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *orderingProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	*p.calls = append(*p.calls, "host")
 
 	return true, nil
 }
 
-func (p *orderingProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+func (p *orderingProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 	*p.calls = append(*p.calls, "action")
 
 	return nil
 }
 
-func (p *orderingProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
+func (p *orderingProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
 	*p.calls = append(*p.calls, "inject")
 
 	return nil
@@ -1723,12 +1725,12 @@ type orderingProviderWithCA struct {
 	caCert string
 }
 
-func (p *orderingProviderWithCA) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *orderingProviderWithCA) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.caCert, nil
 }
 
 func (p *orderingProviderWithCA) AuthorizesAddr(
-	_ context.Context, _ netip.Addr, _ json.RawMessage,
+	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return true, nil
 }
@@ -1778,30 +1780,30 @@ type denyingActionProvider struct {
 func (p *denyingActionProvider) Name() string        { return "denying" }
 func (p *denyingActionProvider) Description() string { return "denies actions" }
 
-func (p *denyingActionProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *denyingActionProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	*p.calls = append(*p.calls, "host")
 
 	return true, nil
 }
 
-func (p *denyingActionProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+func (p *denyingActionProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 	*p.calls = append(*p.calls, "action")
 
 	return errors.New("action denied")
 }
 
-func (p *denyingActionProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
+func (p *denyingActionProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
 	*p.calls = append(*p.calls, "inject")
 
 	return nil
 }
 
-func (p *denyingActionProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *denyingActionProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.caCert, nil
 }
 
 func (p *denyingActionProvider) AuthorizesAddr(
-	_ context.Context, _ netip.Addr, _ json.RawMessage,
+	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return true, nil
 }
@@ -1825,17 +1827,17 @@ func newSpyProvider(name string, called *bool) auth.Provider {
 func (p *spyProvider) Name() string        { return p.name }
 func (p *spyProvider) Description() string { return "records whether AuthorizeAction ran" }
 
-func (p *spyProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *spyProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *spyProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+func (p *spyProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 	*p.called = true
 
 	return nil
 }
 
-func (p *spyProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
+func (p *spyProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
 	return nil
 }
 
@@ -1848,7 +1850,7 @@ type bodySpyProvider struct {
 	seen *string
 }
 
-func (p *bodySpyProvider) AuthorizeAction(_ context.Context, v authreq.View, _ json.RawMessage) error {
+func (p *bodySpyProvider) AuthorizeAction(_ context.Context, v authreq.View, _ authreq.ProviderArgs) error {
 	*p.seen = v.Body
 
 	return nil

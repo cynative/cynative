@@ -3,10 +3,11 @@ package authtest
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/netip"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // FailingProvider is an auth.Provider that always returns an error from InjectAuth.
@@ -14,11 +15,11 @@ type FailingProvider struct{}
 
 func (p *FailingProvider) Name() string        { return "failing" }
 func (p *FailingProvider) Description() string { return "always fails" }
-func (p *FailingProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error {
+func (p *FailingProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
 	return errors.New("injection failed")
 }
 
-func (p *FailingProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *FailingProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
@@ -41,7 +42,7 @@ func (p *LoopbackProvider) Name() string {
 
 func (p *LoopbackProvider) Description() string { return "test loopback provider" }
 
-func (p *LoopbackProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *LoopbackProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	if p.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.Token)
 	}
@@ -49,18 +50,18 @@ func (p *LoopbackProvider) InjectAuth(req *http.Request, _ json.RawMessage) erro
 	return nil
 }
 
-func (p *LoopbackProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *LoopbackProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *LoopbackProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *LoopbackProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.CACert, nil
 }
 
 // AuthorizesAddr authorizes every resolved IP so the transport can dial the
 // loopback httptest server under the dial-time IP guard.
 func (p *LoopbackProvider) AuthorizesAddr(
-	_ context.Context, _ netip.Addr, _ json.RawMessage,
+	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return true, nil
 }
@@ -126,7 +127,7 @@ func NewFailingCert() *CertProvider {
 func (p *CertProvider) Name() string        { return p.ProviderName }
 func (p *CertProvider) Description() string { return p.Desc }
 
-func (p *CertProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *CertProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	if p.Bearer != "" && (p.ClientCert == "" || p.ClientKey == "") {
 		req.Header.Set("Authorization", "Bearer "+p.Bearer)
 	}
@@ -134,12 +135,12 @@ func (p *CertProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
 	return nil
 }
 
-func (p *CertProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *CertProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
 // CACertData returns CACertErr when set, otherwise the static CACert value.
-func (p *CertProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *CertProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	if p.CACertErr != nil {
 		return "", p.CACertErr
 	}
@@ -148,12 +149,12 @@ func (p *CertProvider) CACertData(_ context.Context, _ json.RawMessage) (string,
 }
 
 // ClientCertData returns the configured client cert and key (empty for non-mTLS).
-func (p *CertProvider) ClientCertData(_ context.Context, _ json.RawMessage) (string, string, error) {
+func (p *CertProvider) ClientCertData(_ context.Context, _ authreq.ProviderArgs) (string, string, error) {
 	return p.ClientCert, p.ClientKey, nil
 }
 
 // AuthorizesAddr authorizes every resolved IP so the transport can dial the
 // loopback httptest server under the dial-time IP guard.
-func (p *CertProvider) AuthorizesAddr(_ context.Context, _ netip.Addr, _ json.RawMessage) (bool, error) {
+func (p *CertProvider) AuthorizesAddr(_ context.Context, _ netip.Addr, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }

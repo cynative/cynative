@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -46,17 +45,6 @@ const (
 // type is reserved so a future per-call cluster selector is a non-breaking
 // addition.
 type KubernetesAuthArgs struct{}
-
-// parseKubernetesArgs unmarshals the kubernetes_auth arguments from the raw
-// tool JSON, returning nil when the input is empty or the key is absent
-// (matching the aks convention) and an error only when the JSON is malformed.
-func parseKubernetesArgs(rawArgs json.RawMessage) (*KubernetesAuthArgs, error) {
-	if len(rawArgs) == 0 {
-		return nil, nil //nolint:nilnil // empty input means absent args, not an error; matches the aks convention.
-	}
-
-	return parseAuthArgs[KubernetesAuthArgs](rawArgs, "kubernetes_auth")
-}
 
 // rejectUnsafe fails closed when the selected kubeconfig context carries a
 // field this connector deliberately refuses to honor: an exec credential
@@ -395,9 +383,9 @@ func (p *kubernetesProvider) bearerToken() (string, error) {
 
 // InjectAuth attaches the bearer token (re-reading tokenFile per request so a
 // rotated SA token is picked up), or no header for mTLS (the transport presents
-// the client certificate). rawArgs is unused: v1 targets the single configured
+// the client certificate). args is unused: v1 targets the single configured
 // cluster.
-func (p *kubernetesProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *kubernetesProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	if p.cluster.mode == credMTLS {
 		return nil
 	}
@@ -414,25 +402,25 @@ func (p *kubernetesProvider) InjectAuth(req *http.Request, _ json.RawMessage) er
 
 // CACertData returns the base64-PEM CA captured from the kubeconfig (empty when
 // the cluster uses a publicly-trusted certificate).
-func (p *kubernetesProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *kubernetesProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.cluster.caData, nil
 }
 
 // ClientCertData returns the base64-PEM client cert and key for mTLS clusters
 // (both empty for bearer-token clusters).
-func (p *kubernetesProvider) ClientCertData(_ context.Context, _ json.RawMessage) (string, string, error) {
+func (p *kubernetesProvider) ClientCertData(_ context.Context, _ authreq.ProviderArgs) (string, string, error) {
 	return p.cluster.clientCert, p.cluster.clientKey, nil
 }
 
 // ServerNameData returns the kubeconfig tls-server-name override (empty when
 // unset), used as the TLS verified name for IP endpoints whose CA leaf carries
 // only DNS SANs.
-func (p *kubernetesProvider) ServerNameData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *kubernetesProvider) ServerNameData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.cluster.serverName, nil
 }
 
 // AuthorizesHost permits only the configured cluster endpoint host.
-func (p *kubernetesProvider) AuthorizesHost(_ context.Context, host string, _ json.RawMessage) (bool, error) {
+func (p *kubernetesProvider) AuthorizesHost(_ context.Context, host string, _ authreq.ProviderArgs) (bool, error) {
 	return host == p.cluster.host, nil
 }
 
@@ -464,8 +452,8 @@ func (p *kubernetesProvider) authorizesDialIP(ctx context.Context, ip netip.Addr
 }
 
 // AuthorizesAddr pins the dial to the configured endpoint after the floor.
-// rawArgs is unused: v1 targets the single configured cluster.
-func (p *kubernetesProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ json.RawMessage) (bool, error) {
+// args is unused: v1 targets the single configured cluster.
+func (p *kubernetesProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ authreq.ProviderArgs) (bool, error) {
 	return p.authorizesDialIP(ctx, ip)
 }
 
@@ -481,11 +469,11 @@ func (p *kubernetesProvider) probeAndSeedView(ctx context.Context) error {
 }
 
 // AuthorizeAction enforces the read-only ClusterRole posture via the shared k8sGate.
-func (p *kubernetesProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	args, err := parseKubernetesArgs(rawArgs)
+func (p *kubernetesProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	kubeArgs, err := authreq.Parse[KubernetesAuthArgs](args)
 	if err != nil {
 		return err
 	}
 
-	return p.authorizeAction(ctx, v, args)
+	return p.authorizeAction(ctx, v, kubeArgs)
 }

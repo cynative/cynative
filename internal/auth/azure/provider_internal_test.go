@@ -86,10 +86,16 @@ func buildProvider(t *testing.T) *Provider {
 	return NewProvider(cat, eval, "Reader")
 }
 
-func azArgs(t *testing.T, service string) json.RawMessage {
+func azArgs(t *testing.T, service string) authreq.ProviderArgs {
 	t.Helper()
 	b, _ := json.Marshal(map[string]any{"azure_auth": map[string]string{"service": service}})
-	return b
+	return authreq.NewProviderArgs(b, "azure")
+}
+
+// azToolCall projects a whole http_request tool call down to the azure_auth
+// block, exactly as auth's dispatcher does before it calls a gate.
+func azToolCall(toolCall string) authreq.ProviderArgs {
+	return authreq.NewProviderArgs(json.RawMessage(toolCall), "azure")
 }
 
 func providerView(t *testing.T, method, rawurl string) authreq.View {
@@ -176,7 +182,7 @@ func TestProviderMissingAzureAuth(t *testing.T) {
 			"GET",
 			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines",
 		),
-		json.RawMessage(`{}`),
+		azToolCall(`{}`),
 	); err == nil {
 		t.Fatal("missing azure_auth must error")
 	}
@@ -193,7 +199,7 @@ func TestProviderInvalidJSON(t *testing.T) {
 			"GET",
 			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines",
 		),
-		json.RawMessage(`not-json`),
+		azToolCall(`not-json`),
 	)
 	if err == nil {
 		t.Fatal("invalid JSON must error")

@@ -129,7 +129,7 @@ func TestGitHubProvider_InjectAuth(t *testing.T) {
 		"https://api.github.com/repos/test/test", nil,
 	)
 
-	if err := p.InjectAuth(req, nil); err != nil {
+	if err := p.InjectAuth(req, noArgs()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestGitHubProvider_InjectAuth_StripsModelApiVersion(t *testing.T) {
 	)
 	req.Header.Set("X-Github-Api-Version", "2099-01-01") // model-supplied — must be removed.
 
-	if err := p.InjectAuth(req, nil); err != nil {
+	if err := p.InjectAuth(req, noArgs()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -199,7 +199,7 @@ func TestAWSProvider_InjectAuth_MissingService(t *testing.T) {
 		"https://s3.us-east-1.amazonaws.com/bucket", nil,
 	)
 
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"region": "us-east-1"},
 	})
 
@@ -224,7 +224,7 @@ func TestAWSProvider_InjectAuth_InvalidJSON(t *testing.T) {
 		"https://s3.us-east-1.amazonaws.com/bucket", nil,
 	)
 
-	err := p.InjectAuth(req, json.RawMessage(`{invalid`))
+	err := p.InjectAuth(req, providerArgs(awsProviderName, `{invalid`))
 	if err == nil {
 		t.Fatal("expected error from invalid JSON")
 	}
@@ -248,7 +248,7 @@ func TestAWSProvider_InjectAuth_CredRetrieveError(t *testing.T) {
 		},
 		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }}, //nolint:exhaustruct // test
 	}
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "us-east-1"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -273,7 +273,7 @@ func TestAWSProvider_InjectAuth_NilBody(t *testing.T) {
 		Region:      "us-west-2",
 		Credentials: aws.CredentialsProviderFunc(fakeAWSCreds),
 	}, func(_ context.Context) error { return nil })
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "eu-west-1"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -301,7 +301,7 @@ func TestAWSProvider_InjectAuth_WithBody(t *testing.T) {
 		Region:      "us-east-1",
 		Credentials: aws.CredentialsProviderFunc(fakeAWSCreds),
 	}, func(_ context.Context) error { return nil })
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "execute-api", "region": "us-east-1"},
 	})
 	body := strings.NewReader(`{"key":"value"}`)
@@ -335,7 +335,7 @@ func TestAWSProvider_InjectAuth_BodyReadError(t *testing.T) {
 		},
 		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }}, //nolint:exhaustruct // test
 	}
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "us-east-1"},
 	})
 
@@ -376,7 +376,7 @@ func TestAWSProvider_InjectAuth_SignError(t *testing.T) {
 		},
 		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }}, //nolint:exhaustruct // test
 	}
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "us-east-1"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -409,7 +409,7 @@ func TestAWSProvider_InjectAuth_signsWithResolvedSigningName(t *testing.T) {
 		gotService = service
 		return nil
 	}
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "api.ecr", "region": "us-east-1"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -433,7 +433,7 @@ func TestAWSProvider_InjectAuth_RegionFallbackToConfig(t *testing.T) {
 	}, func(_ context.Context) error { return nil })
 	// No region in aws_auth — signingRegion derives us-east-1 from the global host
 	// (s3.amazonaws.com). The Authorization header is set.
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -458,7 +458,7 @@ func TestAWSProvider_InjectAuth_RegionFallbackToDefault(t *testing.T) {
 	p := newAWSProvider(aws.Config{
 		Credentials: aws.CredentialsProviderFunc(fakeAWSCreds),
 	}, func(_ context.Context) error { return nil })
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -504,7 +504,7 @@ func TestEKSProvider_InjectAuth_MissingCluster(t *testing.T) {
 		"https://kubernetes.default.svc/api/v1/pods", nil,
 	)
 
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, eksProviderName, map[string]any{
 		"eks_auth": map[string]string{"region": "us-east-1"},
 	})
 
@@ -527,7 +527,7 @@ func TestEKSProvider_InjectAuth_InvalidJSON(t *testing.T) {
 		"https://kubernetes.default.svc", nil,
 	)
 
-	err := p.InjectAuth(req, json.RawMessage(`{invalid`))
+	err := p.InjectAuth(req, providerArgs(eksProviderName, `{invalid`))
 	if err == nil {
 		t.Fatal("expected error from invalid JSON")
 	}
@@ -550,7 +550,7 @@ func TestEKSProvider_InjectAuth_CredRetrieveError(t *testing.T) {
 			),
 		},
 	}
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, eksProviderName, map[string]any{
 		"eks_auth": map[string]string{"cluster_name": "test-cluster", "region": "us-east-1"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -575,7 +575,7 @@ func TestEKSProvider_InjectAuth_Success(t *testing.T) {
 		Region:      "us-west-2",
 		Credentials: aws.CredentialsProviderFunc(fakeAWSCreds),
 	})
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, eksProviderName, map[string]any{
 		"eks_auth": map[string]string{"cluster_name": "test-cluster", "region": "eu-west-1"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -607,7 +607,7 @@ func TestEKSProvider_InjectAuth_NilEKSAuthField(t *testing.T) {
 	)
 
 	// Valid JSON but no "eks_auth" key → parsed.EKSAuth is nil → clusterName is "".
-	rawArgs, _ := json.Marshal(map[string]any{})
+	rawArgs := marshalArgs(t, eksProviderName, map[string]any{})
 
 	err := p.InjectAuth(req, rawArgs)
 	if err == nil {
@@ -627,7 +627,7 @@ func TestEKSProvider_InjectAuth_RegionFallbackToDefault(t *testing.T) {
 		Credentials: aws.CredentialsProviderFunc(fakeAWSCreds),
 	})
 	// No region in eks_auth either → should fall back to "us-east-1".
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, eksProviderName, map[string]any{
 		"eks_auth": map[string]string{"cluster_name": "test-cluster"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -688,7 +688,7 @@ func TestEKSProvider_InjectAuth_PresignError(t *testing.T) {
 			return "", errors.New("presign boom")
 		},
 	}
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, eksProviderName, map[string]any{
 		"eks_auth": map[string]string{"cluster_name": "test-cluster"},
 	})
 	req, _ := http.NewRequestWithContext(
@@ -1063,14 +1063,14 @@ type caTestProvider struct {
 	err  error
 }
 
-func (p *caTestProvider) Name() string                                        { return "ca-test" }
-func (p *caTestProvider) Description() string                                 { return "test" }
-func (p *caTestProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
-func (p *caTestProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (p *caTestProvider) Name() string                                             { return "ca-test" }
+func (p *caTestProvider) Description() string                                      { return "test" }
+func (p *caTestProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
+func (p *caTestProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (p *caTestProvider) CACertData(_ context.Context, _ json.RawMessage) (string, error) {
+func (p *caTestProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (string, error) {
 	return p.cert, p.err
 }
 
@@ -1253,7 +1253,7 @@ func TestEKSProvider_CACertData_Success(t *testing.T) {
 		},
 	}
 
-	rawArgs := json.RawMessage(`{"eks_auth":{"cluster_name":"test-cluster","region":"eu-west-1"}}`)
+	rawArgs := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"test-cluster","region":"eu-west-1"}}`)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
 	if err != nil {
@@ -1275,7 +1275,7 @@ func TestEKSProvider_CACertData_APIError(t *testing.T) {
 		},
 	}
 
-	rawArgs := json.RawMessage(`{"eks_auth":{"cluster_name":"test-cluster"}}`)
+	rawArgs := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"test-cluster"}}`)
 
 	_, err := p.CACertData(context.Background(), rawArgs)
 	if err == nil {
@@ -1292,7 +1292,7 @@ func TestEKSProvider_CACertData_NilArgs(t *testing.T) {
 
 	p := &eksProvider{}
 
-	got, err := p.CACertData(context.Background(), json.RawMessage(`{}`))
+	got, err := p.CACertData(context.Background(), providerArgs(eksProviderName, `{}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1307,7 +1307,7 @@ func TestEKSProvider_CACertData_BadJSON(t *testing.T) {
 
 	p := &eksProvider{}
 
-	_, err := p.CACertData(context.Background(), json.RawMessage(`{bad json}`))
+	_, err := p.CACertData(context.Background(), providerArgs(eksProviderName, `{bad json}`))
 	if err == nil {
 		t.Fatal("expected error from bad JSON")
 	}
@@ -1318,7 +1318,7 @@ func TestEKSProvider_CACertData_EmptyClusterName(t *testing.T) {
 
 	p := &eksProvider{}
 
-	rawArgs := json.RawMessage(`{"eks_auth":{"cluster_name":""}}`)
+	rawArgs := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":""}}`)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
 	if err != nil {
@@ -1346,7 +1346,7 @@ func TestEKSProvider_CACertData_CacheHit(t *testing.T) {
 		},
 	}
 
-	rawArgs := json.RawMessage(`{"eks_auth":{"cluster_name":"test-cluster"}}`)
+	rawArgs := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"test-cluster"}}`)
 
 	// First call — should hit the API.
 	got1, err1 := p.CACertData(context.Background(), rawArgs)
@@ -1389,7 +1389,7 @@ func TestGKEProvider_CACertData_CacheHit(t *testing.T) {
 		},
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(gkeProviderName,
 		`{"gke_auth":{"cluster_name":"test-cluster","location":"us-central1","project":"my-project"}}`,
 	)
 
@@ -1457,7 +1457,7 @@ func TestGCPProvider_InjectAuth_Success(t *testing.T) {
 		"https://compute.googleapis.com/compute/v1/projects/my-project", nil,
 	)
 
-	if err := p.InjectAuth(req, nil); err != nil {
+	if err := p.InjectAuth(req, noArgs()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1476,7 +1476,7 @@ func TestGCPProvider_InjectAuth_TokenError(t *testing.T) {
 		"https://storage.googleapis.com/my-bucket", nil,
 	)
 
-	err := p.InjectAuth(req, nil)
+	err := p.InjectAuth(req, noArgs())
 	if err == nil {
 		t.Fatal("expected error from token retrieval failure")
 	}
@@ -1514,7 +1514,7 @@ func TestGKEProvider_InjectAuth_Success(t *testing.T) {
 		"https://gke-cluster.example.com/api/v1/pods", nil,
 	)
 
-	if err := p.InjectAuth(req, nil); err != nil {
+	if err := p.InjectAuth(req, noArgs()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1535,7 +1535,7 @@ func TestGKEProvider_InjectAuth_TokenError(t *testing.T) {
 		"https://gke-cluster.example.com/api/v1/pods", nil,
 	)
 
-	err := p.InjectAuth(req, nil)
+	err := p.InjectAuth(req, noArgs())
 	if err == nil {
 		t.Fatal("expected error from token retrieval failure")
 	}
@@ -1563,7 +1563,7 @@ func TestGKEProvider_CACertData_Success(t *testing.T) {
 		},
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(gkeProviderName,
 		`{"gke_auth":{"cluster_name":"test-cluster","location":"us-central1","project":"my-project"}}`,
 	)
 
@@ -1589,7 +1589,7 @@ func TestGKEProvider_CACertData_APIError(t *testing.T) {
 		},
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(gkeProviderName,
 		`{"gke_auth":{"cluster_name":"test-cluster","location":"us-central1","project":"my-project"}}`,
 	)
 
@@ -1608,7 +1608,7 @@ func TestGKEProvider_CACertData_NilArgs(t *testing.T) {
 
 	p := &gkeProvider{tokenSource: mockTokenSource(&oauth2.Token{}, nil)}
 
-	got, err := p.CACertData(context.Background(), json.RawMessage(`{}`))
+	got, err := p.CACertData(context.Background(), providerArgs(gkeProviderName, `{}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1623,7 +1623,7 @@ func TestGKEProvider_CACertData_BadJSON(t *testing.T) {
 
 	p := &gkeProvider{tokenSource: mockTokenSource(&oauth2.Token{}, nil)}
 
-	_, err := p.CACertData(context.Background(), json.RawMessage(`{bad json}`))
+	_, err := p.CACertData(context.Background(), providerArgs(gkeProviderName, `{bad json}`))
 	if err == nil {
 		t.Fatal("expected error from bad JSON")
 	}
@@ -1635,7 +1635,7 @@ func TestGKEProvider_CACertData_MissingFields(t *testing.T) {
 	p := &gkeProvider{tokenSource: mockTokenSource(&oauth2.Token{}, nil)}
 
 	// Missing location and project — should return empty without error.
-	rawArgs := json.RawMessage(`{"gke_auth":{"cluster_name":"test-cluster"}}`)
+	rawArgs := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"test-cluster"}}`)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
 	if err != nil {
@@ -1928,7 +1928,7 @@ func TestAKSProvider_InjectAuth_AADFallback(t *testing.T) {
 		credential: mockCredential(azcore.AccessToken{Token: "eyJ0eXAiOi.fake-aks-token"}, nil),
 	}
 
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, aksProviderName, map[string]any{
 		"aks_auth": map[string]string{"cluster_name": "my-cluster"},
 	})
 
@@ -1953,7 +1953,7 @@ func TestAKSProvider_InjectAuth_AADFallback_Error(t *testing.T) {
 		credential: mockCredential(azcore.AccessToken{}, errors.New("token expired")),
 	}
 
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, aksProviderName, map[string]any{
 		"aks_auth": map[string]string{"cluster_name": "my-cluster"},
 	})
 
@@ -1977,7 +1977,7 @@ func TestAKSProvider_InjectAuth_MissingCluster(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	rawArgs, _ := json.Marshal(map[string]any{
+	rawArgs := marshalArgs(t, aksProviderName, map[string]any{
 		"aks_auth": map[string]string{},
 	})
 
@@ -2006,7 +2006,7 @@ func TestAKSProvider_InjectAuth_InvalidJSON(t *testing.T) {
 		"https://example.com", nil,
 	)
 
-	err := p.InjectAuth(req, json.RawMessage(`{invalid`))
+	err := p.InjectAuth(req, providerArgs(aksProviderName, `{invalid`))
 	if err == nil {
 		t.Fatal("expected error from invalid JSON")
 	}
@@ -2027,7 +2027,7 @@ func TestAKSProvider_InjectAuth_NilAKSAuthField(t *testing.T) {
 	)
 
 	// Valid JSON but no "aks_auth" key → parsed.AKSAuth is nil → clusterName is "".
-	rawArgs, _ := json.Marshal(map[string]any{})
+	rawArgs := marshalArgs(t, aksProviderName, map[string]any{})
 
 	err := p.InjectAuth(req, rawArgs)
 	if err == nil {
@@ -2157,7 +2157,7 @@ func TestAKSProvider_InjectAuth_LocalToken(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2193,7 +2193,7 @@ func TestAKSProvider_InjectAuth_LocalmTLS(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2224,7 +2224,7 @@ func TestAKSProvider_InjectAuth_ConfigError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2259,7 +2259,7 @@ func TestAKSProvider_InjectAuth_ExecPluginFallback(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2294,7 +2294,7 @@ func TestAKSProvider_CACertData_Success(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2322,7 +2322,7 @@ func TestAKSProvider_CACertData_APIError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"missing","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2341,7 +2341,7 @@ func TestAKSProvider_CACertData_NilArgs(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	got, err := p.CACertData(context.Background(), json.RawMessage(`{}`))
+	got, err := p.CACertData(context.Background(), providerArgs(aksProviderName, `{}`))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2356,7 +2356,7 @@ func TestAKSProvider_CACertData_BadJSON(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	_, err := p.CACertData(context.Background(), json.RawMessage(`{bad json}`))
+	_, err := p.CACertData(context.Background(), providerArgs(aksProviderName, `{bad json}`))
 	if err == nil {
 		t.Fatal("expected error from bad JSON")
 	}
@@ -2369,7 +2369,7 @@ func TestAKSProvider_CACertData_MissingFields(t *testing.T) {
 
 	// Missing resource_group and subscription_id — should return empty without error.
 	// The provider gracefully skips ARM lookup when these aren't provided.
-	rawArgs := json.RawMessage(`{"aks_auth":{"cluster_name":"my-cluster"}}`)
+	rawArgs := providerArgs(aksProviderName, `{"aks_auth":{"cluster_name":"my-cluster"}}`)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
 	if err != nil {
@@ -2397,7 +2397,7 @@ func TestAKSProvider_CACertData_NoCAData(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2421,7 +2421,7 @@ func TestAKSProvider_CACertData_EmptyClusterName(t *testing.T) {
 	// client (none is wired here).
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	rawArgs := json.RawMessage(`{"aks_auth":{"resource_group":"my-rg","subscription_id":"sub-123"}}`)
+	rawArgs := providerArgs(aksProviderName, `{"aks_auth":{"resource_group":"my-rg","subscription_id":"sub-123"}}`)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
 	if err != nil {
@@ -2439,7 +2439,7 @@ func TestAKSProvider_ClientCertData_EmptyClusterName(t *testing.T) {
 	// missing cluster_name returns empty/empty/nil without touching the ARM API.
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	rawArgs := json.RawMessage(`{"aks_auth":{"resource_group":"my-rg","subscription_id":"sub-123"}}`)
+	rawArgs := providerArgs(aksProviderName, `{"aks_auth":{"resource_group":"my-rg","subscription_id":"sub-123"}}`)
 
 	gotCert, gotKey, err := p.ClientCertData(context.Background(), rawArgs)
 	if err != nil {
@@ -2468,7 +2468,7 @@ func TestAKSProvider_ClientCertData_Success(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2497,7 +2497,7 @@ func TestAKSProvider_ClientCertData_NoCerts(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2516,7 +2516,7 @@ func TestAKSProvider_ClientCertData_NilArgs(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	gotCert, gotKey, err := p.ClientCertData(context.Background(), nil)
+	gotCert, gotKey, err := p.ClientCertData(context.Background(), noArgs())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2531,7 +2531,7 @@ func TestAKSProvider_ClientCertData_BadJSON(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	_, _, err := p.ClientCertData(context.Background(), json.RawMessage(`{bad}`))
+	_, _, err := p.ClientCertData(context.Background(), providerArgs(aksProviderName, `{bad}`))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -2546,7 +2546,7 @@ func TestAKSProvider_ClientCertData_MissingFields(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	rawArgs := json.RawMessage(`{"aks_auth":{"cluster_name":"my-cluster"}}`)
+	rawArgs := providerArgs(aksProviderName, `{"aks_auth":{"cluster_name":"my-cluster"}}`)
 
 	gotCert, gotKey, err := p.ClientCertData(context.Background(), rawArgs)
 	if err != nil {
@@ -2571,7 +2571,7 @@ func TestAKSProvider_ClientCertData_APIError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2605,7 +2605,7 @@ func TestAKSProvider_CacheHit(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -2775,7 +2775,7 @@ func TestAWSProvider_AuthorizesHost_strictDispatch(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			ok, _ := p.AuthorizesHost(t.Context(), c.host, json.RawMessage(c.args))
+			ok, _ := p.AuthorizesHost(t.Context(), c.host, providerArgs(awsProviderName, c.args))
 			if ok != c.wantOK {
 				t.Errorf("AuthorizesHost(%q, %s) = %v, want %v", c.host, c.args, ok, c.wantOK)
 			}
@@ -2787,7 +2787,7 @@ func TestAWSProvider_AuthorizesHost_missingAWSAuth(t *testing.T) {
 	t.Parallel()
 	// AuthorizesHost does not call ensureReady — nil closure is intentional.
 	p := newAWSProvider(aws.Config{}, nil)
-	_, err := p.AuthorizesHost(t.Context(), "s3.us-east-1.amazonaws.com", json.RawMessage(`{}`))
+	_, err := p.AuthorizesHost(t.Context(), "s3.us-east-1.amazonaws.com", providerArgs(awsProviderName, `{}`))
 	if err == nil {
 		t.Errorf("expected error for missing aws_auth, got nil")
 	}
@@ -2797,7 +2797,7 @@ func TestAWSProvider_AuthorizesHost_malformedArgs(t *testing.T) {
 	t.Parallel()
 	// AuthorizesHost does not call ensureReady — nil closure is intentional.
 	p := newAWSProvider(aws.Config{}, nil)
-	_, err := p.AuthorizesHost(t.Context(), "s3.us-east-1.amazonaws.com", json.RawMessage(`{bad`))
+	_, err := p.AuthorizesHost(t.Context(), "s3.us-east-1.amazonaws.com", providerArgs(awsProviderName, `{bad`))
 	if err == nil {
 		t.Errorf("expected error for malformed JSON, got nil")
 	}
@@ -2845,7 +2845,7 @@ func TestAWSProvider_AuthorizesHost_signingNameAlias(t *testing.T) {
 	p := newAWSProviderWithModels(t,
 		[]*awshardening.ServiceModel{{EndpointPrefix: "api.ecr", SigningName: "ecr"}}, nil)
 	ok, err := p.AuthorizesHost(t.Context(), "api.ecr.us-east-1.amazonaws.com",
-		json.RawMessage(`{"aws_auth":{"service":"ecr","region":"us-east-1"}}`))
+		providerArgs(awsProviderName, `{"aws_auth":{"service":"ecr","region":"us-east-1"}}`))
 	if err != nil || !ok {
 		t.Errorf("AuthorizesHost(ecr alias) = (%v, %v), want (true, nil)", ok, err)
 	}
@@ -2858,7 +2858,7 @@ func TestAWSProvider_AuthorizesHost_signingNameMismatch(t *testing.T) {
 	p := newAWSProviderWithModels(t,
 		[]*awshardening.ServiceModel{{EndpointPrefix: "api.ecr", SigningName: "ecr"}}, nil)
 	ok, _ := p.AuthorizesHost(t.Context(), "api.ecr.us-east-1.amazonaws.com",
-		json.RawMessage(`{"aws_auth":{"service":"ecr-typo","region":"us-east-1"}}`))
+		providerArgs(awsProviderName, `{"aws_auth":{"service":"ecr-typo","region":"us-east-1"}}`))
 	if ok {
 		t.Error("AuthorizesHost(ecr-typo) = true, want false")
 	}
@@ -2870,7 +2870,7 @@ func TestAWSProvider_AuthorizesHost_signingNameResolveError(t *testing.T) {
 	t.Parallel()
 	p := newAWSProviderWithModels(t, nil, errors.New("archive unavailable"))
 	ok, err := p.AuthorizesHost(t.Context(), "api.ecr.us-east-1.amazonaws.com",
-		json.RawMessage(`{"aws_auth":{"service":"ecr","region":"us-east-1"}}`))
+		providerArgs(awsProviderName, `{"aws_auth":{"service":"ecr","region":"us-east-1"}}`))
 	if ok || err == nil {
 		t.Errorf("AuthorizesHost(resolve error) = (%v, %v), want (false, err)", ok, err)
 	}
@@ -2883,7 +2883,7 @@ func TestAWSProvider_AuthorizesHost_signingNameActionProviderNil(t *testing.T) {
 	// no-op doLazyResolve succeeds but never sets actionProvider.
 	p := newAWSProvider(aws.Config{Region: "us-east-1"}, func(context.Context) error { return nil })
 	ok, _ := p.AuthorizesHost(t.Context(), "api.ecr.us-east-1.amazonaws.com",
-		json.RawMessage(`{"aws_auth":{"service":"ecr","region":"us-east-1"}}`))
+		providerArgs(awsProviderName, `{"aws_auth":{"service":"ecr","region":"us-east-1"}}`))
 	if ok {
 		t.Error("AuthorizesHost(nil action provider) = true, want false")
 	}
@@ -2899,14 +2899,14 @@ func TestAWSProvider_AuthorizesHost_s3ControlClaims(t *testing.T) {
 	// strict-dispatch path (no model resolution needed).
 	strict := newAWSProvider(aws.Config{}, nil)
 	for _, claim := range []string{"s3-control", "s3control"} {
-		args := json.RawMessage(`{"aws_auth":{"service":"` + claim + `","region":"us-east-1"}}`)
+		args := providerArgs(awsProviderName, `{"aws_auth":{"service":"`+claim+`","region":"us-east-1"}}`)
 		ok, err := strict.AuthorizesHost(t.Context(), host, args)
 		if !ok || err != nil {
 			t.Errorf("AuthorizesHost(claim=%q) = (%v,%v), want (true,nil)", claim, ok, err)
 		}
 	}
 	// Wrong service still denied.
-	bad := json.RawMessage(`{"aws_auth":{"service":"iam","region":"us-east-1"}}`)
+	bad := providerArgs(awsProviderName, `{"aws_auth":{"service":"iam","region":"us-east-1"}}`)
 	if ok, _ := strict.AuthorizesHost(t.Context(), host, bad); ok {
 		t.Error("AuthorizesHost(claim=iam) = true, want false")
 	}
@@ -2915,7 +2915,7 @@ func TestAWSProvider_AuthorizesHost_s3ControlClaims(t *testing.T) {
 	// the host's signing name from the model archive.
 	withModels := newAWSProviderWithModels(t,
 		[]*awshardening.ServiceModel{{EndpointPrefix: "s3-control", SigningName: "s3"}}, nil)
-	s3 := json.RawMessage(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	s3 := providerArgs(awsProviderName, `{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	if ok, err := withModels.AuthorizesHost(t.Context(), host, s3); !ok || err != nil {
 		t.Errorf("AuthorizesHost(claim=s3) = (%v,%v), want (true,nil)", ok, err)
 	}
@@ -2931,12 +2931,12 @@ func TestGCPProvider_AuthorizesHost(t *testing.T) {
 	p := newTestGCPProviderFromToken(mockTokenSource(&oauth2.Token{}, nil))
 
 	_, err := p.AuthorizesHost(context.Background(), "evil.com",
-		json.RawMessage(`{"gcp_auth":{"service":"compute"}}`))
+		providerArgs(gcpProviderName, `{"gcp_auth":{"service":"compute"}}`))
 	if err == nil {
 		t.Fatal("evil.com: expected error from ParseHost, got nil")
 	}
 
-	_, err = p.AuthorizesHost(context.Background(), "compute.googleapis.com", nil)
+	_, err = p.AuthorizesHost(context.Background(), "compute.googleapis.com", noArgs())
 	if err == nil {
 		t.Fatal("nil args: expected parse error, got nil")
 	}
@@ -3003,7 +3003,7 @@ func TestEKSProvider_AuthorizesHost(t *testing.T) {
 		}
 	}
 
-	args := json.RawMessage(`{"eks_auth":{"cluster_name":"c"}}`)
+	args := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"c"}}`)
 
 	ok, err := newProvider().AuthorizesHost(context.Background(), "abc123.gr7.us-east-1.eks.amazonaws.com", args)
 	if err != nil || !ok {
@@ -3021,7 +3021,7 @@ func TestEKSProvider_AuthorizesHost_BadJSON(t *testing.T) {
 
 	p := &eksProvider{}
 
-	_, err := p.AuthorizesHost(context.Background(), "x", json.RawMessage(`{bad json}`))
+	_, err := p.AuthorizesHost(context.Background(), "x", providerArgs(eksProviderName, `{bad json}`))
 	if err == nil {
 		t.Fatal("expected error from bad JSON")
 	}
@@ -3032,7 +3032,11 @@ func TestEKSProvider_AuthorizesHost_MissingCluster(t *testing.T) {
 
 	p := &eksProvider{}
 
-	_, err := p.AuthorizesHost(context.Background(), "x", json.RawMessage(`{"eks_auth":{"cluster_name":""}}`))
+	_, err := p.AuthorizesHost(
+		context.Background(),
+		"x",
+		providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":""}}`),
+	)
 	if err == nil {
 		t.Fatal("expected error when cluster_name is empty")
 	}
@@ -3048,7 +3052,11 @@ func TestEKSProvider_AuthorizesHost_ResolveError(t *testing.T) {
 		},
 	}
 
-	_, err := p.AuthorizesHost(context.Background(), "x", json.RawMessage(`{"eks_auth":{"cluster_name":"c"}}`))
+	_, err := p.AuthorizesHost(
+		context.Background(),
+		"x",
+		providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"c"}}`),
+	)
 	if err == nil || !strings.Contains(err.Error(), "describe boom") {
 		t.Fatalf("expected resolve error, got %v", err)
 	}
@@ -3077,7 +3085,7 @@ func TestNewGKEProvider(t *testing.T) {
 		return container.NewService(ctx, option.WithoutAuthentication(), option.WithEndpoint(srv.URL))
 	}
 
-	rawArgs := json.RawMessage(
+	rawArgs := providerArgs(gkeProviderName,
 		`{"gke_auth":{"cluster_name":"test-cluster","location":"us-central1","project":"my-project"}}`,
 	)
 
@@ -3103,7 +3111,7 @@ func TestGKEProvider_AuthorizesHost(t *testing.T) {
 		}
 	}
 
-	args := json.RawMessage(`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
+	args := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
 
 	ok, err := newProvider().AuthorizesHost(context.Background(), "34.71.1.2", args)
 	if err != nil || !ok {
@@ -3121,7 +3129,11 @@ func TestGKEProvider_AuthorizesHost_MissingFields(t *testing.T) {
 
 	p := &gkeProvider{}
 
-	_, err := p.AuthorizesHost(context.Background(), "x", json.RawMessage(`{"gke_auth":{"cluster_name":"c"}}`))
+	_, err := p.AuthorizesHost(
+		context.Background(),
+		"x",
+		providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c"}}`),
+	)
 	if err == nil {
 		t.Fatal("expected error when location/project are empty")
 	}
@@ -3137,7 +3149,7 @@ func TestGKEProvider_AuthorizesHost_ResolveError(t *testing.T) {
 		},
 	}
 
-	args := json.RawMessage(`{"gke_auth":{"cluster_name":"c","location":"l","project":"p"}}`)
+	args := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"l","project":"p"}}`)
 
 	_, err := p.AuthorizesHost(context.Background(), "x", args)
 	if err == nil || !strings.Contains(err.Error(), "get boom") {
@@ -3150,7 +3162,7 @@ func TestGKEProvider_AuthorizesHost_BadJSON(t *testing.T) {
 
 	p := &gkeProvider{}
 
-	_, err := p.AuthorizesHost(context.Background(), "x", json.RawMessage(`{bad}`))
+	_, err := p.AuthorizesHost(context.Background(), "x", providerArgs(gkeProviderName, `{bad}`))
 	if err == nil {
 		t.Fatal("expected error from bad JSON")
 	}
@@ -3170,7 +3182,7 @@ func TestAKSProvider_AuthorizesHost(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	args := json.RawMessage(
+	args := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -3192,7 +3204,7 @@ func TestAKSProvider_AuthorizesHost_MissingFields(t *testing.T) {
 
 	_, err := p.AuthorizesHost(
 		context.Background(), "x",
-		json.RawMessage(`{"aks_auth":{"cluster_name":"my-cluster"}}`),
+		providerArgs(aksProviderName, `{"aks_auth":{"cluster_name":"my-cluster"}}`),
 	)
 	if err == nil {
 		t.Fatal("expected error when resource_group/subscription_id are missing")
@@ -3204,7 +3216,7 @@ func TestAKSProvider_AuthorizesHost_BadJSON(t *testing.T) {
 
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	_, err := p.AuthorizesHost(context.Background(), "x", json.RawMessage(`{bad}`))
+	_, err := p.AuthorizesHost(context.Background(), "x", providerArgs(aksProviderName, `{bad}`))
 	if err == nil {
 		t.Fatal("expected error from bad JSON")
 	}
@@ -3220,7 +3232,7 @@ func TestAKSProvider_AuthorizesHost_MissingFields_NoClientCall(t *testing.T) {
 
 	_, err := p.AuthorizesHost(
 		context.Background(), "x",
-		json.RawMessage(`{"aks_auth":{"cluster_name":"c","resource_group":"rg"}}`),
+		providerArgs(aksProviderName, `{"aks_auth":{"cluster_name":"c","resource_group":"rg"}}`),
 	)
 	if err == nil {
 		t.Fatal("expected up-front validation error for missing subscription_id")
@@ -3246,7 +3258,7 @@ func TestAKSProvider_AuthorizesHost_ConfigError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	args := json.RawMessage(
+	args := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"missing","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -3290,10 +3302,10 @@ type hostAuthFake struct {
 	err  error
 }
 
-func (f *hostAuthFake) Name() string                                        { return f.name }
-func (f *hostAuthFake) Description() string                                 { return "fake" }
-func (f *hostAuthFake) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
-func (f *hostAuthFake) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (f *hostAuthFake) Name() string                                             { return f.name }
+func (f *hostAuthFake) Description() string                                      { return "fake" }
+func (f *hostAuthFake) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
+func (f *hostAuthFake) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return f.ok, f.err
 }
 
@@ -3369,7 +3381,7 @@ func TestAuthorizeAction_callsProviderImplementingActionAuthorizer(t *testing.T)
 	called := false
 	provider := &fakeAuthorizingProvider{
 		name: "aws",
-		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 			called = true
 			return nil
 		},
@@ -3413,7 +3425,7 @@ func TestAuthorizeAction_propagatesActionAuthorizerError(t *testing.T) {
 
 	provider := &fakeAuthorizingProvider{
 		name: "aws",
-		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 			return errors.New("action denied")
 		},
 	}
@@ -3440,7 +3452,7 @@ func TestAuthorizeAction_DispatchesAzure(t *testing.T) {
 	called := false
 	prov := &fakeAuthorizingProvider{
 		name: "azure",
-		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 			called = true
 			return nil
 		},
@@ -3457,18 +3469,20 @@ func TestAuthorizeAction_DispatchesAzure(t *testing.T) {
 // fakeAuthorizingProvider satisfies both Provider and ActionAuthorizer.
 type fakeAuthorizingProvider struct {
 	name            string
-	authorizeAction func(context.Context, authreq.View, json.RawMessage) error
+	authorizeAction func(context.Context, authreq.View, authreq.ProviderArgs) error
 }
 
-func (f *fakeAuthorizingProvider) Name() string                                        { return f.name }
-func (f *fakeAuthorizingProvider) Description() string                                 { return "" }
-func (f *fakeAuthorizingProvider) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+func (f *fakeAuthorizingProvider) Name() string        { return f.name }
+func (f *fakeAuthorizingProvider) Description() string { return "" }
+func (f *fakeAuthorizingProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
+	return nil
+}
 
-func (f *fakeAuthorizingProvider) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (f *fakeAuthorizingProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (f *fakeAuthorizingProvider) AuthorizeAction(ctx context.Context, v authreq.View, raw json.RawMessage) error {
+func (f *fakeAuthorizingProvider) AuthorizeAction(ctx context.Context, v authreq.View, raw authreq.ProviderArgs) error {
 	return f.authorizeAction(ctx, v, raw)
 }
 
@@ -3478,9 +3492,11 @@ func (f *fakeProviderNoActionAuth) Name() string { return f.name }
 
 func (f *fakeProviderNoActionAuth) Description() string { return "" }
 
-func (f *fakeProviderNoActionAuth) InjectAuth(_ *http.Request, _ json.RawMessage) error { return nil }
+func (f *fakeProviderNoActionAuth) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
+	return nil
+}
 
-func (f *fakeProviderNoActionAuth) AuthorizesHost(_ context.Context, _ string, _ json.RawMessage) (bool, error) {
+func (f *fakeProviderNoActionAuth) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
@@ -3494,7 +3510,7 @@ func TestAuthorizeAction_DispatchesGCP(t *testing.T) {
 	called := false
 	prov := &fakeAuthorizingProvider{
 		name: "gcp",
-		authorizeAction: func(_ context.Context, _ authreq.View, _ json.RawMessage) error {
+		authorizeAction: func(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
 			called = true
 			return nil
 		},
@@ -3512,7 +3528,7 @@ func TestAWSProvider_AuthorizeAction_nilActionProviderReturnsError(t *testing.T)
 	t.Parallel()
 	p := newAWSProvider(aws.Config{}, func(_ context.Context) error { return nil })
 	v := actionView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	err := p.AuthorizeAction(t.Context(), v, json.RawMessage(`{}`))
+	err := p.AuthorizeAction(t.Context(), v, providerArgs(awsProviderName, `{}`))
 	if err == nil {
 		t.Errorf("expected error when actionProvider is nil")
 	}
@@ -3528,7 +3544,7 @@ func TestAWSProvider_AuthorizeAction_delegatesToActionProvider(t *testing.T) {
 		"arn:aws:iam::aws:policy/SecurityAudit",
 	)
 	v := actionView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	raw := json.RawMessage(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	raw := providerArgs(awsProviderName, `{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	err := p.AuthorizeAction(t.Context(), v, raw)
 	if !errors.Is(err, awshardening.ErrPolicyDenied) {
 		t.Errorf("err = %v, want ErrPolicyDenied (delegated)", err)
@@ -3596,7 +3612,7 @@ func TestAWSProvider_InjectAuth_triggersLazyOnce(t *testing.T) {
 	})
 	p.signHTTP = noopSignHTTP
 	req := httptest.NewRequest(http.MethodGet, "https://s3.us-east-1.amazonaws.com/", nil)
-	rawArgs := json.RawMessage(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	rawArgs := providerArgs(awsProviderName, `{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	_ = p.InjectAuth(req, rawArgs)
 	_ = p.InjectAuth(req, rawArgs)
 	if calls != 1 {
@@ -3612,7 +3628,7 @@ func TestAWSProvider_AuthorizeAction_triggersLazyOnce(t *testing.T) {
 		return nil
 	})
 	v := actionView(t, http.MethodGet, "https://example.com/")
-	rawArgs := json.RawMessage(`{}`)
+	rawArgs := providerArgs(awsProviderName, `{}`)
 	_ = p.AuthorizeAction(t.Context(), v, rawArgs)
 	_ = p.AuthorizeAction(t.Context(), v, rawArgs)
 	if calls != 1 {
@@ -3627,7 +3643,7 @@ func TestAWSProvider_AuthorizesHost_doesNotTriggerLazy(t *testing.T) {
 		calls++
 		return nil
 	})
-	rawArgs := json.RawMessage(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	rawArgs := providerArgs(awsProviderName, `{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
 	_, _ = p.AuthorizesHost(t.Context(), "s3.us-east-1.amazonaws.com", rawArgs)
 	if calls != 0 {
 		t.Errorf("doLazyResolve called %d times during AuthorizesHost, want 0", calls)
@@ -3643,7 +3659,7 @@ func TestAWSProvider_lazyInit_cachesFailure(t *testing.T) {
 		return wantErr
 	})
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/", nil)
-	rawArgs := json.RawMessage(`{}`)
+	rawArgs := providerArgs(awsProviderName, `{}`)
 
 	err1 := p.InjectAuth(req, rawArgs)
 	err2 := p.InjectAuth(req, rawArgs)
@@ -3772,7 +3788,7 @@ func TestAWSProvider_AuthorizeAction_returnsLazyError(t *testing.T) {
 		return wantErr
 	})
 	v := actionView(t, http.MethodGet, "https://example.com/")
-	rawArgs := json.RawMessage(`{}`)
+	rawArgs := providerArgs(awsProviderName, `{}`)
 	err := p.AuthorizeAction(t.Context(), v, rawArgs)
 	if !errors.Is(err, wantErr) {
 		t.Errorf("AuthorizeAction err = %v, want wrapped %v", err, wantErr)
@@ -3792,7 +3808,7 @@ func TestEKSAuthorizeAction(t *testing.T) {
 		return p
 	}
 
-	rawArgs := json.RawMessage(`{"eks_auth":{"cluster_name":"c","region":"us-east-1"}}`)
+	rawArgs := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"c","region":"us-east-1"}}`)
 
 	t.Run("allows list pods", func(t *testing.T) {
 		t.Parallel()
@@ -3832,7 +3848,7 @@ func TestEKSAuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
-		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
+		if err := p.AuthorizeAction(context.Background(), v, providerArgs(eksProviderName, `{}`)); err == nil {
 			t.Fatal("missing cluster_name must error")
 		}
 	})
@@ -3842,7 +3858,7 @@ func TestEKSAuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
-		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{`)); err == nil {
+		if err := p.AuthorizeAction(context.Background(), v, providerArgs(eksProviderName, `{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})
@@ -3885,7 +3901,7 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		return p
 	}
 
-	rawArgs := json.RawMessage(`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
+	rawArgs := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
 
 	t.Run("allows list deployments", func(t *testing.T) {
 		t.Parallel()
@@ -3935,7 +3951,7 @@ func TestGKEAuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
-		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{}`)); err == nil {
+		if err := p.AuthorizeAction(context.Background(), v, providerArgs(gkeProviderName, `{}`)); err == nil {
 			t.Fatal("missing gke args must error")
 		}
 	})
@@ -3945,7 +3961,7 @@ func TestGKEAuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
-		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{`)); err == nil {
+		if err := p.AuthorizeAction(context.Background(), v, providerArgs(gkeProviderName, `{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})
@@ -3964,7 +3980,10 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		return p
 	}
 
-	rawArgs := json.RawMessage(`{"aks_auth":{"cluster_name":"c","resource_group":"rg","subscription_id":"sub"}}`)
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"c","resource_group":"rg","subscription_id":"sub"}}`,
+	)
 
 	t.Run("allows list pods", func(t *testing.T) {
 		t.Parallel()
@@ -4016,7 +4035,7 @@ func TestAKSAuthorizeAction(t *testing.T) {
 		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
 		if err := p.AuthorizeAction(
 			context.Background(), v,
-			json.RawMessage(`{"aks_auth":{"cluster_name":"c"}}`),
+			providerArgs(aksProviderName, `{"aks_auth":{"cluster_name":"c"}}`),
 		); err == nil {
 			t.Fatal("missing resource_group and subscription_id must error")
 		}
@@ -4027,7 +4046,7 @@ func TestAKSAuthorizeAction(t *testing.T) {
 
 		p := newProv()
 		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
-		if err := p.AuthorizeAction(context.Background(), v, json.RawMessage(`{`)); err == nil {
+		if err := p.AuthorizeAction(context.Background(), v, providerArgs(aksProviderName, `{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
 	})
@@ -4075,7 +4094,7 @@ func TestCloudProvidersRejectClusterAPIEndpoints(t *testing.T) {
 
 		// GKE cluster API endpoints are commonly exposed as a bare public IP.
 		ok, err := gcpProv.AuthorizesHost(ctx, "34.68.6.27",
-			json.RawMessage(`{"gcp_auth":{"service":"container"}}`))
+			providerArgs(gcpProviderName, `{"gcp_auth":{"service":"container"}}`))
 		if err == nil && ok {
 			t.Fatal("SECURITY: gcp AuthorizesHost returned allowed for a bare IP cluster endpoint")
 		}
@@ -4086,7 +4105,7 @@ func TestCloudProvidersRejectClusterAPIEndpoints(t *testing.T) {
 
 		// GKE Private Cluster API endpoints use the gke.goog domain.
 		ok, err := gcpProv.AuthorizesHost(ctx, "something.us-central1-f.gke.goog",
-			json.RawMessage(`{"gcp_auth":{"service":"container"}}`))
+			providerArgs(gcpProviderName, `{"gcp_auth":{"service":"container"}}`))
 		if err == nil && ok {
 			t.Fatal("SECURITY: gcp AuthorizesHost returned allowed for a gke.goog cluster endpoint")
 		}
@@ -4097,7 +4116,7 @@ func TestCloudProvidersRejectClusterAPIEndpoints(t *testing.T) {
 
 		// AKS cluster API servers use the hcp.<region>.azmk8s.io domain.
 		ok, err := azureProv.AuthorizesHost(ctx, "yuri-aks-abc123.hcp.eastus.azmk8s.io",
-			json.RawMessage(`{"azure_auth":{"service":"Microsoft.ContainerService"}}`))
+			providerArgs(azureProviderName, `{"azure_auth":{"service":"Microsoft.ContainerService"}}`))
 		if err == nil && ok {
 			t.Fatal("SECURITY: azure AuthorizesHost returned allowed for an azmk8s.io cluster endpoint")
 		}
@@ -4124,14 +4143,6 @@ func TestAWSAuthArgs_validate(t *testing.T) {
 				t.Fatalf("validate() err=%v, wantErr=%v", err, c.wantErr)
 			}
 		})
-	}
-}
-
-func TestParseAWSArgs_BadJSON(t *testing.T) {
-	t.Parallel()
-	_, err := parseAWSArgs(json.RawMessage(`{bad`))
-	if err == nil || !strings.Contains(err.Error(), "failed to parse aws_auth args") {
-		t.Fatalf("parseAWSArgs bad json err=%v, want parse error", err)
 	}
 }
 
@@ -4193,7 +4204,7 @@ func TestEKSProvider_AuthorizesAddr(t *testing.T) {
 		}
 	}
 
-	args := json.RawMessage(`{"eks_auth":{"cluster_name":"c"}}`)
+	args := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"c"}}`)
 
 	t.Run("allows an IP in the resolved set", func(t *testing.T) {
 		t.Parallel()
@@ -4239,7 +4250,11 @@ func TestEKSProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newProvider(nil, nil)
-		_, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("203.0.113.7"), json.RawMessage(`{bad`))
+		_, err := p.AuthorizesAddr(
+			context.Background(),
+			netip.MustParseAddr("203.0.113.7"),
+			providerArgs(eksProviderName, `{bad`),
+		)
 		if err == nil {
 			t.Fatal("malformed args must error")
 		}
@@ -4249,7 +4264,11 @@ func TestEKSProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newProvider(nil, nil)
-		_, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("203.0.113.7"), json.RawMessage(`{}`))
+		_, err := p.AuthorizesAddr(
+			context.Background(),
+			netip.MustParseAddr("203.0.113.7"),
+			providerArgs(eksProviderName, `{}`),
+		)
 		if err == nil {
 			t.Fatal("missing cluster_name must error")
 		}
@@ -4306,7 +4325,11 @@ func TestEKSProvider_AuthorizesAddr_FloorDeniesMetadata(t *testing.T) {
 				},
 			}
 
-			ok, err := p.AuthorizesAddr(context.Background(), ip, json.RawMessage(`{"eks_auth":{"cluster_name":"c"}}`))
+			ok, err := p.AuthorizesAddr(
+				context.Background(),
+				ip,
+				providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"c"}}`),
+			)
 			if err != nil || ok {
 				t.Fatalf("%s must be floor-denied: ok=%v err=%v, want false/nil", ipStr, ok, err)
 			}
@@ -4325,7 +4348,7 @@ func TestGKEProvider_AuthorizesAddr(t *testing.T) {
 		}
 	}
 
-	args := json.RawMessage(`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
+	args := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
 
 	t.Run("allows the authoritative cloud IP", func(t *testing.T) {
 		t.Parallel()
@@ -4373,7 +4396,11 @@ func TestGKEProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newProvider("34.71.1.2")
-		_, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("34.71.1.2"), json.RawMessage(`{}`))
+		_, err := p.AuthorizesAddr(
+			context.Background(),
+			netip.MustParseAddr("34.71.1.2"),
+			providerArgs(gkeProviderName, `{}`),
+		)
 		if err == nil {
 			t.Fatal("missing gke args must error")
 		}
@@ -4383,7 +4410,11 @@ func TestGKEProvider_AuthorizesAddr(t *testing.T) {
 		t.Parallel()
 
 		p := newProvider("34.71.1.2")
-		_, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("34.71.1.2"), json.RawMessage(`{bad`))
+		_, err := p.AuthorizesAddr(
+			context.Background(),
+			netip.MustParseAddr("34.71.1.2"),
+			providerArgs(gkeProviderName, `{bad`),
+		)
 		if err == nil {
 			t.Fatal("malformed args must error")
 		}
@@ -4423,7 +4454,7 @@ func TestAKSProvider_AuthorizesAddr(t *testing.T) {
 		}
 	}
 
-	args := json.RawMessage(
+	args := providerArgs(aksProviderName,
 		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
 	)
 
@@ -4476,7 +4507,7 @@ func TestAKSProvider_AuthorizesAddr(t *testing.T) {
 		} //nolint:exhaustruct // seams not needed.
 		_, err := p.AuthorizesAddr(
 			context.Background(), netip.MustParseAddr("20.1.2.3"),
-			json.RawMessage(`{"aks_auth":{"cluster_name":"my-cluster"}}`),
+			providerArgs(aksProviderName, `{"aks_auth":{"cluster_name":"my-cluster"}}`),
 		)
 		if err == nil {
 			t.Fatal("missing resource_group/subscription_id must error")
@@ -4489,7 +4520,11 @@ func TestAKSProvider_AuthorizesAddr(t *testing.T) {
 		p := &aksProvider{
 			credential: mockCredential(azcore.AccessToken{}, nil),
 		} //nolint:exhaustruct // parse fails first.
-		_, err := p.AuthorizesAddr(context.Background(), netip.MustParseAddr("20.1.2.3"), json.RawMessage(`{bad`))
+		_, err := p.AuthorizesAddr(
+			context.Background(),
+			netip.MustParseAddr("20.1.2.3"),
+			providerArgs(aksProviderName, `{bad`),
+		)
 		if err == nil {
 			t.Fatal("malformed args must error")
 		}

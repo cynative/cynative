@@ -3,7 +3,6 @@ package auth
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -84,7 +83,7 @@ func TestGithubProvider_AuthorizeAction(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			p, _ := testGithubProvider(t, c.exposure, okFetch)
-			err := p.AuthorizeAction(context.Background(), actionView(t, c.method, c.url), nil)
+			err := p.AuthorizeAction(context.Background(), actionView(t, c.method, c.url), noArgs())
 			if c.wantErr == nil && err != nil {
 				t.Fatalf("AuthorizeAction = %v, want nil", err)
 			}
@@ -104,7 +103,7 @@ func TestGithubProvider_AuthorizeAction_unknownKeyFatal(t *testing.T) {
 		exposure.Exposure{"default": exposure.LevelWrite, "issuez": exposure.LevelNone},
 	)
 	p, _ := testGithubProvider(t, exp, okFetch)
-	err := p.AuthorizeAction(context.Background(), actionView(t, "GET", "https://api.github.com/user"), nil)
+	err := p.AuthorizeAction(context.Background(), actionView(t, "GET", "https://api.github.com/user"), noArgs())
 	if !errors.Is(err, githubhardening.ErrUnknownKey) {
 		t.Fatalf("AuthorizeAction = %v, want ErrUnknownKey", err)
 	}
@@ -116,7 +115,9 @@ func TestGithubAuthorizeAction_DeniesGraphQL(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			t.Parallel()
 			p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
-			err := p.AuthorizeAction(context.Background(), actionView(t, method, "https://api.github.com/graphql"), nil)
+			err := p.AuthorizeAction(
+				context.Background(), actionView(t, method, "https://api.github.com/graphql"), noArgs(),
+			)
 			if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
 				t.Fatalf("AuthorizeAction(%s /graphql) err = %v, want ErrGraphQLUnsupported", method, err)
 			}
@@ -133,9 +134,7 @@ func TestGithubAuthorizeAction_EncodedGraphQLFailsClosed(t *testing.T) {
 	t.Parallel()
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	err := p.AuthorizeAction(
-		context.Background(),
-		actionView(t, http.MethodPost, "https://api.github.com/%67raphql"),
-		nil,
+		context.Background(), actionView(t, http.MethodPost, "https://api.github.com/%67raphql"), noArgs(),
 	)
 	if !errors.Is(err, githubhardening.ErrUnclassifiable) {
 		t.Fatalf("AuthorizeAction(POST /%%67raphql) err = %v, want ErrUnclassifiable (fail-closed)", err)
@@ -147,7 +146,7 @@ func TestGithubProvider_notReadyWhenNoTable(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(),
 		func(context.Context) ([]byte, error) { return nil, errors.New("offline") })
-	err := p.AuthorizeAction(context.Background(), actionView(t, "GET", "https://api.github.com/user"), nil)
+	err := p.AuthorizeAction(context.Background(), actionView(t, "GET", "https://api.github.com/user"), noArgs())
 	if !errors.Is(err, githubhardening.ErrTableNotReady) {
 		t.Fatalf("AuthorizeAction = %v, want ErrTableNotReady", err)
 	}
@@ -170,19 +169,19 @@ func TestGithubProvider_downloadHostGetOnly(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	if err := p.AuthorizeAction(
-		context.Background(), actionView(t, "GET", "https://codeload.github.com/o/r/tarball/main"), nil,
+		context.Background(), actionView(t, "GET", "https://codeload.github.com/o/r/tarball/main"), noArgs(),
 	); err != nil {
 		t.Errorf("download GET = %v, want nil", err)
 	}
 	// The view lower-cases the hostname at projection, so a mixed-case authority
 	// still matches the download-host set.
 	if err := p.AuthorizeAction(
-		context.Background(), actionView(t, "GET", "https://CODELOAD.GitHub.com/o/r/tarball/main"), nil,
+		context.Background(), actionView(t, "GET", "https://CODELOAD.GitHub.com/o/r/tarball/main"), noArgs(),
 	); err != nil {
 		t.Errorf("download GET (upper-case host) = %v, want nil", err)
 	}
 	if err := p.AuthorizeAction(
-		context.Background(), actionView(t, "POST", "https://codeload.github.com/o/r/x"), nil,
+		context.Background(), actionView(t, "POST", "https://codeload.github.com/o/r/x"), noArgs(),
 	); !errors.Is(err, githubhardening.ErrExposureExceeded) {
 		t.Errorf("download POST = %v, want ErrExposureExceeded", err)
 	}
@@ -198,7 +197,7 @@ func TestGithubAuthorizeAction_GraphQLDeniedOnDownloadHost(t *testing.T) {
 
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	err := p.AuthorizeAction(
-		context.Background(), actionView(t, "GET", "https://codeload.github.com/graphql"), nil,
+		context.Background(), actionView(t, "GET", "https://codeload.github.com/graphql"), noArgs(),
 	)
 	if !errors.Is(err, githubhardening.ErrGraphQLUnsupported) {
 		t.Fatalf("AuthorizeAction(GET codeload /graphql) err = %v, want ErrGraphQLUnsupported", err)
@@ -213,13 +212,13 @@ func TestGithubProvider_AuthorizesHost(t *testing.T) {
 		"api.github.com", "codeload.github.com",
 		"release-assets.githubusercontent.com", "objects.githubusercontent.com",
 	} {
-		ok, err := p.AuthorizesHost(context.Background(), host, nil)
+		ok, err := p.AuthorizesHost(context.Background(), host, noArgs())
 		if err != nil || !ok {
 			t.Fatalf("%s: ok=%v err=%v, want true/nil", host, ok, err)
 		}
 	}
 	for _, host := range []string{"evil.com", "githubusercontent.com", "x.objects.githubusercontent.com"} {
-		ok, err := p.AuthorizesHost(context.Background(), host, nil)
+		ok, err := p.AuthorizesHost(context.Background(), host, noArgs())
 		if err != nil || ok {
 			t.Fatalf("%s: ok=%v err=%v, want false/nil", host, ok, err)
 		}
@@ -232,7 +231,7 @@ func TestGithubProvider_InjectAuth_stripsAPIVersion(t *testing.T) {
 	p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), okFetch)
 	r := getReq(t, "https://api.github.com/user")
 	r.Header.Set("X-Github-Api-Version", "1999-01-01") // model-supplied — must be removed.
-	if err := p.InjectAuth(r, nil); err != nil {
+	if err := p.InjectAuth(r, noArgs()); err != nil {
 		t.Fatalf("InjectAuth: %v", err)
 	}
 	// Header must be absent: stripping lets GitHub use its current default version,
@@ -257,7 +256,7 @@ func TestGithubProvider_AuthorizeAction_escapedPath(t *testing.T) {
 	// The view's Path decodes to "/repos/o/r/branches/feature/foo/protection" (too many
 	// segments), but its EscapedPath preserves "%2F" as one segment, matching the template.
 	v := actionView(t, "GET", "https://api.github.com/repos/o/r/branches/feature%2Ffoo/protection")
-	if err := p.AuthorizeAction(context.Background(), v, nil); err != nil {
+	if err := p.AuthorizeAction(context.Background(), v, noArgs()); err != nil {
 		t.Fatalf("AuthorizeAction with %%2F branch = %v, want nil (read allowed)", err)
 	}
 }
@@ -307,10 +306,10 @@ func TestGithubProvider_AuditResponse_noop(t *testing.T) {
 // dispatcher's "found but no audit capability" branch.
 type plainProvider struct{}
 
-func (plainProvider) Name() string                                    { return "plain" }
-func (plainProvider) Description() string                             { return "" }
-func (plainProvider) InjectAuth(*http.Request, json.RawMessage) error { return nil }
-func (plainProvider) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (plainProvider) Name() string                                         { return "plain" }
+func (plainProvider) Description() string                                  { return "" }
+func (plainProvider) InjectAuth(*http.Request, authreq.ProviderArgs) error { return nil }
+func (plainProvider) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 

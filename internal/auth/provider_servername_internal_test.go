@@ -2,10 +2,11 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // serverNameStub implements Provider + ServerNameProvider for the dispatcher test.
@@ -18,15 +19,15 @@ type serverNameStub struct {
 func (s *serverNameStub) Name() string { return s.name }
 
 func (s *serverNameStub) Description() string { return "stub" }
-func (s *serverNameStub) InjectAuth(*http.Request, json.RawMessage) error {
+func (s *serverNameStub) InjectAuth(*http.Request, authreq.ProviderArgs) error {
 	return nil
 }
 
-func (s *serverNameStub) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (s *serverNameStub) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 
-func (s *serverNameStub) ServerNameData(context.Context, json.RawMessage) (string, error) {
+func (s *serverNameStub) ServerNameData(context.Context, authreq.ProviderArgs) (string, error) {
 	return s.sni, s.err
 }
 
@@ -37,11 +38,11 @@ type plainStub struct{ name string }
 func (s *plainStub) Name() string { return s.name }
 
 func (s *plainStub) Description() string { return "plain" }
-func (s *plainStub) InjectAuth(*http.Request, json.RawMessage) error {
+func (s *plainStub) InjectAuth(*http.Request, authreq.ProviderArgs) error {
 	return nil
 }
 
-func (s *plainStub) AuthorizesHost(context.Context, string, json.RawMessage) (bool, error) {
+func (s *plainStub) AuthorizesHost(context.Context, string, authreq.ProviderArgs) (bool, error) {
 	return true, nil
 }
 

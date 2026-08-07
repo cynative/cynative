@@ -2,7 +2,6 @@ package gcp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -35,13 +34,12 @@ func NewProvider(
 	}
 }
 
-// gcpArgsShape decodes only the gcp_auth.service field Layer 2 needs; the full
-// wire shape is auth.GCPAuthArgs (re-declared because internal/auth/gcp cannot
-// import internal/auth — the parent imports this package).
+// gcpArgsShape decodes only the service field Layer 2 needs out of the gcp_auth
+// block; the full wire shape is auth.GCPAuthArgs (re-declared because
+// internal/auth/gcp cannot import internal/auth, since the parent imports this
+// package).
 type gcpArgsShape struct {
-	GCPAuth *struct {
-		Service string `json:"service"`
-	} `json:"gcp_auth"`
+	Service string `json:"service"`
 }
 
 // AuthorizeAction runs the Layer 2 pipeline. The service is derived from the
@@ -49,13 +47,13 @@ type gcpArgsShape struct {
 // For www.googleapis.com, the service is resolved from the PATH (via
 // resolveService) and then verified against the gcp_auth.service claim here —
 // because Layer 3 (AuthorizesHost) cannot do that check without the path.
-func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
-	var args gcpArgsShape
-	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		return fmt.Errorf("gcp_hardening: parse gcp_auth: %w", err)
+func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	gcpAuth, err := authreq.Parse[gcpArgsShape](args)
+	if err != nil {
+		return fmt.Errorf("gcp_hardening: %w", err)
 	}
 
-	if args.GCPAuth == nil || args.GCPAuth.Service == "" {
+	if gcpAuth == nil || gcpAuth.Service == "" {
 		return errors.New("gcp_hardening: gcp_auth.service is required")
 	}
 
@@ -70,9 +68,9 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs 
 	// owns the check: the path-resolved service must match gcp_auth.service.
 	// The claim is COMPARED against the resolved service, never used as a source.
 	if isWWW {
-		if !strings.EqualFold(service, args.GCPAuth.Service) {
+		if !strings.EqualFold(service, gcpAuth.Service) {
 			return fmt.Errorf("%w: www path resolves service %q but gcp_auth.service is %q",
-				ErrHostClaimMismatch, service, args.GCPAuth.Service)
+				ErrHostClaimMismatch, service, gcpAuth.Service)
 		}
 	}
 

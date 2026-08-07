@@ -47,12 +47,18 @@ func buildProvider(t *testing.T) *Provider {
 	return NewProvider(cat, perms, eval, "roles/viewer")
 }
 
-func gcpArgs(t *testing.T, svc string) json.RawMessage {
+func gcpArgs(t *testing.T, svc string) authreq.ProviderArgs {
 	t.Helper()
 
 	b, _ := json.Marshal(map[string]any{"gcp_auth": map[string]string{"service": svc}})
 
-	return b
+	return authreq.NewProviderArgs(b, "gcp")
+}
+
+// gcpToolCall projects a whole http_request tool call down to the gcp_auth
+// block, exactly as auth's dispatcher does before it calls a gate.
+func gcpToolCall(toolCall string) authreq.ProviderArgs {
+	return authreq.NewProviderArgs(json.RawMessage(toolCall), "gcp")
 }
 
 func providerView(t *testing.T, method, rawurl string) authreq.View {
@@ -105,7 +111,7 @@ func TestProviderAuthorizeActionMissingGCPAuth(t *testing.T) {
 	if err := p.AuthorizeAction(
 		context.Background(),
 		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
-		json.RawMessage(`{}`),
+		gcpToolCall(`{}`),
 	); err == nil {
 		t.Fatal("missing gcp_auth should error")
 	}
@@ -215,7 +221,7 @@ func TestProviderAuthorizeActionBadJSON(t *testing.T) {
 	if err := p.AuthorizeAction(
 		context.Background(),
 		providerView(t, "GET", "https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances"),
-		json.RawMessage(`not json`),
+		gcpToolCall(`not json`),
 	); err == nil {
 		t.Fatal("bad JSON should error")
 	}

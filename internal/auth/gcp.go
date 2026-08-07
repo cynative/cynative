@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -67,16 +66,16 @@ func (p *gcpProvider) Description() string {
 		"host pinning. Requires gcp_auth field."
 }
 
-// parseGCPArgs unmarshals gcp_auth; fails closed when nil or Service is empty.
-func parseGCPArgs(rawArgs json.RawMessage) (*GCPAuthArgs, error) {
-	args, err := parseAuthArgs[GCPAuthArgs](rawArgs, "gcp_auth")
+// parseGCPArgs decodes gcp_auth; fails closed when absent or Service is empty.
+func parseGCPArgs(args authreq.ProviderArgs) (*GCPAuthArgs, error) {
+	gcpArgs, err := authreq.Parse[GCPAuthArgs](args)
 	if err != nil {
 		return nil, err
 	}
-	if args == nil || args.Service == "" {
+	if gcpArgs == nil || gcpArgs.Service == "" {
 		return nil, errors.New("gcp_auth.service is required")
 	}
-	return args, nil
+	return gcpArgs, nil
 }
 
 // AuthorizesHost runs Layer 3: parse args → ParseHost → catalog.ResolveService →
@@ -88,8 +87,8 @@ func parseGCPArgs(rawArgs json.RawMessage) (*GCPAuthArgs, error) {
 // host Layer 3 is asked about is always the host Layer 2 classifies and the wire
 // sends. For all other googleapis.com hosts the service is resolved here and
 // verified against the claim as usual.
-func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
-	args, err := parseGCPArgs(rawArgs)
+func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
+	gcpArgs, err := parseGCPArgs(args)
 	if err != nil {
 		return false, err
 	}
@@ -107,25 +106,25 @@ func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, rawArgs j
 	if err != nil {
 		return false, err
 	}
-	return true, gcphardening.Verify(parsed.WithService(svc), args.Service, args.Location)
+	return true, gcphardening.Verify(parsed.WithService(svc), gcpArgs.Service, gcpArgs.Location)
 }
 
 // AuthorizeAction implements auth.ActionAuthorizer, delegating to the composed
 // Layer 2 provider after lazy init.
-func (p *gcpProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
+func (p *gcpProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
 	if p.hardeningAction == nil {
 		return errors.New("gcp_hardening: action authorizer not initialized")
 	}
-	return p.hardeningAction.AuthorizeAction(ctx, v, rawArgs)
+	return p.hardeningAction.AuthorizeAction(ctx, v, args)
 }
 
 // InjectAuth attaches the raw ADC bearer token. Read-only and host gating are
 // enforced by Layer-2 action authorization and Layer-3 host pinning, not by the
 // credential itself.
-func (p *gcpProvider) InjectAuth(req *http.Request, _ json.RawMessage) error {
+func (p *gcpProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
 	if err := p.ensureReady(req.Context()); err != nil {
 		return err
 	}

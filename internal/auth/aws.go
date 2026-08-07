@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,13 +28,6 @@ const emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb924" +
 type AWSAuthArgs struct {
 	Service string `json:"service"          jsonschema_description:"AWS service SigV4 signing name (e.g. 's3', 'execute-api', or 'ecr' for the api.ecr.*.amazonaws.com endpoint). Required."` //nolint:lll // struct tags are indivisible
 	Region  string `json:"region,omitempty" jsonschema_description:"AWS region for SigV4 signing (e.g. 'us-west-2'). Omit to derive the region from the request host."`                       //nolint:lll // struct tags are indivisible
-}
-
-// parseAWSArgs unmarshals the aws_auth arguments from the raw JSON. It returns
-// the typed args (nil when the aws_auth key is absent), matching the sibling
-// providers' nil convention; callers run validate to enforce required fields.
-func parseAWSArgs(rawArgs json.RawMessage) (*AWSAuthArgs, error) {
-	return parseAuthArgs[AWSAuthArgs](rawArgs, "aws_auth")
 }
 
 // validate fails closed unless the required SigV4 signing name (service) is set.
@@ -109,12 +101,12 @@ func (p *awsProvider) Description() string {
 		"Requires aws_auth field."
 }
 
-func (p *awsProvider) InjectAuth(req *http.Request, rawArgs json.RawMessage) error {
+func (p *awsProvider) InjectAuth(req *http.Request, args authreq.ProviderArgs) error {
 	if err := p.ensureReady(req.Context()); err != nil {
 		return err
 	}
 
-	awsArgs, err := parseAWSArgs(rawArgs)
+	awsArgs, err := authreq.Parse[AWSAuthArgs](args)
 	if err != nil {
 		return err
 	}
@@ -174,18 +166,18 @@ func signingRegion(awsArgs *AWSAuthArgs, req *http.Request, sdkRegion string) st
 
 // AuthorizeAction implements the auth.ActionAuthorizer optional interface,
 // delegating to the composed awshardening.Provider.
-func (p *awsProvider) AuthorizeAction(ctx context.Context, v authreq.View, rawArgs json.RawMessage) error {
+func (p *awsProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
 	if p.actionProvider == nil {
 		return errors.New("aws_hardening: action authorizer not initialized")
 	}
-	return p.actionProvider.AuthorizeAction(ctx, v, rawArgs)
+	return p.actionProvider.AuthorizeAction(ctx, v, args)
 }
 
-func (p *awsProvider) AuthorizesHost(ctx context.Context, host string, rawArgs json.RawMessage) (bool, error) {
-	awsArgs, err := parseAWSArgs(rawArgs)
+func (p *awsProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
+	awsArgs, err := authreq.Parse[AWSAuthArgs](args)
 	if err != nil {
 		return false, err
 	}
