@@ -15,24 +15,43 @@ import (
 	"github.com/cynative/cynative/internal/redact"
 )
 
+// AgentProvenance identifies the agent file that framed a run, so an audited
+// action is attributable to the instructions that produced it.
+//
+// Source is a string, not the catalog's Source enum, for two reasons: this
+// package is a leaf and must not import internal/agentcatalog, and an integer
+// enum would be an unstable value to write into a forensic log. Valid values
+// are "project", "user" and "builtin".
+//
+// The agent BODY is never logged; SHA256 over the exact raw file bytes is what
+// ties a record back to a specific file revision.
+type AgentProvenance struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	SHA256 string `json:"sha256"`
+}
+
 // Record is one audited tool invocation. Time, Seq, and Actor are stamped by the
 // Logger; the caller (the dispatch loop or the code_execution invoker) sets the
 // rest. An attempt record carries no Decision/Outcome/Result.
 type Record struct {
-	Time      time.Time       `json:"time"`
-	Seq       uint64          `json:"seq"`
-	SessionID string          `json:"session_id"`
-	RunID     string          `json:"run_id"`
-	CallID    string          `json:"call_id"`
-	Depth     int             `json:"depth"`
-	Actor     string          `json:"actor"`
-	Phase     string          `json:"phase"`
-	Via       string          `json:"via,omitempty"`
-	Tool      string          `json:"tool"`
-	Arguments json.RawMessage `json:"arguments"`
-	Decision  string          `json:"decision,omitempty"`
-	Outcome   string          `json:"outcome,omitempty"`
-	Result    string          `json:"result,omitempty"`
+	Time      time.Time `json:"time"`
+	Seq       uint64    `json:"seq"`
+	SessionID string    `json:"session_id"`
+	RunID     string    `json:"run_id"`
+	CallID    string    `json:"call_id"`
+	Depth     int       `json:"depth"`
+	Actor     string    `json:"actor"`
+	// Agent is the agent file that framed this run, when one was selected. Set
+	// by the Logger, never by the caller.
+	Agent     *AgentProvenance `json:"agent,omitempty"`
+	Phase     string           `json:"phase"`
+	Via       string           `json:"via,omitempty"`
+	Tool      string           `json:"tool"`
+	Arguments json.RawMessage  `json:"arguments"`
+	Decision  string           `json:"decision,omitempty"`
+	Outcome   string           `json:"outcome,omitempty"`
+	Result    string           `json:"result,omitempty"`
 	// RedactArgs requests redaction of Arguments before logging. It is set for
 	// calls whose arguments were never shown at an approval prompt (inner
 	// code_execution calls, ungated orchestration tools, unknown tools), so a
@@ -82,6 +101,7 @@ type Logger struct {
 	clock    func() time.Time
 	redactor redactor
 	actor    string
+	agent    *AgentProvenance
 	seq      uint64
 }
 
@@ -91,6 +111,15 @@ type Option func(*Logger)
 // WithActor sets the actor identity stamped on every record (e.g. provider/model).
 func WithActor(a string) Option {
 	return func(l *Logger) { l.actor = a }
+}
+
+// WithAgent sets the agent provenance stamped on every record. The Logger keeps
+// its own copy, so a later mutation by the caller cannot alter what is logged.
+func WithAgent(p AgentProvenance) Option {
+	return func(l *Logger) {
+		copied := p
+		l.agent = &copied
+	}
 }
 
 // New builds a Logger writing to w. The clock defaults to [time.Now] and the
@@ -119,6 +148,9 @@ func (l *Logger) Log(rec Record) error {
 	rec.Seq = l.seq
 	rec.Time = l.clock()
 	rec.Actor = l.actor
+	// Provenance is the Logger's to set, like Actor: a caller-supplied value is
+	// overwritten so a tool call can never forge the agent it claims to be under.
+	rec.Agent = l.agent
 	rec.Result = l.redactor.Redact(rec.Result)
 	// Approval-gated I/O arguments are verbatim — the operator saw and approved them
 	// at the prompt. Everything else (inner code_execution calls, ungated

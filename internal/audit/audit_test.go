@@ -189,3 +189,73 @@ func TestLogger_Log_RedactsArgumentsWhenRequested(t *testing.T) {
 		t.Errorf("verbatim record should keep arguments: %s", lines[1])
 	}
 }
+
+func TestLog_StampsAgentProvenance(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	prov := audit.AgentProvenance{
+		Name:   "public-exposure",
+		Source: "project",
+		SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+	}
+	l := audit.New(&buf, audit.WithAgent(prov))
+
+	//nolint:exhaustruct // only the stamped fields matter.
+	if err := l.Log(audit.Record{Tool: "http_request", Phase: audit.PhaseAttempt}); err != nil {
+		t.Fatalf("Log() = %v", err)
+	}
+
+	var rec audit.Record
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("Unmarshal() = %v", err)
+	}
+	if rec.Agent == nil {
+		t.Fatal("Agent provenance was not stamped")
+	}
+	if *rec.Agent != prov {
+		t.Fatalf("Agent = %+v, want %+v", *rec.Agent, prov)
+	}
+}
+
+func TestLog_OmitsAgentWhenUnset(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	l := audit.New(&buf)
+	//nolint:exhaustruct // only the stamped fields matter.
+	if err := l.Log(audit.Record{Tool: "http_request", Phase: audit.PhaseAttempt}); err != nil {
+		t.Fatalf("Log() = %v", err)
+	}
+
+	if strings.Contains(buf.String(), `"agent"`) {
+		t.Fatalf("agent key present with no provenance configured: %s", buf.String())
+	}
+}
+
+// A caller-supplied Agent on the Record must not survive: the logger is the
+// single source of provenance, exactly as it is for Actor.
+func TestLog_OverwritesCallerSuppliedAgent(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	configured := audit.AgentProvenance{Name: "real", Source: "user", SHA256: "abc"}
+	l := audit.New(&buf, audit.WithAgent(configured))
+
+	forged := audit.AgentProvenance{Name: "forged", Source: "project", SHA256: "000"}
+	//nolint:exhaustruct // only the stamped fields matter.
+	if err := l.Log(audit.Record{Tool: "t", Phase: audit.PhaseAttempt, Agent: &forged}); err != nil {
+		t.Fatalf("Log() = %v", err)
+	}
+
+	var rec audit.Record
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("Unmarshal() = %v", err)
+	}
+	if rec.Agent == nil || rec.Agent.Name != "real" {
+		t.Fatalf("Agent = %+v, want the logger's configured provenance", rec.Agent)
+	}
+}
