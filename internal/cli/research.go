@@ -11,6 +11,7 @@ import (
 
 	"github.com/cynative/cynative"
 	"github.com/cynative/cynative/internal/agent"
+	"github.com/cynative/cynative/internal/agentcatalog"
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/cache"
@@ -55,6 +56,9 @@ type invocationInputs struct {
 	stdinTruncated bool
 	stdinIsTTY     bool
 	hasTerminal    bool
+	// hasAgent reports that --agent was passed. An agent supplies the
+	// instruction, so a run with one is not a "no task" run.
+	hasAgent bool
 }
 
 // resolvedRun is the decision resolveInvocation produces.
@@ -64,20 +68,26 @@ type resolvedRun struct {
 }
 
 // joinTask assembles the agent task from the positional arg and piped stdin.
-// When both are present the piped content is folded in as framed, untrusted
-// context, passed through verbatim (only trimmed for the empty check) so
-// whitespace-sensitive files (YAML, Python, heredocs) reach the model unchanged;
-// bare piped stdin is the operator's task and is trimmed like a typed prompt. A
-// truncation marker, when set, is appended outside any fence.
-func joinTask(arg, stdin string, truncated bool) string {
+// Piped content is folded in as framed, untrusted context whenever there is
+// another source of instruction: a positional task, or a selected agent. It is
+// passed through verbatim (only trimmed for the empty check) so
+// whitespace-sensitive files (YAML, Python, heredocs) reach the model unchanged.
+// Only bare piped stdin with neither is the operator's own task, and it is
+// trimmed like a typed prompt. A truncation marker, when set, is appended
+// outside any fence.
+//
+// The hasAgent arm matters: without it, `cat data | cynative -p --agent X`
+// would promote piped data to operator-instruction trust, which is exactly the
+// role the agent file is already filling.
+func joinTask(arg, stdin string, truncated, hasAgent bool) string {
 	argTrimmed := strings.TrimSpace(arg)
 	stdinTrimmed := strings.TrimSpace(stdin)
 
 	var task string
 
 	switch {
-	case argTrimmed != "" && stdinTrimmed != "":
-		task = argTrimmed + "\n\n" + agent.WrapPipedInput(stdin)
+	case stdinTrimmed != "" && (argTrimmed != "" || hasAgent):
+		task = strings.TrimSpace(argTrimmed + "\n\n" + agent.WrapPipedInput(stdin))
 	case argTrimmed != "":
 		task = argTrimmed
 	default:
@@ -97,9 +107,9 @@ func joinTask(arg, stdin string, truncated bool) string {
 // no usable approval terminal and no --auto-approve, is a fail-closed error.
 func resolveInvocation(in invocationInputs) (resolvedRun, error) {
 	interactive := !in.printMode && in.stdinIsTTY
-	task := joinTask(in.arg, in.stdinData, in.stdinTruncated)
+	task := joinTask(in.arg, in.stdinData, in.stdinTruncated, in.hasAgent)
 
-	if !interactive && task == "" {
+	if !interactive && task == "" && !in.hasAgent {
 		return resolvedRun{}, ErrNoTask
 	}
 
@@ -147,12 +157,12 @@ type researchFlags struct {
 // fakes. cfg is populated by the root command's PersistentPreRunE before run.
 type deps struct {
 	loadConfig           func(cfgFile string) (config.Config, error)
-	run                  func(ctx context.Context, task string, cfg config.Config, flags researchFlags) error
+	run                  func(ctx context.Context, req runRequest, cfg config.Config, flags researchFlags) error
 	getProviders         getProvidersFunc
 	newChatModel         func(ctx context.Context, cfg config.Config, recordUsage func(schema.Usage)) (chatModel, error)
 	newHTTPRequestTool   func(providers []auth.Provider) schema.InvokableTool
 	newCodeExecutionTool func(primitives []schema.InvokableTool, verbose io.Writer, maxConcurrency int, sink audit.Sink) (schema.InvokableTool, error)
-	newAuditSink         func(cfg config.Config) (audit.Sink, func() error, error)
+	newAuditSink         func(cfg config.Config, prov *audit.AgentProvenance) (audit.Sink, func() error, error)
 	newAgent             func(ctx context.Context, cfg agent.Config, opts ...agent.Option) *agent.Agent
 	ui                   researchUI
 	out                  io.Writer
@@ -160,9 +170,20 @@ type deps struct {
 	cfg                  config.Config
 	stdinIsTTY           bool
 	hasTerminal          bool
-	readStdin            func() (data string, truncated bool, err error)
-	interrupter          agent.Interrupter
-	version              string // pre-rendered `--version` output; resolved in newDeps.
+	// agentName is the --agent flag value; agentFlagChanged reports whether the
+	// flag was passed at all. They are separate because `--agent=` must be an
+	// error rather than reading as "no agent selected".
+	agentName        string
+	agentFlagChanged bool
+	// openAgentCatalog opens the agent sources lazily. It is called ONLY for a
+	// run naming an agent, the agents commands, and completion, so ordinary runs
+	// stay filesystem-light. Tests inject the whole factory; there is no shared
+	// cwd/home seam to reuse (config.Loader.homeDir is unexported and this
+	// feature bypasses the config loader by design).
+	openAgentCatalog func() (*agentcatalog.Catalog, func(), error)
+	readStdin        func() (data string, truncated bool, err error)
+	interrupter      agent.Interrupter
+	version          string // pre-rendered `--version` output; resolved in newDeps.
 	// newDoctorProbeNonce returns the nonce doctor --live-llm asks the model to
 	// echo. Production wires crypto/rand in the shell; tests inject a fixed value.
 	newDoctorProbeNonce func() string
@@ -171,33 +192,35 @@ type deps struct {
 	doctorLiveProbeTimeout time.Duration
 }
 
-// runRoot reads any piped stdin, resolves the invocation, and dispatches to run.
-// It is the root command's RunE body, factored out for direct testing.
+// runRoot resolves any selected agent, reads piped stdin, composes the task and
+// dispatches to run. It is the root command's RunE body, factored out for
+// direct testing.
+//
+// Ordering is load-bearing. Agent validation, catalog opening and resolution
+// happen FIRST and only when an agent was named: validating after the terminal
+// check would let ErrNoApprovalTerminal mask a bad --agent value, and validating
+// after the stdin drain would hang on a non-closing pipe before reporting it. A
+// run naming no agent skips all of it and never touches the filesystem.
+//
+// runRoot is also the sole owner of the catalog cleanup: it calls d.run
+// synchronously and runResearch does not return until the interactive loop
+// ends, so this defer spans the whole session.
 func (d *deps) runRoot(ctx context.Context, args []string, printMode bool, flags researchFlags) error {
+	def, cleanup, err := d.selectAgent()
+	if err != nil {
+		return err
+	}
+
+	defer cleanup()
+
 	arg := ""
 	if len(args) == 1 {
 		arg = args[0]
 	}
 
-	var (
-		stdinData string
-		truncated bool
-	)
-
-	if !d.stdinIsTTY {
-		// Fail closed before draining stdin: with no usable terminal and no
-		// --auto-approve, no tool can be approved, so a non-closing pipe (e.g.
-		// tail -f) must not block us from returning ErrNoApprovalTerminal.
-		if !flags.autoApprove && !d.hasTerminal {
-			return ErrNoApprovalTerminal
-		}
-
-		s, t, err := d.readStdin()
-		if err != nil {
-			return fmt.Errorf("read stdin: %w", err)
-		}
-
-		stdinData, truncated = s, t
+	stdinData, truncated, err := d.readPipedStdin(flags)
+	if err != nil {
+		return err
 	}
 
 	res, err := resolveInvocation(invocationInputs{
@@ -208,6 +231,7 @@ func (d *deps) runRoot(ctx context.Context, args []string, printMode bool, flags
 		stdinTruncated: truncated,
 		stdinIsTTY:     d.stdinIsTTY,
 		hasTerminal:    d.hasTerminal,
+		hasAgent:       d.agentFlagChanged,
 	})
 	if err != nil {
 		return err
@@ -215,13 +239,33 @@ func (d *deps) runRoot(ctx context.Context, args []string, printMode bool, flags
 
 	flags.interactive = res.interactive
 
-	return d.run(ctx, res.task, d.cfg, flags)
+	return d.run(ctx, buildRunRequest(res.task, def), d.cfg, flags)
+}
+
+// readPipedStdin drains stdin when it is not a TTY. It fails closed before
+// draining: with no usable terminal and no --auto-approve no tool can be
+// approved, so a non-closing pipe (e.g. tail -f) must not block the error.
+func (d *deps) readPipedStdin(flags researchFlags) (string, bool, error) {
+	if d.stdinIsTTY {
+		return "", false, nil
+	}
+
+	if !flags.autoApprove && !d.hasTerminal {
+		return "", false, ErrNoApprovalTerminal
+	}
+
+	s, t, err := d.readStdin()
+	if err != nil {
+		return "", false, fmt.Errorf("read stdin: %w", err)
+	}
+
+	return s, t, nil
 }
 
 // runResearch builds the tool set, chat model and agent from cfg, runs the task,
 // and (when interactive) enters the follow-up loop. It is the default value of
 // deps.run; tests can replace deps.run to exercise command plumbing in isolation.
-func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, flags researchFlags) (err error) {
+func (d *deps) runResearch(ctx context.Context, req runRequest, cfg config.Config, flags researchFlags) (err error) {
 	var verboseWriter io.Writer
 	if flags.verbose {
 		verboseWriter = d.errOut
@@ -237,6 +281,8 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 		fmt.Fprintln(d.errOut, "  (no connectors detected)")
 	}
 
+	renderAgentProvenance(d.errOut, req.Agent)
+
 	// Structural LLM gate (local, no network): render the LLM block and abort
 	// before building anything LLM-dependent. Connectors are already shown above.
 	if verr := config.ValidateLLM(&cfg.LLM); verr != nil {
@@ -245,7 +291,13 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 		return ErrLLMUnavailable
 	}
 
-	sink, closeAudit, err := d.newAuditSink(cfg)
+	var prov *audit.AgentProvenance
+	if req.Agent != nil {
+		p := req.Agent.provenance()
+		prov = &p
+	}
+
+	sink, closeAudit, err := d.newAuditSink(cfg, prov)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}
@@ -303,7 +355,7 @@ func (d *deps) runResearch(ctx context.Context, task string, cfg config.Config, 
 	// abort-gates so a config/init failure (which runs no turn) skips the probe.
 	d.ui.PrimeBackground(cfg.RenderStyle)
 
-	established, initErr := d.runInitialPhase(ctx, a, acc, cfg, providers, task, &llmShown, flags)
+	established, initErr := d.runInitialPhase(ctx, a, acc, cfg, providers, req.Task, &llmShown, flags)
 	if initErr != nil {
 		return initErr
 	}

@@ -31,8 +31,8 @@ func TestRootCmd_PrintFlagOneShot(t *testing.T) {
 	}
 
 	d := testDeps()
-	d.run = func(_ context.Context, task string, _ config.Config, f researchFlags) error {
-		got.task, got.interactive = task, f.interactive
+	d.run = func(_ context.Context, task runRequest, _ config.Config, f researchFlags) error {
+		got.task, got.interactive = task.Task, f.interactive
 
 		return nil
 	}
@@ -55,8 +55,8 @@ func TestRootCmd_BareInteractive(t *testing.T) {
 	}
 
 	d := testDeps()
-	d.run = func(_ context.Context, task string, _ config.Config, f researchFlags) error {
-		got.task, got.interactive = task, f.interactive
+	d.run = func(_ context.Context, task runRequest, _ config.Config, f researchFlags) error {
+		got.task, got.interactive = task.Task, f.interactive
 
 		return nil
 	}
@@ -78,8 +78,8 @@ func TestRootCmd_SeededInteractive(t *testing.T) {
 	}
 
 	d := testDeps()
-	d.run = func(_ context.Context, task string, _ config.Config, f researchFlags) error {
-		got.task, got.interactive = task, f.interactive
+	d.run = func(_ context.Context, task runRequest, _ config.Config, f researchFlags) error {
+		got.task, got.interactive = task.Task, f.interactive
 
 		return nil
 	}
@@ -101,8 +101,8 @@ func TestRootCmd_PipedStdinOneShot(t *testing.T) {
 	d := testDeps()
 	d.stdinIsTTY = false
 	d.readStdin = func() (string, bool, error) { return "piped task", false, nil }
-	d.run = func(_ context.Context, task string, _ config.Config, _ researchFlags) error {
-		gotTask = task
+	d.run = func(_ context.Context, task runRequest, _ config.Config, _ researchFlags) error {
+		gotTask = task.Task
 
 		return nil
 	}
@@ -123,8 +123,8 @@ func TestRootCmd_StdinTruncationThreads(t *testing.T) {
 	d := testDeps()
 	d.stdinIsTTY = false
 	d.readStdin = func() (string, bool, error) { return "huge", true, nil }
-	d.run = func(_ context.Context, task string, _ config.Config, _ researchFlags) error {
-		gotTask = task
+	d.run = func(_ context.Context, task runRequest, _ config.Config, _ researchFlags) error {
+		gotTask = task.Task
 
 		return nil
 	}
@@ -141,7 +141,7 @@ func TestRootCmd_NoTaskError(t *testing.T) {
 	t.Parallel()
 
 	d := testDeps()
-	d.run = func(context.Context, string, config.Config, researchFlags) error {
+	d.run = func(context.Context, runRequest, config.Config, researchFlags) error {
 		t.Fatal("run must not be called when there is no task")
 
 		return nil

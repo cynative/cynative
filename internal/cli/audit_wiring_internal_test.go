@@ -16,11 +16,16 @@ func TestRunResearch_AuditOpenError_Aborts(t *testing.T) {
 	t.Parallel()
 
 	d := testDeps()
-	d.newAuditSink = func(config.Config) (audit.Sink, func() error, error) {
+	d.newAuditSink = func(config.Config, *audit.AgentProvenance) (audit.Sink, func() error, error) {
 		return nil, nil, errors.New("bad audit path")
 	}
 
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
+	err := d.runResearch(
+		context.Background(),
+		taskReq("task"),
+		validCfg(),
+		researchFlags{},
+	) //nolint:exhaustruct // defaults
 	if err == nil {
 		t.Fatal("expected the command to abort on audit-open error")
 	}
@@ -36,14 +41,14 @@ func TestRunResearch_AuditSinkClosed(t *testing.T) {
 			responses: []*schema.Message{assistantMsg("done")},
 		}, nil
 	}
-	d.newAuditSink = func(config.Config) (audit.Sink, func() error, error) {
+	d.newAuditSink = func(config.Config, *audit.AgentProvenance) (audit.Sink, func() error, error) {
 		return nil, func() error { closed = true; return nil }, nil
 	}
 	d.out = io.Discard
 
 	if err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		validCfg(),
 		researchFlags{}, //nolint:exhaustruct // defaults
 	); err != nil {
@@ -63,14 +68,14 @@ func TestRunResearch_AuditCloseError_FailsClosed(t *testing.T) {
 			responses: []*schema.Message{assistantMsg("done")},
 		}, nil
 	}
-	d.newAuditSink = func(config.Config) (audit.Sink, func() error, error) {
+	d.newAuditSink = func(config.Config, *audit.AgentProvenance) (audit.Sink, func() error, error) {
 		return nil, func() error { return errors.New("flush failed") }, nil
 	}
 	d.out = io.Discard
 
 	err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		validCfg(),
 		researchFlags{}, //nolint:exhaustruct // defaults
 	)

@@ -70,11 +70,11 @@ func TestNewRootCmd_Research(t *testing.T) {
 	var called bool
 
 	d := testDeps()
-	d.run = func(_ context.Context, task string, _ config.Config, _ researchFlags) error {
+	d.run = func(_ context.Context, task runRequest, _ config.Config, _ researchFlags) error {
 		called = true
 
-		if task != "test task" {
-			t.Errorf("expected task 'test task', got %q", task)
+		if task.Task != "test task" {
+			t.Errorf("expected task 'test task', got %q", task.Task)
 		}
 
 		return nil

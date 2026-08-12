@@ -53,6 +53,11 @@ starting a research session.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Changed, not agentName != "": `--agent=` must be an error rather
+			// than reading as "no agent selected", which would silently run an
+			// unframed task under an agent invocation.
+			d.agentFlagChanged = cmd.Flags().Changed("agent")
+
 			return silenceGracefulStop(cmd, d.runRoot(cmd.Context(), args, printMode, flags))
 		},
 	}
@@ -63,6 +68,8 @@ starting a research session.`,
 		BoolVarP(&printMode, "print", "p", false, "Run a single task non-interactively and print the result")
 	rootCmd.Flags().BoolVar(&flags.autoApprove, "auto-approve", false, "Skip interactive approval for tool calls")
 	rootCmd.Flags().BoolVarP(&flags.verbose, "verbose", "v", false, "Print tool call outputs to stderr")
+	rootCmd.Flags().
+		StringVar(&d.agentName, "agent", "", "Run a named agent file as the prompt for this run")
 
 	// Version enables cobra's built-in --version flag, which short-circuits in
 	// Execute() before ValidateArgs/PersistentPreRunE — so `cynative --version`

@@ -15,6 +15,7 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 
 	"github.com/cynative/cynative/internal/agent"
+	"github.com/cynative/cynative/internal/agentcatalog"
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authtest"
@@ -194,6 +195,13 @@ func validCfg() config.Config {
 // and overrides only the field it exercises, so no state is shared across tests.
 // The chat model defaults to a benign scripted model; the http_request and
 // code_execution tools and the agent are the real constructors.
+// taskReq builds the plain, agent-less run request for a typed task. Most tests
+// exercise the non-agent path, so this keeps their call sites unchanged in
+// spirit while runResearch takes the richer request value.
+func taskReq(task string) runRequest {
+	return runRequest{Task: task, Agent: nil}
+}
+
 func testDeps() *deps {
 	d := &deps{
 		loadConfig: func(string) (config.Config, error) { return validCfg(), nil },
@@ -206,10 +214,13 @@ func testDeps() *deps {
 		},
 		newHTTPRequestTool:   tools.NewHTTPRequestTool,
 		newCodeExecutionTool: tools.NewCodeExecutionTool,
-		newAuditSink: func(config.Config) (audit.Sink, func() error, error) {
+		newAuditSink: func(config.Config, *audit.AgentProvenance) (audit.Sink, func() error, error) {
 			return nil, func() error { return nil }, nil
 		},
-		newAgent:            agent.New,
+		newAgent: agent.New,
+		openAgentCatalog: func() (*agentcatalog.Catalog, func(), error) {
+			return agentcatalog.New(), func() {}, nil
+		},
 		ui:                  &fakeUI{}, //nolint:exhaustruct // empty script: PromptUserInput EOFs immediately
 		out:                 io.Discard,
 		errOut:              io.Discard,
@@ -240,7 +251,7 @@ func TestRunResearch(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"test task",
+		taskReq("test task"),
 		validCfg(),
 		researchFlags{}, //nolint:exhaustruct // defaults
 	)
@@ -312,7 +323,7 @@ func TestRunResearch_PassesHardeningConfig(t *testing.T) {
 
 	if err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		cfg,
 		researchFlags{verbose: true},
 	); err != nil { //nolint:exhaustruct // flags.
@@ -362,7 +373,7 @@ func TestRunResearch_StreamsConnectorViews(t *testing.T) {
 	}
 	if err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		validCfg(),
 		researchFlags{},
 	); err != nil { //nolint:exhaustruct // defaults.
@@ -380,7 +391,7 @@ func TestNewResearchCmd_AutoApprove(t *testing.T) {
 	var gotFlags researchFlags
 
 	d := testDeps()
-	d.run = func(_ context.Context, _ string, _ config.Config, flags researchFlags) error {
+	d.run = func(_ context.Context, _ runRequest, _ config.Config, flags researchFlags) error {
 		gotFlags = flags
 
 		return nil
@@ -413,7 +424,7 @@ func TestRunResearch_AutoApprove(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"test",
+		taskReq("test"),
 		validCfg(),
 		researchFlags{autoApprove: true}, //nolint:exhaustruct // only autoApprove under test
 	)
@@ -443,7 +454,7 @@ func TestRunResearch_VerboseFlag(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"test",
+		taskReq("test"),
 		validCfg(),
 		researchFlags{verbose: true}, //nolint:exhaustruct // only verbose under test
 	)
@@ -544,7 +555,7 @@ func TestRunResearch_Interactive(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"initial task",
+		taskReq("initial task"),
 		validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test
 	)
@@ -571,7 +582,7 @@ func TestRunResearch_InteractiveMultiTurn(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"initial task",
+		taskReq("initial task"),
 		validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test
 	)
@@ -596,7 +607,7 @@ func TestRunResearch_InteractiveInitialError(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test
 	)
@@ -619,7 +630,12 @@ func TestRunResearch_ChatModelInitError(t *testing.T) {
 		return nil, errors.New("init failed")
 	}
 
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
+	err := d.runResearch(
+		context.Background(),
+		taskReq("task"),
+		validCfg(),
+		researchFlags{},
+	) //nolint:exhaustruct // defaults
 	if !errors.Is(err, ErrLLMUnavailable) {
 		t.Fatalf("chat-model init failure must return ErrLLMUnavailable, got: %v", err)
 	}
@@ -710,7 +726,12 @@ func TestRunResearch_CodeToolError(t *testing.T) {
 		return nil, errors.New("code boom")
 	}
 
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
+	err := d.runResearch(
+		context.Background(),
+		taskReq("task"),
+		validCfg(),
+		researchFlags{},
+	) //nolint:exhaustruct // defaults
 	if err == nil {
 		t.Fatal("expected error from code_execution tool build")
 	}
@@ -740,7 +761,7 @@ func TestRunResearch_ThreadsSandboxMaxConcurrency(t *testing.T) {
 	cfg := validCfg()
 	cfg.SandboxMaxConcurrency = 5
 
-	err := d.runResearch(context.Background(), "task", cfg, researchFlags{}) //nolint:exhaustruct // defaults
+	err := d.runResearch(context.Background(), taskReq("task"), cfg, researchFlags{}) //nolint:exhaustruct // defaults
 	if err != nil {
 		t.Fatalf("runResearch: %v", err)
 	}
@@ -779,7 +800,9 @@ func TestJoinTask(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := joinTask(tt.arg, tt.stdin, tt.truncated); got != tt.want {
+			// The existing table covers the no-agent path; hasAgent is
+			// exercised separately in TestJoinTask_FencesBareStdinUnderAgent.
+			if got := joinTask(tt.arg, tt.stdin, tt.truncated, false); got != tt.want {
 				t.Errorf("joinTask(%q,%q,%v) = %q, want %q", tt.arg, tt.stdin, tt.truncated, got, tt.want)
 			}
 		})
@@ -896,7 +919,7 @@ func TestRunResearch_BareInteractiveSkipsSeed(t *testing.T) {
 	}
 	d.ui = &fakeUI{} //nolint:exhaustruct // empty script: PromptUserInput EOFs immediately -> loop exits
 
-	err := d.runResearch(context.Background(), "", validCfg(),
+	err := d.runResearch(context.Background(), taskReq(""), validCfg(),
 		researchFlags{interactive: true}) //nolint:exhaustruct // autoApprove/verbose default false
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -920,7 +943,7 @@ func TestRunResearch_PassesK8sClusterRoles(t *testing.T) {
 
 	if err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		cfg,
 		researchFlags{},
 	); err != nil { //nolint:exhaustruct // defaults.
@@ -951,7 +974,12 @@ func TestRunResearch_RendersFooter(t *testing.T) {
 		}, nil
 	}
 
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
+	err := d.runResearch(
+		context.Background(),
+		taskReq("task"),
+		validCfg(),
+		researchFlags{},
+	) //nolint:exhaustruct // defaults
 	if err != nil {
 		t.Fatalf("runResearch: %v", err)
 	}
@@ -984,7 +1012,12 @@ func TestRunResearch_RendersFooterOnError(t *testing.T) {
 		}, nil
 	}
 
-	err := d.runResearch(context.Background(), "task", validCfg(), researchFlags{}) //nolint:exhaustruct // defaults
+	err := d.runResearch(
+		context.Background(),
+		taskReq("task"),
+		validCfg(),
+		researchFlags{},
+	) //nolint:exhaustruct // defaults
 	if err == nil {
 		t.Fatal("expected error from runResearch")
 	}
@@ -1010,7 +1043,7 @@ func TestRunResearch_RendersFooterEachInteractiveTurn(t *testing.T) {
 	}
 
 	if err := d.runResearch(
-		context.Background(), "task", validCfg(),
+		context.Background(), taskReq("task"), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test
 	); err != nil {
 		t.Fatalf("runResearch: %v", err)
@@ -1049,7 +1082,7 @@ func TestRunResearch_NoSessionFooterWhenNothingRan(t *testing.T) {
 	d.ui = u
 
 	if err := d.runResearch(
-		context.Background(), "", validCfg(),
+		context.Background(), taskReq(""), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	); err != nil {
 		t.Fatalf("runResearch: %v", err)
@@ -1076,7 +1109,7 @@ func TestRunResearch_InteractiveSeedError_TurnFooterNoSession(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "task", validCfg(),
+		context.Background(), taskReq("task"), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	)
 	if err == nil {
@@ -1103,7 +1136,7 @@ func TestRunResearch_InteractiveSeedInterruptBeforeGenerate_NoSessionFooter(t *t
 	d.interrupter = trippedInterrupter{} // seed Run interrupts before first Generate → RoundTrips 0.
 
 	if err := d.runResearch(
-		context.Background(), "task", validCfg(),
+		context.Background(), taskReq("task"), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	); err != nil {
 		t.Fatalf("runResearch: %v (interrupt should fall through to loop; exit returns nil)", err)
@@ -1177,7 +1210,7 @@ func TestRunResearch_RendersBanner(t *testing.T) {
 	d := testDeps()
 	d.ui = u
 	err := d.runResearch(
-		context.Background(), "task", validCfg(), researchFlags{}, //nolint:exhaustruct // defaults.
+		context.Background(), taskReq("task"), validCfg(), researchFlags{}, //nolint:exhaustruct // defaults.
 	)
 	if err != nil {
 		t.Fatalf("runResearch: %v", err)
@@ -1297,7 +1330,7 @@ func TestRunResearch_Welcome(t *testing.T) {
 				cfg.MaxTotalTokens = 1000
 			}
 			err := d.runResearch( //nolint:exhaustruct // only interactive under test.
-				context.Background(), tc.task, cfg, researchFlags{interactive: tc.interactive},
+				context.Background(), taskReq(tc.task), cfg, researchFlags{interactive: tc.interactive},
 			)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("runResearch err = %v, want %v", err, tc.wantErr)
@@ -1388,7 +1421,7 @@ func TestRunResearch_NonInteractiveInterruptPropagates(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		validCfg(),
 		researchFlags{interactive: false}, //nolint:exhaustruct // non-interactive one-shot
 	)
@@ -1414,7 +1447,7 @@ func TestRunResearch_InteractiveInterruptFallsThrough(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"task",
+		taskReq("task"),
 		validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // seeded interactive
 	)
@@ -1443,7 +1476,7 @@ func TestRunResearch_PassesInterrupterToAgent(t *testing.T) {
 		return agent.New(context.Background(), cfg)
 	}
 
-	_ = d.runResearch(t.Context(), "task", d.cfg, researchFlags{})
+	_ = d.runResearch(t.Context(), taskReq("task"), d.cfg, researchFlags{})
 	if gotCfg.Interrupter == nil {
 		t.Errorf("runResearch must pass deps.interrupter as agent.Config.Interrupter")
 	}
@@ -1474,7 +1507,7 @@ func TestRunResearch_NoConnectorsNote(t *testing.T) {
 	}
 
 	if err := d.runResearch(
-		context.Background(), "task", validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
+		context.Background(), taskReq("task"), validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
 	); err != nil {
 		t.Fatalf("runResearch: %v", err)
 	}
@@ -1494,7 +1527,7 @@ func TestRunResearch_PassesAboutToAgent(t *testing.T) {
 		return agent.New(context.Background(), cfg)
 	}
 
-	_ = d.runResearch(t.Context(), "task", d.cfg, researchFlags{})
+	_ = d.runResearch(t.Context(), taskReq("task"), d.cfg, researchFlags{})
 	if !strings.Contains(gotCfg.About, "Cynative runs frontier models") {
 		t.Errorf("runResearch must pass cynative.About() as agent.Config.About; got %q", gotCfg.About)
 	}
@@ -1518,7 +1551,7 @@ func TestRunResearch_WelcomeCtxCancel_ExitsCleanly(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		ctx, "", validCfg(), researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
+		ctx, taskReq(""), validCfg(), researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
 	)
 	// Context cancel in the welcome is treated as a graceful exit (nil), NOT an LLM failure.
 	if err != nil {
@@ -1537,7 +1570,10 @@ func TestRunResearch_NotConfigured_Aborts(t *testing.T) {
 	cfg.LLM.Model = ""
 
 	err := d.runResearch(
-		context.Background(), "", cfg, researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
+		context.Background(),
+		taskReq(""),
+		cfg,
+		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
 	)
 	if !errors.Is(err, ErrLLMUnavailable) {
 		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
@@ -1563,7 +1599,7 @@ func TestRunResearch_BadKey_FirstTurn_Aborts(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "audit my repos", validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
+		context.Background(), taskReq("audit my repos"), validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
 	)
 	if !errors.Is(err, ErrLLMUnavailable) {
 		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
@@ -1586,7 +1622,7 @@ func TestRunResearch_AuditError_NotMislabeled(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "task", validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
+		context.Background(), taskReq("task"), validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
 	)
 	if errors.Is(err, ErrLLMUnavailable) {
 		t.Fatal("an audit error must NOT be reframed as ErrLLMUnavailable")
@@ -1621,7 +1657,7 @@ func TestRunResearch_OneShotRendersLLMBlock(t *testing.T) {
 		}, nil
 	}
 
-	err := d.runResearch(context.Background(), "a task", validCfg(),
+	err := d.runResearch(context.Background(), taskReq("a task"), validCfg(),
 		researchFlags{}) //nolint:exhaustruct // non-interactive defaults.
 	if err != nil {
 		t.Fatalf("runResearch: %v", err)
@@ -1645,7 +1681,7 @@ func TestRunResearch_ChatModelInitFails_Aborts(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "task", validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
+		context.Background(), taskReq("task"), validCfg(), researchFlags{}, //nolint:exhaustruct // defaults
 	)
 	if !errors.Is(err, ErrLLMUnavailable) {
 		t.Fatalf("err = %v, want ErrLLMUnavailable", err)
@@ -1670,7 +1706,10 @@ func TestRunResearch_WelcomeSkipped_FirstTurnBadKey_Aborts(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "", validCfg(), researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
+		context.Background(),
+		taskReq(""),
+		validCfg(),
+		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
 	)
 	if !errors.Is(err, ErrLLMUnavailable) {
 		t.Fatalf("err = %v, want ErrLLMUnavailable (first loop turn is fatal)", err)
@@ -1700,7 +1739,10 @@ func TestRunResearch_EstablishedThenTurnError_Continues(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "", validCfg(), researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
+		context.Background(),
+		taskReq(""),
+		validCfg(),
+		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive
 	)
 	if errors.Is(err, ErrLLMUnavailable) {
 		t.Fatal("an error AFTER the session is established must NOT abort as ErrLLMUnavailable")
@@ -1726,7 +1768,7 @@ func TestRunResearch_InteractiveSeeded_RendersLLMOnce(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "find my repos", validCfg(),
+		context.Background(), taskReq("find my repos"), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	)
 	if err != nil {
@@ -1761,7 +1803,7 @@ func TestRunResearch_SeededCanceledContext_QuietExit(t *testing.T) {
 	cancel()
 
 	//nolint:exhaustruct // only interactive under test.
-	err := d.runResearch(ctx, "do a task", validCfg(), researchFlags{interactive: true})
+	err := d.runResearch(ctx, taskReq("do a task"), validCfg(), researchFlags{interactive: true})
 	if err != nil {
 		t.Fatalf("want nil (quiet exit on canceled ctx), got %v", err)
 	}
@@ -1790,7 +1832,7 @@ func TestRunResearch_InteractiveWelcomeSkipped_RendersLLMAfterFirstTurn(t *testi
 	}
 
 	err := d.runResearch(
-		context.Background(), "", validCfg(),
+		context.Background(), taskReq(""), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	)
 	if err != nil {
@@ -1826,7 +1868,7 @@ func TestRunResearch_WelcomeSuccess_RendersLLMExactlyOnce(t *testing.T) {
 	}
 
 	err := d.runResearch(
-		context.Background(), "", validCfg(),
+		context.Background(), taskReq(""), validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	)
 	if err != nil {
@@ -1876,7 +1918,7 @@ func TestRunResearch_SeededMidFailure_NotLLMUnavailable(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"audit my repos",
+		taskReq("audit my repos"),
 		validCfg(),
 		researchFlags{}, //nolint:exhaustruct // non-interactive one-shot
 	)
@@ -1911,7 +1953,7 @@ func TestRunResearch_WelcomeSkipped_FirstTurnMidFailure_NotFatal(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"",
+		taskReq(""),
 		validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	)
@@ -1954,7 +1996,7 @@ func TestRunResearch_WelcomeTimedOut_Proceeds(t *testing.T) {
 
 	err := d.runResearch(
 		context.Background(),
-		"",
+		taskReq(""),
 		validCfg(),
 		researchFlags{interactive: true}, //nolint:exhaustruct // only interactive under test.
 	)
@@ -2153,7 +2195,7 @@ func TestRunResearch_PrimesBackgroundBeforeFirstRender(t *testing.T) {
 	d := testDeps()
 	d.ui = u
 	if err := d.runResearch(
-		context.Background(), "task", validCfg(), researchFlags{}, //nolint:exhaustruct // defaults.
+		context.Background(), taskReq("task"), validCfg(), researchFlags{}, //nolint:exhaustruct // defaults.
 	); err != nil {
 		t.Fatalf("runResearch: %v", err)
 	}
