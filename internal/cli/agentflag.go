@@ -97,9 +97,15 @@ func (d *deps) selectAgent() (*agentcatalog.Definition, func(), error) {
 
 	def, err := catalog.Resolve(d.agentName)
 	if err != nil {
+		// Annotate BEFORE cleanup. cleanup closes the catalog's *os.Root
+		// handles, and annotateResolveError enumerates names through them, so
+		// releasing first makes that enumeration fail and silently drops the
+		// "available agents" list that a not-found error exists to provide.
+		annotated := annotateResolveError(err, catalog)
+
 		cleanup()
 
-		return nil, noop, sanitizeErr(annotateResolveError(err, catalog))
+		return nil, noop, sanitizeErr(annotated)
 	}
 
 	return &def, cleanup, nil

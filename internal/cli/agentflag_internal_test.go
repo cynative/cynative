@@ -443,3 +443,52 @@ func TestRunResearch_RendersProvenanceAndStampsAudit(t *testing.T) {
 		t.Errorf("provenance = %+v, want the raw-bytes digest and the project tier", gotProv)
 	}
 }
+
+// closableFS models a catalog backed by real OS handles: once its cleanup runs,
+// enumeration through it fails. A no-op cleanup over a MapFS cannot express
+// that, which is why the ordering bug below was invisible to the other tests.
+type closableFS struct {
+	fstest.MapFS
+
+	closed *bool
+}
+
+func (f closableFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if *f.closed {
+		return nil, errors.New("file already closed")
+	}
+
+	return f.MapFS.ReadDir(name)
+}
+
+// The available-agents list must be built BEFORE the catalog is released.
+// selectAgent originally called cleanup() first, which closed the [os.Root]
+// handles that annotateResolveError enumerates through, so the suggestion list
+// was silently dropped on every real run while the fake-cleanup tests passed.
+func TestSelectAgent_AnnotatesBeforeReleasingTheCatalog(t *testing.T) {
+	t.Parallel()
+
+	closed := false
+
+	d := testDeps()
+	d.agentName = "missing"
+	d.agentFlagChanged = true
+	d.openAgentCatalog = func() (*agentcatalog.Catalog, func(), error) {
+		fsys := closableFS{MapFS: agentMapFS("known", "d", "body"), closed: &closed}
+
+		return agentcatalog.New(agentcatalog.Root{
+			Source: agentcatalog.SourceProject, FS: fsys, DisplayPath: "/p",
+		}), func() { closed = true }, nil
+	}
+
+	_, _, err := d.selectAgent()
+	if !errors.Is(err, agentcatalog.ErrAgentNotFound) {
+		t.Fatalf("selectAgent() = %v, want ErrAgentNotFound", err)
+	}
+	if !strings.Contains(err.Error(), "known") {
+		t.Fatalf("error %q lost the available-agents list: it was built after cleanup", err)
+	}
+	if !closed {
+		t.Error("the catalog must still be released on the error path")
+	}
+}

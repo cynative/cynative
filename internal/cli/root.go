@@ -70,6 +70,9 @@ starting a research session.`,
 	rootCmd.Flags().BoolVarP(&flags.verbose, "verbose", "v", false, "Print tool call outputs to stderr")
 	rootCmd.Flags().
 		StringVar(&d.agentName, "agent", "", "Run a named agent file as the prompt for this run")
+	// The only error is an unknown flag name, and the flag is registered
+	// immediately above, so this is structurally impossible.
+	_ = rootCmd.RegisterFlagCompletionFunc("agent", d.completeAgentNames)
 
 	// Version enables cobra's built-in --version flag, which short-circuits in
 	// Execute() before ValidateArgs/PersistentPreRunE — so `cynative --version`
@@ -79,7 +82,7 @@ starting a research session.`,
 	rootCmd.Version = d.version
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 
-	rootCmd.AddCommand(newDoctorCmd(d))
+	rootCmd.AddCommand(newDoctorCmd(d), newAgentsCmd(d))
 
 	return rootCmd
 }
@@ -96,13 +99,18 @@ func silenceGracefulStop(cmd *cobra.Command, err error) error {
 	return err
 }
 
-// skipsConfigLoad reports whether cmd is under Cobra's completion tree
-// (`completion` or the hidden `__complete` / `__completeNoDesc` request
-// commands). Those paths must not touch config or credentials.
+// skipsConfigLoad reports whether cmd is under a subtree that must not read
+// config or touch credentials: Cobra's completion tree (`completion` plus the
+// hidden `__complete` / `__completeNoDesc` request commands), and the `agents`
+// group, whose catalog inspection needs neither LLM configuration nor
+// credentials and must work on a fresh install before anything is configured.
+//
+// The `agents` PARENT name alone covers both leaves, since this walks up
+// through cmd.Parent().
 func skipsConfigLoad(cmd *cobra.Command) bool {
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		case "completion", agentsCmdName, cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 			return true
 		}
 	}
