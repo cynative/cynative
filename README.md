@@ -192,6 +192,16 @@ configuration reference.
 
 `cynative` opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
 
+**Named agents:** a recurring investigation can live in a markdown file instead of at the call site, so the same prompt runs locally and in CI from one artifact.
+
+```bash
+cynative -p --agent aws-public-data-stores "12814983572854"   # with a task
+cynative -p --agent aws-public-data-stores                    # without
+cynative --agent aws-public-data-stores                       # seeds an interactive session
+```
+
+Agents are read from `.cynative/agents/` in your repository, then `~/.cynative/agents/`, then the ones built into the binary; the first match wins. `cynative agents list` shows what is available and which copies are shadowed, and `cynative agents show <name>` prints the file that would run. See [docs/agents.md](docs/agents.md) for the file format and the trust boundary for repository-supplied agents.
+
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 
 **Approvals:** each tool call waits for a single keystroke: `y` runs it once, `a` clears every later call to *that tool* for the session (scripts still print before running), any other key denies. With no controlling terminal, use `--auto-approve`.
