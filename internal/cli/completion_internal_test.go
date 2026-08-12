@@ -39,16 +39,36 @@ func TestCompleteAgentNames_PrefixFiltered(t *testing.T) {
 
 // `agents show <name>` takes exactly one argument, so a second positional must
 // offer nothing rather than a name the command would then reject.
-func TestCompleteAgentNames_NoSecondPositional(t *testing.T) {
+func TestCompleteAgentArg_NoSecondPositional(t *testing.T) {
 	t.Parallel()
 
 	d := testDeps()
 	d.openAgentCatalog = catalogOver(agentFS())
 
-	got, directive := d.completeAgentNames(nil, []string{"alpha"}, "")
+	got, directive := d.completeAgentArg(nil, []string{"alpha"}, "")
 
 	if len(got) != 0 {
-		t.Fatalf("completeAgentNames() = %v, want no second positional candidate", got)
+		t.Fatalf("completeAgentArg() = %v, want no second positional candidate", got)
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("directive = %v, want NoFileComp", directive)
+	}
+}
+
+// The FLAG callback must not inherit that arity guard. The root command takes a
+// positional task alongside --agent, and cobra passes that task through the flag
+// callback's args, so a shared guard would silently stop offering agents for
+// `cynative "audit prod" --agent <TAB>`.
+func TestCompleteAgentNames_UnaffectedByPositionalTask(t *testing.T) {
+	t.Parallel()
+
+	d := testDeps()
+	d.openAgentCatalog = catalogOver(agentFS())
+
+	got, directive := d.completeAgentNames(nil, []string{"audit prod"}, "al")
+
+	if want := []string{"alpha", "alps"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("completeAgentNames() = %v, want %v with a task already present", got, want)
 	}
 	if directive != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf("directive = %v, want NoFileComp", directive)
@@ -134,6 +154,7 @@ func TestCompletion_EmitsCandidatesWithoutLoadingConfig(t *testing.T) {
 		args []string
 	}{
 		{"flag completion", []string{cobra.ShellCompRequestCmd, "--agent", "al"}},
+		{"flag completion after a task", []string{cobra.ShellCompRequestCmd, "audit prod", "--agent", "al"}},
 		{"agents show argument completion", []string{cobra.ShellCompRequestCmd, "agents", "show", "al"}},
 	}
 

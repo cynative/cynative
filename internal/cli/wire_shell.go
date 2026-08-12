@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,7 +129,7 @@ func openAgentCatalogShell() (*agentcatalog.Catalog, func(), error) {
 		return nil, nil, fmt.Errorf("resolve working directory: %w", err)
 	}
 
-	home, err := resolveDir(os.UserHomeDir)
+	home, err := resolveHomeDir()
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve home directory: %w", err)
 	}
@@ -143,6 +145,33 @@ func resolveDir(get func() (string, error)) (string, error) {
 	}
 
 	return filepath.EvalSymlinks(dir)
+}
+
+// resolveHomeDir resolves the home directory, tolerating one that does not
+// exist.
+//
+// A minimal container can set an absolute $HOME that was never created. Failing
+// here would abort the whole catalog, so even `cynative agents list` could not
+// inspect the project and built-in tiers. An unresolvable home is returned
+// cleaned-and-absolute instead: OpenSources then finds no user agents directory
+// and skips that tier, and the search boundary still holds because no existing
+// working directory can sit inside a directory that does not exist.
+func resolveHomeDir() (string, error) {
+	home, err := resolveDir(os.UserHomeDir)
+	if err == nil {
+		return home, nil
+	}
+
+	if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+
+	raw, rerr := os.UserHomeDir()
+	if rerr != nil {
+		return "", rerr
+	}
+
+	return filepath.Clean(raw), nil
 }
 
 // newDeps wires the production collaborators for the cli. It is the composition

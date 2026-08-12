@@ -17,16 +17,9 @@ import (
 // rather than leak an error string into the shell's completion protocol. A name
 // whose highest-precedence claimant is unusable is still offered: hiding it
 // would conceal the name the operator has to fix.
-func (d *deps) completeAgentNames(_ *cobra.Command, args []string, toComplete string) (
+func (d *deps) completeAgentNames(_ *cobra.Command, _ []string, toComplete string) (
 	[]string, cobra.ShellCompDirective,
 ) {
-	// `agents show <name>` takes exactly one argument, so once one is present
-	// there is nothing left to complete. Without this, `agents show alpha <TAB>`
-	// would offer a second agent name the command would then reject.
-	if len(args) > 0 {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
-
 	catalog, cleanup, err := d.openAgentCatalog()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -48,4 +41,22 @@ func (d *deps) completeAgentNames(_ *cobra.Command, args []string, toComplete st
 	}
 
 	return out, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeAgentArg completes the single positional argument of
+// `agents show <name>`.
+//
+// It is separate from completeAgentNames because the same names are offered in
+// two places with different arity. The root command takes a positional task
+// ALONGSIDE --agent, so cobra passes that task through the flag callback's args;
+// an arity guard shared with the flag would silently stop offering agents for
+// `cynative "audit prod" --agent <TAB>`. Only `show` is single-argument.
+func (d *deps) completeAgentArg(cmd *cobra.Command, args []string, toComplete string) (
+	[]string, cobra.ShellCompDirective,
+) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	return d.completeAgentNames(cmd, args, toComplete)
 }

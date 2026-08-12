@@ -60,7 +60,7 @@ func newAgentsShowCmd(d *deps) *cobra.Command {
 		Use:               "show <name>",
 		Short:             "Print the agent file that --agent <name> would run",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: d.completeAgentNames,
+		ValidArgsFunction: d.completeAgentArg,
 		RunE: func(_ *cobra.Command, args []string) error {
 			return d.runAgentsShow(args[0])
 		},

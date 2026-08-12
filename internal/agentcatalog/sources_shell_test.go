@@ -261,3 +261,101 @@ func TestOpenSources_RejectsNonCanonicalInput(t *testing.T) {
 		t.Fatal("OpenSources() = nil error, want a non-absolute cwd rejected")
 	}
 }
+
+// A .cynative/agents symlink whose target is MISSING claims the project source
+// but cannot be opened, so it must fail closed.
+//
+// [os.Stat] follows the final symlink and reports ErrNotExist here, which read as
+// "no project source" and silently handed the name to a lower tier. Lstat is
+// what distinguishes "nothing is claimed" from "something is claimed and
+// broken".
+func TestOpenSources_RefusesDanglingProjectSymlink(t *testing.T) {
+	base := realPath(t, t.TempDir())
+	home := filepath.Join(base, "home")
+	proj := filepath.Join(home, "proj")
+
+	if err := os.MkdirAll(filepath.Join(proj, ".git"), 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	// A same-named USER agent: if the dangling project source were skipped,
+	// this is what would silently run instead.
+	writeAgent(t, filepath.Join(home, ".cynative", "agents"), "shared-name")
+
+	if err := os.Symlink("nonexistent-target", filepath.Join(proj, ".cynative")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, cleanup, err := agentcatalog.OpenSources(proj, home, os.DirFS(base))
+	if err == nil {
+		cleanup()
+		t.Fatal("OpenSources() = nil error, want a dangling project symlink to fail closed")
+	}
+}
+
+// A stray FILE at .cynative/agents is not a claimed source: it is junk, not a
+// broken agents directory, so the search moves on rather than failing.
+func TestOpenSources_StrayFileAtAgentsPathIsNotClaimed(t *testing.T) {
+	base := realPath(t, t.TempDir())
+	home := filepath.Join(base, "home")
+	proj := filepath.Join(home, "proj")
+
+	if err := os.MkdirAll(filepath.Join(proj, ".cynative"), 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".cynative", "agents"), []byte("junk"), 0o600); err != nil {
+		t.Fatalf("WriteFile = %v", err)
+	}
+	writeAgent(t, filepath.Join(home, ".cynative", "agents"), "user-agent")
+
+	c, cleanup, err := agentcatalog.OpenSources(proj, home, os.DirFS(base))
+	if err != nil {
+		t.Fatalf("OpenSources() = %v, want a stray file to be ignored", err)
+	}
+	defer cleanup()
+
+	def, rerr := c.Resolve("user-agent")
+	if rerr != nil {
+		t.Fatalf("Resolve() = %v", rerr)
+	}
+	if def.Source != agentcatalog.SourceUser {
+		t.Fatalf("Source = %v, want SourceUser", def.Source)
+	}
+}
+
+// A .cynative symlink to a REAL directory that happens to hold no agents/ is
+// not a claimed source, so the search moves on cleanly.
+//
+// This is the false positive the dangling-symlink fix could have introduced:
+// treating any symlinked .cynative as claimed would hard-fail every --agent run
+// in a project that uses .cynative for something else.
+func TestOpenSources_ContainedSymlinkWithoutAgentsIsNotClaimed(t *testing.T) {
+	base := realPath(t, t.TempDir())
+	home := filepath.Join(base, "home")
+	proj := filepath.Join(home, "proj")
+
+	if err := os.MkdirAll(filepath.Join(proj, "other"), 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(proj, ".git"), 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	writeAgent(t, filepath.Join(home, ".cynative", "agents"), "user-agent")
+
+	if err := os.Symlink("other", filepath.Join(proj, ".cynative")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	c, cleanup, err := agentcatalog.OpenSources(proj, home, os.DirFS(base))
+	if err != nil {
+		t.Fatalf("OpenSources() = %v, want a .cynative without agents/ to be skipped", err)
+	}
+	defer cleanup()
+
+	def, rerr := c.Resolve("user-agent")
+	if rerr != nil {
+		t.Fatalf("Resolve() = %v", rerr)
+	}
+	if def.Source != agentcatalog.SourceUser {
+		t.Fatalf("Source = %v, want SourceUser", def.Source)
+	}
+}

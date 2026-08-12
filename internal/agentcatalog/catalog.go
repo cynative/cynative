@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"path"
+	"path/filepath"
 	"sort"
 )
 
@@ -143,7 +143,7 @@ func entryFor(r Root, name string, shadowed bool) Entry {
 	e := Entry{ //nolint:exhaustruct // Description and Err are set below.
 		Name:     name,
 		Source:   r.Source,
-		Path:     path.Join(r.DisplayPath, name+mdExt),
+		Path:     filepath.Join(r.DisplayPath, name+mdExt),
 		Shadowed: shadowed,
 	}
 
@@ -232,11 +232,11 @@ func readFrom(r Root, name string) (Definition, bool, error) {
 
 	def, err := Parse(name, raw)
 	if err != nil {
-		return Definition{}, false, fmt.Errorf("%s: %w", path.Join(r.DisplayPath, filename), err)
+		return Definition{}, false, fmt.Errorf("%s: %w", filepath.Join(r.DisplayPath, filename), err)
 	}
 
 	def.Source = r.Source
-	def.Path = path.Join(r.DisplayPath, filename)
+	def.Path = filepath.Join(r.DisplayPath, filename)
 
 	return def, true, nil
 }
@@ -265,7 +265,7 @@ func hasEntry(entries []fs.DirEntry, filename string) bool {
 // SOURCE that cannot be enumerated is different and stays an enumeration error,
 // because it says nothing about any particular candidate.
 func readCandidate(r Root, filename string) ([]byte, error) {
-	display := path.Join(r.DisplayPath, filename)
+	display := filepath.Join(r.DisplayPath, filename)
 
 	info, err := fs.Lstat(r.FS, filename)
 	if err != nil {

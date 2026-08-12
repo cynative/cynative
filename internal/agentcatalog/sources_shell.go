@@ -12,7 +12,15 @@ import (
 // agentsRelPath is the agents directory relative to a project or home
 // directory. It is opened as ONE multi-component name through an already-open
 // root, never as a nested root per component: see openAgentsRoot.
-const agentsRelPath = ".cynative/agents"
+const agentsRelPath = agentsParentDir + "/" + agentsChildDir
+
+// The two components of agentsRelPath, checked separately: an intermediate
+// dangling symlink hides everything beneath it from Lstat, so the parent has to
+// be probed on its own.
+const (
+	agentsParentDir = ".cynative"
+	agentsChildDir  = "agents"
+)
 
 // builtinSubdir is the embedded directory holding the built-in agents.
 const builtinSubdir = "agents"
@@ -38,13 +46,13 @@ func OpenSources(cwd, home string, builtin fs.FS) (*Catalog, func(), error) {
 		return nil, nil, err
 	}
 
-	if err = opened.add(SourceProject, projectDir); err != nil {
+	if err = opened.add(SourceProject, projectDir, true); err != nil {
 		opened.closeAll()
 
 		return nil, nil, err
 	}
 
-	if err = opened.add(SourceUser, home); err != nil {
+	if err = opened.add(SourceUser, home, false); err != nil {
 		opened.closeAll()
 
 		return nil, nil, err
@@ -71,9 +79,15 @@ type openedRoots struct {
 	handles []*os.Root
 }
 
-// add opens dir's agents directory and appends it as a root. An empty dir or an
-// absent directory is skipped silently; every other failure is returned.
-func (o *openedRoots) add(source Source, dir string) error {
+// add opens dir's agents directory and appends it as a root.
+//
+// mustExist marks a source the caller already established is CLAIMED. For such a
+// source, "not there" is a contradiction rather than a skip: findProjectDir only
+// returns a directory whose .cynative/agents entry exists, so a subsequent
+// not-found means the entry is there but unusable — a dangling symlink, most
+// likely. Skipping it would run a lower-precedence agent under a name the
+// project meant to define.
+func (o *openedRoots) add(source Source, dir string, mustExist bool) error {
 	if dir == "" {
 		return nil
 	}
@@ -83,6 +97,10 @@ func (o *openedRoots) add(source Source, dir string) error {
 		return err
 	}
 	if !ok {
+		if mustExist {
+			return fmt.Errorf("%s/%s was claimed but could not be opened", dir, agentsRelPath)
+		}
+
 		return nil
 	}
 
@@ -124,19 +142,70 @@ func findProjectDir(cwd, home string) (string, error) {
 	return "", nil
 }
 
-// hasAgentsDir reports whether dir holds a .cynative/agents directory. A
-// non-directory at that path is treated as absent, not as an error: it is a
-// stray file, not a claimed source.
+// hasAgentsDir reports whether dir CLAIMS a .cynative/agents source.
+//
+// The two path components are probed separately because an intermediate
+// dangling symlink hides everything beneath it: a stat of the full path would
+// report ErrNotExist, the claimed project source would be silently skipped, and
+// a same-named user or built-in agent would run in its place — exactly the
+// substitution the precedence rules exist to prevent.
 func hasAgentsDir(dir string) (bool, error) {
-	info, err := os.Stat(filepath.Join(dir, agentsRelPath))
-	if err == nil {
-		return info.IsDir(), nil
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
+	parent := filepath.Join(dir, agentsParentDir)
+
+	ok, err := parentUsable(parent)
+	if err != nil || !ok {
+		return false, err
 	}
 
-	return false, fmt.Errorf("stat agents dir under %s: %w", dir, err)
+	return childClaims(filepath.Join(parent, agentsChildDir))
+}
+
+// parentUsable reports whether the .cynative entry exists AND resolves. A
+// present-but-dangling one is an error, not an absence.
+func parentUsable(parent string) (bool, error) {
+	present, err := entryExists(parent)
+	if err != nil || !present {
+		return false, err
+	}
+
+	if _, serr := os.Stat(parent); serr != nil {
+		if errors.Is(serr, fs.ErrNotExist) {
+			return false, fmt.Errorf("%s is a broken symlink", parent)
+		}
+
+		return false, fmt.Errorf("stat %s: %w", parent, serr)
+	}
+
+	return true, nil
+}
+
+// childClaims reports whether the agents entry claims a source. Lstat, not
+// Stat: a symlink claims whatever its target turns out to be.
+func childClaims(agents string) (bool, error) {
+	info, err := os.Lstat(agents)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("stat %s: %w", agents, err)
+	}
+
+	return ClaimsSource(info.Mode()), nil
+}
+
+// entryExists reports whether p exists as a directory entry, without following
+// it if it is a symlink.
+func entryExists(p string) (bool, error) {
+	if _, err := os.Lstat(p); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+
+		return false, fmt.Errorf("lstat %s: %w", p, err)
+	}
+
+	return true, nil
 }
 
 // hasGitMarker reports whether dir holds a .git file or directory. A worktree
