@@ -192,9 +192,7 @@ configuration reference.
 
 `cynative` opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
 
-**Named agents:** an agent is a markdown file, a one-line description plus a prompt body, that supplies the instructions for a run. A recurring investigation
-becomes an artifact you can version and review instead of a block of text pasted into each call site. The filename is
-the name, and `--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin.
+**Named agents:** an agent is a markdown file, a one-line description plus a prompt body, that supplies the instructions for a run. A recurring investigation becomes an artifact you can version and review instead of a block of text pasted into each call site. The filename is the name, and `--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin.
 
 ```bash
 cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
@@ -202,15 +200,13 @@ cynative -p --agent aws-public-data-stores                    # without
 cynative --agent aws-public-data-stores                       # seeds an interactive session
 ```
 
-To add your own agent, create `~/.cynative/agents/` and write a markdown file in it. Cynative will not create this directory for you:
+To add your own agent, create `~/.cynative/agents/` and write a markdown file in it. Cynative does not create this directory for you:
 
 ```bash
 mkdir -p ~/.cynative/agents
 ```
 
-Agents are read from there and from the set built into the binary; a user file wins over a built-in of the same name. `cynative agents list` shows every agent
-with its source and marks the shadowed copies, and `cynative agents show <name>` prints the exact file that would run. See [docs/agents.md](docs/agents.md) for
-the file format.
+Agents are read from there and from the set built into the binary; a user file wins over a built-in of the same name. `cynative agents list` shows every agent with its source and marks the shadowed copies, and `cynative agents show <name>` prints the exact file that would run. See [docs/agents.md](docs/agents.md) for the file format.
 
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 
