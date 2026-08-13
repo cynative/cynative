@@ -26,7 +26,7 @@ func agentMapFS(name, desc, body string) fstest.MapFS {
 func catalogOver(fsys fstest.MapFS) func() (*agentcatalog.Catalog, func(), error) {
 	return func() (*agentcatalog.Catalog, func(), error) {
 		return agentcatalog.New(agentcatalog.Root{
-			Source: agentcatalog.SourceProject, FS: fsys, DisplayPath: "/p/.cynative/agents",
+			Source: agentcatalog.SourceUser, FS: fsys, DisplayPath: "/home/u/.cynative/agents",
 		}), func() {}, nil
 	}
 }
@@ -172,8 +172,8 @@ func TestRenderAgentProvenance(t *testing.T) {
 
 	sel := &agentSelection{Def: agentcatalog.Definition{ //nolint:exhaustruct // only rendered fields matter.
 		Name:   "pub\x1b[31mexposure",
-		Source: agentcatalog.SourceProject,
-		Path:   "/p/.cynative/agents/a.md",
+		Source: agentcatalog.SourceUser,
+		Path:   "/home/u/.cynative/agents/a.md",
 	}}
 
 	renderAgentProvenance(&buf, sel)
@@ -182,7 +182,7 @@ func TestRenderAgentProvenance(t *testing.T) {
 	if strings.Contains(out, "\x1b") {
 		t.Fatalf("provenance line carries a terminal escape: %q", out)
 	}
-	if !strings.Contains(out, "project") || !strings.Contains(out, "/p/.cynative/agents/a.md") {
+	if !strings.Contains(out, "user") || !strings.Contains(out, "/home/u/.cynative/agents/a.md") {
 		t.Fatalf("provenance line = %q, want the tier and path", out)
 	}
 }
@@ -260,9 +260,9 @@ func TestRunRoot_ComposesAndCleansUp(t *testing.T) {
 	d.agentFlagChanged = true
 	d.openAgentCatalog = func() (*agentcatalog.Catalog, func(), error) {
 		return agentcatalog.New(agentcatalog.Root{
-			Source:      agentcatalog.SourceProject,
+			Source:      agentcatalog.SourceUser,
 			FS:          agentMapFS("a", "desc", "body"),
-			DisplayPath: "/p/.cynative/agents",
+			DisplayPath: "/home/u/.cynative/agents",
 		}), func() { cleaned = true }, nil
 	}
 
@@ -357,7 +357,9 @@ func TestAnnotateResolveError_NamesFailureReturnsOriginal(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(agentcatalog.Root{
-		Source: agentcatalog.SourceProject, FS: failReadDirFS{}, DisplayPath: "/p", //nolint:exhaustruct // empty MapFS.
+		Source:      agentcatalog.SourceUser,
+		FS:          failReadDirFS{},
+		DisplayPath: "/home/u/.cynative/agents", //nolint:exhaustruct // empty MapFS.
 	})
 
 	got := annotateResolveError(agentcatalog.ErrAgentNotFound, c)
@@ -374,7 +376,7 @@ func TestAnnotateResolveError_EmptyNamesAddsNoSuffix(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(agentcatalog.Root{
-		Source: agentcatalog.SourceProject, FS: fstest.MapFS{}, DisplayPath: "/p",
+		Source: agentcatalog.SourceUser, FS: fstest.MapFS{}, DisplayPath: "/home/u/.cynative/agents",
 	})
 
 	got := annotateResolveError(agentcatalog.ErrAgentNotFound, c)
@@ -389,7 +391,7 @@ func TestAnnotateResolveError_NonNotFoundPassesThrough(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(agentcatalog.Root{
-		Source: agentcatalog.SourceProject, FS: agentMapFS("known", "d", "b"), DisplayPath: "/p",
+		Source: agentcatalog.SourceUser, FS: agentMapFS("known", "d", "b"), DisplayPath: "/home/u/.cynative/agents",
 	})
 
 	got := annotateResolveError(agentcatalog.ErrAgentInvalid, c)
@@ -420,8 +422,8 @@ func TestRunResearch_RendersProvenanceAndStampsAudit(t *testing.T) {
 		Task: "composed",
 		Agent: &agentSelection{Def: agentcatalog.Definition{ //nolint:exhaustruct // only stamped fields matter.
 			Name:   "a",
-			Source: agentcatalog.SourceProject,
-			Path:   "/p/.cynative/agents/a.md",
+			Source: agentcatalog.SourceUser,
+			Path:   "/home/u/.cynative/agents/a.md",
 			Raw:    raw,
 		}},
 	}
@@ -439,8 +441,8 @@ func TestRunResearch_RendersProvenanceAndStampsAudit(t *testing.T) {
 	}
 
 	sum := sha256.Sum256(raw)
-	if gotProv.SHA256 != hex.EncodeToString(sum[:]) || gotProv.Source != "project" {
-		t.Errorf("provenance = %+v, want the raw-bytes digest and the project tier", gotProv)
+	if gotProv.SHA256 != hex.EncodeToString(sum[:]) || gotProv.Source != "user" {
+		t.Errorf("provenance = %+v, want the raw-bytes digest and the user tier", gotProv)
 	}
 }
 
@@ -477,7 +479,7 @@ func TestSelectAgent_AnnotatesBeforeReleasingTheCatalog(t *testing.T) {
 		fsys := closableFS{MapFS: agentMapFS("known", "d", "body"), closed: &closed}
 
 		return agentcatalog.New(agentcatalog.Root{
-			Source: agentcatalog.SourceProject, FS: fsys, DisplayPath: "/p",
+			Source: agentcatalog.SourceUser, FS: fsys, DisplayPath: "/home/u/.cynative/agents",
 		}), func() { closed = true }, nil
 	}
 

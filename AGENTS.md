@@ -716,40 +716,42 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   code so a caller can tell a permanent 404/410 from a retryable miss).
 
 - **`internal/agentcatalog`**: resolves named markdown agent files and composes them into
-  the prompt for a run (`--agent`). Three sources, first match wins: `.cynative/agents/`
-  (nearest walking up from cwd), `~/.cynative/agents/`, and the built-ins embedded from
-  `agents/` at the repo root. `New` is pure and owns no OS handles; the shell entry point
-  `OpenSources(cwd, home, builtin)` returns the catalog plus the cleanup that closes its
-  retained `*os.Root` handles, and the CLI's `runRoot` is the sole owner of that cleanup.
-  Invariants:
-  - **The project search is bounded by the git root and stops before `$HOME`.** Walking to
-    the filesystem root would find `~/.cynative/agents` and classify it as the *project*
-    tier, collapsing the user tier into it for anyone working under their home directory.
-    `ProjectSearchPath` is pure core with an injected marker probe returning `(bool, error)`,
-    so a permission failure is not read as "no marker here"; both inputs must be
-    `filepath.EvalSymlinks`-resolved by the caller, since `os.Getwd` and `os.UserHomeDir`
-    can spell one physical directory two ways.
+  the prompt for a run (`--agent`). Two sources, first match wins: `~/.cynative/agents/`
+  and the built-ins embedded from `agents/` at the repo root. `New` is pure and owns no
+  OS handles; the shell entry point `OpenSources(home, builtin)` returns the catalog plus
+  the cleanup that closes its retained `*os.Root` handles, and the CLI's `runRoot` is the
+  sole owner of that cleanup. Invariants:
+  - **The working directory is never a source.** An agent supplies the prompt for a run,
+    which makes it operator-authored configuration, so reading one from a checkout would
+    mean cloning a repository could change what cynative does with the operator's
+    credentials. There is deliberately no project tier and no cwd parameter.
   - **The agents directory is opened as ONE multi-component name through a root at the
-    project boundary** (`boundary.OpenRoot(".cynative/agents")`). `os.OpenRoot` resolves
+    home directory** (`boundary.OpenRoot(".cynative/agents")`). `os.OpenRoot` resolves
     symlinks in the path it is *given*, so opening the agents path directly follows an
-    escaping symlink straight out of the project. Nesting a second root at `.cynative`
-    would be weaker still: a contained `.cynative` symlink would confine `agents` to the
-    symlink's target rather than to the project. Contained directory symlinks are permitted
-    (a monorepo may share one agents directory); the agent **file** must be a regular
+    escaping symlink straight out. Nesting a second root at `.cynative` would be weaker
+    still: a contained `.cynative` symlink would confine `agents` to the symlink's target
+    rather than to home. Contained directory symlinks are permitted (an operator may point
+    `~/.cynative` at a dotfiles directory); the agent **file** must be a regular
     non-symlink, since its bytes enter the prompt.
+  - **A claimed source that cannot be opened is an error, not a skip.** `hasAgentsDir`
+    probes `.cynative` and `agents` separately, because an intermediate dangling symlink
+    hides everything beneath it from a stat of the full path; a `.cynative` that is a
+    regular file is an absent source, since a file cannot hold an agents entry and
+    treating it as claimed made the child lookup fail with ENOTDIR and took the built-in
+    tier down with it.
   - **Resolution fails closed.** Only a missing directory or a missing entry falls through
-    to a lower source. A claimed-but-unusable candidate (escaping symlink, symlinked or
+    to the built-in tier. A claimed-but-unusable candidate (escaping symlink, symlinked or
     non-regular file, unreadable, oversized, malformed) is an error wrapping
-    `ErrAgentInvalid`, so a typo in a project agent surfaces instead of silently running a
-    different agent of the same name from a lower tier. `openAgentsRoot` propagates every
-    error except `fs.ErrNotExist` for the same reason.
+    `ErrAgentInvalid`, so a typo in a user agent surfaces instead of silently running a
+    built-in of the same name.
   - **Frontmatter is a closed schema**: exactly one YAML document, one untagged mapping,
     the sole key `description` as a non-empty single-line `!!str` scalar. The tag checks are
     load-bearing because yaml.v3 coerces `description: 123` into `"123"` even under
     `KnownFields(true)`, and the exactly-one-pair check is what rejects duplicate keys and
-    defined aliases, since decoding into a `yaml.Node` reports neither. A `---` line after
-    the closing fence is body, not a second document. `FuzzParse` pins the fail-closed
-    contract.
+    defined aliases, since decoding into a `yaml.Node` reports neither. Single-line covers
+    U+2028/U+2029, which a renderer that honours them would use to break out of an
+    `agents list` row. A `---` line after the closing fence is body, not a second document.
+    `FuzzParse` pins the fail-closed contract.
   - `Compose` emits its three labels unconditionally, so a composed task is never empty.
     The CLI's bare-session `Welcome` skip depends on that and on nothing else.
 

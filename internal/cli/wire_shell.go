@@ -117,24 +117,19 @@ func newAuditSinkShell(cfg config.Config, prov *audit.AgentProvenance) (audit.Si
 	return audit.New(w, opts...), w.Close, nil
 }
 
-// openAgentCatalogShell builds the production agent catalog. Both paths are
-// resolved through [filepath.EvalSymlinks], and resolved the SAME way, or the
-// home boundary in agentcatalog.ProjectSearchPath cannot be enforced:
-// [os.Getwd] and [os.UserHomeDir] can spell one physical directory two ways,
-// which would let a physical-home dotfiles repository re-enter ~/.cynative as
-// the project tier.
+// openAgentCatalogShell builds the production agent catalog from the operator's
+// home directory and the embedded built-ins.
+//
+// The working directory is deliberately not consulted: agents are
+// operator-authored configuration, so a checkout must not be able to supply the
+// prompt for a run.
 func openAgentCatalogShell() (*agentcatalog.Catalog, func(), error) {
-	cwd, err := resolveDir(os.Getwd)
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolve working directory: %w", err)
-	}
-
 	home, err := resolveHomeDir()
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve home directory: %w", err)
 	}
 
-	return agentcatalog.OpenSources(cwd, home, cynative.BuiltinAgents())
+	return agentcatalog.OpenSources(home, cynative.BuiltinAgents())
 }
 
 // resolveDir returns get()'s directory with symlinks resolved.
@@ -152,10 +147,9 @@ func resolveDir(get func() (string, error)) (string, error) {
 //
 // A minimal container can set an absolute $HOME that was never created. Failing
 // here would abort the whole catalog, so even `cynative agents list` could not
-// inspect the project and built-in tiers. An unresolvable home is returned
-// cleaned-and-absolute instead: OpenSources then finds no user agents directory
-// and skips that tier, and the search boundary still holds because no existing
-// working directory can sit inside a directory that does not exist.
+// inspect the built-in tier. An unresolvable home is returned cleaned-and-
+// absolute instead: OpenSources then finds no user agents directory and skips
+// that tier.
 func resolveHomeDir() (string, error) {
 	home, err := resolveDir(os.UserHomeDir)
 	if err == nil {

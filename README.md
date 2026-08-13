@@ -200,7 +200,7 @@ cynative -p --agent aws-public-data-stores                    # without
 cynative --agent aws-public-data-stores                       # seeds an interactive session
 ```
 
-Agents are read from `.cynative/agents/` in your repository, then `~/.cynative/agents/`, then the ones built into the binary; the first match wins. `cynative agents list` shows what is available and which copies are shadowed, and `cynative agents show <name>` prints the file that would run. See [docs/agents.md](docs/agents.md) for the file format and the trust boundary for repository-supplied agents.
+Agents are read from `~/.cynative/agents/` and the ones built into the binary, in that order. The working directory is never consulted: an agent supplies the prompt for a run, so cloning a repository must not change what cynative does with your credentials. `cynative agents list` shows what is available and which copies are shadowed, and `cynative agents show <name>` prints the file that would run. See [docs/agents.md](docs/agents.md) for the file format.
 
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 

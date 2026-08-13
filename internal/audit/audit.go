@@ -21,7 +21,7 @@ import (
 // Source is a string, not the catalog's Source enum, for two reasons: this
 // package is a leaf and must not import internal/agentcatalog, and an integer
 // enum would be an unstable value to write into a forensic log. Valid values
-// are "project", "user" and "builtin".
+// are "user" and "builtin".
 //
 // The agent BODY is never logged; SHA256 over the exact raw file bytes is what
 // ties a record back to a specific file revision.

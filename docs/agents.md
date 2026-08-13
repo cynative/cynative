@@ -34,8 +34,9 @@ starting or ending with a hyphen. Windows reserved device names (`con`, `nul`,
 whose only key is `description`, a single-line non-empty string of at most 256
 bytes. Single-line is enforced against Unicode line and paragraph separators
 (U+2028, U+2029) as well as ordinary control characters, since a renderer that
-honours them would let a description break out of its `agents list` row. Unknown keys, duplicate keys, aliases, merge keys, custom tags and
-multiple documents are all rejected.
+honours them would let a description break out of its `agents list` row. Unknown
+keys, duplicate keys, aliases, merge keys, custom tags and multiple documents
+are all rejected.
 
 That strictness is deliberate. A frontmatter key cynative does not understand,
 such as a `model:` or `tools:` override, fails loudly rather than being silently
@@ -50,55 +51,52 @@ frontmatter block.
 
 ## Where agents come from
 
-Three sources, searched in order, first match wins:
+Two sources, searched in order, first match wins:
 
 | Precedence | Source | Location |
 | --- | --- | --- |
-| 1 | project | `.cynative/agents/`, nearest walking up from the working directory |
-| 2 | user | `~/.cynative/agents/` |
-| 3 | built-in | embedded in the binary |
+| 1 | user | `~/.cynative/agents/` |
+| 2 | built-in | embedded in the binary |
 
-**The project search is bounded by the repository root.** It walks up from the
-working directory to the nearest directory containing `.git`, and stops there.
-It never reaches your home directory, so `~/.cynative/agents` is always the
-*user* tier even if your home directory is itself a git repository. Without that
-bound the two tiers would collapse into one for anyone working under `$HOME`.
+**The working directory is never consulted.** An agent supplies the prompt for a
+run, which makes it operator-authored configuration rather than project content.
+Reading agents from a checkout would mean cloning a repository was enough to
+change what cynative does on your credentials, so cynative does not do it. A
+`.cynative/agents/` directory inside a repository is ignored.
 
-Only the nearest project directory is a source. A `.cynative/agents` further up
-the tree is invisible; a name missing from the nearest one falls through to the
-user and built-in tiers, never sideways.
+To share an agent with a team, commit it wherever you like and have people copy
+it into `~/.cynative/agents/` deliberately.
 
-**Cynative never creates these directories.** To add your own agents:
+**Cynative never creates the directory.** To add your own agents:
 
 ```bash
 mkdir -p ~/.cynative/agents
 ```
 
-`--config` does not move the user agents directory. It is always
-`~/.cynative/agents`.
+`--config` does not move it. It is always `~/.cynative/agents`.
 
 ### Shadowing
 
-When two sources define the same name, the higher-precedence one wins and
+A user agent takes precedence over a built-in of the same name, and
 `cynative agents list` marks the loser:
 
 ```
 NAME    DESCRIPTION                 SOURCE   STATUS
-alpha   The project copy of alpha.  project  active
-alpha   The user copy of alpha.     user     shadowed by project
-beta    A user-only agent.          user     active
-broken                              project  invalid (blocking)
+alpha   Your copy of alpha.         user     active
+alpha   The built-in alpha.         builtin  shadowed by user
+beta    A built-in agent.           builtin  active
+broken                              user     invalid (blocking)
 ```
 
 A file that is found but unusable — malformed, unreadable, oversized, a symlink,
 or not a regular file — is `invalid (blocking)`. It still *claims* the name, so
 nothing else answers to it and the run fails with an error naming the file.
-Resolution never falls through to a lower tier in that case: a typo in your
-project agent must fail loudly rather than silently run a different agent that
-happens to share the name.
+Resolution never falls through to the built-in in that case: a typo in your own
+agent must fail loudly rather than silently run a different one that happens to
+share the name.
 
-There is no way to address a built-in that a user agent shadows. Rename the
-user file.
+There is no way to address a built-in that a user agent shadows. Rename your
+file.
 
 ## What the model receives
 
@@ -160,7 +158,7 @@ cynative agents show <name>   # the exact file --agent <name> would run
 ```
 
 `agents show` writes the file bytes to stdout and the source path to stderr, so
-this copies an agent you want to edit:
+this copies a built-in you want to customize:
 
 ```bash
 cynative agents show aws-public-data-stores > ~/.cynative/agents/my-version.md
@@ -172,27 +170,25 @@ support shell completion for agent names.
 
 ## Trust
 
-A project-local agent is text from a repository, and you may not have written
-it. Running `--agent x` from a checkout runs instructions that checkout supplied.
+Agents come only from your own home directory and the binary, so an agent is
+something you installed. There is no path by which a repository, a working
+directory, or the model itself can introduce one: selection is always explicit
+by name, and cynative never chooses an agent on its own.
 
-What a hostile agent file **can** do: redirect or broaden the investigation
-within what your credentials already allow. That is a scope-discipline risk, and
-it is the reason the provenance line is printed on every run:
+An agent still cannot exceed what your credentials already allow. Approval
+prompts, the connector authorizers and the read-only ceilings are enforced by the
+host on every request, not by the prompt, so no agent file can grant itself
+access you do not have.
+
+Every run prints which file it used, which is worth a glance when you have agents
+you did not write recently:
 
 ```
-Agent: aws-public-data-stores  [project: /repo/.cynative/agents/aws-public-data-stores.md]
+Agent: aws-public-data-stores  [user: /home/you/.cynative/agents/aws-public-data-stores.md]
 ```
 
-Check it when you are working in an unfamiliar repository. `cynative agents list`
-shows the same information ahead of time.
+`cynative agents list` shows the same information ahead of time, and every
+audited tool call records the agent's name, source and file digest.
 
-What it **cannot** do: bypass approval prompts, the connector authorizers, or
-the read-only ceilings. Those are enforced by the host on every request, not by
-the prompt. An agent file cannot grant itself access your credentials do not
-have.
-
-Supporting controls: agents are only ever run when you name one explicitly,
-never chosen by the model; the project search is bounded by the repository root;
-directory traversal is confined so a symlink cannot escape the project; agent
-files themselves must be regular files, not symlinks; and every audited tool call
-records which agent framed it, by name, source and file digest.
+Treat an agent file you did not write like any other configuration you are about
+to run: read it first. `cynative agents show <name>` prints it exactly.

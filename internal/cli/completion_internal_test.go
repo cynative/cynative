@@ -97,7 +97,7 @@ func TestCompleteAgentNames_FailsQuietly(t *testing.T) {
 			setup: func(d *deps) {
 				d.openAgentCatalog = func() (*agentcatalog.Catalog, func(), error) {
 					return agentcatalog.New(agentcatalog.Root{
-						Source: agentcatalog.SourceProject, FS: failReadDirFS{}, DisplayPath: "/p",
+						Source: agentcatalog.SourceUser, FS: failReadDirFS{}, DisplayPath: "/home/u/.cynative/agents",
 					}), func() {}, nil
 				}
 			},

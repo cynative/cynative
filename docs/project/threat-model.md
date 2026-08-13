@@ -23,10 +23,6 @@ credentials the operator supplies.
    filesystem or packages.
 3. **Agent to provider** - credentials attach only after the gate
    authorizes and the host and resolved IP are verified.
-4. **Repository to prompt** - a project-local agent file
-   (`.cynative/agents/`) is text the operator may not have written. It is
-   run only when named explicitly, never chosen by the model.
-
 The model never holds credentials and never chooses the policy, so it
 cannot move any of these lines.
 
@@ -46,17 +42,12 @@ cannot move any of these lines.
   process; scripts run in the JS sandbox.
 - **Request redirection** - hosts pinned, resolved IP verified before
   connect.
-- **Hostile project agent** - a `.cynative/agents/` file from an untrusted
-  checkout can redirect or broaden an investigation within what the
-  operator's credentials already allow. It is a scope-discipline risk, not
-  a credential-boundary bypass: approvals, the connector authorizers and
-  the read-only ceilings are host-enforced per request and no prompt can
-  widen them. Countered by explicit invocation by name, a provenance line
-  naming the winning file on every run, a project search bounded by the
-  repository root that never reaches `$HOME`, directory traversal confined
-  to the project so a symlink cannot escape it, a regular-file requirement
-  on the agent file itself, and an audit record on every tool call carrying
-  the agent's name, source and file digest.
+- **Repository-supplied prompts** - agents are read only from
+  `~/.cynative/agents/` and the binary, never from the working directory,
+  so cloning a repository cannot change what cynative does with the
+  operator's credentials. Selection is always explicit by name and the
+  model never chooses an agent. Every audited tool call records the
+  agent's name, source and file digest.
 - **Credential leakage** - no credential store; secrets are redacted from
   tool results and the audit log, which is readable only by the running
   user.

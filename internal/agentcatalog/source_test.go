@@ -14,7 +14,6 @@ func TestSourceString(t *testing.T) {
 		in   agentcatalog.Source
 		want string
 	}{
-		{"project", agentcatalog.SourceProject, "project"},
 		{"user", agentcatalog.SourceUser, "user"},
 		{"builtin", agentcatalog.SourceBuiltin, "builtin"},
 		{"out of range", agentcatalog.Source(99), "unknown"},

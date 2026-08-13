@@ -21,10 +21,6 @@ func brokenFile() *fstest.MapFile {
 	return &fstest.MapFile{Data: []byte("no frontmatter")} //nolint:exhaustruct // Mode/ModTime default.
 }
 
-func projectRoot(fsys fs.FS) agentcatalog.Root {
-	return agentcatalog.Root{Source: agentcatalog.SourceProject, FS: fsys, DisplayPath: "/proj/.cynative/agents"}
-}
-
 func userRoot(fsys fs.FS) agentcatalog.Root {
 	return agentcatalog.Root{Source: agentcatalog.SourceUser, FS: fsys, DisplayPath: "/home/u/.cynative/agents"}
 }
@@ -37,7 +33,6 @@ func TestResolve_FirstMatchWins(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(
-		projectRoot(fstest.MapFS{"a.md": agentFile("project copy", "P")}),
 		userRoot(fstest.MapFS{"a.md": agentFile("user copy", "U")}),
 		builtinRoot(fstest.MapFS{"a.md": agentFile("builtin copy", "B")}),
 	)
@@ -46,13 +41,13 @@ func TestResolve_FirstMatchWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() = %v", err)
 	}
-	if def.Description != "project copy" {
-		t.Errorf("Description = %q, want the project copy", def.Description)
+	if def.Description != "user copy" {
+		t.Errorf("Description = %q, want the user copy", def.Description)
 	}
-	if def.Source != agentcatalog.SourceProject {
-		t.Errorf("Source = %v, want SourceProject", def.Source)
+	if def.Source != agentcatalog.SourceUser {
+		t.Errorf("Source = %v, want SourceUser", def.Source)
 	}
-	if def.Path != "/proj/.cynative/agents/a.md" {
+	if def.Path != "/home/u/.cynative/agents/a.md" {
 		t.Errorf("Path = %q", def.Path)
 	}
 }
@@ -61,7 +56,6 @@ func TestResolve_FallsThroughMissingNameAndMissingDir(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(
-		projectRoot(fstest.MapFS{}),
 		userRoot(fstest.MapFS{"other.md": agentFile("d", "b")}),
 		builtinRoot(fstest.MapFS{"a.md": agentFile("builtin copy", "B")}),
 	)
@@ -78,7 +72,7 @@ func TestResolve_FallsThroughMissingNameAndMissingDir(t *testing.T) {
 func TestResolve_NotFoundIsSentinel(t *testing.T) {
 	t.Parallel()
 
-	c := agentcatalog.New(projectRoot(fstest.MapFS{}))
+	c := agentcatalog.New(userRoot(fstest.MapFS{}))
 
 	_, err := c.Resolve("nope")
 	if !errors.Is(err, agentcatalog.ErrAgentNotFound) {
@@ -91,7 +85,7 @@ func TestResolve_RejectsBadNameBeforeAnyFilesystemAccess(t *testing.T) {
 
 	//nolint:exhaustruct // only ReadDir fails.
 	fsys := faultFS{failReadDir: errors.New("ReadDir must not be reached for an invalid name")}
-	c := agentcatalog.New(projectRoot(fsys))
+	c := agentcatalog.New(userRoot(fsys))
 
 	if _, err := c.Resolve("../etc/passwd"); !errors.Is(err, agentcatalog.ErrAgentName) {
 		t.Fatalf("Resolve() error = %v, want ErrAgentName", err)
@@ -99,13 +93,13 @@ func TestResolve_RejectsBadNameBeforeAnyFilesystemAccess(t *testing.T) {
 }
 
 // A malformed higher-precedence file must NOT fall through to a valid lower
-// one: a typo in a project agent has to fail loudly, not silently run a
+// one: a typo in a user agent has to fail loudly, not silently run a
 // different agent.
 func TestResolve_MalformedWinnerBlocks(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(
-		projectRoot(fstest.MapFS{"a.md": brokenFile()}),
+		userRoot(fstest.MapFS{"a.md": brokenFile()}),
 		builtinRoot(fstest.MapFS{"a.md": agentFile("builtin copy", "B")}),
 	)
 
@@ -136,7 +130,7 @@ func TestResolve_RejectsSymlinkAndNonRegular(t *testing.T) {
 				Mode: tc.mode,
 			}}
 
-			_, err := agentcatalog.New(projectRoot(fsys)).Resolve("a")
+			_, err := agentcatalog.New(userRoot(fsys)).Resolve("a")
 			if !errors.Is(err, agentcatalog.ErrAgentInvalid) {
 				t.Fatalf("Resolve() error = %v, want ErrAgentInvalid", err)
 			}
@@ -153,7 +147,7 @@ func TestResolve_RejectsOversizedFile(t *testing.T) {
 	}
 	fsys := fstest.MapFS{"a.md": {Data: big}} //nolint:exhaustruct // Mode defaults.
 
-	_, err := agentcatalog.New(projectRoot(fsys)).Resolve("a")
+	_, err := agentcatalog.New(userRoot(fsys)).Resolve("a")
 	if !errors.Is(err, agentcatalog.ErrAgentInvalid) {
 		t.Fatalf("Resolve() error = %v, want ErrAgentInvalid", err)
 	}
@@ -184,7 +178,7 @@ func TestResolve_PropagatesFilesystemFailures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := agentcatalog.New(projectRoot(tc.fsys)).Resolve("a")
+			_, err := agentcatalog.New(userRoot(tc.fsys)).Resolve("a")
 			if err == nil {
 				t.Fatal("Resolve() = nil error, want the filesystem failure surfaced")
 			}
@@ -206,7 +200,7 @@ func TestResolve_MissingDirectoryFallsThrough(t *testing.T) {
 	notExist := faultFS{MapFS: fstest.MapFS{}, failReadDir: fs.ErrNotExist} //nolint:exhaustruct // one fault.
 
 	c := agentcatalog.New(
-		projectRoot(notExist),
+		userRoot(notExist),
 		builtinRoot(fstest.MapFS{"a.md": agentFile("builtin copy", "B")}),
 	)
 
@@ -223,7 +217,7 @@ func TestResolve_MissingDirectoryFallsThrough(t *testing.T) {
 func TestResolve_RequiresExactDirectoryEntry(t *testing.T) {
 	t.Parallel()
 
-	c := agentcatalog.New(projectRoot(fstest.MapFS{"Foo.md": agentFile("d", "b")}))
+	c := agentcatalog.New(userRoot(fstest.MapFS{"Foo.md": agentFile("d", "b")}))
 
 	if _, err := c.Resolve("foo"); !errors.Is(err, agentcatalog.ErrAgentNotFound) {
 		t.Fatalf("Resolve() error = %v, want ErrAgentNotFound", err)
@@ -234,8 +228,8 @@ func TestList_MarksShadowedAndInvalid(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(
-		projectRoot(fstest.MapFS{"a.md": brokenFile()}),
-		userRoot(fstest.MapFS{"a.md": agentFile("user copy", "U"), "b.md": agentFile("only b", "B")}),
+		userRoot(fstest.MapFS{"a.md": brokenFile()}),
+		builtinRoot(fstest.MapFS{"a.md": agentFile("builtin copy", "B"), "b.md": agentFile("only b", "B")}),
 	)
 
 	entries, err := c.List()
@@ -246,8 +240,8 @@ func TestList_MarksShadowedAndInvalid(t *testing.T) {
 		t.Fatalf("List() returned %d entries, want 3", len(entries))
 	}
 
-	// a@project: claims the name, is invalid, is not shadowed.
-	if entries[0].Name != "a" || entries[0].Source != agentcatalog.SourceProject {
+	// a@user: claims the name, is invalid, is not shadowed.
+	if entries[0].Name != "a" || entries[0].Source != agentcatalog.SourceUser {
 		t.Fatalf("entry 0 = %+v", entries[0])
 	}
 	if entries[0].Err == nil {
@@ -257,12 +251,12 @@ func TestList_MarksShadowedAndInvalid(t *testing.T) {
 		t.Error("the highest-precedence claimant is never shadowed")
 	}
 
-	// a@user: shadowed by the invalid project claimant, which claimed the name.
+	// a@builtin: shadowed by the invalid user claimant, which claimed the name.
 	if !entries[1].Shadowed {
-		t.Error("a@user should be shadowed by the blocking project claimant")
+		t.Error("a@builtin should be shadowed by the blocking user claimant")
 	}
 
-	// b@user: sole claimant.
+	// b@builtin: sole claimant.
 	if entries[2].Name != "b" || entries[2].Shadowed || entries[2].Err != nil {
 		t.Errorf("entry 2 = %+v", entries[2])
 	}
@@ -271,7 +265,7 @@ func TestList_MarksShadowedAndInvalid(t *testing.T) {
 func TestList_IgnoresNonAgentFiles(t *testing.T) {
 	t.Parallel()
 
-	c := agentcatalog.New(projectRoot(fstest.MapFS{
+	c := agentcatalog.New(userRoot(fstest.MapFS{
 		".keep":     {}, //nolint:exhaustruct // empty marker file.
 		"README.md": agentFile("uppercase stem is not a valid name", "x"),
 		"notes.txt": {}, //nolint:exhaustruct // not markdown.
@@ -290,7 +284,7 @@ func TestList_IgnoresNonAgentFiles(t *testing.T) {
 func TestList_FailsOnSourceEnumerationError(t *testing.T) {
 	t.Parallel()
 
-	c := agentcatalog.New(projectRoot(faultFS{failReadDir: errors.New("boom")})) //nolint:exhaustruct // one fault.
+	c := agentcatalog.New(userRoot(faultFS{failReadDir: errors.New("boom")})) //nolint:exhaustruct // one fault.
 
 	if _, err := c.List(); err == nil {
 		t.Fatal("List() = nil error, want the enumeration failure surfaced")
@@ -307,7 +301,7 @@ func TestList_ReportsUnreadableEntry(t *testing.T) {
 		failOpen: errors.New("permission denied"),
 	}
 
-	entries, err := agentcatalog.New(projectRoot(fsys)).List()
+	entries, err := agentcatalog.New(userRoot(fsys)).List()
 	if err != nil {
 		t.Fatalf("List() = %v", err)
 	}
@@ -326,7 +320,7 @@ func TestList_ReportsEntryThatVanishesMidListing(t *testing.T) {
 	//nolint:exhaustruct // calls counter starts at zero.
 	fsys := &vanishingFS{MapFS: fstest.MapFS{"a.md": agentFile("d", "b")}}
 
-	entries, err := agentcatalog.New(projectRoot(fsys)).List()
+	entries, err := agentcatalog.New(userRoot(fsys)).List()
 	if err != nil {
 		t.Fatalf("List() = %v", err)
 	}
@@ -347,16 +341,16 @@ func TestListAndNames_SkipMissingDirectory(t *testing.T) {
 	notExist := faultFS{MapFS: fstest.MapFS{}, failReadDir: fs.ErrNotExist} //nolint:exhaustruct // one fault.
 
 	c := agentcatalog.New(
-		projectRoot(notExist),
-		userRoot(fstest.MapFS{"a.md": agentFile("d", "b")}),
+		userRoot(notExist),
+		builtinRoot(fstest.MapFS{"a.md": agentFile("d", "b")}),
 	)
 
 	entries, err := c.List()
 	if err != nil {
 		t.Fatalf("List() = %v, want a missing directory to be skipped", err)
 	}
-	if len(entries) != 1 || entries[0].Source != agentcatalog.SourceUser {
-		t.Fatalf("List() = %+v, want only the user entry", entries)
+	if len(entries) != 1 || entries[0].Source != agentcatalog.SourceBuiltin {
+		t.Fatalf("List() = %+v, want only the built-in entry", entries)
 	}
 
 	names, err := c.Names()
@@ -372,8 +366,8 @@ func TestNames_DeduplicatesAndKeepsInvalidClaimants(t *testing.T) {
 	t.Parallel()
 
 	c := agentcatalog.New(
-		projectRoot(fstest.MapFS{"b.md": brokenFile()}),
-		userRoot(fstest.MapFS{"a.md": agentFile("d", "x"), "b.md": agentFile("d", "x")}),
+		userRoot(fstest.MapFS{"b.md": brokenFile()}),
+		builtinRoot(fstest.MapFS{"a.md": agentFile("d", "x"), "b.md": agentFile("d", "x")}),
 	)
 
 	got, err := c.Names()
@@ -388,7 +382,7 @@ func TestNames_DeduplicatesAndKeepsInvalidClaimants(t *testing.T) {
 func TestNames_FailsOnSourceEnumerationError(t *testing.T) {
 	t.Parallel()
 
-	c := agentcatalog.New(projectRoot(faultFS{failReadDir: errors.New("boom")})) //nolint:exhaustruct // one fault.
+	c := agentcatalog.New(userRoot(faultFS{failReadDir: errors.New("boom")})) //nolint:exhaustruct // one fault.
 
 	if _, err := c.Names(); err == nil {
 		t.Fatal("Names() = nil error, want completion to suppress rather than mislead")

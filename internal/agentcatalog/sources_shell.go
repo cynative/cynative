@@ -9,9 +9,9 @@ import (
 	"slices"
 )
 
-// agentsRelPath is the agents directory relative to a project or home
-// directory. It is opened as ONE multi-component name through an already-open
-// root, never as a nested root per component: see openAgentsRoot.
+// agentsRelPath is the agents directory relative to the home directory. It is
+// opened as ONE multi-component name through an already-open root, never as a
+// nested root per component: see openAgentsRoot.
 const agentsRelPath = agentsParentDir + "/" + agentsChildDir
 
 // The two components of agentsRelPath, checked separately: an intermediate
@@ -28,27 +28,23 @@ const builtinSubdir = "agents"
 // builtinDisplayPath labels the embedded tier in listings and provenance.
 const builtinDisplayPath = "built-in"
 
-// OpenSources builds the production catalog: the nearest project agents
-// directory bounded by the git root, the user directory, and the embedded
-// built-ins.
+// OpenSources builds the production catalog: the operator's own
+// ~/.cynative/agents, then the embedded built-ins.
 //
-// cwd and home must already be canonicalized by the caller through
-// [filepath.EvalSymlinks], and canonicalized the same way, or the home boundary
-// in [ProjectSearchPath] cannot be enforced.
+// There is deliberately no project tier. Agents are operator-authored
+// configuration, so they are never read from the working directory: a checkout
+// must not be able to supply the prompt for a run.
+//
+// home must already be canonicalized by the caller through
+// [filepath.EvalSymlinks].
 //
 // On failure it closes anything it already opened and returns a nil cleanup. On
 // success the returned func closes the retained roots in reverse order.
-func OpenSources(cwd, home string, builtin fs.FS) (*Catalog, func(), error) {
+func OpenSources(home string, builtin fs.FS) (*Catalog, func(), error) {
 	var opened openedRoots
 
-	projectDir, userDir, err := claimedDirs(cwd, home)
+	userDir, err := claimedUserDir(home)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	if err = opened.add(SourceProject, projectDir); err != nil {
-		opened.closeAll()
-
 		return nil, nil, err
 	}
 
@@ -72,8 +68,7 @@ func OpenSources(cwd, home string, builtin fs.FS) (*Catalog, func(), error) {
 
 // openedRoots accumulates the OS handles OpenSources takes ownership of,
 // alongside the catalog roots they back. Keeping the bookkeeping on a type is
-// what holds every shell function inside the complexity budget: OpenSources
-// itself becomes a straight line of guarded steps.
+// what holds every shell function inside the complexity budget.
 type openedRoots struct {
 	roots   []Root
 	handles []*os.Root
@@ -82,11 +77,11 @@ type openedRoots struct {
 // add opens dir's agents directory and appends it as a root. An empty dir is a
 // source that is simply not present on this machine.
 //
-// A non-empty dir is one claimedDirs already established is CLAIMED, so "not
+// A non-empty dir is one claimedUserDir already established is CLAIMED, so "not
 // there" is a contradiction rather than a skip: the .cynative/agents entry
 // exists, and a subsequent not-found means it is there but unusable — a dangling
-// symlink, most likely. Skipping it would run a lower-precedence agent under a
-// name that tier meant to define.
+// symlink, most likely. Skipping it would hide the broken source and silently
+// resolve a same-named built-in instead.
 func (o *openedRoots) add(source Source, dir string) error {
 	if dir == "" {
 		return nil
@@ -117,59 +112,27 @@ func (o *openedRoots) closeAll() {
 	}
 }
 
-// claimedDirs returns the project and user directories that CLAIM an agents
-// source, each "" when that tier is genuinely absent.
-//
-// Both tiers are resolved the same way on purpose. Treating a dangling user
-// source as absent would hide it from `agents list` and silently resolve a
-// same-named built-in instead — the same substitution the project tier's check
-// prevents, one tier down.
-func claimedDirs(cwd, home string) (string, string, error) {
-	projectDir, err := findProjectDir(cwd, home)
-	if err != nil {
-		return "", "", err
-	}
-
-	userClaimed, err := hasAgentsDir(home)
-	if err != nil {
-		return "", "", err
-	}
-
-	if !userClaimed {
-		return projectDir, "", nil
-	}
-
-	return projectDir, home, nil
-}
-
-// findProjectDir returns the nearest directory holding a .cynative/agents,
-// searched from cwd up to the git root, or "" when there is none.
-func findProjectDir(cwd, home string) (string, error) {
-	candidates, err := ProjectSearchPath(cwd, home, hasGitMarker)
+// claimedUserDir returns home when it CLAIMS an agents source, or "" when that
+// tier is genuinely absent.
+func claimedUserDir(home string) (string, error) {
+	claimed, err := hasAgentsDir(home)
 	if err != nil {
 		return "", err
 	}
 
-	for _, dir := range candidates {
-		ok, serr := hasAgentsDir(dir)
-		if serr != nil {
-			return "", serr
-		}
-		if ok {
-			return dir, nil
-		}
+	if !claimed {
+		return "", nil
 	}
 
-	return "", nil
+	return home, nil
 }
 
 // hasAgentsDir reports whether dir CLAIMS a .cynative/agents source.
 //
 // The two path components are probed separately because an intermediate
 // dangling symlink hides everything beneath it: a stat of the full path would
-// report ErrNotExist, the claimed project source would be silently skipped, and
-// a same-named user or built-in agent would run in its place — exactly the
-// substitution the precedence rules exist to prevent.
+// report ErrNotExist and the broken source would be silently skipped, after
+// which a same-named built-in would resolve in its place.
 func hasAgentsDir(dir string) (bool, error) {
 	parent := filepath.Join(dir, agentsParentDir)
 
@@ -185,9 +148,9 @@ func hasAgentsDir(dir string) (bool, error) {
 // directory. A present-but-dangling one is an error, not an absence.
 //
 // The directory check matters for availability: a stray regular file named
-// .cynative cannot contain an agents entry, so it is an absent project source.
-// Without the check, the child lookup fails with ENOTDIR, which aborts opening
-// the catalog and takes the user and built-in tiers down with it.
+// .cynative cannot contain an agents entry, so it is an absent source. Without
+// the check, the child lookup fails with ENOTDIR, which aborts opening the
+// catalog and takes the built-in tier down with it.
 func parentUsable(parent string) (bool, error) {
 	present, err := entryExists(parent)
 	if err != nil || !present {
@@ -235,30 +198,12 @@ func entryExists(p string) (bool, error) {
 	return true, nil
 }
 
-// hasGitMarker reports whether dir holds a .git file or directory. A worktree
-// or submodule uses a .git FILE, so this deliberately does not require a
-// directory.
-func hasGitMarker(dir string) (bool, error) {
-	_, err := os.Lstat(filepath.Join(dir, ".git"))
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-
-	return false, fmt.Errorf("lstat: %w", err)
-}
-
 // openAgentsRoot opens parent's agents directory confined to parent.
 //
 // ok is false ONLY when the directory genuinely is not there. Every other
-// failure is propagated, and that distinction is the fail-closed contract:
-// an escaping symlink, a permission failure, an ENOTDIR, or a symlink loop all
-// mean a project tier was CLAIMED but could not be opened. Skipping those would
-// silently run a lower-precedence user or built-in agent under a name the
-// project meant to define, which is exactly the substitution the precedence
-// rules exist to prevent.
+// failure is propagated: an escaping symlink, a permission failure, an ENOTDIR
+// or a symlink loop all mean the source was CLAIMED but could not be opened,
+// and skipping those would resolve a same-named built-in in its place.
 //
 // The whole relative path is opened through ONE root. Nesting a second root at
 // .cynative would be weaker: if .cynative were a contained symlink, re-rooting

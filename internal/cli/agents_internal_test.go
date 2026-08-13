@@ -28,14 +28,14 @@ func TestFormatAgentList(t *testing.T) {
 
 	// Sorted by name then precedence, exactly as List returns them.
 	entries := []agentcatalog.Entry{
-		// a@project wins outright; a@user is shadowed by it.
-		{Name: "a", Description: "first", Source: agentcatalog.SourceProject, Path: "/p/a.md"},
-		{Name: "a", Description: "shadowed one", Source: agentcatalog.SourceUser, Shadowed: true},
-		// b@project claims the name but is unusable, so no b row is active. Its
-		// user copy is BOTH shadowed and itself broken, which is the case that
-		// must render as two facts rather than collapsing into one.
-		{Name: "b", Source: agentcatalog.SourceProject, Err: agentcatalog.ErrAgentInvalid},
-		{Name: "b", Source: agentcatalog.SourceUser, Shadowed: true, Err: agentcatalog.ErrAgentInvalid},
+		// a@user wins outright; a@builtin is shadowed by it.
+		{Name: "a", Description: "first", Source: agentcatalog.SourceUser, Path: "/home/u/a.md"},
+		{Name: "a", Description: "shadowed one", Source: agentcatalog.SourceBuiltin, Shadowed: true},
+		// b@user claims the name but is unusable, so no b row is active. Its
+		// built-in copy is BOTH shadowed and itself broken, which is the case
+		// that must render as two facts rather than collapsing into one.
+		{Name: "b", Source: agentcatalog.SourceUser, Err: agentcatalog.ErrAgentInvalid},
+		{Name: "b", Source: agentcatalog.SourceBuiltin, Shadowed: true, Err: agentcatalog.ErrAgentInvalid},
 	}
 
 	out := formatAgentList(entries)
@@ -43,16 +43,16 @@ func TestFormatAgentList(t *testing.T) {
 	if !strings.Contains(out, "active") {
 		t.Error("the winning entry should be marked active")
 	}
-	if !strings.Contains(out, "shadowed by project") {
+	if !strings.Contains(out, "shadowed by user") {
 		t.Error("a shadowed entry should name the source that claimed it")
 	}
 	if !strings.Contains(out, "invalid (blocking)") {
 		t.Error("an unusable claimant should be marked invalid (blocking)")
 	}
-	if !strings.Contains(out, "shadowed by project, invalid") {
+	if !strings.Contains(out, "shadowed by user, invalid") {
 		t.Error("a shadowed entry that is itself invalid should say both")
 	}
-	if strings.Contains(out, "/p/a.md") {
+	if strings.Contains(out, "/home/u/a.md") {
 		t.Error("list must not print filesystem paths; SOURCE is the tier word alone")
 	}
 }
@@ -76,7 +76,7 @@ func TestFormatAgentList_SanitizesDescriptions(t *testing.T) {
 	t.Parallel()
 
 	entries := []agentcatalog.Entry{
-		{Name: "a", Description: "evil\x1b[31m", Source: agentcatalog.SourceProject},
+		{Name: "a", Description: "evil\x1b[31m", Source: agentcatalog.SourceUser},
 	}
 
 	if out := formatAgentList(entries); strings.Contains(out, "\x1b") {
@@ -233,7 +233,7 @@ func TestAgentsCommands_Failures(t *testing.T) {
 			set: func(d *deps) {
 				d.openAgentCatalog = func() (*agentcatalog.Catalog, func(), error) {
 					return agentcatalog.New(agentcatalog.Root{
-						Source: agentcatalog.SourceProject, FS: failReadDirFS{}, DisplayPath: "/p",
+						Source: agentcatalog.SourceUser, FS: failReadDirFS{}, DisplayPath: "/home/u/.cynative/agents",
 					}), func() {}, nil
 				}
 			},
@@ -339,7 +339,7 @@ func TestFormatAgentList_NoRowSplittingSeparators(t *testing.T) {
 	t.Parallel()
 
 	entries := []agentcatalog.Entry{
-		{Name: "a", Description: "real\u2028forged  fake  user  active", Source: agentcatalog.SourceProject},
+		{Name: "a", Description: "real\u2028forged  fake  user  active", Source: agentcatalog.SourceUser},
 	}
 
 	out := formatAgentList(entries)
