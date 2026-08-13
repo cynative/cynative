@@ -16,8 +16,17 @@ import "strings"
 // stderr source line, and rendered errors that embed a path. It is NOT applied
 // to `agents show` stdout, whose contract is the exact raw file bytes.
 func sanitizeInline(s string) string {
+	// U+2028/U+2029 are not C0/C1 controls but a renderer that honours them
+	// still breaks the line, so a value carrying one could print on a line of
+	// its own. Replaced for the same reason as a bare newline.
+	const (
+		lineSeparator      = '\u2028'
+		paragraphSeparator = '\u2029'
+	)
+
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) ||
+			r == lineSeparator || r == paragraphSeparator {
 			return ' '
 		}
 

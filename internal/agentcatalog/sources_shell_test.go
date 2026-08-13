@@ -359,3 +359,38 @@ func TestOpenSources_ContainedSymlinkWithoutAgentsIsNotClaimed(t *testing.T) {
 		t.Fatalf("Source = %v, want SourceUser", def.Source)
 	}
 }
+
+// A stray regular FILE named .cynative is an absent project source, not a
+// claimed-but-broken one.
+//
+// A file cannot contain an agents entry, so treating it as claimed made the
+// child lookup fail with ENOTDIR, which aborted opening the catalog entirely
+// and took the user and built-in tiers down with it. One stray file anywhere in
+// the search path disabled agents completely.
+func TestOpenSources_StrayFileNamedCynativeIsNotClaimed(t *testing.T) {
+	base := realPath(t, t.TempDir())
+	home := filepath.Join(base, "home")
+	proj := filepath.Join(home, "proj")
+
+	if err := os.MkdirAll(proj, 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".cynative"), []byte("junk"), 0o600); err != nil {
+		t.Fatalf("WriteFile = %v", err)
+	}
+	writeAgent(t, filepath.Join(home, ".cynative", "agents"), "user-agent")
+
+	c, cleanup, err := agentcatalog.OpenSources(proj, home, os.DirFS(base))
+	if err != nil {
+		t.Fatalf("OpenSources() = %v, want a stray .cynative file to be skipped", err)
+	}
+	defer cleanup()
+
+	def, rerr := c.Resolve("user-agent")
+	if rerr != nil {
+		t.Fatalf("Resolve() = %v, want the user tier to remain reachable", rerr)
+	}
+	if def.Source != agentcatalog.SourceUser {
+		t.Fatalf("Source = %v, want SourceUser", def.Source)
+	}
+}

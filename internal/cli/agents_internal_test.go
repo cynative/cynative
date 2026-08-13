@@ -331,3 +331,24 @@ func TestBuiltinAgents_AllValid(t *testing.T) {
 		}
 	}
 }
+
+// The listing must stay one row per agent even when a description carries a
+// Unicode line separator, which is the concrete harm the single-line rule and
+// the sanitizer exist to prevent.
+func TestFormatAgentList_NoRowSplittingSeparators(t *testing.T) {
+	t.Parallel()
+
+	entries := []agentcatalog.Entry{
+		{Name: "a", Description: "real\u2028forged  fake  user  active", Source: agentcatalog.SourceProject},
+	}
+
+	out := formatAgentList(entries)
+
+	// One header line plus exactly one data row.
+	if got := strings.Count(strings.TrimRight(out, "\n"), "\n"); got != 1 {
+		t.Fatalf("list has %d newlines, want 1 (header + one row):\n%q", got, out)
+	}
+	if strings.ContainsAny(out, "\u2028\u2029") {
+		t.Fatalf("list output still carries a line separator: %q", out)
+	}
+}

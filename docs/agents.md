@@ -32,7 +32,9 @@ starting or ending with a hyphen. Windows reserved device names (`con`, `nul`,
 
 **Frontmatter is required and strict.** It must be exactly one YAML mapping
 whose only key is `description`, a single-line non-empty string of at most 256
-bytes. Unknown keys, duplicate keys, aliases, merge keys, custom tags and
+bytes. Single-line is enforced against Unicode line and paragraph separators
+(U+2028, U+2029) as well as ordinary control characters, since a renderer that
+honours them would let a description break out of its `agents list` row. Unknown keys, duplicate keys, aliases, merge keys, custom tags and
 multiple documents are all rejected.
 
 That strictness is deliberate. A frontmatter key cynative does not understand,

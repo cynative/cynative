@@ -30,6 +30,7 @@ func FuzzParse(f *testing.F) {
 	f.Add("\ufeff---\ndescription: ok\n---\nbody\n")
 	f.Add("---\n<<: {description: a}\n---\nbody\n")
 	f.Add("---\n!custom description: x\n---\nbody\n")
+	f.Add("---\ndescription: \"a\\u2028b\"\n---\nbody\n")
 
 	f.Fuzz(func(t *testing.T, src string) {
 		def, err := agentcatalog.Parse("n", []byte(src))
@@ -51,7 +52,8 @@ func FuzzParse(f *testing.F) {
 			t.Fatal("accepted a file with a blank body")
 		}
 		if strings.ContainsFunc(def.Description, func(r rune) bool {
-			return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
+			return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) ||
+				r == '\u2028' || r == '\u2029'
 		}) {
 			t.Fatalf("accepted a description containing a control character: %q", def.Description)
 		}

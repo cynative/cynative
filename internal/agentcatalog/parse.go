@@ -199,7 +199,21 @@ func validateDescription(value *yaml.Node) (string, error) {
 	return desc, nil
 }
 
-// isControlRune reports whether r is a C0 control, DEL, or a C1 control.
+// isControlRune reports whether r is a C0 control, DEL, a C1 control, or a
+// Unicode line/paragraph separator.
+//
+// U+2028 and U+2029 are not control characters by the C0/C1 definition, but a
+// renderer that honours them splits the line anyway. A description carrying one
+// could therefore break out of its `agents list` row and print attacker-chosen
+// text on a line of its own, which is exactly what the single-line rule exists
+// to prevent. yaml.v3 decodes the escaped forms, so `description: "a\u2028b"`
+// reaches this check as a real separator.
 func isControlRune(r rune) bool {
-	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
+	const (
+		lineSeparator      = '\u2028'
+		paragraphSeparator = '\u2029'
+	)
+
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) ||
+		r == lineSeparator || r == paragraphSeparator
 }

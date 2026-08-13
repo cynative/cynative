@@ -160,15 +160,21 @@ func hasAgentsDir(dir string) (bool, error) {
 	return childClaims(filepath.Join(parent, agentsChildDir))
 }
 
-// parentUsable reports whether the .cynative entry exists AND resolves. A
-// present-but-dangling one is an error, not an absence.
+// parentUsable reports whether the .cynative entry exists, resolves, AND is a
+// directory. A present-but-dangling one is an error, not an absence.
+//
+// The directory check matters for availability: a stray regular file named
+// .cynative cannot contain an agents entry, so it is an absent project source.
+// Without the check, the child lookup fails with ENOTDIR, which aborts opening
+// the catalog and takes the user and built-in tiers down with it.
 func parentUsable(parent string) (bool, error) {
 	present, err := entryExists(parent)
 	if err != nil || !present {
 		return false, err
 	}
 
-	if _, serr := os.Stat(parent); serr != nil {
+	info, serr := os.Stat(parent)
+	if serr != nil {
 		if errors.Is(serr, fs.ErrNotExist) {
 			return false, fmt.Errorf("%s is a broken symlink", parent)
 		}
@@ -176,7 +182,7 @@ func parentUsable(parent string) (bool, error) {
 		return false, fmt.Errorf("stat %s: %w", parent, serr)
 	}
 
-	return true, nil
+	return info.IsDir(), nil
 }
 
 // childClaims reports whether the agents entry claims a source. Lstat, not

@@ -55,3 +55,28 @@ func TestSanitizeErr(t *testing.T) {
 		t.Error("sanitizeErr must preserve errors.Is through Unwrap")
 	}
 }
+
+// U+2028/U+2029 are not C0/C1 controls, but a renderer that honours them splits
+// the line, so a sanitized value could still print on a line of its own.
+func TestSanitizeInline_UnicodeLineSeparators(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"line separator", "a\u2028b", "a b"},
+		{"paragraph separator", "a\u2029b", "a b"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := sanitizeInline(tc.in); got != tc.want {
+				t.Fatalf("sanitizeInline(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

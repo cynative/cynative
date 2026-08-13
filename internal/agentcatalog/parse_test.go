@@ -84,6 +84,10 @@ func TestParse_Rejects(t *testing.T) {
 		{"description a sequence", "---\ndescription:\n  - a\n---\nbody\n"},
 		{"description empty after trim", "---\ndescription: \"   \"\n---\nbody\n"},
 		{"description with control char", "---\ndescription: \"a\\u0007b\"\n---\nbody\n"},
+		// U+2028/U+2029 are not C0/C1 controls, but a renderer that honours them
+		// splits the line, letting a description break out of its agents list row.
+		{"description with U+2028 line separator", "---\ndescription: \"a\\u2028b\"\n---\nbody\n"},
+		{"description with U+2029 paragraph separator", "---\ndescription: \"a\\u2029b\"\n---\nbody\n"},
 		{"custom tag on the value", "---\ndescription: !!binary aGk=\n---\nbody\n"},
 		{"custom tag on the mapping", "---\n!custom\ndescription: x\n---\nbody\n"},
 		{"custom tag on the key", "---\n!custom description: x\n---\nbody\n"},
