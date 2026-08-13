@@ -1,8 +1,8 @@
 # Agents
 
 An agent is a markdown file that supplies the prompt for a run. It turns a
-recurring investigation into an artifact you can version, review and share,
-instead of a block of text pasted at the call site.
+recurring investigation into an artifact you can version and review, instead of
+a block of text pasted at the call site.
 
 ```bash
 cynative -p --agent aws-public-data-stores "12814983572854"   # with a task
@@ -63,9 +63,6 @@ run, which makes it operator-authored configuration rather than project content.
 Reading agents from a checkout would mean cloning a repository was enough to
 change what cynative does on your credentials, so cynative does not do it. A
 `.cynative/agents/` directory inside a repository is ignored.
-
-To share an agent with a team, commit it wherever you like and have people copy
-it into `~/.cynative/agents/` deliberately.
 
 **Cynative never creates the directory.** To add your own agents:
 
@@ -180,8 +177,7 @@ prompts, the connector authorizers and the read-only ceilings are enforced by th
 host on every request, not by the prompt, so no agent file can grant itself
 access you do not have.
 
-Every run prints which file it used, which is worth a glance when you have agents
-you did not write recently:
+Every run prints which file it used:
 
 ```
 Agent: aws-public-data-stores  [user: /home/you/.cynative/agents/aws-public-data-stores.md]
@@ -189,6 +185,3 @@ Agent: aws-public-data-stores  [user: /home/you/.cynative/agents/aws-public-data
 
 `cynative agents list` shows the same information ahead of time, and every
 audited tool call records the agent's name, source and file digest.
-
-Treat an agent file you did not write like any other configuration you are about
-to run: read it first. `cynative agents show <name>` prints it exactly.
