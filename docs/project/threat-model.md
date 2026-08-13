@@ -43,11 +43,10 @@ cannot move any of these lines.
 - **Request redirection** - hosts pinned, resolved IP verified before
   connect.
 - **Repository-supplied prompts** - agents are read only from
-  `~/.cynative/agents/` and the binary, never from the working directory,
-  so cloning a repository cannot change what cynative does with the
-  operator's credentials. Selection is always explicit by name and the
-  model never chooses an agent. Every audited tool call records the
-  agent's name, source and file digest.
+  `~/.cynative/agents/` and the binary, never from the working directory.
+  Selection is always explicit by name and the model never chooses an
+  agent. Every audited tool call records the agent's name, source and file
+  digest.
 - **Credential leakage** - no credential store; secrets are redacted from
   tool results and the audit log, which is readable only by the running
   user.
