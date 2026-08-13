@@ -352,3 +352,22 @@ func TestFormatAgentList_NoRowSplittingSeparators(t *testing.T) {
 		t.Fatalf("list output still carries a line separator: %q", out)
 	}
 }
+
+// The help text must name only the sources OpenSources actually searches. A
+// user following it who creates .cynative/agents in a checkout would otherwise
+// find their agent silently ignored.
+func TestAgentsCmd_HelpNamesOnlyRealSources(t *testing.T) {
+	t.Parallel()
+
+	long := newAgentsCmd(testDeps()).Long
+
+	if !strings.Contains(long, "~/.cynative/agents/") {
+		t.Error("help should name the user agents directory")
+	}
+	if !strings.Contains(long, "working directory is never consulted") {
+		t.Error("help should state that the working directory is not a source")
+	}
+	if strings.Contains(long, "three sources") || strings.Contains(long, "walking up") {
+		t.Errorf("help still describes the removed project tier:\n%s", long)
+	}
+}

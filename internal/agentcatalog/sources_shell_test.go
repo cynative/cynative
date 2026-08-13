@@ -277,3 +277,18 @@ func TestOpenSources_AbsentUserTierIsNotAnError(t *testing.T) {
 		t.Fatalf("Names() = %v, want none", names)
 	}
 }
+
+// A relative home is refused outright rather than resolved against the working
+// directory, which would hand a checkout the user tier: [os.UserHomeDir] returns
+// $HOME verbatim, so `HOME=.` reaches here as ".".
+func TestOpenSources_RejectsRelativeHome(t *testing.T) {
+	base := realPath(t, t.TempDir())
+
+	writeAgent(t, filepath.Join(base, ".cynative", "agents"), "planted")
+
+	_, cleanup, err := agentcatalog.OpenSources(".", os.DirFS(base))
+	if err == nil {
+		cleanup()
+		t.Fatal("OpenSources(\".\") = nil error, want a relative home refused")
+	}
+}

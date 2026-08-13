@@ -35,12 +35,18 @@ const builtinDisplayPath = "built-in"
 // configuration, so they are never read from the working directory: a checkout
 // must not be able to supply the prompt for a run.
 //
-// home must already be canonicalized by the caller through
-// [filepath.EvalSymlinks].
+// home must be absolute and already canonicalized by the caller through
+// [filepath.EvalSymlinks]; it is validated here rather than trusted, because a
+// relative home would resolve every lookup against the working directory and
+// hand the checkout the user tier.
 //
 // On failure it closes anything it already opened and returns a nil cleanup. On
 // success the returned func closes the retained roots in reverse order.
 func OpenSources(home string, builtin fs.FS) (*Catalog, func(), error) {
+	if err := ValidateHome(home); err != nil {
+		return nil, nil, err
+	}
+
 	var opened openedRoots
 
 	userDir, err := claimedUserDir(home)
