@@ -1154,7 +1154,15 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   can never fail `publish` and skip the post-publish channel jobs (cynative#140). Publish is
   additionally gated on `scripts/release/audit-formula.sh`
   (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`
-  job); any pre-publish failure leaves the draft intact. Publish requires
+  job); any pre-publish failure leaves the draft intact. The rendered Formula deliberately
+  carries **no `version` stanza**, so the release tag in each of the four download urls is the
+  only version source: `audit --strict` rejects a `version` that merely restates what brew
+  scans out of the url, which is what broke the v1.9.0 release once Homebrew started preferring
+  the release tag over the asset filename (before that it read `x86_64` as version "86.64", so
+  the two never collided). That leaves the rendered version at the mercy of Homebrew's url
+  parsing, so `audit-formula.sh` pins it: every url must scan to exactly the release version,
+  checked for all four arches rather than only the runner's, since brew evaluates an arch block
+  only on its own platform. Publish requires
   `result == 'success'` from every gate job (not `!= 'failure'`), so a cancelled gate blocks the
   publish; that is also why `connector-e2e.yaml` scopes `cancel-in-progress` to `workflow_dispatch`
   runs and gives the gate path its own run-id concurrency group (a called workflow's concurrency

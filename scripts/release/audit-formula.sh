@@ -35,9 +35,28 @@ brew untap cynative/audit >/dev/null 2>&1 || true
 brew tap-new --no-git cynative/audit >/dev/null
 trap 'brew untap cynative/audit >/dev/null 2>&1 || true' EXIT
 
+formula="$(brew --repository cynative/audit)/Formula/cynative.rb"
 "${here}/render-formula.sh" "${version}" \
   "${sha_darwin_arm}" "${sha_darwin_intel}" "${sha_linux_arm}" "${sha_linux_intel}" \
-  > "$(brew --repository cynative/audit)/Formula/cynative.rb"
+  > "${formula}"
+
+# The formula carries no `version` stanza (audit --strict rejects one that
+# restates the version scanned from the URL), so the version brew reports is
+# whatever its URL parser makes of the tag. Pin that per url: a parser change
+# would otherwise ship a formula labeled with a version nobody chose, and
+# `brew upgrade` compares exactly that label. Every url is checked, not just
+# the runner's, since the arch blocks are only evaluated on their own platform.
+# ARGV, not env: brew sanitizes non-HOMEBREW_ variables out of `brew ruby`.
+brew ruby -e '
+  expected, path = ARGV
+  urls = File.read(path).scan(/^\s*url "([^"]+)"$/).flatten
+  abort "expected 4 urls in the formula, found #{urls.length}" unless urls.length == 4
+  urls.each do |url|
+    scanned = Version.detect(url).to_s
+    next if scanned == expected
+    abort "brew scans version #{scanned.inspect} from #{url}, expected #{expected.inspect}"
+  end
+' -- "${version}" "${formula}"
 
 brew audit --strict cynative/audit/cynative
 echo "formula audit OK (${version})"

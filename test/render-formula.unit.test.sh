@@ -26,7 +26,6 @@ desc='Agentic security research across your code, cloud, and runtime (read-only)
 if (
 	out=$("$render" 1.5.1 "$sha_a" "$sha_b" "$sha_c" "$sha_d") || exit 1
 	printf '%s' "$out" | grep -q 'class Cynative < Formula' || exit 1
-	printf '%s' "$out" | grep -Fq "version \"1.5.1\"" || exit 1
 	printf '%s' "$out" | grep -Fq "desc \"$desc\"" || exit 1
 	printf '%s' "$out" | grep -Fq 'homepage "https://github.com/cynative/cynative"' || exit 1
 	printf '%s' "$out" | grep -Fq 'license "Apache-2.0"' || exit 1
@@ -40,10 +39,23 @@ if (
 	printf '%s' "$out" | grep -Fq "sha256 \"$sha_c\"" || exit 1
 	printf '%s' "$out" | grep -Fq "sha256 \"$sha_d\"" || exit 1
 	printf '%s' "$out" | grep -Fq 'bin.install "cynative"' || exit 1
-	# Ruby interpolation for brew-time version, not the shell-filled one in urls.
-	printf '%s' "$out" | grep -Fq 'v#{version}/' || exit 1
 	exit 0
-); then pass "render-formula renders version/arches/urls/hashes/meta and :monterey floor"; else fail "render-formula happy path"; fi
+); then pass "render-formula renders arches/urls/hashes/meta and the :monterey floor"; else fail "render-formula happy path"; fi
+
+# ---- no version stanza; the tag in every url is the sole version source ------
+# `brew audit --strict` rejects a `version` that restates what it scans from the
+# URL (Homebrew/brew#23336 made it scan the release tag rather than misreading
+# `x86_64`), so re-adding the stanza breaks the release gate. All four urls must
+# carry the literal tag: brew evaluates each arch block only on its own
+# platform, and a Ruby-interpolated `v#{version}` would resolve to nothing once
+# the stanza is gone.
+if (
+	out=$("$render" 1.5.1 "$sha_a" "$sha_b" "$sha_c" "$sha_d") || exit 1
+	! printf '%s' "$out" | grep -Eq '^[[:space:]]*version ' || exit 1
+	! printf '%s' "$out" | grep -Fq '#{version}' || exit 1
+	[ "$(printf '%s\n' "$out" | grep -Fc '/releases/download/v1.5.1/')" -eq 4 ] || exit 1
+	exit 0
+); then pass "render-formula omits the version stanza and pins the tag in all four urls"; else fail "render-formula version sourcing"; fi
 
 # ---- byte-for-byte golden ----------------------------------------------------
 golden="$here/testdata/homebrew-cynative.golden.rb"
