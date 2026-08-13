@@ -28,12 +28,8 @@ Agents are markdown files supplying the prompt for a run. They are searched in
 two sources, first match wins: ~/.cynative/agents/ and the agents built into the
 binary.
 
-The working directory is never consulted. An agent supplies the prompt for a
-run, so a repository must not be able to change what cynative does with your
-credentials; a .cynative/agents/ directory inside a checkout is ignored.
-
-Cynative never creates the directory. To add your own, run
-"mkdir -p ~/.cynative/agents" and write a markdown file there.`,
+To add your own, run "mkdir -p ~/.cynative/agents" and write a markdown file
+there. Cynative does not create the directory for you.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
