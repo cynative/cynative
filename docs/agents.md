@@ -5,7 +5,7 @@ recurring investigation into an artifact you can version and review, instead of
 a block of text pasted at the call site.
 
 ```bash
-cynative -p --agent aws-public-data-stores "12814983572854"   # with a task
+cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
 cynative -p --agent aws-public-data-stores                    # without
 cynative --agent aws-public-data-stores                       # seeds an interactive session
 ```
@@ -58,19 +58,13 @@ Two sources, searched in order, first match wins:
 | 1 | user | `~/.cynative/agents/` |
 | 2 | built-in | embedded in the binary |
 
-**The working directory is never consulted.** An agent supplies the prompt for a
-run, which makes it operator-authored configuration rather than project content.
-Reading agents from a checkout would mean cloning a repository was enough to
-change what cynative does on your credentials, so cynative does not do it. A
-`.cynative/agents/` directory inside a repository is ignored.
-
-**Cynative never creates the directory.** To add your own agents:
+To add your own agents, create the directory and write markdown files in it. Cynative will not create it for you:
 
 ```bash
 mkdir -p ~/.cynative/agents
 ```
 
-`--config` does not move it. It is always `~/.cynative/agents`.
+`--config` does not move it.
 
 ### Shadowing
 
@@ -166,16 +160,13 @@ a fresh install before cynative is configured. `--agent` and `agents show` both
 support shell completion for agent names.
 
 ## Trust
-
 Agents come only from your own home directory and the binary, so an agent is
-something you installed. There is no path by which a repository, a working
-directory, or the model itself can introduce one: selection is always explicit
-by name, and cynative never chooses an agent on its own.
+something you installed. Selection is always explicit by name: the model cannot
+introduce an agent or choose one on its own.
 
-An agent still cannot exceed what your credentials already allow. Approval
-prompts, the connector authorizers and the read-only ceilings are enforced by the
-host on every request, not by the prompt, so no agent file can grant itself
-access you do not have.
+An agent only supplies text. Approvals, connector authorization and the
+read-only ceilings are enforced by cynative when each tool call runs. An
+agent cannot reach anything your credentials do not already allow.
 
 Every run prints which file it used:
 
