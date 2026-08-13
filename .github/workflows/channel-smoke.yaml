@@ -108,11 +108,15 @@ jobs:
             rm -rf /tmp/tap-probe
             if git clone --quiet --depth 1 \
                 https://github.com/cynative/homebrew-tap /tmp/tap-probe 2>/tmp/poll-err; then
-              if grep -Fq "version \"${VERSION}\"" /tmp/tap-probe/Formula/cynative.rb 2>/dev/null; then
+              # The formula carries no `version` stanza — `brew audit --strict`
+              # rejects one that restates the version scanned from the url — so
+              # the release tag in the download urls is what marks the served
+              # version. The trailing slash keeps 1.9.1 from matching v1.9.10.
+              if grep -Fq "/releases/download/v${VERSION}/" /tmp/tap-probe/Formula/cynative.rb 2>/dev/null; then
                 echo "tap serves ${VERSION} (attempt ${attempt})"
                 exit 0
               fi
-              last="tap cloned but formula version != ${VERSION}"
+              last="tap cloned but formula does not serve ${VERSION}"
             else
               last="$(tr -d '\n' < /tmp/poll-err)"
             fi
