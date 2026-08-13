@@ -27,6 +27,7 @@ if ! command -v brew >/dev/null 2>&1 && [ -x /home/linuxbrew/.linuxbrew/bin/brew
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 command -v brew >/dev/null 2>&1 || { echo "::error::brew not found" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "::error::jq not found" >&2; exit 1; }
 
 # Throwaway local tap. --no-git because tap-new otherwise makes a git commit,
 # which fails wherever no git identity is configured (CI runners, dev hosts).
@@ -40,23 +41,30 @@ formula="$(brew --repository cynative/audit)/Formula/cynative.rb"
   "${sha_darwin_arm}" "${sha_darwin_intel}" "${sha_linux_arm}" "${sha_linux_intel}" \
   > "${formula}"
 
-# The formula carries no `version` stanza (audit --strict rejects one that
-# restates the version scanned from the URL), so the version brew reports is
-# whatever its URL parser makes of the tag. Pin that per url: a parser change
-# would otherwise ship a formula labeled with a version nobody chose, and
-# `brew upgrade` compares exactly that label. Every url is checked, not just
-# the runner's, since the arch blocks are only evaluated on their own platform.
-# ARGV, not env: brew sanitizes non-HOMEBREW_ variables out of `brew ruby`.
-brew ruby -e '
-  expected, path = ARGV
-  urls = File.read(path).scan(/^\s*url "([^"]+)"$/).flatten
-  abort "expected 4 urls in the formula, found #{urls.length}" unless urls.length == 4
-  urls.each do |url|
-    scanned = Version.detect(url).to_s
-    next if scanned == expected
-    abort "brew scans version #{scanned.inspect} from #{url}, expected #{expected.inspect}"
-  end
-' -- "${version}" "${formula}"
+# --except=version, and the formula KEEPS its `version` stanza. `brew audit
+# --strict` calls a version that matches the one it scans out of the download
+# url redundant, and fails the release over it; the obvious answer, dropping the
+# stanza, is wrong. Homebrew's url parsing is not a dependable version source
+# for our asset names, and it is the USER's brew that resolves the formula, not
+# CI's:
+#   * before Homebrew/brew#23336, `cynative_Linux_x86_64.tar.gz` scanned as
+#     version "86.64" (which is why this audit passed silently until v1.9.0)
+#   * the ubuntu-latest brew that carries that fix still scans
+#     `cynative_Darwin_arm64.tar.gz` as version "64" (observed live on the
+#     v1.9.1 release run)
+# so a stanza-less formula installs under a version nobody chose on whichever
+# arch the user's brew happens to misparse, and `brew upgrade` compares exactly
+# that label. An explicit version is the only spelling that means the same thing
+# on every brew. --except takes audit METHOD names, so this turns off exactly
+# one, ResourceAuditor#audit_version, and nothing else.
+brew audit --strict --except=version cynative/audit/cynative
 
-brew audit --strict cynative/audit/cynative
+# That method's only other service here is catching a missing or empty version
+# (its remaining arm is core/bottle-only), so assert the version directly rather
+# than lose the check: this is what the formula will report to `brew install`.
+resolved="$(brew info --json=v2 cynative/audit/cynative | jq -r '.formulae[0].versions.stable')"
+if [ "${resolved}" != "${version}" ]; then
+  echo "::error::formula reports version '${resolved}', expected '${version}'" >&2
+  exit 1
+fi
 echo "formula audit OK (${version})"

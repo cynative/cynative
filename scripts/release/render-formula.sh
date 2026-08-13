@@ -3,11 +3,6 @@
 # Pure and arg-driven (the Homebrew twin of render-scoop.sh), so it is unit-testable offline.
 # Usage: render-formula.sh <version-without-v> <sha_darwin_arm64> <sha_darwin_x86_64> <sha_linux_arm64> <sha_linux_x86_64>
 # Note: ${...} are bash (filled now); #{...} are Ruby (evaluated by brew at install).
-#
-# There is deliberately no `version` stanza: `brew audit --strict` rejects one
-# that merely restates the version brew scans out of the download URL, so the
-# tag in each url is the single source. That makes the rendered version depend
-# on Homebrew's URL parsing, which audit-formula.sh pins per url before publish.
 set -euo pipefail
 version="$1"
 sha_darwin_arm="$2"; sha_darwin_intel="$3"
@@ -23,6 +18,7 @@ cat <<EOF
 class Cynative < Formula
   desc "Agentic security research across your code, cloud, and runtime (read-only)"
   homepage "https://github.com/cynative/cynative"
+  version "${version}"
   license "Apache-2.0"
 
   on_macos do
@@ -33,24 +29,24 @@ class Cynative < Formula
     depends_on macos: :monterey
 
     on_arm do
-      url "https://github.com/cynative/cynative/releases/download/v${version}/cynative_Darwin_arm64.tar.gz"
+      url "https://github.com/cynative/cynative/releases/download/v#{version}/cynative_Darwin_arm64.tar.gz"
       sha256 "${sha_darwin_arm}"
     end
 
     on_intel do
-      url "https://github.com/cynative/cynative/releases/download/v${version}/cynative_Darwin_x86_64.tar.gz"
+      url "https://github.com/cynative/cynative/releases/download/v#{version}/cynative_Darwin_x86_64.tar.gz"
       sha256 "${sha_darwin_intel}"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/cynative/cynative/releases/download/v${version}/cynative_Linux_arm64.tar.gz"
+      url "https://github.com/cynative/cynative/releases/download/v#{version}/cynative_Linux_arm64.tar.gz"
       sha256 "${sha_linux_arm}"
     end
 
     on_intel do
-      url "https://github.com/cynative/cynative/releases/download/v${version}/cynative_Linux_x86_64.tar.gz"
+      url "https://github.com/cynative/cynative/releases/download/v#{version}/cynative_Linux_x86_64.tar.gz"
       sha256 "${sha_linux_intel}"
     end
   end

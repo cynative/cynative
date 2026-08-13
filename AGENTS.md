@@ -1154,15 +1154,19 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   can never fail `publish` and skip the post-publish channel jobs (cynative#140). Publish is
   additionally gated on `scripts/release/audit-formula.sh`
   (offline `brew audit --strict` of the rendered formula in a throwaway tap, in the `release`
-  job); any pre-publish failure leaves the draft intact. The rendered Formula deliberately
-  carries **no `version` stanza**, so the release tag in each of the four download urls is the
-  only version source: `audit --strict` rejects a `version` that merely restates what brew
-  scans out of the url, which is what broke the v1.9.0 release once Homebrew started preferring
-  the release tag over the asset filename (before that it read `x86_64` as version "86.64", so
-  the two never collided). That leaves the rendered version at the mercy of Homebrew's url
-  parsing, so `audit-formula.sh` pins it: every url must scan to exactly the release version,
-  checked for all four arches rather than only the runner's, since brew evaluates an arch block
-  only on its own platform. Publish requires
+  job); any pre-publish failure leaves the draft intact. That audit runs
+  **`--except=version`**, and the Formula's `version` stanza is load-bearing: `audit --strict`
+  calls a version redundant when it matches the one brew scans out of the download url, which
+  is what broke the v1.9.0 release once Homebrew started preferring the release tag over the
+  asset filename (before that it read `x86_64` as version "86.64", so the two never collided).
+  Dropping the stanza is the wrong answer and was tried and reverted: Homebrew's url parsing has
+  misread our asset names on every build tested (`x86_64` → "86.64" before
+  [Homebrew/brew#23336](https://github.com/Homebrew/brew/issues/23336), `arm64` → "64" after
+  it), and it is the **user's** brew that resolves the formula, so a misparse ships as the
+  installed version and as what `brew upgrade` compares. `--except` takes audit method names, so
+  it disables exactly `ResourceAuditor#audit_version`; its only other service here is catching a
+  missing version, which `audit-formula.sh` replaces with a direct assertion that
+  `brew info` reports exactly the release version. Publish requires
   `result == 'success'` from every gate job (not `!= 'failure'`), so a cancelled gate blocks the
   publish; that is also why `connector-e2e.yaml` scopes `cancel-in-progress` to `workflow_dispatch`
   runs and gives the gate path its own run-id concurrency group (a called workflow's concurrency
