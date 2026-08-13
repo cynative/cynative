@@ -58,13 +58,11 @@ Two sources, searched in order, first match wins:
 | 1 | user | `~/.cynative/agents/` |
 | 2 | built-in | embedded in the binary |
 
-To add your own agents, create the directory and write markdown files in it. Cynative will not create it for you:
+To add your own agents, create the directory and write markdown files in it. Cynative does not create it for you:
 
 ```bash
 mkdir -p ~/.cynative/agents
 ```
-
-`--config` does not move it.
 
 ### Shadowing
 
