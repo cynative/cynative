@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.1](https://github.com/cynative/cynative/compare/v1.9.0...v1.9.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* drop the redundant version stanza from the Homebrew Formula ([#257](https://github.com/cynative/cynative/issues/257)) ([68b90f7](https://github.com/cynative/cynative/commit/68b90f7e80c1178c055b491f75baf65944fd8615))
+
 ## [1.9.0](https://github.com/cynative/cynative/compare/v1.8.0...v1.9.0) (2026-08-13)
 
 
