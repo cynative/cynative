@@ -722,9 +722,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   the cleanup that closes its retained `*os.Root` handles, and the CLI's `runRoot` is the
   sole owner of that cleanup. Invariants:
   - **The working directory is never a source.** An agent supplies the prompt for a run,
-    which makes it operator-authored configuration, so reading one from a checkout would
-    mean cloning a repository could change what cynative does with the operator's
-    credentials. There is deliberately no project tier and no cwd parameter.
+    which makes it operator-authored configuration rather than project content: a checkout
+    must not be able to supply one. There is deliberately no project tier and no cwd
+    parameter.
   - **The agents directory is opened as ONE multi-component name through a root at the
     home directory** (`boundary.OpenRoot(".cynative/agents")`). `os.OpenRoot` resolves
     symlinks in the path it is *given*, so opening the agents path directly follows an
