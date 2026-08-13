@@ -51,7 +51,7 @@ frontmatter block.
 
 ## Where agents come from
 
-Two sources, searched in order, first match wins:
+Agents come from exactly two sources, searched in order, first match wins:
 
 | Precedence | Source | Location |
 | --- | --- | --- |
@@ -158,6 +158,7 @@ a fresh install before cynative is configured. `--agent` and `agents show` both
 support shell completion for agent names.
 
 ## Trust
+
 Agents come only from your own home directory and the binary, so an agent is
 something you installed. Selection is always explicit by name: the model cannot
 introduce an agent or choose one on its own.
