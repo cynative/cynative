@@ -394,3 +394,54 @@ func TestOpenSources_StrayFileNamedCynativeIsNotClaimed(t *testing.T) {
 		t.Fatalf("Source = %v, want SourceUser", def.Source)
 	}
 }
+
+// The USER tier gets the same claim detection as the project tier: a dangling
+// ~/.cynative/agents is broken, not absent.
+//
+// Treating it as absent would hide the broken source from `agents list` and
+// silently resolve a same-named built-in instead — the same substitution the
+// project tier's check prevents, one tier down.
+func TestOpenSources_RefusesDanglingUserSymlink(t *testing.T) {
+	base := realPath(t, t.TempDir())
+	home := filepath.Join(base, "home")
+	proj := filepath.Join(home, "proj")
+
+	if err := os.MkdirAll(proj, 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".cynative"), 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+
+	if err := os.Symlink("nonexistent-target", filepath.Join(home, ".cynative", "agents")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, cleanup, err := agentcatalog.OpenSources(proj, home, os.DirFS(base))
+	if err == nil {
+		cleanup()
+		t.Fatal("OpenSources() = nil error, want a dangling user source to fail closed")
+	}
+}
+
+// A genuinely absent user tier is still a clean skip, not an error.
+func TestOpenSources_AbsentUserTierIsNotAnError(t *testing.T) {
+	base := realPath(t, t.TempDir())
+	home := filepath.Join(base, "home")
+	proj := filepath.Join(home, "proj")
+
+	if err := os.MkdirAll(filepath.Join(proj, ".git"), 0o750); err != nil {
+		t.Fatalf("MkdirAll = %v", err)
+	}
+	writeAgent(t, filepath.Join(proj, ".cynative", "agents"), "proj-agent")
+
+	c, cleanup, err := agentcatalog.OpenSources(proj, home, os.DirFS(base))
+	if err != nil {
+		t.Fatalf("OpenSources() = %v, want an absent user tier to be skipped", err)
+	}
+	defer cleanup()
+
+	if _, rerr := c.Resolve("proj-agent"); rerr != nil {
+		t.Fatalf("Resolve() = %v", rerr)
+	}
+}

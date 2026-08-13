@@ -41,18 +41,18 @@ const builtinDisplayPath = "built-in"
 func OpenSources(cwd, home string, builtin fs.FS) (*Catalog, func(), error) {
 	var opened openedRoots
 
-	projectDir, err := findProjectDir(cwd, home)
+	projectDir, userDir, err := claimedDirs(cwd, home)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if err = opened.add(SourceProject, projectDir, true); err != nil {
+	if err = opened.add(SourceProject, projectDir); err != nil {
 		opened.closeAll()
 
 		return nil, nil, err
 	}
 
-	if err = opened.add(SourceUser, home, false); err != nil {
+	if err = opened.add(SourceUser, userDir); err != nil {
 		opened.closeAll()
 
 		return nil, nil, err
@@ -79,15 +79,15 @@ type openedRoots struct {
 	handles []*os.Root
 }
 
-// add opens dir's agents directory and appends it as a root.
+// add opens dir's agents directory and appends it as a root. An empty dir is a
+// source that is simply not present on this machine.
 //
-// mustExist marks a source the caller already established is CLAIMED. For such a
-// source, "not there" is a contradiction rather than a skip: findProjectDir only
-// returns a directory whose .cynative/agents entry exists, so a subsequent
-// not-found means the entry is there but unusable — a dangling symlink, most
-// likely. Skipping it would run a lower-precedence agent under a name the
-// project meant to define.
-func (o *openedRoots) add(source Source, dir string, mustExist bool) error {
+// A non-empty dir is one claimedDirs already established is CLAIMED, so "not
+// there" is a contradiction rather than a skip: the .cynative/agents entry
+// exists, and a subsequent not-found means it is there but unusable — a dangling
+// symlink, most likely. Skipping it would run a lower-precedence agent under a
+// name that tier meant to define.
+func (o *openedRoots) add(source Source, dir string) error {
 	if dir == "" {
 		return nil
 	}
@@ -97,11 +97,7 @@ func (o *openedRoots) add(source Source, dir string, mustExist bool) error {
 		return err
 	}
 	if !ok {
-		if mustExist {
-			return fmt.Errorf("%s/%s was claimed but could not be opened", dir, agentsRelPath)
-		}
-
-		return nil
+		return fmt.Errorf("%s/%s was claimed but could not be opened", dir, agentsRelPath)
 	}
 
 	o.handles = append(o.handles, root)
@@ -119,6 +115,31 @@ func (o *openedRoots) closeAll() {
 	for _, h := range slices.Backward(o.handles) {
 		_ = h.Close()
 	}
+}
+
+// claimedDirs returns the project and user directories that CLAIM an agents
+// source, each "" when that tier is genuinely absent.
+//
+// Both tiers are resolved the same way on purpose. Treating a dangling user
+// source as absent would hide it from `agents list` and silently resolve a
+// same-named built-in instead — the same substitution the project tier's check
+// prevents, one tier down.
+func claimedDirs(cwd, home string) (string, string, error) {
+	projectDir, err := findProjectDir(cwd, home)
+	if err != nil {
+		return "", "", err
+	}
+
+	userClaimed, err := hasAgentsDir(home)
+	if err != nil {
+		return "", "", err
+	}
+
+	if !userClaimed {
+		return projectDir, "", nil
+	}
+
+	return projectDir, home, nil
 }
 
 // findProjectDir returns the nearest directory holding a .cynative/agents,
