@@ -69,7 +69,7 @@ An agent is a markdown file: one line of description, then the prompt. The filen
 ```bash
 mkdir -p ~/.cynative/agents
 
-cat > ~/.cynative/agents/public-data-stores.md <<'EOF'
+cat > ~/.cynative/agents/aws-public-data-stores.md <<'EOF'
 ---
 description: Finds publicly accessible data stores in an AWS account.
 ---
@@ -77,7 +77,7 @@ Check S3, RDS snapshots, EBS snapshots and public AMIs for exposure.
 Report each finding with the resource ARN and how it is reachable.
 EOF
 
-cynative -p --agent public-data-stores
+cynative -p --agent aws-public-data-stores
 ```
 
 See [docs/agents.md](docs/agents.md) for the format.
@@ -85,8 +85,8 @@ See [docs/agents.md](docs/agents.md) for the format.
 ## Running agents
 
 ```bash
-cynative -p --agent public-data-stores "AWS account ID 12814983572854 only"   # with a task
-cynative -p --agent public-data-stores                    # without
+cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
+cynative -p --agent aws-public-data-stores                    # without
 cynative --agent public-data-stores                       # seeds an interactive session
 ```
 
@@ -359,7 +359,7 @@ Configure under `audit:` in `~/.cynative/config.yaml`, or via env:
 
 ## Questions and feedback
 
-[Discussions](https://github.com/cynative/cynative/discussions) is the best place to share your feedback - what you pointed it at, what came back, and what's missing.
+[Discussions](https://github.com/cynative/cynative/discussions) is the best place to share your feedback - what you pointed it at, what came back, and what's missing. Stars help people find the project.
 
 ## Contributing
 
