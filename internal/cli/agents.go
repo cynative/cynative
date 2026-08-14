@@ -26,7 +26,7 @@ func newAgentsCmd(d *deps) *cobra.Command {
 
 Agents are markdown files supplying the prompt for a run. They are searched in
 two sources, first match wins: ~/.cynative/agents/ and the agents built into the
-binary.
+binary. The working directory is never consulted.
 
 To add your own, run "mkdir -p ~/.cynative/agents" and write a markdown file
 there. Cynative does not create the directory for you.`,
