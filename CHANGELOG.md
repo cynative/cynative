@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2](https://github.com/cynative/cynative/compare/v1.9.1...v1.9.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* keep the Homebrew version stanza, skip the audit rule instead ([#259](https://github.com/cynative/cynative/issues/259)) ([93478d6](https://github.com/cynative/cynative/commit/93478d69df29c5d3ce60167ca837b0cfcafd8fbe))
+
 ## [1.9.1](https://github.com/cynative/cynative/compare/v1.9.0...v1.9.1) (2026-08-13)
 
 
