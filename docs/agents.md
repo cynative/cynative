@@ -1,7 +1,7 @@
 # Agents
 
 An agent is a markdown file that supplies the prompt for a run. It turns a
-recurring research into an artifact you can version and review, instead of
+recurring research task into an artifact you can version and review, instead of
 a block of text pasted at the call site.
 
 ```bash
