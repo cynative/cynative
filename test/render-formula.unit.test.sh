@@ -45,6 +45,22 @@ if (
 	exit 0
 ); then pass "render-formula renders version/arches/urls/hashes/meta and :monterey floor"; else fail "render-formula happy path"; fi
 
+# ---- the version stanza is load-bearing; do not "fix" the audit by removing it
+# `brew audit --strict` calls the stanza redundant with the version it scans
+# from the url, and audit-formula.sh answers that with --except=version rather
+# than by dropping it. Dropping it hands the version to Homebrew's url parsing,
+# which has misread our asset names on every brew build tested: "86.64" from
+# x86_64 before Homebrew/brew#23336, "64" from arm64 after it. The user's brew
+# resolves the formula, so a misparse ships as the installed version.
+if (
+	out=$("$render" 9.9.9 "$sha_a" "$sha_b" "$sha_c" "$sha_d") || exit 1
+	printf '%s' "$out" | grep -Eq '^[[:space:]]*version "9\.9\.9"$' || exit 1
+	# The urls interpolate that stanza rather than restating the version, so the
+	# tag can never drift from it.
+	[ "$(printf '%s\n' "$out" | grep -Fc '/download/v#{version}/')" -eq 4 ] || exit 1
+	exit 0
+); then pass "render-formula keeps the version stanza and interpolates it into all four urls"; else fail "render-formula version stanza"; fi
+
 # ---- byte-for-byte golden ----------------------------------------------------
 golden="$here/testdata/homebrew-cynative.golden.rb"
 if "$render" 1.5.1 "$sha_a" "$sha_b" "$sha_c" "$sha_d" | diff -u "$golden" - >/dev/null 2>&1; then
