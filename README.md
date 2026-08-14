@@ -12,7 +12,7 @@ Open-source framework for security agents with live, read-only access to your in
 **[Quickstart](#quickstart) · [Your first agent](#your-first-agent) · [Docs](docs/)**
 
 <!-- BEGIN agent-about -->
-**Ask your infrastructure anything.** Cynative runs AI models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
+**Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
 
 ```bash
 cynative "what in my cloud is publicly exposed that shouldn't be?"
