@@ -58,7 +58,7 @@ It picks up the credentials already in your shell. Ask it anything:
 cynative -p "which IAM roles can escalate to admin?"
 cynative -p "high-risk cloud permissions, trace each to the PR where it was granted"
 cynative -p "cloud credentials leaked in source code and their current blast radius"
-cynative "live cloud resources absent from IaC - drift" # starts an interactive session"
+cynative "live cloud resources absent from IaC - drift" # starts an interactive session
 cat findings.json | cynative -p "triage these findings by exploitability"
 ```
 
