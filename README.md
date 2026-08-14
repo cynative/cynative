@@ -87,7 +87,7 @@ See [docs/agents.md](docs/agents.md) for the format.
 ```bash
 cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
 cynative -p --agent aws-public-data-stores                    # without
-cynative --agent public-data-stores                       # seeds an interactive session
+cynative --agent aws-public-data-stores                       # seeds an interactive session
 ```
 
 `--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin, so the same file runs interactively while you develop it and non-interactively once it settles.
