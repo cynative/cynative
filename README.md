@@ -2,7 +2,7 @@
 
 # Build your own security agents
 
-Open-source framework for security agents with live, read-only access to production. They cannot write, and cannot widen their own access.
+Open-source framework for security agents with live, read-only access to your infrastructure.
 
 [![CI](https://github.com/cynative/cynative/actions/workflows/ci.yaml/badge.svg)](https://github.com/cynative/cynative/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/cynative/cynative)](https://github.com/cynative/cynative/releases/latest)
