@@ -9,6 +9,8 @@ Open-source framework for security agents with live, read-only access to product
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13851/badge)](https://www.bestpractices.dev/projects/13851)
 
+**[Quickstart](#quickstart) · [Your first agent](#your-first-agent) · [Docs](docs/)**
+
 <!-- BEGIN agent-about -->
 **Ask your infrastructure anything.** Cynative runs AI models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
 
@@ -28,13 +30,13 @@ Unlike coding agents and MCP servers, it's **read-only by construction**: every 
 </p>
 
 ## What your agents get
- 
+
 - **Code-to-runtime**: Reasons through AWS, GCP, Azure, any K8s, GitHub and GitLab
 - **Sandbox**: Generates and runs code to research at scale, with no network or host access of its own
 - **Action-gate**: Resolves every call to its required IAM actions and applies a read-only policy before a credential is attached
 - **Evidence-backed**: Cross-checks to verify every finding
 - **Sovereign**: One binary, your model, your data stays yours
- 
+
 ## Quickstart
 
 Install and set an LLM:
@@ -53,7 +55,7 @@ export ANTHROPIC_API_KEY=...
 It picks up the credentials already in your shell. Ask it anything:
 
 ```bash
-cynative -p "which IAM roles can escalate to admin?" 
+cynative -p "which IAM roles can escalate to admin?"
 cynative -p "high-risk cloud permissions, trace each to the PR where it was granted"
 cynative -p "cloud credentials leaked in source code and their current blast radius"
 cynative "live cloud resources absent from IaC - drift" # starts an interactive session"
@@ -61,12 +63,12 @@ cat findings.json | cynative -p "triage these findings by exploitability"
 ```
 
 ## Your first agent
- 
+
 An agent is a markdown file: one line of description, then the prompt. The filename is the name. To add your own, create `~/.cynative/agents/` and write one in it. Cynative does not create this directory for you:
 
 ```bash
 mkdir -p ~/.cynative/agents
- 
+
 cat > ~/.cynative/agents/public-data-stores.md <<'EOF'
 ---
 description: Finds publicly accessible data stores in an AWS account.
@@ -74,12 +76,24 @@ description: Finds publicly accessible data stores in an AWS account.
 Check S3, RDS snapshots, EBS snapshots and public AMIs for exposure.
 Report each finding with the resource ARN and how it is reachable.
 EOF
- 
+
 cynative -p --agent public-data-stores
 ```
- 
+
 See [docs/agents.md](docs/agents.md) for the format.
- 
+
+## Running agents
+
+```bash
+cynative -p --agent public-data-stores "AWS account ID 12814983572854 only"   # with a task
+cynative -p --agent public-data-stores                    # without
+cynative --agent public-data-stores                       # seeds an interactive session
+```
+
+`--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin, so the same file runs interactively while you develop it and non-interactively once it settles.
+
+Agents are read from `~/.cynative/agents/` and from the set built into the binary; a user file wins over a built-in of the same name. `cynative agents list` shows every agent with its source and marks the shadowed copies, and `cynative agents show <name>` prints the exact file that would run.
+
 ## Can't a coding agent with MCPs do this?
 
 | | Coding agent + MCPs | Cynative |
@@ -212,18 +226,6 @@ configuration reference.
 
 </details>
 
-## Running agents
-  
-```bash
-cynative -p --agent public-data-stores "AWS account ID 12814983572854 only"   # with a task
-cynative -p --agent public-data-stores                    # without
-cynative --agent public-data-stores                       # seeds an interactive session
-```
-
-`--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin, so the same file runs interactively while you develop it and non-interactively once it settles.
- 
-Agents are read from `~/.cynative/agents/` and from the set built into the binary; a user file wins over a built-in of the same name. `cynative agents list` shows every agent with its source and marks the shadowed copies, and `cynative agents show <name>` prints the exact file that would run.
-
 ## Sessions and approvals
 
 `cynative` opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`).
@@ -329,7 +331,7 @@ console.log(JSON.stringify(all.filter((x) => x.clusters.length > 0), null, 2));
   headers, body }`; `body` is the raw string - `JSON.parse(resp.body)` for JSON
   APIs or read it directly for XML.
 - **Sandboxed**: a script can only call the tools Cynative exposes - it has no
-  network, filesystem or package access of its own.
+  network or host access of its own.
 - **You see the whole script**: each `code_execution` call is shown in full for
   approval before it runs (skip with `--auto-approve`; stream each inner call
   with `-v`).
@@ -342,7 +344,7 @@ console.log(JSON.stringify(all.filter((x) => x.clusters.length > 0), null, 2));
 ## Audit Log
 
 Every tool call is recorded to a persistent JSONL audit log (`~/.cynative/audit.log`, on by default). The log is fail-closed: if a call can't be recorded, the run aborts. Every entry from an agent run also records the agent's name, source and file digest, so a finding can be traced back to the exact prompt that produced it.
- 
+
 Tool results are redacted before they're written but approval-prompt arguments are stored verbatim - the log can hold sensitive values. It's readable only by the user who ran Cynative. Rotation and retention are configurable.
 
 Configure under `audit:` in `~/.cynative/config.yaml`, or via env:
