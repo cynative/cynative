@@ -83,13 +83,19 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   credential job's and decision step's full `if`, all three sentinel bodies, both
   `make connector-<c>-e2e` invocations and gate-assert's `sh ci-gate-assert.sh &&`-guarded
   `gate_sha` emission are compared **whole**, each checked step's env is pinned by exact
-  key set, and workflow/job `defaults`/`env`/`container` and step `shell`/`working-directory`
-  must be absent. Every membership check tried during review had a bypass that left the
-  searched-for text exactly where it was - `if false; then make ...; fi`, `|| true` on the
-  repository guard, deleting only the sentinel's outcome check, `MAKEFLAGS: -n`,
-  `shell: bash -c 'exit 0'` - each of which succeeds, mints a proof and greens the gate.
-  **Editing `connector-e2e.yaml`'s pinned bodies, conditions or step env means updating
-  this golden in the same change.**), all four connector suites' offline
+  key set, each job's ordered step spine and `runs-on` are pinned, no gate step may write
+  `$GITHUB_ENV`/`$GITHUB_PATH`, workflow/job `defaults`/`env`/`container` and step
+  `shell`/`working-directory` must be absent, and the `Makefile`'s `connector-%-e2e` recipe
+  is pinned as the last hop. Every membership check tried during review had a bypass that
+  left the searched-for text exactly where it was - `if false; then make ...; fi`, `|| true`
+  on the repository guard, deleting only the sentinel's outcome check, `MAKEFLAGS: -n`
+  (in the step env or via a predecessor writing `$GITHUB_ENV`), `shell: bash -c 'exit 0'` -
+  each of which succeeds, mints a proof and greens the gate. Its scope is stated in its
+  header and is worth knowing: it catches a gate NARROWED while still looking right, not an
+  author willing to edit the golden itself, which nothing in-repo can (anchor and anchored
+  ship in one commit; that is what review and branch protection are for).
+  **Editing `connector-e2e.yaml`'s pinned bodies, conditions, step env or step order means
+  updating this golden in the same change.**), all four connector suites' offline
   audit-parser selftests, and the shared-machinery selftest).
   Install-free: presence-checks `shellcheck`, PowerShell 7, `python3` and PyYAML (the
   secret-boundary pin's YAML parser) up front and fails with

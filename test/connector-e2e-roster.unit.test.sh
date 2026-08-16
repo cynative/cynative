@@ -35,6 +35,20 @@
 #      outcome check, `MAKEFLAGS: -n` in the step env, `shell: bash -c 'exit 0'` on the
 #      step. Each one succeeds, mints a proof and greens the release gate.
 #
+# WHAT THIS DEFENDS AGAINST, AND WHAT IT CANNOT. It defends against a change that narrows
+# the gate while still looking right: a row and its ROSTER entry deleted together in a
+# refactor, a leg quietly pinned to one connector, a canary knob flipped, a step inserted
+# that mutates what a later one runs. Those are the mistakes that survive review precisely
+# because every surviving check still passes.
+#
+# It cannot defend against an author who is willing to edit THIS file. Nothing in-repo can:
+# the anchor and the thing it anchors live in the same commit, so a determined rewrite
+# updates both. That is what branch protection and human review are for, and it is why the
+# checks below stop where they do rather than trying to prove the runner honest. The line
+# is drawn at: could this change be made, and reviewed, without anyone noticing the gate
+# stopped testing something? Everything on that side is pinned; a fully deliberate
+# co-edit of the golden is out of scope by construction, not by oversight.
+#
 # THE WORKFLOW IS PARSED WITH PyYAML, NOT LINE BY LINE. Every check here asks a structural
 # question - which key belongs to which step - and a line scanner cannot answer that
 # safely: a decoy `env:`/`run:` block nested inside a multiline `name:` scalar is valid
@@ -158,6 +172,27 @@ EXPECTED_IF = {
 # successfully, and the exact run body, the outcome check and the proof emission all still
 # pass. The values that carry meaning on their own (REQUIRE_RUN, CANARY, CONNECTOR,
 # EXPECTED_TOTAL, E2E_OUTCOME) are pinned by value separately below.
+# The ordered step spine of every job, by id where a step has one and by uses/name
+# otherwise, plus the runner. A step INSERTED before a pinned one can mutate what the
+# pinned one then executes - `echo MAKEFLAGS=-n >>"$GITHUB_ENV"` in a new step makes the
+# pinned make invocation dry-run successfully, and nothing in the e2e step's own env
+# changes - and `runs-on` decides whose machine any of it runs on at all: repointing a
+# credential job at a controlled self-hosted runner makes every pinned command meaningless.
+EXPECTED_STEPS = {
+    "prepare": ["uses:actions/checkout", "contract"],
+    "gcp-wif": ["uses:actions/checkout", "name:Assert the exact checkout",
+                "uses:actions/setup-go", "name:Preflight the required repo ", "auth",
+                "name:Add quota project to the WIF", "e2e", "sentinel"],
+    "aws-oidc": ["uses:actions/checkout", "name:Assert the exact checkout",
+                 "uses:actions/setup-go", "name:Preflight the required repo ", "aws",
+                 "e2e", "sentinel"],
+    "github-app": ["uses:actions/checkout", "name:Assert the exact checkout",
+                   "uses:actions/setup-go", "name:Preflight the required repo ", "aws",
+                   "apptoken", "e2e", "sentinel"],
+    "gate-assert": ["uses:actions/checkout", "assert"],
+}
+EXPECTED_RUNNER = "ubuntu-latest"
+
 EXPECTED_ENV_KEYS = {
     ("gcp-wif", "e2e"): {
         "CYNATIVE_LLM_PROVIDER", "CYNATIVE_LLM_MODEL", "CYNATIVE_LLM_VERTEX_PROJECT_ID",
@@ -458,7 +493,36 @@ check_if("gate-assert", None)
 # evidence if it cannot be emitted without that evaluation succeeding.
 check_run("gate-assert", "assert")
 
-# ---- 5. execution context ---------------------------------------------------
+# ---- 5. the step spine and the runner ---------------------------------------
+for job_name, want_steps in sorted(EXPECTED_STEPS.items()):
+    spec = job_of(job_name)
+    if spec.get("runs-on") != EXPECTED_RUNNER:
+        problems.append("job %s runs-on is %r, want %r: a pinned command proves nothing "
+                        "about what ran if the runner itself is not ours"
+                        % (job_name, spec.get("runs-on"), EXPECTED_RUNNER))
+    got_steps = []
+    for step in spec.get("steps") or []:
+        if step.get("id"):
+            got_steps.append(step["id"])
+        elif step.get("uses"):
+            got_steps.append("uses:" + step["uses"].split("@")[0])
+        else:
+            got_steps.append("name:" + str(step.get("name"))[:28])
+    if got_steps != want_steps:
+        problems.append("job %s step spine is not the pinned sequence:\n    got  %s\n    want %s"
+                        % (job_name, got_steps, want_steps))
+    # $GITHUB_ENV and $GITHUB_PATH are the only two ways one step can change a LATER
+    # step's environment, so an appended line in any predecessor is the same attack as a
+    # key added to the pinned step's own env. No step in these jobs needs either.
+    for step in spec.get("steps") or []:
+        body = str(step.get("run") or "")
+        for sink in ("GITHUB_ENV", "GITHUB_PATH"):
+            if sink in body:
+                problems.append("job %s step %r writes $%s, which mutates a later step's "
+                                "execution environment; no gate step may"
+                                % (job_name, step.get("id") or step.get("name"), sink))
+
+# ---- 6. execution context ---------------------------------------------------
 # A pinned run body is only evidence if the runner actually executes it as written.
 # `shell: bash -c 'exit 0' -- {0}` on the e2e step leaves the exact body in place and its
 # outcome success, so both sentinels mint proofs while no suite runs; a workflow- or
@@ -485,6 +549,22 @@ for job_name, step_id in sorted(EXPECTED_ENV_KEYS):
                         % (job_name, step_id,
                            sorted(got_keys - EXPECTED_ENV_KEYS[(job_name, step_id)]),
                            sorted(EXPECTED_ENV_KEYS[(job_name, step_id)] - got_keys)))
+
+# ---- 7. the Makefile dispatch ------------------------------------------------
+# The last hop of the executable seam. `make connector-<c>-e2e` is one pattern rule, so
+# rewriting its recipe to a successful no-op bypasses every live suite at once while the
+# workflow still reads exactly as pinned - and `make check` would stay green, because it
+# reaches the parser selftests through a different path.
+WANT_RECIPE = ("connector-%-e2e: FORCE ## run one live connector e2e (gcp|aws|github|gke); "
+               "naming is load-bearing\n\tsh test/connector.$*.e2e.test.sh\n")
+try:
+    with open("Makefile", encoding="utf-8") as makefile:
+        if WANT_RECIPE not in makefile.read():
+            problems.append("the Makefile's connector-%-e2e recipe is not the pinned two "
+                            "lines; a no-op recipe bypasses every live suite while the "
+                            "workflow still reads as pinned")
+except OSError as err:
+    problems.append("cannot read the Makefile to pin the connector-%%-e2e recipe: %s" % err)
 
 if problems:
     for p in problems:
