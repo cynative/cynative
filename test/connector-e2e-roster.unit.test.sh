@@ -128,6 +128,44 @@ for job, job_rows in sorted(BY_JOB.items()):
 # The cost is that any real edit to these four bodies must update this table too. That is
 # the intent: these are the lines that turn every other literal in this file from a
 # declaration into evidence.
+# The full normalized `if` of every credential-bearing job and of the two steps that
+# decide whether a leg runs and whether it may mint a proof. Whole-expression equality for
+# the same reason as EXPECTED_RUN: a substring check for the repository guard survives
+# appending `|| true`, which neutralizes the one defense that keeps a fork off the
+# credential steps while every checked fragment stays present.
+#
+# Scope is deliberate: the conditions pinned here are the ones that can let a leg mint a
+# proof it did not earn. Other step conditions (the preflight's, which carries the same
+# selection expression) are not pinned, because loosening one can only make a run fail on
+# a variable it does not need - noisy, never green.
+EXPECTED_IF = {
+    ("gcp-wif", None): ("github.repository == 'cynative/cynative' && "
+                        "needs.prepare.result == 'success' && "
+                        "(needs.prepare.outputs.selector == '' || "
+                        "needs.prepare.outputs.selector == 'gcp' || "
+                        "needs.prepare.outputs.selector == 'gke')"),
+    ("aws-oidc", None): ("github.repository == 'cynative/cynative' && "
+                         "needs.prepare.result == 'success' && "
+                         "(needs.prepare.outputs.selector == '' || "
+                         "needs.prepare.outputs.selector == 'aws')"),
+    ("github-app", None): ("github.repository == 'cynative/cynative' && "
+                           "needs.prepare.result == 'success' && "
+                           "(needs.prepare.outputs.selector == '' || "
+                           "needs.prepare.outputs.selector == 'github')"),
+    # A matrix leg is selected on the STEP, because a job-level if cannot read matrix.
+    ("gcp-wif", "e2e"): ("${{ needs.prepare.outputs.selector == '' || "
+                         "needs.prepare.outputs.selector == matrix.connector }}"),
+    ("aws-oidc", "e2e"): ("${{ needs.prepare.outputs.selector == '' || "
+                          "needs.prepare.outputs.selector == matrix.connector }}"),
+    ("github-app", "e2e"): "",
+    ("gcp-wif", "sentinel"): ("${{ always() && (needs.prepare.outputs.selector == '' || "
+                              "needs.prepare.outputs.selector == matrix.connector) }}"),
+    ("aws-oidc", "sentinel"): ("${{ always() && (needs.prepare.outputs.selector == '' || "
+                               "needs.prepare.outputs.selector == matrix.connector) }}"),
+    ("github-app", "sentinel"): "${{ always() }}",
+    ("gate-assert", None): "${{ always() }}",
+}
+
 EXPECTED_RUN = {
     ("gcp-wif", "e2e"): [
         'export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"',
@@ -140,6 +178,47 @@ EXPECTED_RUN = {
     ("gate-assert", "assert"): [
         "sh scripts/ci/ci-gate-assert.sh &&",
         "printf 'gate_sha=%s\\n' \"$CHECKOUT_SHA\" >>\"$GITHUB_OUTPUT\"",
+    ],
+    # The sentinel is the third executable seam. Pinned whole: dropping only its
+    # E2E_OUTCOME check, while keeping the case arms and the proof emission, lets a leg
+    # that never ran still mint its proof - and every arm-by-arm check would still pass.
+    ("gcp-wif", "sentinel"): [
+        'if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then',
+        'echo "::error::gcp-wif realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"',
+        "exit 1",
+        "fi",
+        'if [ "$E2E_OUTCOME" != success ]; then',
+        'echo "::error::connector $CONNECTOR e2e outcome=$E2E_OUTCOME"',
+        "exit 1",
+        "fi",
+        'case "$CONNECTOR" in',
+        "gcp) key=proof_gcp ;;",
+        "gke) key=proof_gke ;;",
+        '*) echo "::error::connector $CONNECTOR is not in the gcp-wif allowlist"; exit 1 ;;',
+        "esac",
+        "printf '%s=success\\n' \"$key\" >>\"$GITHUB_OUTPUT\"",
+    ],
+    ("aws-oidc", "sentinel"): [
+        'if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then',
+        'echo "::error::aws-oidc realized $ACTUAL_TOTAL legs, expected $EXPECTED_TOTAL: a matrix row was added or dropped"',
+        "exit 1",
+        "fi",
+        'if [ "$E2E_OUTCOME" != success ]; then',
+        'echo "::error::connector $CONNECTOR e2e outcome=$E2E_OUTCOME"',
+        "exit 1",
+        "fi",
+        'case "$CONNECTOR" in',
+        "aws) key=proof_aws ;;",
+        '*) echo "::error::connector $CONNECTOR is not in the aws-oidc allowlist"; exit 1 ;;',
+        "esac",
+        "printf '%s=success\\n' \"$key\" >>\"$GITHUB_OUTPUT\"",
+    ],
+    ("github-app", "sentinel"): [
+        'if [ "$E2E_OUTCOME" != success ]; then',
+        'echo "::error::connector github e2e outcome=$E2E_OUTCOME"',
+        "exit 1",
+        "fi",
+        "printf 'proof_github=success\\n' >>\"$GITHUB_OUTPUT\"",
     ],
 }
 
@@ -193,6 +272,21 @@ def check_run(job_name, step_id):
                         "    got  %s\n    want %s" % (job_name, step_id, got, want))
 
 
+def check_if(job_name, step_id):
+    """Whole-expression equality against EXPECTED_IF. step_id None means the job's own
+    condition."""
+    key = (job_name, step_id)
+    if key not in EXPECTED_IF:
+        problems.append("no expected if: is pinned for %s/%s" % (job_name, step_id))
+        return
+    node = job_of(job_name) if step_id is None else step_of(job_name, step_id)
+    got = " ".join(str(node.get("if") or "").split())
+    if got != EXPECTED_IF[key]:
+        problems.append("job %s %s if: is not the pinned expression:\n    got  %r\n    want %r"
+                        % (job_name, "job-level" if step_id is None else "step " + step_id,
+                           got, EXPECTED_IF[key]))
+
+
 # ---- 1. job topology --------------------------------------------------------
 rows = []
 for job in JOBS:
@@ -237,19 +331,14 @@ for job in JOBS:
                     % (job, BY_JOB[job][0][1], str(spec.get("timeout-minutes"))))
     check_run(job, "e2e")
 
-    # ---- 2. selection: the job's own membership test ------------------------
-    cond = " ".join(str(spec.get("if") or "").split())
-    if "contains(" in cond:
-        problems.append("job %s uses contains() in its if:, which is SUBSTRING matching; use "
-                        "exact selector equality" % job)
-    if "github.repository == 'cynative/cynative'" not in cond:
-        problems.append("job %s lost its repository guard, the defense that keeps a fork off "
-                        "the credential steps" % job)
-    for parts in BY_JOB[job]:
-        want = "needs.prepare.outputs.selector == '%s'" % parts[1]
-        if want not in cond:
-            problems.append("job %s if: does not admit its own connector %s (want %r)"
-                            % (job, parts[1], want))
+    # ---- 2. selection: the job's and its steps' own conditions --------------
+    # Whole-expression equality, not substring membership: the repository guard is the one
+    # defense that keeps a fork off the credential steps, and appending `|| true` leaves
+    # every fragment a substring check looks for exactly where it was. The pinned strings
+    # are also what carry the "exact equality, never contains()" rule, since contains() is
+    # substring matching and contains('gcp gke', 'gk') is true.
+    for step_id in (None, "e2e", "sentinel"):
+        check_if(job, step_id)
 
     # ---- 4. the operational seam -------------------------------------------
     outputs = spec.get("outputs") or {}
@@ -258,15 +347,15 @@ for job in JOBS:
     if outputs != want_outputs:
         problems.append("job %s outputs are %r, want exactly %r (matrix outputs sharing one "
                         "name race; distinct names combine)" % (job, outputs, want_outputs))
-    sentinel = run_body(job, "sentinel")
-    for parts in BY_JOB[job]:
-        connector = parts[1]
-        if kind == "matrix":
-            arm = "%s) key=proof_%s ;;" % (connector, connector)
-            if arm not in sentinel:
-                problems.append("job %s sentinel has no allowlist arm %r" % (job, arm))
-        elif not any("proof_%s=success" % connector in l for l in sentinel):
-            problems.append("job %s sentinel does not emit proof_%s=success" % (job, connector))
+    # The sentinel's allowlist arms, its E2E_OUTCOME check and its proof emission are all
+    # inside the body pinned here, so no separate per-arm assertion is needed - and a
+    # per-arm one would miss the removal of the outcome check that guards them.
+    check_run(job, "sentinel")
+    if step_env(job, "sentinel").get("E2E_OUTCOME") != "${{ steps.e2e.outcome }}":
+        problems.append("job %s sentinel must bind E2E_OUTCOME to steps.e2e.OUTCOME - "
+                        "outcome is the value before continue-on-error, so it catches a "
+                        "skipped, tolerated or renamed e2e step where conclusion would not"
+                        % job)
     env = step_env(job, "e2e")
     for parts in BY_JOB[job]:
         prefix = "GH" if parts[1] == "github" else parts[1].upper()
@@ -325,9 +414,7 @@ if got_needs != sorted(["prepare"] + JOBS):
     problems.append("gate-assert needs %s does not equal %s"
                     % (got_needs, sorted(["prepare"] + JOBS)))
 # Bare always(), zero conjuncts: any conjunct reopens the skip-is-success hole.
-if " ".join(str(ga.get("if") or "").split()) != "${{ always() }}":
-    problems.append("gate-assert must run under a bare `if: ${{ always() }}` with no conjuncts "
-                    "(got %r)" % ga.get("if"))
+check_if("gate-assert", None)
 # The fan-in literals are only evidence if something evaluates them, and gate_sha is only
 # evidence if it cannot be emitted without that evaluation succeeding.
 check_run("gate-assert", "assert")
