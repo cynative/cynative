@@ -22,19 +22,25 @@
 #   2. Selection: SELECTORS, the dispatch choice list, and each job's own `if:`
 #      membership, spelled as exact equality (never contains(), which is substring
 #      matching: contains('gcp gke', 'gk') is true).
-#   3. The fan-in: ROSTER/JOBS/PROOFS and gate-assert's `needs`, all derived from the
-#      canonical rows and compared as sorted multisets.
+#   3. The fan-in: ROSTER/JOBS/PROOFS/RESULTS and gate-assert's `needs`, all derived from
+#      the canonical rows and compared as sorted multisets.
 #   4. The two EXECUTABLE seams, which are what turn the roster into evidence. Every
 #      literal above is inert unless something runs the suite and something evaluates the
-#      fan-in, so both invocations are read out of the owning step's own `run:` body with
-#      comments stripped: `make connector-<c>-e2e` inside `id: e2e`, and
-#      `sh scripts/ci/ci-gate-assert.sh &&` guarding the gate_sha emission inside
-#      `id: assert`. A step whose body is `: # make "connector-${CONNECTOR}-e2e"` succeeds,
-#      mints a proof and greens the release gate while a substring search over the raw job
-#      still finds the command. Also each leg's `*_REQUIRE_RUN: "1"` and `*_CANARY: "1"`,
-#      read from that step alone: a leg whose REQUIRE_RUN went missing skips green on a
-#      renamed variable, and one whose CANARY went to 0 proves a read while never probing
-#      the boundary at all.
+#      fan-in, so both invocations are pinned as the COMPLETE comment-stripped body of the
+#      owning step's `run:` - `make connector-<c>-e2e` in `id: e2e`, and
+#      `sh scripts/ci/ci-gate-assert.sh &&` guarding the gate_sha emission in `id: assert`.
+#      Membership is not enough: a body that merely CONTAINS the command proves nothing
+#      about execution, since `if false; then make ...; fi` succeeds, mints a proof and
+#      greens the gate. Also each leg's `*_REQUIRE_RUN` and `*_CANARY` forcing.
+#
+# THE WORKFLOW IS PARSED WITH PyYAML, NOT LINE BY LINE. Every check here asks a structural
+# question - which key belongs to which step - and a line scanner cannot answer that
+# safely: a decoy `env:`/`run:` block nested inside a multiline `name:` scalar is valid
+# YAML that a text search reads as the step's own keys while Actions uses the real sibling
+# keys below it. Parsing gives the same tree Actions sees, so a decoy is just a string.
+# The loader clears PyYAML's YAML 1.1 implicit resolvers for the same reason
+# scripts/ci/check-llm-smoke-secrets.py does: otherwise `on:` resolves to the boolean True
+# and stops being addressable as the key it was written as.
 set -eu
 
 workflow=.github/workflows/connector-e2e.yaml
@@ -43,24 +49,43 @@ fails=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-# job|connector|kind|timeout, one line per LOGICAL connector leg. `kind` is matrix or
-# static: github is a genuine singleton job, not a one-row matrix, and the difference
-# changes which assertions apply (a static job has no strategy, no matrix.connector, and
-# no EXPECTED_TOTAL). Timeouts are part of the anchor because a leg silently dropped to a
-# 1-minute cap would fail on the release path only.
+# job|connector|kind|timeout|extra, one line per LOGICAL connector leg.
+#
+# `kind` is matrix or static: github is a genuine singleton job, not a one-row matrix, and
+# the difference changes which assertions apply (a static job has no strategy, no
+# matrix.connector, and no EXPECTED_TOTAL). Timeouts are part of the anchor because a leg
+# silently dropped to a 1-minute cap would fail on the release path only. `extra` is the
+# row's remaining matrix keys as k=v pairs, or `-` for none: aws-oidc carries
+# output_env_credentials=true, which is what puts AWS_* in the environment so the aws
+# connector registers, and the github leg sets the INVERSE to keep it dark. The workflow
+# calls that inversion easy to copy wrongly, so it is pinned rather than tolerated.
 cat >"$tmp/expected" <<'EOF'
-aws-oidc|aws|matrix|25
-gcp-wif|gcp|matrix|20
-gcp-wif|gke|matrix|30
-github-app|github|static|35
+aws-oidc|aws|matrix|25|output_env_credentials=true
+gcp-wif|gcp|matrix|20|-
+gcp-wif|gke|matrix|30|-
+github-app|github|static|35|-
 EOF
 
 python3 - "$workflow" "$tmp/expected" >"$tmp/actual" <<'PY'
-import re
 import sys
 
+try:
+    import yaml
+except ImportError:
+    sys.stderr.write("  PyYAML not found - needed to parse the workflow (apt: python3-yaml, "
+                     "pip: PyYAML)\n")
+    sys.exit(1)
+
+
+class PlainStringLoader(yaml.SafeLoader):
+    """Leaves every plain scalar as the string it was written as, so `on:` stays the key
+    `on` instead of resolving to the YAML 1.1 boolean True."""
+
+
+PlainStringLoader.yaml_implicit_resolvers = {}
+
 with open(sys.argv[1], encoding="utf-8") as workflow_file:
-    lines = workflow_file.read().splitlines()
+    wf = yaml.load(workflow_file.read(), Loader=PlainStringLoader)  # noqa: S506 - SafeLoader subclass
 
 problems = []
 
@@ -70,8 +95,8 @@ with open(sys.argv[2], encoding="utf-8") as canonical_file:
         if raw.strip():
             canonical.append(raw.split("|"))
 for parts in canonical:
-    if len(parts) != 4:
-        problems.append("canonical row %r is not job|connector|kind|timeout" % "|".join(parts))
+    if len(parts) != 5:
+        problems.append("canonical row %r is not job|connector|kind|timeout|extra" % "|".join(parts))
     elif parts[2] not in ("matrix", "static"):
         problems.append("canonical row %r has an unknown kind %r" % ("|".join(parts), parts[2]))
 
@@ -82,147 +107,9 @@ for parts in canonical:
     BY_JOB.setdefault(parts[0], []).append(parts)
 # A job is matrix or static as a whole; a mixed one would make every per-kind assertion
 # below ambiguous rather than wrong, so catch it here.
-for job, rows in sorted(BY_JOB.items()):
-    if len({r[2] for r in rows}) != 1:
+for job, job_rows in sorted(BY_JOB.items()):
+    if len({r[2] for r in job_rows}) != 1:
         problems.append("job %s mixes matrix and static legs" % job)
-
-
-def job_slice(name):
-    """The lines of one top-level job, exclusive of the next job header."""
-    start = None
-    for i, line in enumerate(lines):
-        if line == "  %s:" % name:
-            start = i + 1
-            break
-    if start is None:
-        problems.append("job %s not found in the workflow" % name)
-        return []
-    end = len(lines)
-    for i in range(start, len(lines)):
-        if re.match(r"^  [A-Za-z0-9_-]+:\s*$", lines[i]) or re.match(r"^\S", lines[i]):
-            end = i
-            break
-    return lines[start:end]
-
-
-def scalars(chunk, key):
-    """Every `key: value` in chunk, comments excluded."""
-    out = []
-    for line in chunk:
-        if line.lstrip().startswith("#"):
-            continue
-        m = re.match(r"^\s*%s:\s*(.+?)\s*$" % re.escape(key), line)
-        if m:
-            out.append(m.group(1))
-    return out
-
-
-def block(chunk, key):
-    """The lines of a single `key: |` literal block."""
-    out = []
-    starts = [i for i, l in enumerate(chunk)
-              if re.match(r"^\s*%s:\s*\|\s*$" % re.escape(key), l)]
-    if len(starts) != 1:
-        problems.append("expected exactly one %s block, found %d" % (key, len(starts)))
-        return out
-    indent = len(chunk[starts[0]]) - len(chunk[starts[0]].lstrip())
-    for l in chunk[starts[0] + 1:]:
-        if l.strip() and (len(l) - len(l.lstrip())) <= indent:
-            break
-        if l.strip():
-            out.append(l.strip())
-    return out
-
-
-def folded(chunk, key):
-    """A `key: >-` folded scalar, joined into one line."""
-    starts = [i for i, l in enumerate(chunk) if re.match(r"^\s*%s:\s*>-\s*$" % re.escape(key), l)]
-    if len(starts) != 1:
-        return None
-    indent = len(chunk[starts[0]]) - len(chunk[starts[0]].lstrip())
-    parts = []
-    for l in chunk[starts[0] + 1:]:
-        if l.strip() and (len(l) - len(l.lstrip())) <= indent:
-            break
-        if l.strip():
-            parts.append(l.strip())
-    return " ".join(parts)
-
-
-def step_slice(chunk, step_id):
-    """The lines of the ONE step whose `id:` is step_id, ending at the next step in the
-    same list. Bounding it matters: an unbounded forward scan would happily adopt a LATER
-    step's env or run block, so a no-op e2e step followed by a decorative one could
-    satisfy every check below."""
-    ids = [i for i, l in enumerate(chunk) if " ".join(l.split()) == "id: %s" % step_id]
-    if len(ids) != 1:
-        problems.append("expected exactly one `id: %s` step, found %d" % (step_id, len(ids)))
-        return []
-    start = ids[0]
-    # Walk back to this step's own "- " bullet to learn the list indentation.
-    bullet = start
-    while bullet >= 0 and not re.match(r"^\s*-\s", chunk[bullet]):
-        bullet -= 1
-    if bullet < 0:
-        problems.append("step %s is not inside a steps list" % step_id)
-        return []
-    indent = len(chunk[bullet]) - len(chunk[bullet].lstrip())
-    end = len(chunk)
-    for i in range(bullet + 1, len(chunk)):
-        if re.match(r"^ {%d}-\s" % indent, chunk[i]) or (
-                chunk[i].strip() and (len(chunk[i]) - len(chunk[i].lstrip())) < indent):
-            end = i
-            break
-    return chunk[bullet:end]
-
-
-def step_env(chunk, step_id):
-    """The env mapping of the step whose `id:` is step_id, read from that step only."""
-    step = step_slice(chunk, step_id)
-    j = 0
-    while j < len(step) and " ".join(step[j].split()) != "env:":
-        j += 1
-    if j == len(step):
-        return {}
-    env_indent = len(step[j]) - len(step[j].lstrip())
-    env = {}
-    j += 1
-    while j < len(step):
-        l = step[j]
-        if l.strip() and (len(l) - len(l.lstrip())) <= env_indent:
-            break
-        m = re.match(r"^\s*([A-Za-z0-9_]+):\s*(.*?)\s*$", l)
-        if m and not l.lstrip().startswith("#"):
-            if m.group(1) in env:
-                problems.append("step %s declares env %s twice" % (step_id, m.group(1)))
-            env[m.group(1)] = m.group(2)
-        j += 1
-    return env
-
-
-def step_run(chunk, step_id):
-    """The non-comment, non-blank lines of the step's `run:` body, normalized. Scoped to
-    the step and comment-stripped, so `: # make "connector-${CONNECTOR}-e2e"` - a step
-    that succeeds without running anything, mints a proof, and greens the gate - cannot
-    satisfy a check for the real invocation."""
-    step = step_slice(chunk, step_id)
-    for j, l in enumerate(step):
-        m = re.match(r"^(\s*)run:\s*(\|-?|>-?)?\s*(.*?)\s*$", l)
-        if not m:
-            continue
-        if m.group(3):
-            return [" ".join(m.group(3).split())]
-        indent = len(m.group(1))
-        body = []
-        for follow in step[j + 1:]:
-            if follow.strip() and (len(follow) - len(follow.lstrip())) <= indent:
-                break
-            stripped = follow.strip()
-            if stripped and not stripped.startswith("#"):
-                body.append(" ".join(stripped.split()))
-        return body
-    return []
-
 
 # The COMPLETE comment-stripped run body of each executable seam, as an independent
 # literal. Whole-body equality, never membership: a body that merely CONTAINS the command
@@ -239,7 +126,7 @@ def step_run(chunk, step_id):
 # sequence pins the `&&` relationship between them.
 #
 # The cost is that any real edit to these four bodies must update this table too. That is
-# the intent: these are the two lines that turn every other literal in this file from a
+# the intent: these are the lines that turn every other literal in this file from a
 # declaration into evidence.
 EXPECTED_RUN = {
     ("gcp-wif", "e2e"): [
@@ -257,74 +144,101 @@ EXPECTED_RUN = {
 }
 
 
-def check_run(chunk, job, step_id):
-    want = EXPECTED_RUN.get((job, step_id))
+def job_of(name):
+    j = (wf.get("jobs") or {}).get(name)
+    if not isinstance(j, dict):
+        problems.append("job %s is missing from the workflow" % name)
+        return {}
+    return j
+
+
+def step_of(job_name, step_id):
+    """The ONE step of `job_name` whose `id` is step_id, from the parsed tree. Any other
+    count is a broken workflow, never a silently-picked first match."""
+    steps = [s for s in (job_of(job_name).get("steps") or [])
+             if isinstance(s, dict) and s.get("id") == step_id]
+    if len(steps) != 1:
+        problems.append("job %s must have exactly one step with id: %s, found %d"
+                        % (job_name, step_id, len(steps)))
+        return {}
+    return steps[0]
+
+
+def step_env(job_name, step_id):
+    env = step_of(job_name, step_id).get("env")
+    return env if isinstance(env, dict) else {}
+
+
+def run_body(job_name, step_id):
+    """The step's `run:` as a list of normalized, non-comment, non-blank lines."""
+    body = step_of(job_name, step_id).get("run")
+    if not isinstance(body, str):
+        return []
+    out = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            out.append(" ".join(stripped.split()))
+    return out
+
+
+def check_run(job_name, step_id):
+    want = EXPECTED_RUN.get((job_name, step_id))
     if want is None:
-        problems.append("no expected run body is pinned for %s/%s" % (job, step_id))
+        problems.append("no expected run body is pinned for %s/%s" % (job_name, step_id))
         return
-    got = step_run(chunk, step_id)
+    got = run_body(job_name, step_id)
     if got != want:
         problems.append("job %s step %s run body is not the pinned sequence:\n"
-                        "    got  %s\n    want %s" % (job, step_id, got, want))
+                        "    got  %s\n    want %s" % (job_name, step_id, got, want))
 
 
 # ---- 1. job topology --------------------------------------------------------
 rows = []
 for job in JOBS:
-    chunk = job_slice(job)
+    spec = job_of(job)
     kind = BY_JOB[job][0][2]
     if kind == "matrix":
-        if scalars(chunk, "fail-fast") != ["false"]:
-            problems.append("job %s must declare exactly one fail-fast: false so one red leg "
-                            "cannot mask another (got %r)" % (job, scalars(chunk, "fail-fast")))
-        # Each `- connector: X` row is followed by its own `timeout: N`.
+        strategy = spec.get("strategy") or {}
+        if strategy.get("fail-fast") != "false":
+            problems.append("job %s must set fail-fast: false so one red leg cannot mask "
+                            "another (got %r)" % (job, strategy.get("fail-fast")))
+        include = (strategy.get("matrix") or {}).get("include") or []
         declared = []
-        for i, l in enumerate(chunk):
-            m = re.match(r"^\s*-\s*connector:\s*(\S+)\s*$", l)
-            if not m:
+        for row in include:
+            if not isinstance(row, dict) or "connector" not in row or "timeout" not in row:
+                problems.append("job %s has a matrix row without connector+timeout: %r" % (job, row))
                 continue
-            timeout = None
-            for follow in chunk[i + 1:]:
-                if re.match(r"^\s*-\s*connector:", follow):
-                    break
-                tm = re.match(r"^\s*timeout:\s*(\d+)\s*$", follow)
-                if tm:
-                    timeout = tm.group(1)
-                    break
-            if timeout is None:
-                problems.append("job %s row %s declares no timeout" % (job, m.group(1)))
-                continue
-            declared.append((m.group(1), timeout))
+            extra = ",".join("%s=%s" % (k, row[k]) for k in sorted(row)
+                             if k not in ("connector", "timeout")) or "-"
+            declared.append((row["connector"], str(row["timeout"]), extra))
         if len(declared) != len(set(declared)):
             problems.append("job %s declares a duplicate matrix row" % job)
-        for connector, timeout in declared:
-            rows.append("%s|%s|matrix|%s" % (job, connector, timeout))
+        for connector, timeout, extra in declared:
+            rows.append("%s|%s|matrix|%s|%s" % (job, connector, timeout, extra))
         # EXPECTED_TOTAL must equal this job's realized leg count, or strategy.job-total
         # cannot catch an added or dropped row.
-        totals = scalars(chunk, "EXPECTED_TOTAL")
-        want_total = '"%d"' % len(BY_JOB[job])
-        if totals != [want_total]:
-            problems.append("job %s EXPECTED_TOTAL is %r, want exactly [%r]" % (job, totals, want_total))
-        # Checked per step, not by counting occurrences: other steps may legitimately bind
-        # CONNECTOR too (the preflight dispatches its per-fixture checks on it), and a
-        # count would then be pinned to how many of them exist rather than to the two that
-        # matter.
+        want_total = str(len(BY_JOB[job]))
+        got_total = step_env(job, "sentinel").get("EXPECTED_TOTAL")
+        if got_total != want_total:
+            problems.append("job %s sentinel EXPECTED_TOTAL is %r, want %r"
+                            % (job, got_total, want_total))
+        # Checked per step: other steps legitimately bind CONNECTOR too (the preflight
+        # dispatches its per-fixture checks on it), so a count would pin how many of them
+        # exist rather than the two that matter.
         for step_id in ("e2e", "sentinel"):
-            if step_env(chunk, step_id).get("CONNECTOR") != "${{ matrix.connector }}":
+            if step_env(job, step_id).get("CONNECTOR") != "${{ matrix.connector }}":
                 problems.append("job %s step %s must bind CONNECTOR: ${{ matrix.connector }}, "
                                 "so a row field cannot become an unused label" % (job, step_id))
-        check_run(chunk, job, "e2e")
     else:
-        if scalars(chunk, "strategy"):
+        if spec.get("strategy"):
             problems.append("job %s is canonically static but declares a strategy" % job)
-        check_run(chunk, job, "e2e")
-        static_connector = BY_JOB[job][0][1]
-        timeouts = scalars(chunk, "timeout-minutes")
-        rows.append("%s|%s|static|%s"
-                    % (job, static_connector, timeouts[0] if timeouts else "<none>"))
+        rows.append("%s|%s|static|%s|-"
+                    % (job, BY_JOB[job][0][1], str(spec.get("timeout-minutes"))))
+    check_run(job, "e2e")
 
     # ---- 2. selection: the job's own membership test ------------------------
-    cond = folded(chunk, "if") or ""
+    cond = " ".join(str(spec.get("if") or "").split())
     if "contains(" in cond:
         problems.append("job %s uses contains() in its if:, which is SUBSTRING matching; use "
                         "exact selector equality" % job)
@@ -338,48 +252,45 @@ for job in JOBS:
                             % (job, parts[1], want))
 
     # ---- 4. the operational seam -------------------------------------------
-    outputs = scalars(chunk, "proof_%s" % BY_JOB[job][0][1])
-    del outputs
+    outputs = spec.get("outputs") or {}
+    want_outputs = {"proof_%s" % parts[1]: "${{ steps.sentinel.outputs.proof_%s }}" % parts[1]
+                    for parts in BY_JOB[job]}
+    if outputs != want_outputs:
+        problems.append("job %s outputs are %r, want exactly %r (matrix outputs sharing one "
+                        "name race; distinct names combine)" % (job, outputs, want_outputs))
+    sentinel = run_body(job, "sentinel")
     for parts in BY_JOB[job]:
         connector = parts[1]
-        want_out = "${{ steps.sentinel.outputs.proof_%s }}" % connector
-        if want_out not in scalars(chunk, "proof_%s" % connector):
-            problems.append("job %s does not declare output proof_%s from the sentinel"
-                            % (job, connector))
         if kind == "matrix":
             arm = "%s) key=proof_%s ;;" % (connector, connector)
-            if arm not in [" ".join(l.split()) for l in chunk]:
+            if arm not in sentinel:
                 problems.append("job %s sentinel has no allowlist arm %r" % (job, arm))
-        else:
-            if "proof_%s=success" % connector not in "\n".join(chunk):
-                problems.append("job %s sentinel does not emit proof_%s=success" % (job, connector))
-    env = step_env(chunk, "e2e")
+        elif not any("proof_%s=success" % connector in l for l in sentinel):
+            problems.append("job %s sentinel does not emit proof_%s=success" % (job, connector))
+    env = step_env(job, "e2e")
     for parts in BY_JOB[job]:
         prefix = "GH" if parts[1] == "github" else parts[1].upper()
         for suffix in ("REQUIRE_RUN", "CANARY"):
             key = "%s_E2E_%s" % (prefix, suffix)
-            if env.get(key) != '"1"':
-                problems.append("job %s e2e env %s is %r, want '\"1\"' (a missing REQUIRE_RUN "
-                                "skips green; a CANARY other than 1 leaves the boundary unprobed)"
-                                % (job, key, env.get(key)))
+            if str(env.get(key)) != "1":
+                problems.append("job %s e2e env %s is %r, want \"1\" (a missing REQUIRE_RUN "
+                                "skips green; a CANARY other than 1 leaves the boundary "
+                                "unprobed)" % (job, key, env.get(key)))
 
 # ---- 2. selection: the global selector vocabulary ---------------------------
-prep = job_slice("prepare")
-selectors = scalars(prep, "SELECTORS")
-if len(selectors) != 1 or sorted(selectors[0].split()) != CONNECTORS:
+selectors = step_env("prepare", "contract").get("SELECTORS")
+if not isinstance(selectors, str) or sorted(selectors.split()) != CONNECTORS:
     problems.append("prepare SELECTORS %r does not equal the canonical connector set %s"
                     % (selectors, CONNECTORS))
-options = [l for l in lines if re.match(r"^\s*options:\s*\[", l)]
-if len(options) != 1:
-    problems.append("expected exactly one workflow_dispatch options list, found %d" % len(options))
-else:
-    got = [o.strip() for o in options[0].split("[", 1)[1].rstrip("]").split(",")]
-    want = ["all"] + CONNECTORS
-    if sorted(got) != sorted(want) or got[0] != "all":
-        problems.append("workflow_dispatch options %s do not equal %s" % (got, want))
+triggers = wf.get("on")
+options = (((triggers or {}).get("workflow_dispatch") or {}).get("inputs") or {}) \
+    .get("connector", {}).get("options")
+if not isinstance(options, list) or options[:1] != ["all"] or sorted(options) != sorted(["all"] + CONNECTORS):
+    problems.append("workflow_dispatch connector options %r do not equal %s with 'all' first"
+                    % (options, ["all"] + CONNECTORS))
 
 # ---- 3. the fan-in ----------------------------------------------------------
-ga = job_slice("gate-assert")
+ga_env = step_env("gate-assert", "assert")
 want_roster = sorted("%s:%s" % (parts[1], parts[0]) for parts in canonical)
 want_jobs = sorted("%s:%s:always" % (job, job) for job in JOBS)
 want_proofs = sorted(
@@ -388,37 +299,38 @@ want_proofs = sorted(
 )
 want_results = sorted("%s=${{ needs.%s.result }}" % (job, job) for job in JOBS)
 
-got_roster = scalars(ga, "ROSTER")
-got_jobs = scalars(ga, "JOBS")
-if len(got_roster) != 1 or sorted(got_roster[0].split()) != want_roster:
-    problems.append("gate-assert ROSTER %r does not match the derived %s" % (got_roster, want_roster))
-if len(got_jobs) != 1 or sorted(got_jobs[0].split()) != want_jobs:
-    problems.append("gate-assert JOBS %r does not match the derived %s" % (got_jobs, want_jobs))
-if sorted(block(ga, "PROOFS")) != want_proofs:
+
+def lines_of(value):
+    return sorted(l.strip() for l in str(value or "").splitlines() if l.strip())
+
+
+if sorted(str(ga_env.get("ROSTER") or "").split()) != want_roster:
+    problems.append("gate-assert ROSTER %r does not match the derived %s"
+                    % (ga_env.get("ROSTER"), want_roster))
+if sorted(str(ga_env.get("JOBS") or "").split()) != want_jobs:
+    problems.append("gate-assert JOBS %r does not match the derived %s"
+                    % (ga_env.get("JOBS"), want_jobs))
+if lines_of(ga_env.get("PROOFS")) != want_proofs:
     problems.append("gate-assert PROOFS do not match the derived lines:\n    got  %s\n    want %s"
-                    % (sorted(block(ga, "PROOFS")), want_proofs))
-if sorted(block(ga, "RESULTS")) != want_results:
+                    % (lines_of(ga_env.get("PROOFS")), want_proofs))
+if lines_of(ga_env.get("RESULTS")) != want_results:
     problems.append("gate-assert RESULTS do not match the derived lines:\n    got  %s\n    want %s"
-                    % (sorted(block(ga, "RESULTS")), want_results))
+                    % (lines_of(ga_env.get("RESULTS")), want_results))
 
 # gate-assert's `needs` is what the runtime cross-check compares ROSTER against, so a job
 # missing from it makes the whole family invisible rather than red.
-needs = [l for l in ga if re.match(r"^\s*needs:\s*\[", l)]
-if len(needs) != 1:
-    problems.append("expected exactly one gate-assert needs list, found %d" % len(needs))
-else:
-    got_needs = sorted(n.strip() for n in needs[0].split("[", 1)[1].rstrip("]").split(","))
-    if got_needs != sorted(["prepare"] + JOBS):
-        problems.append("gate-assert needs %s does not equal %s"
-                        % (got_needs, sorted(["prepare"] + JOBS)))
+ga = job_of("gate-assert")
+got_needs = sorted(ga.get("needs") or [])
+if got_needs != sorted(["prepare"] + JOBS):
+    problems.append("gate-assert needs %s does not equal %s"
+                    % (got_needs, sorted(["prepare"] + JOBS)))
 # Bare always(), zero conjuncts: any conjunct reopens the skip-is-success hole.
-if "    if: ${{ always() }}" not in ga:
-    problems.append("gate-assert must run under a bare `if: ${{ always() }}` with no conjuncts")
-
+if " ".join(str(ga.get("if") or "").split()) != "${{ always() }}":
+    problems.append("gate-assert must run under a bare `if: ${{ always() }}` with no conjuncts "
+                    "(got %r)" % ga.get("if"))
 # The fan-in literals are only evidence if something evaluates them, and gate_sha is only
-# evidence if it cannot be emitted without that evaluation succeeding. Whole-body equality;
-# see EXPECTED_RUN for why membership is not enough.
-check_run(ga, "gate-assert", "assert")
+# evidence if it cannot be emitted without that evaluation succeeding.
+check_run("gate-assert", "assert")
 
 if problems:
     for p in problems:
