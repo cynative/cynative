@@ -24,14 +24,16 @@
 #      matching: contains('gcp gke', 'gk') is true).
 #   3. The fan-in: ROSTER/JOBS/PROOFS/RESULTS and gate-assert's `needs`, all derived from
 #      the canonical rows and compared as sorted multisets.
-#   4. The two EXECUTABLE seams, which are what turn the roster into evidence. Every
-#      literal above is inert unless something runs the suite and something evaluates the
-#      fan-in, so both invocations are pinned as the COMPLETE comment-stripped body of the
-#      owning step's `run:` - `make connector-<c>-e2e` in `id: e2e`, and
-#      `sh scripts/ci/ci-gate-assert.sh &&` guarding the gate_sha emission in `id: assert`.
-#      Membership is not enough: a body that merely CONTAINS the command proves nothing
-#      about execution, since `if false; then make ...; fi` succeeds, mints a proof and
-#      greens the gate. Also each leg's `*_REQUIRE_RUN` and `*_CANARY` forcing.
+#   4. The EXECUTABLE seams, which are what turn the roster into evidence. Every literal
+#      above is inert unless something runs the suite and something evaluates the fan-in,
+#      so the e2e step, the sentinels and gate-assert's assert step are pinned as COMPLETE
+#      comment-stripped run bodies, alongside the conditions that decide whether each runs
+#      and the env key set each may carry. Nothing here is a membership check, and that is
+#      the whole point: every membership check tried during review had a bypass that kept
+#      the searched-for text exactly where it was - `if false; then make ...; fi` around
+#      the invocation, `|| true` on the repository guard, deleting only the sentinel's
+#      outcome check, `MAKEFLAGS: -n` in the step env, `shell: bash -c 'exit 0'` on the
+#      step. Each one succeeds, mints a proof and greens the release gate.
 #
 # THE WORKFLOW IS PARSED WITH PyYAML, NOT LINE BY LINE. Every check here asks a structural
 # question - which key belongs to which step - and a line scanner cannot answer that
@@ -111,23 +113,6 @@ for job, job_rows in sorted(BY_JOB.items()):
     if len({r[2] for r in job_rows}) != 1:
         problems.append("job %s mixes matrix and static legs" % job)
 
-# The COMPLETE comment-stripped run body of each executable seam, as an independent
-# literal. Whole-body equality, never membership: a body that merely CONTAINS the command
-# proves nothing about execution, and every membership check has the same shape of bypass -
-#
-#     if false; then
-#       make "connector-${CONNECTOR}-e2e"
-#     fi
-#
-# succeeds, mints a proof and greens the release gate while containing the line verbatim.
-# The same applies to gate-assert: checking the script call and the gate_sha printf
-# separately would accept `sh ...ci-gate-assert.sh && true` followed by an unconditional
-# printf, which emits the gate's proof even when the assertion failed. Only the exact
-# sequence pins the `&&` relationship between them.
-#
-# The cost is that any real edit to these four bodies must update this table too. That is
-# the intent: these are the lines that turn every other literal in this file from a
-# declaration into evidence.
 # The full normalized `if` of every credential-bearing job and of the two steps that
 # decide whether a leg runs and whether it may mint a proof. Whole-expression equality for
 # the same reason as EXPECTED_RUN: a substring check for the repository guard survives
@@ -166,6 +151,60 @@ EXPECTED_IF = {
     ("gate-assert", None): "${{ always() }}",
 }
 
+# The exact env KEY SET of every checked step. Keys, not values: a timeout or token cap is
+# free to change, but a key that is not in this set cannot be introduced. That is the
+# allowlist form of a rule I would otherwise have to write as a denylist and keep guessing
+# at - `MAKEFLAGS: -n` on the e2e step makes every `make connector-<c>-e2e` dry-run
+# successfully, and the exact run body, the outcome check and the proof emission all still
+# pass. The values that carry meaning on their own (REQUIRE_RUN, CANARY, CONNECTOR,
+# EXPECTED_TOTAL, E2E_OUTCOME) are pinned by value separately below.
+EXPECTED_ENV_KEYS = {
+    ("gcp-wif", "e2e"): {
+        "CYNATIVE_LLM_PROVIDER", "CYNATIVE_LLM_MODEL", "CYNATIVE_LLM_VERTEX_PROJECT_ID",
+        "CYNATIVE_LLM_VERTEX_REGION", "GCP_E2E_PROJECT", "GCP_E2E_EXPECT", "GCP_E2E_TIMEOUT",
+        "GCP_E2E_MAX_TOKENS", "GCP_E2E_REQUIRE_RUN", "GCP_E2E_CANARY", "GKE_E2E_PROJECT",
+        "GKE_E2E_LOCATION", "GKE_E2E_CLUSTER", "GKE_E2E_CONFIGMAP", "GKE_E2E_EXPECT",
+        "GKE_E2E_ENDPOINT", "GKE_E2E_TIMEOUT", "GKE_E2E_MAX_TOKENS", "GKE_E2E_REQUIRE_RUN",
+        "GKE_E2E_CANARY", "CONNECTOR", "CREDS_FILE",
+    },
+    ("aws-oidc", "e2e"): {
+        "CYNATIVE_LLM_PROVIDER", "CYNATIVE_LLM_MODEL", "CYNATIVE_LLM_BEDROCK_REGION",
+        "CYNATIVE_LLM_BEDROCK_ACCESS_KEY", "CYNATIVE_LLM_BEDROCK_SECRET_KEY",
+        "CYNATIVE_LLM_BEDROCK_SESSION_TOKEN", "AWS_E2E_ROLE_NAME", "AWS_E2E_EXPECT",
+        "AWS_E2E_ACCOUNT", "AWS_E2E_ENFORCED", "AWS_E2E_TIMEOUT", "AWS_E2E_MAX_TOKENS",
+        "AWS_E2E_REQUIRE_RUN", "AWS_E2E_CANARY", "CONNECTOR",
+    },
+    ("github-app", "e2e"): {
+        "CYNATIVE_LLM_PROVIDER", "CYNATIVE_LLM_MODEL", "CYNATIVE_LLM_BEDROCK_REGION",
+        "CYNATIVE_LLM_BEDROCK_ACCESS_KEY", "CYNATIVE_LLM_BEDROCK_SECRET_KEY",
+        "CYNATIVE_LLM_BEDROCK_SESSION_TOKEN", "GH_E2E_REPO", "GH_E2E_EXPECT", "GH_E2E_TOKEN",
+        "GH_E2E_EXPECT_NO_AWS", "GH_E2E_TIMEOUT", "GH_E2E_MAX_TOKENS", "GH_E2E_REQUIRE_RUN",
+        "GH_E2E_CANARY",
+    },
+    ("gcp-wif", "sentinel"): {"CONNECTOR", "ACTUAL_TOTAL", "EXPECTED_TOTAL", "E2E_OUTCOME"},
+    ("aws-oidc", "sentinel"): {"CONNECTOR", "ACTUAL_TOTAL", "EXPECTED_TOTAL", "E2E_OUTCOME"},
+    ("github-app", "sentinel"): {"E2E_OUTCOME"},
+    ("gate-assert", "assert"): {"SELECTOR", "MODE", "ROSTER", "JOBS", "NEEDS_JSON", "RESULTS",
+                                "PROOFS", "CHECKOUT_SHA"},
+}
+
+# The COMPLETE comment-stripped run body of each executable seam, as an independent
+# literal. Whole-body equality, never membership: a body that merely CONTAINS the command
+# proves nothing about execution, and every membership check has the same shape of bypass -
+#
+#     if false; then
+#       make "connector-${CONNECTOR}-e2e"
+#     fi
+#
+# succeeds, mints a proof and greens the release gate while containing the line verbatim.
+# The same applies to gate-assert: checking the script call and the gate_sha printf
+# separately would accept `sh ...ci-gate-assert.sh && true` followed by an unconditional
+# printf, which emits the gate's proof even when the assertion failed. Only the exact
+# sequence pins the `&&` relationship between them.
+#
+# The cost is that any real edit to these four bodies must update this table too. That is
+# the intent: these are the lines that turn every other literal in this file from a
+# declaration into evidence.
 EXPECTED_RUN = {
     ("gcp-wif", "e2e"): [
         'export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"',
@@ -418,6 +457,34 @@ check_if("gate-assert", None)
 # The fan-in literals are only evidence if something evaluates them, and gate_sha is only
 # evidence if it cannot be emitted without that evaluation succeeding.
 check_run("gate-assert", "assert")
+
+# ---- 5. execution context ---------------------------------------------------
+# A pinned run body is only evidence if the runner actually executes it as written.
+# `shell: bash -c 'exit 0' -- {0}` on the e2e step leaves the exact body in place and its
+# outcome success, so both sentinels mint proofs while no suite runs; a workflow- or
+# job-level `env: MAKEFLAGS: -n` turns every make invocation into a successful dry run;
+# and `defaults.run` can move the working directory or replace the shell wholesale. None
+# of these touch anything the checks above look at.
+for scope, node in [("workflow", wf)] + [(j, job_of(j)) for j in JOBS + ["gate-assert"]]:
+    for key in ("defaults", "env", "container"):
+        if node.get(key) is not None:
+            problems.append("%s declares %s, which can change how the pinned run bodies "
+                            "execute; the gate's steps must run in the default context"
+                            % (scope, key))
+for job_name, step_id in sorted(EXPECTED_ENV_KEYS):
+    step = step_of(job_name, step_id)
+    for key in ("shell", "working-directory"):
+        if step.get(key) is not None:
+            problems.append("job %s step %s declares %s=%r; a pinned run body proves nothing "
+                            "if the runner is told to execute it differently"
+                            % (job_name, step_id, key, step.get(key)))
+    got_keys = set(step_env(job_name, step_id))
+    if got_keys != EXPECTED_ENV_KEYS[(job_name, step_id)]:
+        problems.append("job %s step %s env keys differ from the pinned set:\n"
+                        "    added   %s\n    missing %s"
+                        % (job_name, step_id,
+                           sorted(got_keys - EXPECTED_ENV_KEYS[(job_name, step_id)]),
+                           sorted(EXPECTED_ENV_KEYS[(job_name, step_id)] - got_keys)))
 
 if problems:
     for p in problems:

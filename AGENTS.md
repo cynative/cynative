@@ -71,14 +71,25 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   tests, the python syntax gate (the secret-boundary checker plus the shared audit-parser
   package), the connector-gate roster golden
   (`test/connector-e2e-roster.unit.test.sh`: an independent here-doc anchor for
-  `connector-e2e.yaml`'s matrix rows and their timeouts, the static github leg, the
-  `SELECTORS`/dispatch-choice vocabulary, each job's exact-equality selector membership and
-  repository guard, and the `ROSTER`/`JOBS`/`PROOFS`/`RESULTS`/`needs` fan-in literals, plus
-  each leg's `*_REQUIRE_RUN`/`*_CANARY` forcing and its `make connector-<c>-e2e` seam. It
-  exists because the runtime checks are internally consistent by construction: delete a
-  matrix row **and** its `ROSTER` entry together and the sentinel, `EXPECTED_TOTAL` and
-  `gate-assert` all still pass while the connector goes silently ungated on the release
-  path), all four connector suites' offline
+  `connector-e2e.yaml`'s matrix rows with their timeouts and extra keys, the static github
+  leg, the `SELECTORS`/dispatch-choice vocabulary, and the
+  `ROSTER`/`JOBS`/`PROOFS`/`RESULTS`/`needs` fan-in literals. It exists because the runtime
+  checks are internally consistent by construction: delete a matrix row **and** its
+  `ROSTER` entry together and the sentinel, `EXPECTED_TOTAL` and `gate-assert` all still
+  pass while the connector goes silently ungated on the release path. It parses the
+  workflow with **PyYAML**, not line by line, because every question it asks is structural
+  and a decoy `env:`/`run:` block nested in a multiline `name:` scalar is valid YAML a text
+  search reads as the step's own keys. Nothing in it is a membership check: each
+  credential job's and decision step's full `if`, all three sentinel bodies, both
+  `make connector-<c>-e2e` invocations and gate-assert's `sh ci-gate-assert.sh &&`-guarded
+  `gate_sha` emission are compared **whole**, each checked step's env is pinned by exact
+  key set, and workflow/job `defaults`/`env`/`container` and step `shell`/`working-directory`
+  must be absent. Every membership check tried during review had a bypass that left the
+  searched-for text exactly where it was - `if false; then make ...; fi`, `|| true` on the
+  repository guard, deleting only the sentinel's outcome check, `MAKEFLAGS: -n`,
+  `shell: bash -c 'exit 0'` - each of which succeeds, mints a proof and greens the gate.
+  **Editing `connector-e2e.yaml`'s pinned bodies, conditions or step env means updating
+  this golden in the same change.**), all four connector suites' offline
   audit-parser selftests, and the shared-machinery selftest).
   Install-free: presence-checks `shellcheck`, PowerShell 7, `python3` and PyYAML (the
   secret-boundary pin's YAML parser) up front and fails with
