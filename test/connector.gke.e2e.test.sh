@@ -128,12 +128,19 @@ case "${GKE_E2E_CANARY:-1}" in
 	*) printf 'FAIL: GKE_E2E_CANARY must be 0 or 1 (got %s)\n' "$GKE_E2E_CANARY" >&2; exit 1 ;;
 esac
 
-# Validate the target components BEFORE they are interpolated into a prompt, a URL or
-# a parser target. A "/" in any of them would silently re-partition the slash-delimited
-# target the parser splits on, handing a mode another mode's arity.
+# Validate the target components BEFORE they are interpolated into a prompt, a URL or a
+# parser target. A "/" would silently re-partition the slash-delimited target the parser
+# splits on, handing a mode another mode's arity; a percent escape, a dot segment or a
+# query/fragment delimiter would break the parser's raw-URL comparison, which is only
+# sound because the URL it builds cannot mean one thing raw and another once Go decodes
+# it. The alphabet is deliberately narrower than the real GCP/RFC-1123 grammars it stands
+# in for, and the parser's own _COMPONENT_RE repeats it: these are trusted repo variables,
+# so this is drift hardening, and it belongs on both sides of the seam.
 for _v in "$GKE_E2E_PROJECT" "$GKE_E2E_LOCATION" "$GKE_E2E_CLUSTER" "$GKE_E2E_CONFIGMAP"; do
 	case "$_v" in
-		*/* | *' '* | '') printf 'FAIL: GKE_E2E_* target components must be non-empty and contain no "/" or space (got %s)\n' "$_v" >&2; exit 1 ;;
+		'' | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]* | *..*)
+			printf 'FAIL: GKE_E2E_* target components must match [A-Za-z0-9][A-Za-z0-9._-]* with no ".." (got %s)\n' "$_v" >&2
+			exit 1 ;;
 	esac
 done
 
@@ -148,6 +155,16 @@ unset GKE_E2E_ENDPOINT
 # interpolated straight into the canary URLs and the parser's canary target, and the
 # gke connector only ever pins to an IP literal anyway (a DNS-based control-plane
 # endpoint is not IP-pinnable and fails closed by design).
+#
+# The `case` runs FIRST and is the whole-value check: grep is line-oriented, so a
+# `^...$` pattern would happily match the first line of "136.112.99.126<newline>junk"
+# and wave the rest through. Rejecting every byte outside [0-9.] rules out a newline,
+# whitespace, a port and brackets before grep is asked about structure at all.
+case "$gke_endpoint" in
+	'' | *[!0-9.]*)
+		printf 'FAIL: GKE_E2E_ENDPOINT must be a bare canonical IPv4 address (got %s)\n' "$gke_endpoint" >&2
+		exit 1 ;;
+esac
 if ! printf '%s' "$gke_endpoint" | grep -Eq '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'; then
 	printf 'FAIL: GKE_E2E_ENDPOINT must be a bare canonical IPv4 address (got %s)\n' "$gke_endpoint" >&2
 	exit 1
@@ -160,8 +177,9 @@ workdir=$(mktemp -d)
 secret_file=""
 # GKE_E2E_KEEP_WORKDIR=1 preserves the parser and the per-phase audit logs, so a
 # failure can be re-examined by hand instead of re-run blind. The live-secret file is
-# shredded unconditionally, before the keep-check: KEEP preserves the workdir, never
-# the secret material.
+# REMOVED unconditionally, before the keep-check, so KEEP preserves the workdir and never
+# the secret material. It is an rm, not a secure erase: the guarantee is that the path
+# does not outlive the run, not that the bytes are unrecoverable from the device.
 cleanup() {
 	rm -f "$secret_file"
 	if [ "${GKE_E2E_KEEP_WORKDIR:-}" = "1" ]; then
@@ -217,14 +235,19 @@ attempts="${GKE_E2E_ATTEMPTS:-2}"
 # env-var credentials this suite can name, one per line, mode 0600, in its own mktemp
 # OUTSIDE the workdir so cleanup shreds it even under GKE_E2E_KEEP_WORKDIR. GKE reads
 # ambient ADC, so the enumerable secrets are the LLM driver's credentials when the run
-# supplies them: an api key for the direct providers, or the Vertex service-account JSON
-# CI feeds inline via CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS. The fixture nonce and the
-# endpoint are deliberately NOT listed: they are the evidence this suite exists to find,
-# and naming the nonce would make the legitimate ConfigMap response trip the leak
-# detector. e2e_write_live_secrets skips unset/empty vars, so an ambient-only run naming
-# none of them is valid.
+# supplies them: an api key for the direct providers, the Vertex service-account JSON CI
+# feeds inline via CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS, or the three inline Bedrock
+# values. The Bedrock trio matters even though CI drives this leg with Vertex: a raw
+# secret access key or session token has no reliable class-2/class-3 shape of its own, so
+# without an exact class-1 needle a leak of one could pass unnoticed on any run that
+# configures Bedrock inline - which this suite accepts, and which is how it was
+# live-verified. The fixture nonce and the endpoint are deliberately NOT listed: they are
+# the evidence this suite exists to find, and naming the nonce would make the legitimate
+# ConfigMap response trip the leak detector. e2e_write_live_secrets skips unset/empty
+# vars, so an ambient-only run naming none of them is valid.
 secret_file=$(mktemp)
-e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS
+e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS \
+	CYNATIVE_LLM_BEDROCK_ACCESS_KEY CYNATIVE_LLM_BEDROCK_SECRET_KEY CYNATIVE_LLM_BEDROCK_SESSION_TOKEN
 
 # Sanitized-artifact wiring for e2e_run_with_retries (cynative#59). ARTIFACTS_DIR must
 # stay OUTSIDE workdir so this suite's own cleanup() does not delete what was just
@@ -253,7 +276,11 @@ assert_gke_posture() {
 		grep -iE 'gcp|gke|hardening' "$_err" >&2 || true
 		return 1
 	fi
-	if ! grep -Eq 'gcp .*role=roles/viewer.*\(\+gke\)' "$_err"; then
+	# Anchored to the inventory row itself (leading status glyph, then the connector id as
+	# the first word), not just to the words appearing somewhere on some line: an
+	# unrelated diagnostic mentioning the same tokens must not be able to stand in for the
+	# posture. Same anchor the github suite uses.
+	if ! grep -Eq '^[^a-z]*gcp[[:space:]].*role=roles/viewer.*\(\+gke\)' "$_err"; then
 		printf 'no single inventory line shows gcp under role=roles/viewer WITH the (+gke) managed suffix. inventory + stderr tail:\n' >&2
 		grep -iE 'gcp|gke|connector|hardening|no connectors detected' "$_err" >&2 || true
 		tail -n 25 "$_err" >&2

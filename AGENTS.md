@@ -1128,7 +1128,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   Linux, PE machine arch on Windows, exact `--version`); the `connector-e2e` job calls
   `.github/workflows/connector-e2e.yaml` (`workflow_call` with `ref: <release SHA>`) against the
   real GCP, AWS, GitHub and GKE fixtures, so a release whose connector cannot authenticate,
-  cannot read, or **fails to deny a write** cannot publish. The `llm-smoke` job calls
+  cannot read, or **fails to deny a boundary probe** - a write, or a sensitive read the
+  ceiling forbids (github's secret-scanning alerts, gke's Secrets list) - cannot publish. The `llm-smoke` job calls
   `.github/workflows/llm-smoke.yaml` the same way (`workflow_call` with `ref: <release SHA>`,
   ceiling raised to `id-token: write`), so a release whose model path cannot authenticate,
   answer, or drive the tool loop cannot publish. `publish` gates on both gates the same way: an
@@ -1159,9 +1160,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   file, `job.workflow_ref` names the file defining the current job, and equal-vs-different means
   direct-dispatch-vs-reusable-call. On the reusable-call path the caller is then pinned to the
   exact string `cynative/cynative/.github/workflows/release.yaml@refs/heads/main`. One job now
-  covers each credential family rather than each connector: `gcp-wif` and `aws-oidc` are
-  single-row matrices today (GKE #117 and EKS #116 reuse the same federation, so onboarding them
-  is a data change, not a new job), and `github-app` is a static singleton; each family job still
+  covers each credential family rather than each connector: `gcp-wif` is a **two-row** matrix
+  (gcp and gke, #117 - both federate through the same WIF into `cynative-cli-ci`, which is what
+  the matrix was built for: onboarding gke was a data change, not a new job), `aws-oidc` is a
+  single-row matrix (EKS #116 reuses the same federation the same way), and `github-app` is a
+  static singleton; each family job still
   carries an explicit `github.repository` guard, since these are **public** reusable workflows and
   cloud trust alone does not prove a fork never reaches the credential step. Each leg's sentinel
   step asserts `steps.e2e.outcome`, the value from before `continue-on-error` is applied so it

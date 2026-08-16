@@ -24,10 +24,17 @@
 #      matching: contains('gcp gke', 'gk') is true).
 #   3. The fan-in: ROSTER/JOBS/PROOFS and gate-assert's `needs`, all derived from the
 #      canonical rows and compared as sorted multisets.
-#   4. The operational seam: each leg's `*_REQUIRE_RUN: "1"` and `*_CANARY: "1"`, its
-#      proof output and sentinel arm, and the `make connector-<c>-e2e` invocation. A leg
-#      whose REQUIRE_RUN went missing skips green on a renamed variable, and one whose
-#      CANARY went to 0 would prove a read while never probing the boundary at all.
+#   4. The two EXECUTABLE seams, which are what turn the roster into evidence. Every
+#      literal above is inert unless something runs the suite and something evaluates the
+#      fan-in, so both invocations are read out of the owning step's own `run:` body with
+#      comments stripped: `make connector-<c>-e2e` inside `id: e2e`, and
+#      `sh scripts/ci/ci-gate-assert.sh &&` guarding the gate_sha emission inside
+#      `id: assert`. A step whose body is `: # make "connector-${CONNECTOR}-e2e"` succeeds,
+#      mints a proof and greens the release gate while a substring search over the raw job
+#      still finds the command. Also each leg's `*_REQUIRE_RUN: "1"` and `*_CANARY: "1"`,
+#      read from that step alone: a leg whose REQUIRE_RUN went missing skips green on a
+#      renamed variable, and one whose CANARY went to 0 proves a read while never probing
+#      the boundary at all.
 set -eu
 
 workflow=.github/workflows/connector-e2e.yaml
@@ -142,22 +149,46 @@ def folded(chunk, key):
     return " ".join(parts)
 
 
-def step_env(chunk, step_id):
-    """The env mapping of the step whose `id:` is step_id."""
+def step_slice(chunk, step_id):
+    """The lines of the ONE step whose `id:` is step_id, ending at the next step in the
+    same list. Bounding it matters: an unbounded forward scan would happily adopt a LATER
+    step's env or run block, so a no-op e2e step followed by a decorative one could
+    satisfy every check below."""
     ids = [i for i, l in enumerate(chunk) if " ".join(l.split()) == "id: %s" % step_id]
     if len(ids) != 1:
         problems.append("expected exactly one `id: %s` step, found %d" % (step_id, len(ids)))
-        return {}
-    j = ids[0]
-    while j < len(chunk) and " ".join(chunk[j].split()) != "env:":
+        return []
+    start = ids[0]
+    # Walk back to this step's own "- " bullet to learn the list indentation.
+    bullet = start
+    while bullet >= 0 and not re.match(r"^\s*-\s", chunk[bullet]):
+        bullet -= 1
+    if bullet < 0:
+        problems.append("step %s is not inside a steps list" % step_id)
+        return []
+    indent = len(chunk[bullet]) - len(chunk[bullet].lstrip())
+    end = len(chunk)
+    for i in range(bullet + 1, len(chunk)):
+        if re.match(r"^ {%d}-\s" % indent, chunk[i]) or (
+                chunk[i].strip() and (len(chunk[i]) - len(chunk[i].lstrip())) < indent):
+            end = i
+            break
+    return chunk[bullet:end]
+
+
+def step_env(chunk, step_id):
+    """The env mapping of the step whose `id:` is step_id, read from that step only."""
+    step = step_slice(chunk, step_id)
+    j = 0
+    while j < len(step) and " ".join(step[j].split()) != "env:":
         j += 1
-    if j == len(chunk):
+    if j == len(step):
         return {}
-    env_indent = len(chunk[j]) - len(chunk[j].lstrip())
+    env_indent = len(step[j]) - len(step[j].lstrip())
     env = {}
     j += 1
-    while j < len(chunk):
-        l = chunk[j]
+    while j < len(step):
+        l = step[j]
         if l.strip() and (len(l) - len(l.lstrip())) <= env_indent:
             break
         m = re.match(r"^\s*([A-Za-z0-9_]+):\s*(.*?)\s*$", l)
@@ -169,15 +200,39 @@ def step_env(chunk, step_id):
     return env
 
 
+def step_run(chunk, step_id):
+    """The non-comment, non-blank lines of the step's `run:` body, normalized. Scoped to
+    the step and comment-stripped, so `: # make "connector-${CONNECTOR}-e2e"` - a step
+    that succeeds without running anything, mints a proof, and greens the gate - cannot
+    satisfy a check for the real invocation."""
+    step = step_slice(chunk, step_id)
+    for j, l in enumerate(step):
+        m = re.match(r"^(\s*)run:\s*(\|-?|>-?)?\s*(.*?)\s*$", l)
+        if not m:
+            continue
+        if m.group(3):
+            return [" ".join(m.group(3).split())]
+        indent = len(m.group(1))
+        body = []
+        for follow in step[j + 1:]:
+            if follow.strip() and (len(follow) - len(follow.lstrip())) <= indent:
+                break
+            stripped = follow.strip()
+            if stripped and not stripped.startswith("#"):
+                body.append(" ".join(stripped.split()))
+        return body
+    return []
+
+
 # ---- 1. job topology --------------------------------------------------------
 rows = []
 for job in JOBS:
     chunk = job_slice(job)
     kind = BY_JOB[job][0][2]
     if kind == "matrix":
-        if "false" not in scalars(chunk, "fail-fast"):
-            problems.append("job %s must set fail-fast: false so one red leg cannot mask another"
-                            % job)
+        if scalars(chunk, "fail-fast") != ["false"]:
+            problems.append("job %s must declare exactly one fail-fast: false so one red leg "
+                            "cannot mask another (got %r)" % (job, scalars(chunk, "fail-fast")))
         # Each `- connector: X` row is followed by its own `timeout: N`.
         declared = []
         for i, l in enumerate(chunk):
@@ -206,18 +261,27 @@ for job in JOBS:
         want_total = '"%d"' % len(BY_JOB[job])
         if totals != [want_total]:
             problems.append("job %s EXPECTED_TOTAL is %r, want exactly [%r]" % (job, totals, want_total))
-        if scalars(chunk, "CONNECTOR") != ["${{ matrix.connector }}"] * 2:
-            problems.append("job %s must bind CONNECTOR: ${{ matrix.connector }} in both the "
-                            "e2e and sentinel steps, so a row field cannot become an unused label"
-                            % job)
-        if 'make "connector-${CONNECTOR}-e2e"' not in "\n".join(chunk):
-            problems.append("job %s does not invoke make \"connector-${CONNECTOR}-e2e\"" % job)
+        # Checked per step, not by counting occurrences: other steps may legitimately bind
+        # CONNECTOR too (the preflight dispatches its per-fixture checks on it), and a
+        # count would then be pinned to how many of them exist rather than to the two that
+        # matter.
+        for step_id in ("e2e", "sentinel"):
+            if step_env(chunk, step_id).get("CONNECTOR") != "${{ matrix.connector }}":
+                problems.append("job %s step %s must bind CONNECTOR: ${{ matrix.connector }}, "
+                                "so a row field cannot become an unused label" % (job, step_id))
+        want_cmd = 'make "connector-${CONNECTOR}-e2e"'
+        if want_cmd not in step_run(chunk, "e2e"):
+            problems.append("job %s: the id: e2e step's run body does not contain the exact "
+                            "line %r (a step that succeeds without running the suite still "
+                            "mints a proof and greens the gate)" % (job, want_cmd))
     else:
         if scalars(chunk, "strategy"):
             problems.append("job %s is canonically static but declares a strategy" % job)
         connector = BY_JOB[job][0][1]
-        if "make connector-%s-e2e" % connector not in "\n".join(chunk):
-            problems.append("job %s does not invoke make connector-%s-e2e" % (job, connector))
+        want_cmd = "make connector-%s-e2e" % connector
+        if want_cmd not in step_run(chunk, "e2e"):
+            problems.append("job %s: the id: e2e step's run body does not contain the exact "
+                            "line %r" % (job, want_cmd))
         timeouts = scalars(chunk, "timeout-minutes")
         rows.append("%s|%s|static|%s" % (job, connector, timeouts[0] if timeouts else "<none>"))
 
@@ -312,6 +376,18 @@ else:
 # Bare always(), zero conjuncts: any conjunct reopens the skip-is-success hole.
 if "    if: ${{ always() }}" not in ga:
     problems.append("gate-assert must run under a bare `if: ${{ always() }}` with no conjuncts")
+
+# The fan-in literals are only evidence if something evaluates them, and gate_sha is only
+# evidence if it cannot be emitted without that evaluation succeeding. Replacing the
+# script call with a bare `printf gate_sha=...` would leave every literal above intact and
+# hand publish a passing gate, so pin the invocation and the && that guards the emission.
+assert_run = step_run(ga, "assert")
+if "sh scripts/ci/ci-gate-assert.sh &&" not in assert_run:
+    problems.append("gate-assert's id: assert step must invoke `sh scripts/ci/ci-gate-assert.sh &&` "
+                    "(got %r)" % assert_run)
+if not any(l.startswith("printf 'gate_sha=%s\\n' \"$CHECKOUT_SHA\"") for l in assert_run):
+    problems.append("gate-assert's id: assert step must emit gate_sha from CHECKOUT_SHA, joined "
+                    "to the script call with && so it provably cannot run when the assert fails")
 
 if problems:
     for p in problems:

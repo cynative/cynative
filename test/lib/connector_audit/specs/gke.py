@@ -38,10 +38,20 @@ the read target is structural, not a convention: the read assertion cannot consu
 it was never given, so the only thing that can bind hop 2 is hop-1 bytes. plan_reads
 accepts either arity (engine.run_canary sweeps with the canary target, and a legitimate
 discovery read during a canary phase must still be admitted) and uses only the first four.
-Any other arity, or an empty component, fails closed.
+
+So the arity is enforced in two places, and the split is worth knowing precisely. Any
+arity other than four or five, and any component outside the safe URL-segment alphabet,
+fails closed in `_split_target` on the first call, which is `plan_reads` - before the
+sweep, in every mode. A five-component target reaching READ mode is the one case
+plan_reads cannot reject (it is a legal canary target), and is caught by `is_witness`,
+whose own `_split_target(..., 4)` runs ahead of every other test in that function. The
+residual gap is exact and harmless: a read phase given a canary target AND containing no
+planned call with a result exits 1 rather than 4 - nothing was adjudicated, so there is
+nothing to fail closed about.
 """
 import ipaddress
 import json
+import re
 
 from connector_audit import engine
 
@@ -62,17 +72,40 @@ _READ_PARTS = 4
 _CANARY_PARTS = 5
 
 
+# A conservative URL-segment alphabet, deliberately narrower than any of the real
+# grammars it stands in for (GCP project ids, GKE locations and cluster names, RFC 1123
+# ConfigMap names are all subsets of it). The components are interpolated straight into
+# the canonical URLs this spec compares RAW against, so anything that could mean one thing
+# to that raw comparison and another to Go's decoded req.URL.Path - a percent escape, a
+# dot segment, a query or fragment delimiter, whitespace, a control character - has to be
+# impossible here, or the raw-versus-decoded reasoning the whole hop-2 check rests on
+# stops holding.
+_COMPONENT_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+# An IPv4 dotted quad, whole-string. \A..\Z rather than ^..$, which in Python match at
+# line boundaries and would accept "10.0.0.1\njunk".
+_IPV4_RE = re.compile(r"\A(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])"
+                      r"(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}\Z")
+
+
 def _split_target(target, want):
     """The target's components, or fail closed. `want` is the exact count this caller
-    accepts (a tuple accepts several). An empty component is a wiring bug - a URL built
-    from it would collapse two path segments into one - and a wrong arity means a mode was
-    handed another mode's target, which is exactly the confusion the split arity exists to
-    prevent."""
+    accepts (a tuple accepts several). A wrong arity means a mode was handed another
+    mode's target, which is exactly the confusion the split arity exists to prevent, and a
+    component outside _COMPONENT_RE is a wiring bug that would break the raw-URL
+    comparison. The fifth component, when present, is the control-plane endpoint and is
+    validated as a dotted quad instead."""
     parts = engine._str(target).split("/")
     counts = want if isinstance(want, tuple) else (want,)
-    if len(parts) not in counts or not all(parts):
-        engine.insecure("gke: target %r has %d component(s), want %s non-empty - failing "
-                        "closed" % (target, len(parts), " or ".join(str(c) for c in counts)))
+    if len(parts) not in counts:
+        engine.insecure("gke: target %r has %d component(s), want %s - failing closed"
+                        % (target, len(parts), " or ".join(str(c) for c in counts)))
+    for part in parts[:_READ_PARTS]:
+        if not _COMPONENT_RE.match(part) or ".." in part:
+            engine.insecure("gke: target component %r is not a safe URL segment - failing "
+                            "closed" % part)
+    if len(parts) == _CANARY_PARTS and not _IPV4_RE.match(parts[4]):
+        engine.insecure("gke: target endpoint %r is not a bare IPv4 address - failing "
+                        "closed" % parts[4])
     return parts
 
 
@@ -115,18 +148,43 @@ def _gke_auth_matches(a, project, location, cluster):
             and g.get("cluster_name") == cluster)
 
 
+# Response-SHAPING query parameters only: they change what comes back, never which
+# resource is addressed and never who is authenticated. Everything else - the deprecated
+# projectId/zone/clusterId target selectors, the key/$key API-key system parameters, and
+# anything Google adds later - is not part of the sanctioned discovery call.
+_HOP1_QUERY_KEYS = frozenset(("alt", "fields", "$fields", "prettyPrint", "$prettyPrint"))
+
+
+def _query_is_shaping_only(query):
+    """True when the hop-1 query is empty or names only allowlisted shaping parameters.
+    Parsed with keep_blank_values and strict_parsing off, then checked against the
+    allowlist by NAME: the values are free (a fields mask is arbitrary), the names are
+    not. A parse failure is not possible here, but an unnamed pair ("&&") yields nothing
+    and is therefore harmless."""
+    if not query:
+        return True
+    from urllib.parse import parse_qsl
+    return all(k in _HOP1_QUERY_KEYS for k, _v in parse_qsl(query, keep_blank_values=True))
+
+
 def is_hop1(rec, project, location, cluster):
     """Hop 1: the GCP Container API get for exactly this cluster - exact scheme, host and
     path, no fragment/userinfo/port, no body and no request headers at all (Google honours
     X-HTTP-Method-Override, so a headered GET could be a write on the wire).
 
-    A query string is the one thing tolerated here, and only here. Hop 1 is a read of
-    Google's own control-plane API, already classified and authorized by the gcp action
-    gate under roles/viewer, and no query turns a GET into a write there; a query that
-    trimmed the response (?fields=) only removes the `endpoint` field, which binds nothing
-    and fails closed. Rejecting it would instead turn a harmless model flourish on a
-    SUCCESSFUL read into an unsanctioned success, i.e. a fatal, non-retryable gate
-    failure. Hop 2 gets no such latitude: there the path IS the authorization surface."""
+    A query string is tolerated here, and only here, but only from an ALLOWLIST of
+    response-shaping parameters. Rejecting every query would turn a harmless model
+    flourish on a SUCCESSFUL read into an unsanctioned success, i.e. a fatal,
+    non-retryable gate failure; accepting an arbitrary one goes too far the other way,
+    because this method still documents the deprecated TARGET SELECTORS projectId, zone
+    and clusterId. "Exact path plus any query" would therefore no longer mean "the cluster
+    the path names": a request whose path names the fixture while its query names another
+    cluster could bind that other cluster's endpoint, and if the GKE host gate were the
+    thing regressing, a successful hop 2 to it would be planned rather than caught. Google
+    system parameters also include `key`/`$key`, an API-key credential the central
+    injection guard does not cover. So: shape the response, never select the resource.
+
+    Hop 2 gets no query latitude at all: there the path IS the authorization surface."""
     a = engine.args_of(rec)
     u = engine.parsed_url(a)
     g = _nested(a, "gcp_auth")
@@ -136,6 +194,7 @@ def is_hop1(rec, project, location, cluster):
         and u.scheme == "https" and u.hostname == CONTAINER_HOST
         and u.path == "/v1/projects/%s/locations/%s/clusters/%s" % (project, location, cluster)
         and not u.fragment and not u.username and not u.password and u.port is None
+        and _query_is_shaping_only(u.query)
         and g is not None and g.get("service") == GCP_SERVICE
         and not engine._str(a.get("body"))
         and not engine.headers_of(rec)
@@ -143,12 +202,18 @@ def is_hop1(rec, project, location, cluster):
 
 
 def is_hop2(rec, endpoint, project, location, cluster, configmap):
-    """Hop 2: the Kubernetes ConfigMap get, at exactly `endpoint`. Same exact-raw-URL
-    discipline as hop 1. Deliberately NOT a normalization: Go authorizes on the decoded
+    """Hop 2: the Kubernetes ConfigMap get, at exactly `endpoint`. Unlike hop 1 this is
+    EXACT raw-URL equality with no query latitude whatsoever, because here the path is the
+    authorization surface rather than a resource name Google resolves.
+
+    Deliberately a string compare, not a normalization: Go authorizes on the decoded
     req.URL.Path while the escaped form can differ, so building the one canonical URL and
-    comparing strings is the only comparison that cannot drift from two URL parsers.
-    No headers at all: kube-apiserver honours method-override style headers, so a headered
-    GET could be a write on the wire."""
+    comparing raw strings is the only comparison that cannot drift from two URL parsers.
+    It rejects IPv6, ports, userinfo, queries, fragments, percent-encoding, dot segments,
+    trailing slashes and non-canonical numeric IP spellings in a single step - and it only
+    holds because _split_target already bounded the components it is built from to a safe
+    URL-segment alphabet. No headers at all: kube-apiserver honours method-override style
+    headers, so a headered GET could be a write on the wire."""
     a = engine.args_of(rec)
     return (
         a.get("auth_provider") == "gke"
@@ -165,12 +230,17 @@ def bound_endpoint(rec):
     untruncated 200 whose JSON body carries `endpoint` as a CANONICAL, globally routable
     IPv4 literal.
 
-    Canonical spelling only (str(parsed) == raw) rejects the octal/hex/short forms
-    netip would refuse anyway; `is_global` mirrors the Go dial guard's floor, so a hop-1
-    response naming 127.0.0.1, a link-local or an RFC1918 address binds nothing rather
-    than sanctioning a hop 2 aimed inside the runner. A duplicate JSON key, a malformed or
-    truncated body, a non-string endpoint or a DNS endpoint all bind nothing: an unbound
-    hop 2 that succeeds is then an unsanctioned success, which is fatal."""
+    The policy is "canonical global-unicast IPv4", which is deliberately STRICTER than the
+    Go dial guard's floor rather than a mirror of it: the Go managed-Kubernetes providers
+    permit RFC1918 so private clusters work, while this fixture is a settled public
+    cluster and a proof parser should admit nothing broader than the one shape it expects.
+    Canonical spelling (str(parsed) == raw) rejects the octal/hex/short forms netip refuses
+    anyway; `is_global` rejects loopback, link-local, RFC1918 and reserved ranges; and
+    multicast is excluded separately because Python reports 224.0.0.0/4 as global.
+
+    A duplicate JSON key, a malformed or truncated body, a non-string endpoint or a DNS
+    endpoint all bind nothing: an unbound hop 2 that succeeds is then an unsanctioned
+    success, which is fatal."""
     if engine.status_of(rec) != 200:
         return None
     body, truncated = engine.body_of(rec)
@@ -189,7 +259,7 @@ def bound_endpoint(rec):
         ip = ipaddress.IPv4Address(raw)
     except ValueError:
         return None
-    if str(ip) != raw or not ip.is_global:
+    if str(ip) != raw or not ip.is_global or ip.is_multicast:
         return None
     return raw
 
@@ -246,11 +316,21 @@ def never_sanctioned(_rec, _target):
 # ErrHostNotAuthorized). Anchored at the start, so denial text quoted inside a response
 # body can never match.
 #
-# `http request failed:` is deliberately ABSENT. That prefix also covers ordinary network
-# errors, which are no proof at all that the request stayed on the machine; admitting it
-# would trade a spurious 4 for a real fail-open. The dial guard is unreachable as a
-# distinct outcome here anyway: hop 2's URL is an IP literal, so the dialed address is the
-# host the host gate already compared.
+# `http request failed:` is deliberately ABSENT, and that is the load-bearing omission.
+# The prefix also covers ordinary network errors, which are no proof at all that the
+# request stayed on the machine; admitting it to catch the dial guard underneath would
+# trade a spurious 4 for a real fail-open. The dial guard is not reachable as a distinct
+# outcome here anyway: hop 2's URL is an IP literal, so the dialed address is the host the
+# host gate already compared, and a hop 1 whose DNS resolved somewhere internal is a
+# PLANNED call that never reaches the sweep.
+#
+# One narrow case is knowingly left as a fatal: a credential-injection failure (a stalled
+# GCP token refresh) is genuinely pre-dispatch, but it is not matched here, so an
+# UNSANCTIONED call that failed that way reports 4 rather than 1. It needs a token failure
+# and an off-family call in the same attempt, and a token source that is failing takes the
+# sanctioned calls down with it, so the phase was already going to be red. Widening the
+# set to cover it would mean admitting shapes that are harder to prove local than these
+# three, which is the wrong trade for a proof parser.
 _DENIAL_PREFIXES = tuple(
     wrap + core
     for wrap in ("Error executing tool: ", "")
@@ -272,11 +352,25 @@ def blocked_by_hardening(rec):
 
 def is_witness(rec, target, expect):
     """rec already passed plan_reads (engine.run_read only offers planned records), so it
-    is a hop-1 or a bound hop-2. The remaining proof is structural: an untruncated 200
-    whose body is the fixture ConfigMap itself - right kind, namespace and name - carrying
-    the nonce fed out of band. A hop-1 body cannot satisfy it."""
+    is a hop-1 or a bound hop-2. The proof is therefore two things, not one.
+
+    First it must be the GKE hop. Planned membership alone says "hop 1 or a bound hop 2",
+    and a body check alone says only "some planned response was ConfigMap-shaped" - a
+    hop-1 response that happened to carry a ConfigMap-shaped object with the nonce would
+    otherwise satisfy the whole read assertion with no Kubernetes call in the audit at
+    all. `auth_provider == "gke"` closes that; combined with planned membership it means
+    exactly "a hop 2 bound to an endpoint an earlier hop 1 established".
+
+    Then the structure: an untruncated 200 whose body is the fixture ConfigMap itself -
+    right kind, namespace and name - carrying the nonce fed out of band.
+
+    The arity check runs FIRST, before any early return, so a read phase handed a
+    canary-shaped (endpoint-bearing) target fails closed on the first planned result
+    rather than being silently judged against a target it should never have seen."""
     project, location, cluster, configmap = _split_target(target, _READ_PARTS)
     del project, location, cluster
+    if engine.args_of(rec).get("auth_provider") != "gke":
+        return False
     if engine.status_of(rec) != 200:
         return False
     body, truncated = engine.body_of(rec)
@@ -562,10 +656,52 @@ def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hide
             NONCE),
         ("read_hop1_list_url", 4, "read", _pair("h1", {**hop1_args, "url": hop1_url(
             PROJECT, LOCATION, CLUSTER).rsplit("/", 1)[0]}, _sres(200, hop1_body)) + hop2, NONCE),
-        # A query on hop 1 is deliberately tolerated (see is_hop1): the chain still binds.
+        # THE witness case. A sanctioned hop 1 whose body happens to be ConfigMap-shaped
+        # and carries the nonce, with NO Kubernetes call anywhere: planned membership plus
+        # a body check alone would call that proof, so is_witness also requires the record
+        # to be the gke hop. Must be a miss, never a pass.
+        ("read_hop1_as_witness", 1, "read", hop1_with(json.dumps(
+            {"endpoint": ENDPOINT, "kind": "ConfigMap",
+             "metadata": {"name": CONFIGMAP, "namespace": NAMESPACE},
+             "data": {"nonce": NONCE}})), NONCE),
+        # A response-shaping query on hop 1 is deliberately tolerated (see is_hop1): the
+        # chain still binds.
         ("read_hop1_query_ok", 0, "read", _pair("h1", {
             **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER) + "?alt=json"},
             _sres(200, hop1_body)) + hop2, NONCE),
+        ("read_hop1_query_fields_ok", 0, "read", _pair("h1", {
+            **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER) + "?fields=endpoint"},
+            _sres(200, hop1_body)) + hop2, NONCE),
+        # A RESOURCE-SELECTING query is not: projectId/zone/clusterId are documented
+        # legacy target selectors, so "exact path + any query" would stop meaning "the
+        # cluster the path names". Unsanctioned, and its 200 is therefore fatal.
+        ("read_hop1_query_legacy_selector", 4, "read", _pair("h1", {
+            **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER) + "?clusterId=other"},
+            _sres(200, hop1_body)) + hop2, NONCE),
+        # ...nor is a credential system parameter, which the central injection guard's
+        # denylist does not cover.
+        ("read_hop1_query_api_key", 4, "read", _pair("h1", {
+            **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER) + "?key=AIzaSyDUMMY"},
+            _sres(200, hop1_body)) + hop2, NONCE),
+        ("read_hop1_wrong_scheme", 4, "read", _pair("h1", {
+            **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER).replace("https://", "http://")},
+            _sres(200, hop1_body)) + hop2, NONCE),
+        ("read_hop1_wrong_host", 4, "read", _pair("h1", {
+            **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER).replace(
+                CONTAINER_HOST, "container.googleapis.com.evil.test")},
+            _sres(200, hop1_body)) + hop2, NONCE),
+        ("read_hop1_fragment", 4, "read", _pair("h1", {
+            **hop1_args, "url": hop1_url(PROJECT, LOCATION, CLUSTER) + "#x"},
+            _sres(200, hop1_body)) + hop2, NONCE),
+        ("read_hop1_with_body", 4, "read", _pair("h1", {
+            **hop1_args, "body": "{}"}, _sres(200, hop1_body)) + hop2, NONCE),
+        # Python reports 224.0.0.0/4 as is_global, so multicast is excluded separately.
+        ("read_hop1_multicast_endpoint", 4, "read", hop1_with(json.dumps(
+            {"endpoint": "239.255.255.250"}))
+            + hop2_to(hop2_url("239.255.255.250", CONFIGMAP)), NONCE),
+        # A duplicate JSON key in the hop-1 body is ambiguous, so it binds nothing.
+        ("read_hop1_dup_endpoint_key", 4, "read", _pair("h1", hop1_args, _sres(
+            200, '{"endpoint":"%s","endpoint":"%s"}' % (ENDPOINT, ROGUE))) + hop2, NONCE),
         # A port, userinfo or fragment is not: those change the authority or are never
         # sent, so they are not the sanctioned discovery call.
         ("read_hop1_port", 4, "read", _pair("h1", {**hop1_args, "url": hop1_url(
@@ -632,9 +768,41 @@ def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hide
             "session_id": "s", "run_id": "r", "call_id": "cx", "tool": "mystery",
             "phase": "attempt", "arguments": {"auth_provider": "gke",
                                               "url": hop2_url(ENDPOINT, CONFIGMAP)}})], NONCE),
+        # A plain host denial carries NO `auth:` wrapper at all (provider.go's
+        # ErrHostNotAuthorized), so denial_matches has to admit it directly; otherwise a
+        # healthy run whose model fumbled one call turns a retryable miss into a fatal 4.
+        ("read_plain_host_denial", 1, "read", hop1 + _pair("hx", {
+            **hop2_args, "url": hop2_url(ROGUE, CONFIGMAP)},
+            'host not authorized for auth_provider: "%s" not allowed for provider gke' % ROGUE,
+            outcome="error") + hop2, NONCE),
+        # A generic transport failure is NOT proof the request stayed on the machine, so
+        # an unsanctioned call that merely failed to connect must stay fatal.
+        ("read_network_error_not_proof", 4, "read", hop1 + _pair("hx", {
+            **hop2_args, "url": hop2_url(ROGUE, CONFIGMAP)},
+            "Error executing tool: http request failed: dial tcp: i/o timeout",
+            outcome="error") + hop2, NONCE),
+        # Nested gke_auth keys are folded the way Go binds them, so a miscased key still
+        # matches; keys that collide after folding are ambiguous and fail closed.
+        ("read_hop2_folded_gke_auth", 0, "read", hop1 + _pair("h2", {**hop2_args, "gke_auth": {
+            "Project": PROJECT, "LOCATION": LOCATION, "cluster_name": CLUSTER}},
+            _sres(200, cm_body)), NONCE),
+        ("read_hop2_gke_auth_collision", 4, "read", hop1 + _pair("h2", {
+            **hop2_args, "gke_auth": {"project": PROJECT, "Project": PROJECT,
+                                      "location": LOCATION, "cluster_name": CLUSTER}},
+            _sres(200, cm_body)), NONCE),
+        ("read_witness_bad_data", 1, "read", hop1 + _pair("h2", hop2_args, _sres(200, json.dumps(
+            {"kind": "ConfigMap", "metadata": {"name": CONFIGMAP, "namespace": NAMESPACE},
+             "data": "nonce=" + NONCE}))), NONCE),
         # The target the READ mode is handed must not carry an endpoint: if it did, the
         # read assertion could bind hop 2 to an out-of-band value instead of hop-1 bytes.
+        # The arity check runs on the first planned result, ahead of every other witness
+        # test, so a healthy-looking chain still fails closed.
         ("read_target_has_endpoint", 4, "read", hop1 + hop2, NONCE),
+        ("read_target_too_few_parts", 4, "read", hop1 + hop2, NONCE),
+        # A component that is not a safe URL segment breaks the raw-URL comparison the
+        # hop-2 check rests on: percent escapes and dot segments mean one thing to the
+        # parser's string compare and another to Go's decoded req.URL.Path.
+        ("read_target_unsafe_component", 4, "read", hop1 + hop2, NONCE),
 
         # ---- write canary ----
         ("canary_ok", 0, "canary", _pair("c1", write_args, wdenial, outcome="error")),
@@ -677,6 +845,18 @@ def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hide
             "c1", write_args, "HTTP/1.1 2000 Weird\r\n\r\n{}", outcome="error")),
         ("canary_target_missing_endpoint", 4, "canary", _pair(
             "c1", write_args, wdenial, outcome="error")),
+        ("canary_target_bad_endpoint", 4, "canary", _pair(
+            "c1", write_args, wdenial, outcome="error")),
+        # A stale GKE_E2E_ENDPOINT names a host the gke gate does not authorize, so the
+        # denial comes from the host gate rather than the ClusterRole gate: blocked
+        # pre-dispatch, therefore a retryable miss, never "proven denied".
+        ("canary_stale_endpoint", 1, "canary", _pair("c1", {
+            **write_args, "url": canary_url(ROGUE)}, hostdenial, outcome="error")),
+        ("canary_query", 1, "canary", _pair("c1", {
+            **write_args, "url": canary_url(ENDPOINT) + "?dryRun=All"}, wdenial, outcome="error")),
+        ("canary_port", 1, "canary", _pair("c1", {
+            **write_args, "url": "https://%s:443/api/v1/namespaces/%s/configmaps"
+            % (ENDPOINT, NAMESPACE)}, wdenial, outcome="error")),
 
         # ---- secretscan canary ----
         ("secretscan_ok", 0, "secretscan", _pair("c1", ss_args, ssdenial, outcome="error")),
@@ -696,12 +876,19 @@ def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hide
 SELFTEST_CASES = tuple(_build_cases())
 
 # Per-case target overrides (engine.ProviderSpec.selftest_targets): every canary-mode case
-# needs the five-component target, and two cases deliberately pin the WRONG arity - a read
-# handed the endpoint, and a canary denied it - which is why this is per case rather than
-# per mode.
+# needs the five-component target, and a handful deliberately pin a MALFORMED one - a read
+# handed the endpoint, a canary denied it, wrong arities, an unsafe component, a
+# non-IPv4 endpoint - which is why this is per case rather than per mode. The malformed
+# entries come last so they win over the blanket canary rule above them.
 SELFTEST_TARGETS = tuple(
     [(name, CANARY_TARGET) for name, _want, mode, *_rest in SELFTEST_CASES if mode != "read"]
-    + [("read_target_has_endpoint", CANARY_TARGET), ("canary_target_missing_endpoint", READ_TARGET)]
+    + [
+        ("read_target_has_endpoint", CANARY_TARGET),
+        ("read_target_too_few_parts", "/".join((PROJECT, LOCATION, CLUSTER))),
+        ("read_target_unsafe_component", "/".join((PROJECT, LOCATION, CLUSTER, "x%2f..%2fsecrets"))),
+        ("canary_target_missing_endpoint", READ_TARGET),
+        ("canary_target_bad_endpoint", READ_TARGET + "/not-an-ip"),
+    ]
 )
 
 SPEC = engine.ProviderSpec(

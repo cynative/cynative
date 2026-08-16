@@ -186,6 +186,12 @@ jobs:
           GKE_CONFIGMAP: ${{ vars.GKE_E2E_CONFIGMAP }}
           GKE_EXPECT: ${{ vars.GKE_E2E_EXPECT }}
           GKE_ENDPOINT: ${{ vars.GKE_E2E_ENDPOINT }}
+          CONNECTOR: ${{ matrix.connector }}
+        # The shared credential variables are required on every row; the per-fixture ones
+        # only on the row that consumes them. Checking both fixtures unconditionally would
+        # make a dispatch filtered to gcp fail on a missing GKE variable it never reads,
+        # and vice versa - coupling two independent fixtures for no gain. The default arm
+        # fails closed, so a new row cannot silently skip its own preflight.
         run: |
           missing=
           [ -n "${PROJECT}" ]       || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
@@ -193,14 +199,24 @@ jobs:
           [ -n "${SA}" ]            || missing="${missing} CYNATIVE_CLI_CI_SA"
           [ -n "${VERTEX_MODEL}" ]  || missing="${missing} CYNATIVE_CLI_CI_VERTEX_MODEL"
           [ -n "${VERTEX_REGION}" ] || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
-          [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
-          [ -n "${E2E_EXPECT}" ]    || missing="${missing} GCP_E2E_EXPECT"
-          [ -n "${GKE_PROJECT}" ]   || missing="${missing} GKE_E2E_PROJECT"
-          [ -n "${GKE_LOCATION}" ]  || missing="${missing} GKE_E2E_LOCATION"
-          [ -n "${GKE_CLUSTER}" ]   || missing="${missing} GKE_E2E_CLUSTER"
-          [ -n "${GKE_CONFIGMAP}" ] || missing="${missing} GKE_E2E_CONFIGMAP"
-          [ -n "${GKE_EXPECT}" ]    || missing="${missing} GKE_E2E_EXPECT"
-          [ -n "${GKE_ENDPOINT}" ]  || missing="${missing} GKE_E2E_ENDPOINT"
+          case "${CONNECTOR}" in
+          gcp)
+            [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
+            [ -n "${E2E_EXPECT}" ]    || missing="${missing} GCP_E2E_EXPECT"
+            ;;
+          gke)
+            [ -n "${GKE_PROJECT}" ]   || missing="${missing} GKE_E2E_PROJECT"
+            [ -n "${GKE_LOCATION}" ]  || missing="${missing} GKE_E2E_LOCATION"
+            [ -n "${GKE_CLUSTER}" ]   || missing="${missing} GKE_E2E_CLUSTER"
+            [ -n "${GKE_CONFIGMAP}" ] || missing="${missing} GKE_E2E_CONFIGMAP"
+            [ -n "${GKE_EXPECT}" ]    || missing="${missing} GKE_E2E_EXPECT"
+            [ -n "${GKE_ENDPOINT}" ]  || missing="${missing} GKE_E2E_ENDPOINT"
+            ;;
+          *)
+            echo "::error::connector ${CONNECTOR} has no preflight block"
+            exit 1
+            ;;
+          esac
           if [ -n "${missing}" ]; then
             echo "::error::missing repo variables:${missing}"
             exit 1
@@ -232,9 +248,9 @@ jobs:
       # The selection condition is required on the e2e step, not just the sentinel. A
       # job-level if cannot filter matrix legs: the whole family job runs when ANY of its
       # connectors is selected, and every row still materializes. Without this, a future
-      # `gcp gke` family asked for gcp alone would still run the gke suite. It is inert
-      # today with one row (the job only runs when that row is selected), and the fan-in
-      # already requires no proof from an unselected connector.
+      # family asked for gcp alone would still run the gke suite. That is no longer
+      # hypothetical: this family has two rows, so a dispatch filtered to one of them
+      # relies on this condition, and the fan-in requires no proof from the other.
       - name: Run the connector e2e
         id: e2e
         if: ${{ needs.prepare.outputs.selector == '' || needs.prepare.outputs.selector == matrix.connector }}
@@ -310,7 +326,8 @@ jobs:
           printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
 
   # ---- aws-oidc family -----------------------------------------------------
-  # One row today; EKS (#116) reuses this same aws-ci OIDC environment.
+  # One row today; EKS (#116) reuses this same aws-ci OIDC environment, exactly as gke
+  # reuses the gcp-wif federation above.
   aws-oidc:
     name: AWS connector read + canary
     needs: prepare
