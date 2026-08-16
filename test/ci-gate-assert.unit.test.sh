@@ -130,6 +130,57 @@ github-app=skipped' 'gcp-wif.gcp=
 aws-oidc.aws=
 github-app.github='
 
+# ---- two legs sharing one family (gcp + gke in gcp-wif, cynative#117) -----
+# The shape the real connector gate has since GKE joined gcp-wif. It is the case where a
+# job RESULT proves the least: the family is one job, so dropping one of its two matrix
+# rows leaves that job green and only the per-leg proof can tell. These fixtures are
+# roster-local (they pass their own ROSTER), so they exercise the script's handling of
+# the shape without pinning the live workflow's roster - test/connector-e2e-roster.unit.test.sh
+# is what pins that.
+TWO_ROSTER='gcp:gcp-wif gke:gcp-wif aws:aws-oidc github:github-app'
+TWO_PROOF='gcp-wif.gcp=success
+gcp-wif.gke=success
+aws-oidc.aws=success
+github-app.github=success'
+
+case_ 0 "two legs in one family, both proven, passes" "" "$ALL_OK" "$TWO_PROOF" "$TWO_ROSTER"
+
+# THE case this section exists for: the gke row is deleted, the gcp-wif job still runs
+# gcp and reports success, and every job result is green. Only the missing per-leg proof
+# makes the dropped leg visible.
+case_ 1 "a dropped sibling row in a shared family fails despite a green job" "" "$ALL_OK" \
+	'gcp-wif.gcp=success
+gcp-wif.gke=
+aws-oidc.aws=success
+github-app.github=success' "$TWO_ROSTER"
+
+# Filtering one leg of a shared family: the job RUNS (its sibling row materializes), so
+# the excluded leg's job result is success rather than skipped, and the excluded leg must
+# be silent. This is the arm that distinguishes an excluded leg from a failed one.
+case_ 0 "filtering one leg of a shared family passes with the sibling silent" gke 'gcp-wif=success
+aws-oidc=skipped
+github-app=skipped' 'gcp-wif.gcp=
+gcp-wif.gke=success
+aws-oidc.aws=
+github-app.github=' "$TWO_ROSTER"
+
+# The sibling ran anyway: the per-row step condition leaked, so the filter did not hold.
+case_ 1 "an excluded sibling in a shared family emitting a proof fails" gke 'gcp-wif=success
+aws-oidc=skipped
+github-app=skipped' 'gcp-wif.gcp=success
+gcp-wif.gke=success
+aws-oidc.aws=
+github-app.github=' "$TWO_ROSTER"
+
+# The selected leg of a shared family must still prove itself, even though its sibling's
+# presence keeps the job green.
+case_ 1 "the selected leg of a shared family with no proof fails" gke 'gcp-wif=success
+aws-oidc=skipped
+github-app=skipped' 'gcp-wif.gcp=
+gcp-wif.gke=
+aws-oidc.aws=
+github-app.github=' "$TWO_ROSTER"
+
 # A selector that names no roster leg must fail closed. Every leg is "excluded",
 # every job legitimately skipped, and today the script exits 0 while claiming the
 # selected leg ran; allowlist/roster drift on a filtered dispatch would go green

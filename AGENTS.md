@@ -69,7 +69,16 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   permission, guarded steps and pinned verification identity together, since drift between
   them would first fail during a live release), the per-package changelog override renderer unit
   tests, the python syntax gate (the secret-boundary checker plus the shared audit-parser
-  package), all three connector suites' offline
+  package), the connector-gate roster golden
+  (`test/connector-e2e-roster.unit.test.sh`: an independent here-doc anchor for
+  `connector-e2e.yaml`'s matrix rows and their timeouts, the static github leg, the
+  `SELECTORS`/dispatch-choice vocabulary, each job's exact-equality selector membership and
+  repository guard, and the `ROSTER`/`JOBS`/`PROOFS`/`RESULTS`/`needs` fan-in literals, plus
+  each leg's `*_REQUIRE_RUN`/`*_CANARY` forcing and its `make connector-<c>-e2e` seam. It
+  exists because the runtime checks are internally consistent by construction: delete a
+  matrix row **and** its `ROSTER` entry together and the sentinel, `EXPECTED_TOTAL` and
+  `gate-assert` all still pass while the connector goes silently ungated on the release
+  path), all four connector suites' offline
   audit-parser selftests, and the shared-machinery selftest).
   Install-free: presence-checks `shellcheck`, PowerShell 7, `python3` and PyYAML (the
   secret-boundary pin's YAML parser) up front and fails with
@@ -144,7 +153,22 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   binds it to the bytes GitHub returned, requiring a private 200 so the read also proves credential
   injection) plus a `PATCH` write canary and a secret-scanning-read canary, each denied before the
   request leaves the machine, and skipping cleanly when `GH_E2E_*`/creds are unset (the script
-  header documents its env and knobs). The three suites share one audit parser, the importable
+  header documents its env and knobs). `make connector-gke-e2e`: standalone live GKE connector
+  e2e (not part of `make check`); runs the real `cynative -p` against a fixture GKE cluster
+  through the `gke` connector (`test/connector.gke.e2e.test.sh`, needs `python3`), and is the
+  first suite whose read is **two hops**: the model resolves the cluster's control-plane
+  endpoint through the GCP Container API (`auth_provider=gcp`) and only then reads a fixture
+  ConfigMap from the Kubernetes API at that endpoint (`auth_provider=gke`), because the gke
+  connector has no default cluster and that discover-then-call flow is its documented
+  workflow. The endpoint is deliberately **not** given to the model, so a regression in the
+  GCP container-permission pins (#233/#235) breaks discovery and turns this suite red.
+  Plus two canaries denied before the request leaves the machine, a ConfigMap `create` and a
+  Secrets `list` (a different dimension: a `view` ClusterRole that drifted open on secrets
+  while still denying the write would sail past the write canary alone), and a clean skip when
+  `GKE_E2E_*`/creds are unset (the script header documents its env and knobs).
+  `GKE_E2E_ENDPOINT` is canary-only: the suite reads it into a shell-local and **unsets it
+  from the environment before any `cynative` process starts**, so the read phase cannot
+  consult it. The four suites share one audit parser, the importable
   Python package `test/lib/connector_audit/` (engine plus a per-provider spec in
   `connector_audit/specs/<provider>.py` and a runnable `connector-audit-parser.py` entrypoint), and
   one shell orchestration library `test/lib/connector-e2e.sh` (sourcing the generic
@@ -152,7 +176,21 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   The parser is what stops a suite going green while the read-only boundary is broken: its exit code
   is the phase status (1 = retryable miss, 4 = boundary failure, never retried, since the per-attempt
   audit truncation would erase the evidence), and a first-line credential prepass fails closed (4) if
-  credential material was logged. `make sh-test` gates the parser: each suite's offline `--selftest`
+  credential material was logged. **Sanctioning a read is a security decision, not a
+  convenience**: `sweep_calls` exempts a sanctioned call from the fatal unsanctioned sweep
+  *without looking at its result*, so whatever the read family admits can no longer be caught
+  having succeeded. gcp/aws/github use the per-record `is_sanctioned_read`, which must stay a
+  pure function of the call's **arguments** (the engine now evaluates it once per call and
+  reuses that verdict for both the sweep and witness candidacy). A connector whose read is
+  only legitimate *relative to another call* supplies the optional `plan_reads(calls, target)`
+  instead, which decides the whole sanctioned key set **before** the sweep: gke sanctions its
+  second hop only when an earlier, untruncated, sanctioned hop-1 200 established exactly that
+  endpoint (ordering compares hop 1's **result** position to hop 2's **attempt** position, in
+  physical audit-record order, never a timestamp). Deciding that *after* the sweep would
+  downgrade a successful request to an attacker-chosen endpoint into a retryable miss, and the
+  retry would truncate the audit and erase it; gke's `is_sanctioned_read` is therefore a
+  constant deny, so an unwired `plan_reads` sanctions nothing rather than falling back to a
+  broad classifier. `make sh-test` gates the parser: each suite's offline `--selftest`
   drives it and pins the suite's frozen case-name/code set
   (`connector_audit/testdata/<provider>.names.txt`), plus a shared-machinery `--selftest` that
   exercises the engine's own fail-closed and prepass cases. The `test/connector.<provider>.e2e.test.sh`
@@ -1089,7 +1127,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   extraction on Linux, `Expand-Archive` with a root-layout check on Windows, executable bit on
   Linux, PE machine arch on Windows, exact `--version`); the `connector-e2e` job calls
   `.github/workflows/connector-e2e.yaml` (`workflow_call` with `ref: <release SHA>`) against the
-  real GCP, AWS, and GitHub fixture accounts, so a release whose connector cannot authenticate,
+  real GCP, AWS, GitHub and GKE fixtures, so a release whose connector cannot authenticate,
   cannot read, or **fails to deny a write** cannot publish. The `llm-smoke` job calls
   `.github/workflows/llm-smoke.yaml` the same way (`workflow_call` with `ref: <release SHA>`,
   ceiling raised to `id-token: write`), so a release whose model path cannot authenticate,

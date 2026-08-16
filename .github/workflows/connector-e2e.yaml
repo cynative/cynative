@@ -1,6 +1,6 @@
 name: Live connector e2e
 
-# The live connector e2es against the real GCP, AWS, and GitHub fixture accounts: a
+# The live connector e2es against the real GCP, AWS, GitHub and GKE fixtures: a
 # read of a fact that only the real provider can supply, plus a write canary denied
 # before the request leaves the machine, proving read-only enforcement end to end.
 #
@@ -36,7 +36,7 @@ on:
         type: choice
         required: true
         default: all
-        options: [all, gcp, aws, github]
+        options: [all, gcp, aws, github, gke]
 
 permissions: {}
 
@@ -100,16 +100,19 @@ jobs:
           CALL_REF: ${{ inputs.ref }}
           TRIGGER_SHA: ${{ github.sha }}
           SELECTOR: ${{ inputs.connector }}
-          SELECTORS: gcp aws github
+          SELECTORS: gcp aws github gke
           DISPATCH_POLICY: filtered
         run: sh scripts/ci/ci-gate-contract.sh >>"$GITHUB_OUTPUT"
 
   # ---- gcp-wif family ------------------------------------------------------
-  # One row today. The matrix is deliberate: GKE (#117) reuses this same Workload
-  # Identity Federation, so onboarding it later is a data change rather than a change
-  # to job topology, filter behavior, and the release fan-in all at once.
+  # Two rows: gcp and gke (#117). Both federate through the SAME Workload Identity
+  # Federation into cynative-cli-ci, which is what the matrix was built for - onboarding
+  # gke was a data change rather than a change to job topology, filter behavior and the
+  # release fan-in all at once. The gke leg additionally depends on the gcp connector
+  # working, since its read resolves the cluster endpoint through the Container API
+  # before it ever talks to Kubernetes.
   gcp-wif:
-    name: GCP connector read + canary
+    name: GCP/GKE connector read + canaries
     needs: prepare
     # Filtering happens at JOB level. A job-level if cannot read the matrix context, but
     # it can read needs, and family membership is a static literal. This matters: an
@@ -124,20 +127,29 @@ jobs:
       github.repository == 'cynative/cynative' &&
       needs.prepare.result == 'success' &&
       (needs.prepare.outputs.selector == '' ||
-       needs.prepare.outputs.selector == 'gcp')
+       needs.prepare.outputs.selector == 'gcp' ||
+       needs.prepare.outputs.selector == 'gke')
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
       id-token: write # mint the OIDC token for Workload Identity Federation
+    # Distinct names, never one shared key: matrix outputs with IDENTICAL names race and
+    # the fan-in could not tell which leg produced the surviving value.
     outputs:
       proof_gcp: ${{ steps.sentinel.outputs.proof_gcp }}
+      proof_gke: ${{ steps.sentinel.outputs.proof_gke }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - connector: gcp
             timeout: 20
+          # Headroom for three phases, each retried once, at 240s per run, plus the build
+          # and the first-request Container API + ClusterRole fetches. The read alone is
+          # two round-trips.
+          - connector: gke
+            timeout: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -168,6 +180,12 @@ jobs:
           VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
           E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
           E2E_EXPECT: ${{ vars.GCP_E2E_EXPECT }}
+          GKE_PROJECT: ${{ vars.GKE_E2E_PROJECT }}
+          GKE_LOCATION: ${{ vars.GKE_E2E_LOCATION }}
+          GKE_CLUSTER: ${{ vars.GKE_E2E_CLUSTER }}
+          GKE_CONFIGMAP: ${{ vars.GKE_E2E_CONFIGMAP }}
+          GKE_EXPECT: ${{ vars.GKE_E2E_EXPECT }}
+          GKE_ENDPOINT: ${{ vars.GKE_E2E_ENDPOINT }}
         run: |
           missing=
           [ -n "${PROJECT}" ]       || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
@@ -177,6 +195,12 @@ jobs:
           [ -n "${VERTEX_REGION}" ] || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
           [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
           [ -n "${E2E_EXPECT}" ]    || missing="${missing} GCP_E2E_EXPECT"
+          [ -n "${GKE_PROJECT}" ]   || missing="${missing} GKE_E2E_PROJECT"
+          [ -n "${GKE_LOCATION}" ]  || missing="${missing} GKE_E2E_LOCATION"
+          [ -n "${GKE_CLUSTER}" ]   || missing="${missing} GKE_E2E_CLUSTER"
+          [ -n "${GKE_CONFIGMAP}" ] || missing="${missing} GKE_E2E_CONFIGMAP"
+          [ -n "${GKE_EXPECT}" ]    || missing="${missing} GKE_E2E_EXPECT"
+          [ -n "${GKE_ENDPOINT}" ]  || missing="${missing} GKE_E2E_ENDPOINT"
           if [ -n "${missing}" ]; then
             echo "::error::missing repo variables:${missing}"
             exit 1
@@ -230,6 +254,22 @@ jobs:
           # The harness treats only the exact string 1 as required. Anything else lets
           # the suite skip green on a renamed variable.
           GCP_E2E_REQUIRE_RUN: "1"
+          # Explicit, never the suite default: a *_CANARY=0 reaching a leg would green a
+          # read-only run and the boundary would go unprobed on the release path.
+          GCP_E2E_CANARY: "1"
+          GKE_E2E_PROJECT: ${{ vars.GKE_E2E_PROJECT }}
+          GKE_E2E_LOCATION: ${{ vars.GKE_E2E_LOCATION }}
+          GKE_E2E_CLUSTER: ${{ vars.GKE_E2E_CLUSTER }}
+          GKE_E2E_CONFIGMAP: ${{ vars.GKE_E2E_CONFIGMAP }}
+          GKE_E2E_EXPECT: ${{ vars.GKE_E2E_EXPECT }}
+          # Canary phases only. The suite reads it into a shell-local and unsets it from
+          # the environment before any cynative process starts, so the read phase must
+          # still discover the endpoint through the Container API.
+          GKE_E2E_ENDPOINT: ${{ vars.GKE_E2E_ENDPOINT }}
+          GKE_E2E_TIMEOUT: "240"
+          GKE_E2E_MAX_TOKENS: "100000"
+          GKE_E2E_REQUIRE_RUN: "1"
+          GKE_E2E_CANARY: "1"
           CONNECTOR: ${{ matrix.connector }}
           CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
         run: |
@@ -251,7 +291,7 @@ jobs:
         env:
           CONNECTOR: ${{ matrix.connector }}
           ACTUAL_TOTAL: ${{ strategy.job-total }}
-          EXPECTED_TOTAL: "1"
+          EXPECTED_TOTAL: "2"
           E2E_OUTCOME: ${{ steps.e2e.outcome }}
         run: |
           if [ "$ACTUAL_TOTAL" != "$EXPECTED_TOTAL" ]; then
@@ -264,6 +304,7 @@ jobs:
           fi
           case "$CONNECTOR" in
           gcp) key=proof_gcp ;;
+          gke) key=proof_gke ;;
           *) echo "::error::connector $CONNECTOR is not in the gcp-wif allowlist"; exit 1 ;;
           esac
           printf '%s=success\n' "$key" >>"$GITHUB_OUTPUT"
@@ -371,6 +412,8 @@ jobs:
           AWS_E2E_TIMEOUT: "240"
           AWS_E2E_MAX_TOKENS: "100000"
           AWS_E2E_REQUIRE_RUN: "1"
+          # Explicit, never the suite default; see the note on the gcp-wif leg.
+          AWS_E2E_CANARY: "1"
           CONNECTOR: ${{ matrix.connector }}
         run: make "connector-${CONNECTOR}-e2e"
       - name: Assert the leg really ran
@@ -498,6 +541,8 @@ jobs:
           GH_E2E_TIMEOUT: "240"
           GH_E2E_MAX_TOKENS: "100000"
           GH_E2E_REQUIRE_RUN: "1"
+          # Explicit, never the suite default; see the note on the gcp-wif leg.
+          GH_E2E_CANARY: "1"
         run: make connector-github-e2e
       - name: Assert the leg really ran
         id: sentinel
@@ -541,7 +586,7 @@ jobs:
         env:
           SELECTOR: ${{ needs.prepare.outputs.selector }}
           MODE: ${{ needs.prepare.outputs.mode }}
-          ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app
+          ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app gke:gcp-wif
           JOBS: gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always github-app:github-app:always
           # The actual dependency set this job waits on, so the script can catch a
           # job that was added to needs but never added to JOBS (or vice versa).
@@ -554,6 +599,7 @@ jobs:
             gcp-wif.gcp=${{ needs.gcp-wif.outputs.proof_gcp }}
             aws-oidc.aws=${{ needs.aws-oidc.outputs.proof_aws }}
             github-app.github=${{ needs.github-app.outputs.proof_github }}
+            gcp-wif.gke=${{ needs.gcp-wif.outputs.proof_gke }}
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
           sh scripts/ci/ci-gate-assert.sh &&

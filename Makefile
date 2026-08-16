@@ -139,7 +139,11 @@ pwsh-test:
 # all of which would first fail during a live release), an AST
 # syntax check of every file in the shared connector audit-parser package
 # (test/lib/connector-audit-parser.py,
-# test/lib/connector_audit/*.py, and its specs/), all three connector suites' offline
+# test/lib/connector_audit/*.py, and its specs/), the connector gate's roster golden
+# (test/connector-e2e-roster.unit.test.sh: an independent anchor for the matrix rows,
+# selection vocabulary, fan-in literals and per-leg REQUIRE_RUN/CANARY forcing, so a
+# connector deleted from BOTH the topology and the fan-in fails here instead of going
+# silently ungated), all four connector suites' offline
 # audit-parser selftests (--selftest), and the shared-machinery selftest (the engine's
 # own cases run with no provider, including the #56 credential prepass detection
 # fixtures the per-provider selftests only prove inert on). All hermetic: no network, no
@@ -165,6 +169,7 @@ sh-test:
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
+	@sh test/connector-e2e-roster.unit.test.sh
 	@sh test/llm-smoke-secrets.unit.test.sh
 	@sh test/retrigger.unit.test.sh
 	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
@@ -247,7 +252,7 @@ sh-test:
 	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
 	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
@@ -321,16 +326,16 @@ llm-tools-smoke:
 	sh test/llm-tools.smoke.test.sh
 
 # connector-%-e2e: live connector end-to-end tests (cynative#39, cynative#52,
-# cynative#53). Standalone (NOT part of `make check`): runs the real `cynative -p`
-# against a real fixture account/repo through the named connector and needs real
-# credentials; skips cleanly when the connector's *_E2E_* env is unset. Each
+# cynative#53, cynative#117). Standalone (NOT part of `make check`): runs the real
+# `cynative -p` against a real fixture account/repo/cluster through the named connector
+# and needs real credentials; skips cleanly when the connector's *_E2E_* env is unset. Each
 # script header documents its env and knobs. FORCE keeps the recipe live even if
 # a file named connector-<name>-e2e exists in the repo root; a bare pattern rule
 # has no such guarantee since it cannot be a .PHONY prerequisite.
 .PHONY: FORCE
 FORCE:
 
-connector-%-e2e: FORCE ## run one live connector e2e (gcp|aws|github); naming is load-bearing
+connector-%-e2e: FORCE ## run one live connector e2e (gcp|aws|github|gke); naming is load-bearing
 	sh test/connector.$*.e2e.test.sh
 
 # homebrew-smoke: post-release Homebrew install smoke (cynative#45). Standalone

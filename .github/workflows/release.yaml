@@ -595,7 +595,7 @@ jobs:
           exit $LASTEXITCODE
 
   # ---- Pre-publish read-only-boundary gate ------------------------------
-  # The live connector e2es against the real GCP, AWS, and GitHub fixture accounts,
+  # The live connector e2es against the real GCP, AWS, GitHub and GKE fixtures,
   # between the draft build and publish: a release whose connector cannot authenticate,
   # cannot read, or - above all - fails to DENY a write fails here while the release is
   # still an editable draft (recovery notes above apply unchanged).
