@@ -237,17 +237,20 @@ attempts="${GKE_E2E_ATTEMPTS:-2}"
 # ambient ADC, so the enumerable secrets are the LLM driver's credentials when the run
 # supplies them: an api key for the direct providers, the Vertex service-account JSON CI
 # feeds inline via CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS, or the three inline Bedrock
-# values. The Bedrock trio matters even though CI drives this leg with Vertex: a raw
-# secret access key or session token has no reliable class-2/class-3 shape of its own, so
-# without an exact class-1 needle a leak of one could pass unnoticed on any run that
-# configures Bedrock inline - which this suite accepts, and which is how it was
-# live-verified. The fixture nonce and the endpoint are deliberately NOT listed: they are
-# the evidence this suite exists to find, and naming the nonce would make the legitimate
-# ConfigMap response trip the leak detector. e2e_write_live_secrets skips unset/empty
-# vars, so an ambient-only run naming none of them is valid.
+# values, or the ambient AWS_* chain Bedrock also accepts - which e2e_isolate_env
+# deliberately leaves in place, precisely because an LLM provider may need it. Both
+# Bedrock triples matter even though CI drives this leg with Vertex: a raw secret access
+# key or session token has no reliable class-2/class-3 shape of its own (only the AKIA/ASIA
+# key ID does), so without an exact class-1 needle a leak of one could pass unnoticed on
+# any run that reaches Bedrock either way - which this suite accepts, and which is how it
+# was live-verified. The fixture nonce and the endpoint are deliberately NOT listed: they
+# are the evidence this suite exists to find, and naming the nonce would make the
+# legitimate ConfigMap response trip the leak detector. e2e_write_live_secrets skips
+# unset/empty vars, so a run naming none of them is valid.
 secret_file=$(mktemp)
 e2e_write_live_secrets "$secret_file" CYNATIVE_LLM_API_KEY CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS \
-	CYNATIVE_LLM_BEDROCK_ACCESS_KEY CYNATIVE_LLM_BEDROCK_SECRET_KEY CYNATIVE_LLM_BEDROCK_SESSION_TOKEN
+	CYNATIVE_LLM_BEDROCK_ACCESS_KEY CYNATIVE_LLM_BEDROCK_SECRET_KEY CYNATIVE_LLM_BEDROCK_SESSION_TOKEN \
+	AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
 # Sanitized-artifact wiring for e2e_run_with_retries (cynative#59). ARTIFACTS_DIR must
 # stay OUTSIDE workdir so this suite's own cleanup() does not delete what was just

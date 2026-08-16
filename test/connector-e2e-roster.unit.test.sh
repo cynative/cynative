@@ -224,6 +224,50 @@ def step_run(chunk, step_id):
     return []
 
 
+# The COMPLETE comment-stripped run body of each executable seam, as an independent
+# literal. Whole-body equality, never membership: a body that merely CONTAINS the command
+# proves nothing about execution, and every membership check has the same shape of bypass -
+#
+#     if false; then
+#       make "connector-${CONNECTOR}-e2e"
+#     fi
+#
+# succeeds, mints a proof and greens the release gate while containing the line verbatim.
+# The same applies to gate-assert: checking the script call and the gate_sha printf
+# separately would accept `sh ...ci-gate-assert.sh && true` followed by an unconditional
+# printf, which emits the gate's proof even when the assertion failed. Only the exact
+# sequence pins the `&&` relationship between them.
+#
+# The cost is that any real edit to these four bodies must update this table too. That is
+# the intent: these are the two lines that turn every other literal in this file from a
+# declaration into evidence.
+EXPECTED_RUN = {
+    ("gcp-wif", "e2e"): [
+        'export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"',
+        'CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")"',
+        "export CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS",
+        'make "connector-${CONNECTOR}-e2e"',
+    ],
+    ("aws-oidc", "e2e"): ['make "connector-${CONNECTOR}-e2e"'],
+    ("github-app", "e2e"): ["make connector-github-e2e"],
+    ("gate-assert", "assert"): [
+        "sh scripts/ci/ci-gate-assert.sh &&",
+        "printf 'gate_sha=%s\\n' \"$CHECKOUT_SHA\" >>\"$GITHUB_OUTPUT\"",
+    ],
+}
+
+
+def check_run(chunk, job, step_id):
+    want = EXPECTED_RUN.get((job, step_id))
+    if want is None:
+        problems.append("no expected run body is pinned for %s/%s" % (job, step_id))
+        return
+    got = step_run(chunk, step_id)
+    if got != want:
+        problems.append("job %s step %s run body is not the pinned sequence:\n"
+                        "    got  %s\n    want %s" % (job, step_id, got, want))
+
+
 # ---- 1. job topology --------------------------------------------------------
 rows = []
 for job in JOBS:
@@ -269,21 +313,15 @@ for job in JOBS:
             if step_env(chunk, step_id).get("CONNECTOR") != "${{ matrix.connector }}":
                 problems.append("job %s step %s must bind CONNECTOR: ${{ matrix.connector }}, "
                                 "so a row field cannot become an unused label" % (job, step_id))
-        want_cmd = 'make "connector-${CONNECTOR}-e2e"'
-        if want_cmd not in step_run(chunk, "e2e"):
-            problems.append("job %s: the id: e2e step's run body does not contain the exact "
-                            "line %r (a step that succeeds without running the suite still "
-                            "mints a proof and greens the gate)" % (job, want_cmd))
+        check_run(chunk, job, "e2e")
     else:
         if scalars(chunk, "strategy"):
             problems.append("job %s is canonically static but declares a strategy" % job)
-        connector = BY_JOB[job][0][1]
-        want_cmd = "make connector-%s-e2e" % connector
-        if want_cmd not in step_run(chunk, "e2e"):
-            problems.append("job %s: the id: e2e step's run body does not contain the exact "
-                            "line %r" % (job, want_cmd))
+        check_run(chunk, job, "e2e")
+        static_connector = BY_JOB[job][0][1]
         timeouts = scalars(chunk, "timeout-minutes")
-        rows.append("%s|%s|static|%s" % (job, connector, timeouts[0] if timeouts else "<none>"))
+        rows.append("%s|%s|static|%s"
+                    % (job, static_connector, timeouts[0] if timeouts else "<none>"))
 
     # ---- 2. selection: the job's own membership test ------------------------
     cond = folded(chunk, "if") or ""
@@ -378,16 +416,9 @@ if "    if: ${{ always() }}" not in ga:
     problems.append("gate-assert must run under a bare `if: ${{ always() }}` with no conjuncts")
 
 # The fan-in literals are only evidence if something evaluates them, and gate_sha is only
-# evidence if it cannot be emitted without that evaluation succeeding. Replacing the
-# script call with a bare `printf gate_sha=...` would leave every literal above intact and
-# hand publish a passing gate, so pin the invocation and the && that guards the emission.
-assert_run = step_run(ga, "assert")
-if "sh scripts/ci/ci-gate-assert.sh &&" not in assert_run:
-    problems.append("gate-assert's id: assert step must invoke `sh scripts/ci/ci-gate-assert.sh &&` "
-                    "(got %r)" % assert_run)
-if not any(l.startswith("printf 'gate_sha=%s\\n' \"$CHECKOUT_SHA\"") for l in assert_run):
-    problems.append("gate-assert's id: assert step must emit gate_sha from CHECKOUT_SHA, joined "
-                    "to the script call with && so it provably cannot run when the assert fails")
+# evidence if it cannot be emitted without that evaluation succeeding. Whole-body equality;
+# see EXPECTED_RUN for why membership is not enough.
+check_run(ga, "gate-assert", "assert")
 
 if problems:
     for p in problems:

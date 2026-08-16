@@ -43,11 +43,15 @@ So the arity is enforced in two places, and the split is worth knowing precisely
 arity other than four or five, and any component outside the safe URL-segment alphabet,
 fails closed in `_split_target` on the first call, which is `plan_reads` - before the
 sweep, in every mode. A five-component target reaching READ mode is the one case
-plan_reads cannot reject (it is a legal canary target), and is caught by `is_witness`,
-whose own `_split_target(..., 4)` runs ahead of every other test in that function. The
-residual gap is exact and harmless: a read phase given a canary target AND containing no
-planned call with a result exits 1 rather than 4 - nothing was adjudicated, so there is
-nothing to fail closed about.
+plan_reads cannot reject (it is a legal canary target); it is caught by `is_witness`,
+whose own `_split_target(..., 4)` runs ahead of every other test in that function.
+
+That leaves a read phase given a canary target reporting 1 rather than 4 whenever
+`is_witness` is never reached at all - no planned call with a result, or a retryable sweep
+miss that returns first. It is a wiring bug either way, not a boundary question: the
+phase cannot go green, because the only path to 0 runs through the arity check. It is
+documented rather than enforced because the alternative is a second, mode-aware seam in
+the engine to say something no green run can hide.
 """
 import ipaddress
 import json
@@ -159,8 +163,13 @@ def _query_is_shaping_only(query):
     """True when the hop-1 query is empty or names only allowlisted shaping parameters.
     Parsed with keep_blank_values and strict_parsing off, then checked against the
     allowlist by NAME: the values are free (a fields mask is arbitrary), the names are
-    not. A parse failure is not possible here, but an unnamed pair ("&&") yields nothing
-    and is therefore harmless."""
+    not. A parse failure is not possible here, and an unnamed pair ("&&") yields nothing.
+
+    parse_qsl splits on "&" only, so "fields=x;clusterId=other" reads as ONE allowed
+    `fields` pair rather than a smuggled selector. That is deliberate rather than
+    overlooked: it matches Go's url.ParseQuery, which since 1.17 does not treat ";" as a
+    separator and REJECTS a query containing one, so such a request never reaches a
+    provider at all. Both sides therefore agree, and neither reads a selector out of it."""
     if not query:
         return True
     from urllib.parse import parse_qsl

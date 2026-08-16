@@ -171,7 +171,13 @@ jobs:
       # Fail loudly on a missing or renamed variable. The suite's own REQUIRE_RUN check
       # covers only the vars it lists; these are consumed by the auth action before the
       # suite ever runs. GCP had no preflight before consolidation.
+      #
+      # Carries the same selection condition as the e2e step below. Both matrix rows
+      # materialize whatever the filter says, so without it a dispatch filtered to one
+      # connector would still fail on the OTHER connector's missing variable - fail-closed,
+      # but for a fixture the run never touches.
       - name: Preflight the required repo variables
+        if: ${{ needs.prepare.outputs.selector == '' || needs.prepare.outputs.selector == matrix.connector }}
         env:
           PROJECT: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
           WIF_PROVIDER: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
@@ -187,11 +193,12 @@ jobs:
           GKE_EXPECT: ${{ vars.GKE_E2E_EXPECT }}
           GKE_ENDPOINT: ${{ vars.GKE_E2E_ENDPOINT }}
           CONNECTOR: ${{ matrix.connector }}
-        # The shared credential variables are required on every row; the per-fixture ones
-        # only on the row that consumes them. Checking both fixtures unconditionally would
-        # make a dispatch filtered to gcp fail on a missing GKE variable it never reads,
-        # and vice versa - coupling two independent fixtures for no gain. The default arm
-        # fails closed, so a new row cannot silently skip its own preflight.
+        # The variables every row consumes are checked unconditionally; the per-fixture
+        # ones only on the row that reads them, so a filtered dispatch does not depend on
+        # the other fixture's configuration. GCP_E2E_PROJECT is in the shared set on
+        # purpose: the quota-project step below injects it into the credentials file for
+        # BOTH rows, so it is a shared input despite its name. The default arm fails
+        # closed, so a new row cannot silently skip its own preflight.
         run: |
           missing=
           [ -n "${PROJECT}" ]       || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
@@ -199,9 +206,9 @@ jobs:
           [ -n "${SA}" ]            || missing="${missing} CYNATIVE_CLI_CI_SA"
           [ -n "${VERTEX_MODEL}" ]  || missing="${missing} CYNATIVE_CLI_CI_VERTEX_MODEL"
           [ -n "${VERTEX_REGION}" ] || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
+          [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
           case "${CONNECTOR}" in
           gcp)
-            [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
             [ -n "${E2E_EXPECT}" ]    || missing="${missing} GCP_E2E_EXPECT"
             ;;
           gke)
