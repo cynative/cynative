@@ -248,9 +248,7 @@ func registerStructDefaults(v *viper.Viper, prefix string, val reflect.Value) {
 // pass through; [time.Duration] is rendered as its string form so the strict
 // duration decode-hook accepts it (it rejects raw int64).
 func defaultValueForViper(v reflect.Value) any {
-	if v.Type() == reflect.TypeFor[time.Duration]() {
-		d, _ := v.Interface().(time.Duration)
-
+	if d, ok := reflect.TypeAssert[time.Duration](v); ok {
 		return d.String()
 	}
 
