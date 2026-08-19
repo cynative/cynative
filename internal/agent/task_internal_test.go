@@ -284,3 +284,36 @@ func TestTaskTool_RunNoBracketOnRefusedCalls(t *testing.T) {
 		t.Errorf("rendered = %q, want no bracket notices", buf.String())
 	}
 }
+
+func TestTaskTool_RunNoAnswer(t *testing.T) {
+	t.Parallel()
+
+	// A sub-agent whose model went blank returns a conclusion string rather than an
+	// error, distinct from the iteration-limit notice, and still closes its bracket
+	// as complete. dispatch turns that string into the parent's tool result; this
+	// test pins runScoped's contract, not the dispatch hop.
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+	a.maxSubagentIter = 32
+	a.renderer = echoRenderer
+
+	var buf bytes.Buffer
+
+	out, err := newTaskTool(a).runScoped(context.Background(), rootState(&buf), `{"description":"go blank"}`)
+	if err != nil {
+		t.Fatalf("runScoped: %v", err)
+	}
+	if out != subagentNoAnswer {
+		t.Errorf("out = %q, want the no-answer notice", out)
+	}
+	if strings.Contains(out, "iteration limit") {
+		t.Errorf("out = %q, must not blame the iteration limit", out)
+	}
+	if !strings.Contains(buf.String(), "■ Sub-task complete") {
+		t.Errorf("rendered = %q, want the completion notice", buf.String())
+	}
+}

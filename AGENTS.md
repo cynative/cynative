@@ -366,6 +366,17 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     minus the hand-triaged `nonChatProviders` exclusions (providers whose Bifrost impl cannot
     chat, rejected by `config.ValidateLLM`). `CanonicalEnvKeyLookup` backs the single-env-var
     fallback.
+  - Response text is read from **both** content shapes (`textBlocks` in `convert.go`).
+    Bifrost carries assistant prose in either `ContentStr` or `ContentBlocks` and providers
+    disagree on which: Anthropic joins every text part into `ContentStr`, while Gemini emits
+    one block per response part and collapses to `ContentStr` **only when there is exactly
+    one**. Reading `ContentStr` alone therefore silently dropped the whole answer of any
+    multi-part Gemini reply, which reached the agent loop as an empty turn and ended the run
+    (#271). A provider that splits content is covered by this. The **other** carriers
+    Bifrost already has today are not read: `ChatAssistantMessage.Refusal`/`.Reasoning` and
+    the `refusal` content-block type. An OpenAI-style refusal therefore still reaches the
+    loop as a blank turn and is retried and reported as an empty response rather than shown
+    to the operator — tracked separately, alongside surfacing `FinishReason`.
   - Env references resolve through the injected `LookupEnv`, never the process environment:
     `ResolveEnvVar` turns `env.X` strings into Bifrost `SecretVar`s, `ProviderEnvKeys` enumerates
     the dotted key paths that `CYNATIVE_LLM_*` vars map onto, and `ValidateEnvVars` verifies
@@ -382,8 +393,16 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   against a fake `schema.ChatModel` (no framework runner, no checkpoint store, no
   interrupt/resume). `Agent.run` (`loop.go`) calls `model.Generate`, renders the assistant turn,
   and returns its text when there are no tool calls; otherwise it dispatches each tool call,
-  appends a `ToolMessage` per result, and loops (terminating after `maxIter` iterations with an
-  empty answer). Tool failures and unknown-tool names come back as tool-result content, never a
+  appends a `ToolMessage` per result, and loops. A turn carrying **neither** text nor a tool
+  call is not an answer: `acceptTurn` retries it with `emptyTurnDirective` and ends the run
+  with `errNoAnswer` after `maxConsecutiveEmpty` (3) in a row, while exhausting `maxIter` ends
+  it with `errIterationLimit`. The two are distinct sentinels because a single empty string
+  used to mean both, so a model that returned nothing was reported as an iteration limit on a
+  run with most of its budget left (#271). **A blank turn is never appended to the
+  transcript**: it re-encodes to a content-less assistant message that Bifrost's Anthropic
+  adapter serializes as `"content": []` and its OpenAI adapter as a bare role, both rejected by
+  those APIs; Gemini's adapter drops it, which is why replaying one went unnoticed. Tool
+  failures and unknown-tool names come back as tool-result content, never a
   Go error, so the model can self-correct. `Run` seeds the working transcript from the agent's
   clean Q&A history (prior questions and final answers only; intermediate plans/steps/tool
   output render live but are not replayed) plus the system message and the new question, then

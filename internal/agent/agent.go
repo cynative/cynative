@@ -213,14 +213,19 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 
 			return nil
 		}
+		if errors.Is(err, errIterationLimit) {
+			fmt.Fprintln(w, "\n⚠️  Reached the iteration limit without a final answer.")
+
+			return nil
+		}
+		if errors.Is(err, errNoAnswer) {
+			fmt.Fprintf(w, "\n⚠️  The model returned %d empty responses in a row and could not "+
+				"produce an answer. Try rerunning, or switch models.\n", maxConsecutiveEmpty)
+
+			return nil
+		}
 
 		return err
-	}
-
-	if answer == "" {
-		fmt.Fprintln(w, "\n⚠️  Reached the iteration limit without a final answer.")
-
-		return nil
 	}
 
 	a.history = append(a.history, schema.UserMessage(task), schema.AssistantMessage(answer, nil))

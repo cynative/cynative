@@ -465,3 +465,54 @@ func TestSchemaToolsToParams_Empty(t *testing.T) {
 		t.Errorf("expected nil for no tools")
 	}
 }
+
+func TestSchemaFromBifrostMessage_MultipleTextContentBlocks(t *testing.T) {
+	t.Parallel()
+
+	// Bifrost's Gemini adapter emits one content block per response part and
+	// collapses to ContentStr only when there is exactly one text block, so a
+	// reply split across parts arrives as ContentBlocks. Reading ContentStr
+	// alone dropped the whole answer and the agent loop saw an empty turn.
+	first, second := "The project has ", "three findings."
+	bm := bschemas.ChatMessage{ //nolint:exhaustruct // only fields under test
+		Role: bschemas.ChatMessageRoleAssistant,
+		Content: &bschemas.ChatMessageContent{ //nolint:exhaustruct // only ContentBlocks
+			ContentBlocks: []bschemas.ChatContentBlock{
+				{Type: bschemas.ChatContentBlockTypeText, Text: &first},  //nolint:exhaustruct // text block only
+				{Type: bschemas.ChatContentBlockTypeText, Text: &second}, //nolint:exhaustruct // text block only
+			},
+		},
+	}
+
+	out := schemaFromBifrostMessage(bm)
+
+	if got := out.Text(); got != "The project has three findings." {
+		t.Errorf("text = %q, want the joined parts", got)
+	}
+}
+
+func TestSchemaFromBifrostMessage_SkipsEmptyAndNonTextBlocks(t *testing.T) {
+	t.Parallel()
+
+	empty, wanted := "", "the answer"
+	bm := bschemas.ChatMessage{ //nolint:exhaustruct // only fields under test
+		Role: bschemas.ChatMessageRoleAssistant,
+		Content: &bschemas.ChatMessageContent{ //nolint:exhaustruct // only ContentBlocks
+			ContentBlocks: []bschemas.ChatContentBlock{
+				{Type: bschemas.ChatContentBlockTypeImage, Text: &wanted}, //nolint:exhaustruct // non-text block
+				{Type: bschemas.ChatContentBlockTypeText, Text: nil},      //nolint:exhaustruct // nil text
+				{Type: bschemas.ChatContentBlockTypeText, Text: &empty},   //nolint:exhaustruct // empty text
+				{Type: bschemas.ChatContentBlockTypeText, Text: &wanted},  //nolint:exhaustruct // the only text block
+			},
+		},
+	}
+
+	out := schemaFromBifrostMessage(bm)
+
+	if got := out.Text(); got != "the answer" {
+		t.Errorf("text = %q, want only the non-empty text block", got)
+	}
+	if len(out.Content) != 1 {
+		t.Errorf("content blocks = %d, want 1", len(out.Content))
+	}
+}

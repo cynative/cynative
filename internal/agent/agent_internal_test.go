@@ -169,8 +169,8 @@ func TestRun_IterationGuardExhausts(t *testing.T) {
 	a := newTestAgent(model, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
 
 	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 2)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errIterationLimit) {
+		t.Fatalf("err = %v, want errIterationLimit", err)
 	}
 	if answer != "" {
 		t.Errorf("answer = %q, want empty (iteration limit)", answer)
@@ -185,8 +185,8 @@ func TestRun_ZeroIterations(t *testing.T) {
 	a := newTestAgent(model, map[string]schema.InvokableTool{})
 
 	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errIterationLimit) {
+		t.Fatalf("err = %v, want errIterationLimit", err)
 	}
 	if answer != "" {
 		t.Errorf("answer = %q, want empty", answer)
@@ -1834,5 +1834,348 @@ func TestRun_NilOnFirstResponseIsSafe(t *testing.T) {
 	}
 	if answer != "done" {
 		t.Errorf("answer = %q, want %q", answer, "done")
+	}
+}
+
+// transcriptModel returns its scripted messages in order and keeps a copy of the
+// transcript it was handed on every call, so a test can assert what the retry
+// after an empty turn actually saw. capturingModel overwrites its record each
+// call, which cannot show a retry's input.
+type transcriptModel struct {
+	msgs []*schema.Message
+	seen [][]*schema.Message
+}
+
+var _ schema.ChatModel = (*transcriptModel)(nil)
+
+func (m *transcriptModel) Generate(
+	_ context.Context,
+	msgs []*schema.Message,
+	_ []*schema.ToolInfo,
+) (*schema.Message, error) {
+	m.seen = append(m.seen, append([]*schema.Message(nil), msgs...))
+	if len(m.seen) > len(m.msgs) {
+		return nil, errors.New("transcriptModel: out of scripted messages")
+	}
+
+	return m.msgs[len(m.seen)-1], nil
+}
+
+func TestRun_EmptyTurnRetriesInsteadOfEndingTheRun(t *testing.T) {
+	t.Parallel()
+
+	// A turn with neither text nor tool calls is not an answer. The loop used to
+	// return it as the final answer, discarding the whole investigation.
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("the real answer", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 8)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "the real answer" {
+		t.Errorf("answer = %q, want the answer produced after the retry", answer)
+	}
+	if len(model.seen) != 2 {
+		t.Fatalf("Generate called %d times, want 2 (the empty turn then the retry)", len(model.seen))
+	}
+}
+
+func TestRun_EmptyTurnRetryCarriesDirectiveNotTheBlankMessage(t *testing.T) {
+	t.Parallel()
+
+	// The blank turn must not reach the transcript. Bifrost's Anthropic adapter
+	// serializes a content-less assistant message as "content": [] and its OpenAI
+	// adapter as a bare role, and both APIs reject that; Gemini's adapter drops it,
+	// which is why replaying one went unnoticed. The retry carries a host
+	// directive in its place.
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("answer", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+
+	seed := []*schema.Message{schema.UserMessage("q")}
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, seed, 8); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	retry := model.seen[1]
+	for _, m := range retry {
+		if m.Role == schema.Assistant && len(m.Content) == 0 {
+			t.Fatal("retry transcript carries the blank assistant message")
+		}
+	}
+	last := retry[len(retry)-1]
+	if last.Role != schema.User || last.Text() != emptyTurnDirective {
+		t.Errorf("retry ends with %v %q, want the user directive", last.Role, last.Text())
+	}
+}
+
+func TestRun_RepeatedEmptyTurnsGiveUpBeforeExhaustingIterations(t *testing.T) {
+	t.Parallel()
+
+	// A deterministically blank model must not burn every remaining iteration on
+	// billed round-trips: the token budget is unbounded by default.
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("never reached", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if !errors.Is(err, errNoAnswer) {
+		t.Fatalf("err = %v, want errNoAnswer", err)
+	}
+	if answer != "" {
+		t.Errorf("answer = %q, want empty", answer)
+	}
+	if len(model.seen) != maxConsecutiveEmpty {
+		t.Errorf("Generate called %d times, want %d", len(model.seen), maxConsecutiveEmpty)
+	}
+}
+
+func TestRun_WhitespaceOnlyTurnIsRetried(t *testing.T) {
+	t.Parallel()
+
+	// A turn of pure whitespace is no more an answer than an empty one; the
+	// failure-summary path already treats blank this way.
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("  \n\t ", nil),
+		schema.AssistantMessage("real", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 8)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "real" {
+		t.Errorf("answer = %q, want the retried answer", answer)
+	}
+}
+
+func TestRun_NilMessageIsRetriedNotDereferenced(t *testing.T) {
+	t.Parallel()
+
+	// schema.Message's accessors dereference their receiver, so a ChatModel
+	// returning (nil, nil) would panic in the loop rather than retry.
+	model := &transcriptModel{msgs: []*schema.Message{
+		nil,
+		schema.AssistantMessage("recovered", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 8)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "recovered" {
+		t.Errorf("answer = %q, want the retried answer", answer)
+	}
+}
+
+func TestRun_EmptyStreakResetsOnAProductiveTurn(t *testing.T) {
+	t.Parallel()
+
+	// The ceiling counts CONSECUTIVE blanks. A run that keeps making progress
+	// between occasional blanks must not accumulate its way into a give-up.
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		toolCall("c1", "echo", "{}"),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("done", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "done" {
+		t.Errorf("answer = %q, want done", answer)
+	}
+}
+
+func TestRun_NoAnswerNotice(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Cfg.MaxIterations = 32
+	cfg.Model = &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+	}}
+
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "empty responses in a row") {
+		t.Errorf("output = %q, want the empty-response notice", buf.String())
+	}
+	if strings.Contains(buf.String(), "iteration limit") {
+		t.Errorf("output = %q, must not blame the iteration limit", buf.String())
+	}
+	if len(a.history) != 0 {
+		t.Errorf("history length = %d, want 0", len(a.history))
+	}
+}
+
+func TestRun_BlankTurnOnTheLastIterationReportsTheIterationLimit(t *testing.T) {
+	t.Parallel()
+
+	// A blank turn consumes an iteration like any other. When it is the last one
+	// there is no budget left to retry in, and the iteration limit is then the
+	// honest reason the run stopped — not the empty-response ceiling, which was
+	// never reached.
+	model := &transcriptModel{msgs: []*schema.Message{schema.AssistantMessage("", nil)}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+
+	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 1)
+	if !errors.Is(err, errIterationLimit) {
+		t.Fatalf("err = %v, want errIterationLimit", err)
+	}
+	if errors.Is(err, errNoAnswer) {
+		t.Error("a single blank turn must not report the empty-response ceiling")
+	}
+}
+
+// blankBudgetModel spends usage and always returns a blank turn, so a run hits
+// the token budget and the empty-response ceiling in the same stretch.
+type blankBudgetModel struct {
+	acc   *metrics.Accumulator
+	usage schema.Usage
+	calls int
+}
+
+var _ schema.ChatModel = (*blankBudgetModel)(nil)
+
+func (m *blankBudgetModel) Generate(
+	_ context.Context,
+	_ []*schema.Message,
+	_ []*schema.ToolInfo,
+) (*schema.Message, error) {
+	m.acc.AddUsage(m.usage)
+	m.calls++
+
+	return schema.AssistantMessage("", nil), nil
+}
+
+func TestRun_BudgetWinsOverTheEmptyResponseCeiling(t *testing.T) {
+	t.Parallel()
+
+	// The post-Generate halt check runs before a turn is classified, so an
+	// operator-facing halt is never reported as a model problem: a blank turn that
+	// also crossed the budget stops with the budget notice.
+	acc := metrics.NewAccumulator("p", "m", metrics.WithBudget(10))
+	model := &blankBudgetModel{acc: acc, usage: schema.Usage{TotalTokens: 50}, calls: 0}
+
+	cfg := baseConfig()
+	cfg.Model = model
+	cfg.Metrics = acc
+
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "Budget reached") {
+		t.Errorf("output = %q, want the budget notice", out)
+	}
+	if strings.Contains(out, "empty responses in a row") {
+		t.Errorf("output = %q, a budget halt must not be reported as a model failure", out)
+	}
+}
+
+func TestRun_InterruptDuringABlankStreakBeatsTheEmptyCeiling(t *testing.T) {
+	t.Parallel()
+
+	// The blank path returns without another halt check of its own, so a stop that
+	// lands after the post-Generate check would otherwise be reported as a model
+	// failure — and Run maps that to exit 0, swallowing the operator's Ctrl-C.
+	// Checks per blank iteration: top-of-loop, post-Generate, then the terminal
+	// one. Trip on the 7th (0-based 6): the third iteration's terminal check.
+	ci := &countInterrupter{target: 6, calls: 0}
+	model := &transcriptModel{msgs: []*schema.Message{
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+		schema.AssistantMessage("", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+	a.interrupter = ci
+
+	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("err = %v, want errInterrupted", err)
+	}
+	if errors.Is(err, errNoAnswer) {
+		t.Error("an operator stop must not be reported as a model failure")
+	}
+}
+
+func TestRun_InterruptOnTheLastIterationBeatsTheIterationLimit(t *testing.T) {
+	t.Parallel()
+
+	// Same hazard at the other terminal return: exhausting maxIter must not mask a
+	// stop that landed during the final iteration. A single blank turn under
+	// maxIter=1 is the only shape that reaches that return without passing a
+	// dispatch checkpoint first, so it uses the top-of-loop and post-Generate
+	// checks (0 and 1) and trips on the terminal one.
+	ci := &countInterrupter{target: 2, calls: 0}
+	model := &transcriptModel{msgs: []*schema.Message{schema.AssistantMessage("", nil)}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{})
+	a.interrupter = ci
+
+	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 1)
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("err = %v, want errInterrupted", err)
+	}
+	if errors.Is(err, errIterationLimit) {
+		t.Error("an operator stop must not be reported as an iteration limit")
+	}
+}
+
+func TestRun_BlankTurnDoesNotDisturbTheToolFailureStreak(t *testing.T) {
+	t.Parallel()
+
+	// The two ceilings count different things: consecutiveFailures counts failed
+	// tool calls, consecutiveEmpty counts blank model turns. A blank turn between
+	// two failing tool calls must neither credit the failure streak nor reset it,
+	// so the failure halt still fires on the second failure.
+	model := &transcriptModel{msgs: []*schema.Message{
+		toolCall("c1", "boom", "{}"),
+		schema.AssistantMessage("", nil),
+		toolCall("c2", "boom", "{}"),
+		schema.AssistantMessage("stuck: I need credentials", nil),
+	}}
+	a := newTestAgent(model, map[string]schema.InvokableTool{"boom": &errTool{}})
+	a.maxConsecutiveFailures = 2
+
+	rs := &runState{depth: 0, out: io.Discard}
+	answer, err := a.run(context.Background(), rs, nil, 32)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "stuck: I need credentials" {
+		t.Errorf("answer = %q, want the failure summary", answer)
+	}
+	if rs.consecutiveFailures != 2 {
+		t.Errorf("consecutiveFailures = %d, want 2 (the blank turn neither credits nor resets)",
+			rs.consecutiveFailures)
 	}
 }

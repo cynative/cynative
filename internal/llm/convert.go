@@ -113,13 +113,37 @@ func schemaToBifrostToolCalls(in []schema.ToolCallBlock) []bschemas.ChatAssistan
 	return calls
 }
 
+// textBlocks extracts a message's assistant prose as schema text blocks. Bifrost
+// carries content in one of two shapes and providers disagree on which: Anthropic
+// joins every text part into ContentStr, while Gemini emits one ContentBlock per
+// response part and collapses to ContentStr only when exactly one text block
+// exists. Reading ContentStr alone therefore dropped the entire answer of any
+// multi-part Gemini reply, which reached the agent loop as an empty turn and
+// ended the run. Empty and non-text blocks contribute nothing.
+func textBlocks(c *bschemas.ChatMessageContent) []schema.Block {
+	if c == nil {
+		return nil
+	}
+
+	var out []schema.Block
+	if c.ContentStr != nil && *c.ContentStr != "" {
+		out = append(out, schema.TextBlock{Text: *c.ContentStr})
+	}
+	for _, blk := range c.ContentBlocks {
+		if blk.Type != bschemas.ChatContentBlockTypeText || blk.Text == nil || *blk.Text == "" {
+			continue
+		}
+		out = append(out, schema.TextBlock{Text: *blk.Text})
+	}
+
+	return out
+}
+
 // schemaFromBifrostMessage converts a Bifrost chat message into an internal schema message.
 func schemaFromBifrostMessage(bm bschemas.ChatMessage) *schema.Message {
 	out := &schema.Message{Role: schema.Role(bm.Role)} //nolint:exhaustruct // optional fields set below
 
-	if bm.Content != nil && bm.Content.ContentStr != nil && *bm.Content.ContentStr != "" {
-		out.Content = append(out.Content, schema.TextBlock{Text: *bm.Content.ContentStr})
-	}
+	out.Content = append(out.Content, textBlocks(bm.Content)...)
 
 	if bm.ChatAssistantMessage != nil {
 		for _, tc := range bm.ChatAssistantMessage.ToolCalls {

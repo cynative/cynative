@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/cynative/cynative/internal/audit"
@@ -33,6 +34,34 @@ var errInterrupted = errors.New("agent: interrupted")
 // exit code 130 and the interactive loop can treat it as non-fatal.
 var ErrInterrupted = errInterrupted
 
+// errIterationLimit ends a run that exhausted maxIter without reaching a final
+// answer. It exists so the exhaustion notice is only ever printed for actual
+// exhaustion: before it, every non-answer shared one empty string, and a model
+// turn carrying no answer was reported as an iteration limit on a run that had
+// most of its budget left. Errname-compliant; the error type exempts it from
+// gochecknoglobals.
+var errIterationLimit = errors.New("agent: iteration limit reached")
+
+// errNoAnswer ends a run whose model returned maxConsecutiveEmpty blank turns in
+// a row. Run renders its own notice and recovers; like the iteration limit it is
+// not fatal.
+var errNoAnswer = errors.New("agent: model returned no answer")
+
+// maxConsecutiveEmpty is how many blank assistant turns a run tolerates in a row
+// before giving up. A blank turn is retried because it is usually transient, but
+// a model that is deterministically blank (a content filter, an output budget
+// consumed by reasoning) would otherwise burn every remaining iteration on
+// billed round-trips: the token budget is unbounded by default, so maxIter is
+// the only other stop. Three means one blank plus two retries.
+const maxConsecutiveEmpty = 3
+
+// emptyTurnDirective is appended as a trusted host message after a blank turn.
+// Resending the transcript unchanged tends to reproduce the same blank response,
+// so the retry carries an explicit instruction instead — the same shape as
+// stopSummaryDirective.
+const emptyTurnDirective = "Your previous response was empty: it contained neither text nor a " +
+	"tool call. Continue the investigation with a tool call, or give your final answer as text."
+
 // deniedInterruptResult is the model-facing message returned by invokeIO when the
 // operator interrupted before the tool was dispatched; it matches the unframed
 // denial convention (trusted host/user signal, not untrusted tool output).
@@ -57,6 +86,10 @@ type runState struct {
 	// consecutiveFailures counts no-progress tool calls in this run; reset on any
 	// progress. At maxConsecutiveFailures the run halts into a model summary.
 	consecutiveFailures int
+	// consecutiveEmpty counts blank assistant turns in this run; reset on any turn
+	// that carries text or a tool call. At maxConsecutiveEmpty the run gives up.
+	// It lives here, not on *Agent, so concurrent sub-runs share no mutable state.
+	consecutiveEmpty int
 }
 
 // runScopedTool is implemented by the in-package orchestration tools that need
@@ -69,11 +102,14 @@ type runScopedTool interface {
 
 // run drives one tool-calling loop to a final answer. turn is the working
 // transcript seeded by the caller; rs is this run's private state. The loop
-// terminates when the model emits an assistant turn with no tool calls (the
-// final answer) or after maxIter iterations (returns ""). Tool failures and
-// unknown tools come back as tool-result content, never as a Go error, so the
-// model can self-correct. A non-nil error from dispatch (fatal audit failure)
-// aborts the run immediately.
+// terminates when the model emits an assistant turn that carries text and no
+// tool calls — the final answer. A turn carrying neither is not an answer: it is
+// retried with a directive, and after maxConsecutiveEmpty in a row the run ends
+// with errNoAnswer. Exhausting maxIter ends it with errIterationLimit. Both are
+// non-fatal and distinguishable, so the caller reports the stop that actually
+// happened. Tool failures and unknown tools come back as tool-result content,
+// never as a Go error, so the model can self-correct. A non-nil error from
+// dispatch (fatal audit failure) aborts the run immediately.
 func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, maxIter int) (string, error) {
 	firstResponse := true
 	for range maxIter {
@@ -113,22 +149,19 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 		// concurrent depth-0 runs race-free; depth>0 sub-runs never fire it.
 		a.maybeFireFirstResponse(&firstResponse, rs.depth)
 
-		turn = append(turn, msg)
-		a.renderTurn(msg, rs.out)
-
-		calls := msg.ToolCalls()
-		if len(calls) == 0 {
-			// Re-check after rendering: a stop that landed while the final answer was
-			// being written still surfaces ErrInterrupted/130 instead of recording the
-			// answer and exiting 0.
-			if herr := a.haltErr(); herr != nil {
-				return "", herr
-			}
-
-			return msg.Text(), nil
+		var answer string
+		var done bool
+		turn, answer, done, err = a.acceptTurn(turn, msg, rs)
+		if err != nil {
+			return "", err
+		}
+		if done {
+			return answer, nil
 		}
 
-		for _, tc := range calls {
+		// A retried blank turn carries no tool calls, so this loop is a no-op and
+		// the run falls through to the next iteration.
+		for _, tc := range toolCallsOf(msg) {
 			a.metrics.AddToolCall()
 			var halt string
 			turn, halt, err = a.dispatchAndTrack(ctx, rs, tc, turn)
@@ -141,7 +174,84 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 		}
 	}
 
-	return "", nil
+	return "", a.haltOr(errIterationLimit)
+}
+
+// haltOr returns a pending operator-facing halt (interrupt, then budget) in
+// preference to fallback. Every terminal return that is not itself a halt goes
+// through it: Run maps errIterationLimit and errNoAnswer to a notice and exit 0,
+// so a stop that landed after the last checkpoint would otherwise be reported as
+// a model or budget-shaped failure and swallow the operator's Ctrl-C.
+func (a *Agent) haltOr(fallback error) error {
+	if err := a.haltErr(); err != nil {
+		return err
+	}
+
+	return fallback
+}
+
+// toolCallsOf returns a turn's tool calls, tolerating the nil message blankTurn
+// admits: schema.Message's accessors dereference their receiver, so the retry
+// path must not reach for them directly.
+func toolCallsOf(msg *schema.Message) []schema.ToolCallBlock {
+	if msg == nil {
+		return nil
+	}
+
+	return msg.ToolCalls()
+}
+
+// blankTurn reports whether an assistant turn carries nothing the run can use:
+// no tool call, and no text once trimmed. Providers produce these on truncation,
+// a content filter, or a reasoning-only response, and a lossy provider
+// conversion can strip a real answer down to one. A nil message counts as blank,
+// so a ChatModel returning (nil, nil) is retried rather than dereferenced.
+func blankTurn(msg *schema.Message) bool {
+	if msg == nil {
+		return true
+	}
+
+	return len(msg.ToolCalls()) == 0 && strings.TrimSpace(msg.Text()) == ""
+}
+
+// acceptTurn classifies one assistant turn and extends the transcript. It
+// returns the updated turn, the final answer when the run is over, whether it is
+// over, and a halt error.
+//
+// A blank turn is NOT appended: an assistant message with neither content nor
+// tool calls re-encodes to a content-less message that Bifrost's Anthropic
+// adapter serializes as "content": [] and its OpenAI adapter as a bare role,
+// both of which those APIs reject. Gemini's adapter drops it instead, which is
+// why appending one went unnoticed. The retry therefore carries a host directive
+// in place of the blank turn rather than a repaired version of it.
+func (a *Agent) acceptTurn(
+	turn []*schema.Message, msg *schema.Message, rs *runState,
+) ([]*schema.Message, string, bool, error) {
+	if blankTurn(msg) {
+		rs.consecutiveEmpty++
+		if rs.consecutiveEmpty >= maxConsecutiveEmpty {
+			return turn, "", false, a.haltOr(errNoAnswer)
+		}
+
+		return append(turn, schema.UserMessage(emptyTurnDirective)), "", false, nil
+	}
+
+	rs.consecutiveEmpty = 0
+	turn = append(turn, msg)
+	a.renderTurn(msg, rs.out)
+
+	if len(msg.ToolCalls()) > 0 {
+		return turn, "", false, nil
+	}
+
+	// Re-check after rendering: a stop that landed while the final answer was
+	// being written still surfaces ErrInterrupted/130 instead of recording the
+	// answer and exiting 0.
+	if herr := a.haltErr(); herr != nil {
+		return turn, "", false, herr
+	}
+
+	return turn, msg.Text(), true, nil
 }
 
 // dispatchAndTrack dispatches one tool call, appends its result to turn, updates the

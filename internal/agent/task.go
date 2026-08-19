@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/cynative/cynative/internal/schema"
 )
@@ -42,6 +43,28 @@ const maxTaskDepth = 1
 // inline instead of recursing.
 const subagentDelegationGuidance = "Sub-agents cannot themselves delegate with task; " +
 	"do the work directly in this sub-agent."
+
+// subagentIterationLimit and subagentNoAnswer are the model-facing conclusions for
+// a sub-run that stopped without one. They are returned unfenced: a host notice is
+// trusted output, unlike the sub-agent's own summary.
+const (
+	subagentIterationLimit = "Sub-agent reached its iteration limit without a conclusion."
+	subagentNoAnswer       = "Sub-agent stopped: the model returned repeated empty responses."
+)
+
+// subagentStop maps a sub-run's non-fatal stop conditions to the notice the parent
+// model sees. It reports false for a nil error and for the fatal ones (interrupt,
+// budget, audit failure), which must propagate to the parent run instead.
+func subagentStop(err error) (bool, string) {
+	switch {
+	case errors.Is(err, errIterationLimit):
+		return true, subagentIterationLimit
+	case errors.Is(err, errNoAnswer):
+		return true, subagentNoAnswer
+	default:
+		return false, ""
+	}
+}
 
 // newTaskTool builds the task tool bound to a.
 func newTaskTool(a *Agent) *taskTool {
@@ -104,12 +127,18 @@ func (t *taskTool) runScoped(ctx context.Context, rs *runState, argumentsInJSON 
 
 	t.agent.renderTaskStart(args.Description, rs.out)
 	answer, err := t.agent.run(ctx, sub, seed, t.agent.maxSubagentIter)
-	t.agent.renderTaskEnd(err == nil, rs.out)
+	// A sub-agent that ran out of iterations or could not produce an answer still
+	// completed as far as the parent is concerned: it reports the outcome as a tool
+	// result so the parent model can adapt, exactly as it did when both arrived as
+	// an empty answer. Only a genuine error closes the bracket as failed, so this
+	// classification has to happen before the error check, not after it.
+	stopped, notice := subagentStop(err)
+	t.agent.renderTaskEnd(err == nil || stopped, rs.out)
+	if stopped {
+		return notice, nil
+	}
 	if err != nil {
 		return "", err
-	}
-	if answer == "" {
-		return "Sub-agent reached its iteration limit without a conclusion.", nil
 	}
 
 	// The summary is shaped by a sub-investigation of external data, so fence it

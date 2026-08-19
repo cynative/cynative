@@ -43,7 +43,8 @@ func (a *Agent) renderTaskStart(description string, w io.Writer) {
 }
 
 // renderTaskEnd closes a sub-task bracket on w. ok reports whether the sub-run
-// returned without a Go error.
+// finished cleanly: no Go error, or one of the non-fatal stop conditions the task
+// tool converts into a conclusion for the parent model (see subagentStop).
 func (a *Agent) renderTaskEnd(ok bool, w io.Writer) {
 	notice := "■ Sub-task complete"
 	if !ok {
