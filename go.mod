@@ -453,7 +453,7 @@ require (
 	github.com/sirupsen/logrus v1.10.0 // indirect
 	github.com/sivchari/containedctx v1.0.3 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
-	github.com/slack-go/slack v0.27.0 // indirect
+	github.com/slack-go/slack v0.29.0 // indirect
 	github.com/sonatard/noctx v0.5.1 // indirect
 	github.com/sourcegraph/go-diff v0.8.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
