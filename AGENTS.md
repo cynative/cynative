@@ -372,11 +372,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     one block per response part and collapses to `ContentStr` **only when there is exactly
     one**. Reading `ContentStr` alone therefore silently dropped the whole answer of any
     multi-part Gemini reply, which reached the agent loop as an empty turn and ended the run
-    (#271). A provider that splits content is covered by this. The **other** carriers
-    Bifrost already has today are not read: `ChatAssistantMessage.Refusal`/`.Reasoning` and
-    the `refusal` content-block type. An OpenAI-style refusal therefore still reaches the
-    loop as a blank turn and is retried and reported as an empty response rather than shown
-    to the operator — tracked separately, alongside surfacing `FinishReason`.
+    (#271). Refusals are read too, from **both** carriers Bifrost uses (the `refusal`
+    content-block type and the OpenAI-shaped `ChatAssistantMessage.Refusal` field beside a
+    null content), so a refusal becomes the run's answer instead of a blank turn the loop
+    retries three times and reports as an empty response. `.Reasoning`/`.ReasoningDetails`
+    stay unread on purpose: a reasoning-only turn is not an answer and should be retried.
+    A provider that adds a further prose carrier would present as an empty turn again.
   - Env references resolve through the injected `LookupEnv`, never the process environment:
     `ResolveEnvVar` turns `env.X` strings into Bifrost `SecretVar`s, `ProviderEnvKeys` enumerates
     the dotted key paths that `CYNATIVE_LLM_*` vars map onto, and `ValidateEnvVars` verifies

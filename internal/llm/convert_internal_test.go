@@ -516,3 +516,46 @@ func TestSchemaFromBifrostMessage_SkipsEmptyAndNonTextBlocks(t *testing.T) {
 		t.Errorf("content blocks = %d, want 1", len(out.Content))
 	}
 }
+
+func TestSchemaFromBifrostMessage_RefusalBecomesTheAnswer(t *testing.T) {
+	t.Parallel()
+
+	// An OpenAI-family refusal arrives with null content and a refusal string. Read
+	// only from content, it looked like a blank turn: the agent loop retried it and
+	// reported repeated empty responses instead of showing the operator what the
+	// model actually said.
+	refusal := "I can't help with that request."
+	bm := bschemas.ChatMessage{ //nolint:exhaustruct // only fields under test
+		Role: bschemas.ChatMessageRoleAssistant,
+		ChatAssistantMessage: &bschemas.ChatAssistantMessage{ //nolint:exhaustruct // only Refusal
+			Refusal: &refusal,
+		},
+	}
+
+	out := schemaFromBifrostMessage(bm)
+
+	if got := out.Text(); got != refusal {
+		t.Errorf("text = %q, want the refusal", got)
+	}
+}
+
+func TestSchemaFromBifrostMessage_RefusalContentBlock(t *testing.T) {
+	t.Parallel()
+
+	// The same refusal can arrive as a content block instead of a message field.
+	refusal := "I won't do that."
+	bm := bschemas.ChatMessage{ //nolint:exhaustruct // only fields under test
+		Role: bschemas.ChatMessageRoleAssistant,
+		Content: &bschemas.ChatMessageContent{ //nolint:exhaustruct // only ContentBlocks
+			ContentBlocks: []bschemas.ChatContentBlock{
+				{Type: bschemas.ChatContentBlockTypeRefusal, Refusal: &refusal}, //nolint:exhaustruct // refusal block
+			},
+		},
+	}
+
+	out := schemaFromBifrostMessage(bm)
+
+	if got := out.Text(); got != refusal {
+		t.Errorf("text = %q, want the refusal", got)
+	}
+}

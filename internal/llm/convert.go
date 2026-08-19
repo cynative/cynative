@@ -130,13 +130,37 @@ func textBlocks(c *bschemas.ChatMessageContent) []schema.Block {
 		out = append(out, schema.TextBlock{Text: *c.ContentStr})
 	}
 	for _, blk := range c.ContentBlocks {
-		if blk.Type != bschemas.ChatContentBlockTypeText || blk.Text == nil || *blk.Text == "" {
-			continue
+		if text := blockText(blk); text != "" {
+			out = append(out, schema.TextBlock{Text: text})
 		}
-		out = append(out, schema.TextBlock{Text: *blk.Text})
 	}
 
 	return out
+}
+
+// blockText returns the operator-facing prose of one content block, or "" for a
+// block that carries none. A refusal counts: it is what the model said, and
+// dropping it left the loop with a blank turn to retry instead of an answer to
+// show.
+func blockText(blk bschemas.ChatContentBlock) string {
+	if blk.Type == bschemas.ChatContentBlockTypeText {
+		return deref(blk.Text)
+	}
+	if blk.Type == bschemas.ChatContentBlockTypeRefusal {
+		return deref(blk.Refusal)
+	}
+
+	// Image, audio and file blocks carry no prose for the operator.
+	return ""
+}
+
+// deref reads an optional Bifrost string field.
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+
+	return *s
 }
 
 // schemaFromBifrostMessage converts a Bifrost chat message into an internal schema message.
@@ -146,6 +170,11 @@ func schemaFromBifrostMessage(bm bschemas.ChatMessage) *schema.Message {
 	out.Content = append(out.Content, textBlocks(bm.Content)...)
 
 	if bm.ChatAssistantMessage != nil {
+		// A refusal can arrive as a message field rather than a content block, which
+		// is the OpenAI shape: null content plus a refusal string.
+		if refusal := deref(bm.ChatAssistantMessage.Refusal); refusal != "" {
+			out.Content = append(out.Content, schema.TextBlock{Text: refusal})
+		}
 		for _, tc := range bm.ChatAssistantMessage.ToolCalls {
 			call := schema.ToolCallBlock{Arguments: tc.Function.Arguments} //nolint:exhaustruct // ID/Name set below
 			if tc.ID != nil {
