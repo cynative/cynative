@@ -559,3 +559,31 @@ func TestSchemaFromBifrostMessage_RefusalContentBlock(t *testing.T) {
 		t.Errorf("text = %q, want the refusal", got)
 	}
 }
+
+func TestTextBlocks_EmptyContentAllocatesNothing(t *testing.T) {
+	t.Parallel()
+
+	// A turn with no prose must produce no blocks and no backing array: the agent
+	// loop distinguishes a blank turn from an answer, and every response goes
+	// through here.
+	blank := ""
+	cases := map[string]*bschemas.ChatMessageContent{
+		"nil content":  nil,
+		"zero content": {},                   //nolint:exhaustruct // both halves unset on purpose.
+		"blank string": {ContentStr: &blank}, //nolint:exhaustruct // only ContentStr.
+		"no-prose blocks": {ContentBlocks: []bschemas.ChatContentBlock{ //nolint:exhaustruct // only ContentBlocks.
+			{Type: bschemas.ChatContentBlockTypeImage},      //nolint:exhaustruct // type only.
+			{Type: bschemas.ChatContentBlockTypeInputAudio}, //nolint:exhaustruct // type only.
+		}},
+	}
+
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := textBlocks(in); got != nil {
+				t.Errorf("textBlocks = %#v, want nil", got)
+			}
+		})
+	}
+}

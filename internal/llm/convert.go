@@ -125,14 +125,32 @@ func textBlocks(c *bschemas.ChatMessageContent) []schema.Block {
 		return nil
 	}
 
-	var out []schema.Block
-	if c.ContentStr != nil && *c.ContentStr != "" {
-		out = append(out, schema.TextBlock{Text: *c.ContentStr})
+	// Size the result up front so a many-part reply appends without regrowing.
+	// Bifrost sets only one of the two halves, so this is an upper bound, and it is
+	// computed from one evaluation of the text rather than a repeated nil-and-empty
+	// test that could drift from the append below.
+	str := deref(c.ContentStr)
+	n := len(c.ContentBlocks)
+	if str != "" {
+		n++
+	}
+	if n == 0 {
+		return nil
+	}
+
+	out := make([]schema.Block, 0, n)
+	if str != "" {
+		out = append(out, schema.TextBlock{Text: str})
 	}
 	for _, blk := range c.ContentBlocks {
 		if text := blockText(blk); text != "" {
 			out = append(out, schema.TextBlock{Text: text})
 		}
+	}
+	// A message whose blocks were all non-prose (images, audio, files) has nothing
+	// for the operator; report that as no blocks rather than an empty slice.
+	if len(out) == 0 {
+		return nil
 	}
 
 	return out
