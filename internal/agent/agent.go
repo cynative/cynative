@@ -21,6 +21,16 @@ import (
 	"github.com/cynative/cynative/internal/schema"
 )
 
+// Notices Run renders for a blank turn whose stop reason makes retrying futile.
+const (
+	outputLimitNotice = "\n⚠️  The model used its entire output budget before producing an answer. " +
+		"Lower llm.reasoning_effort or llm.reasoning_max_tokens, narrow the question, or switch models."
+	contentFilteredNotice = "\n⚠️  The model's content filter blocked the response. " +
+		"Rephrase the question, or switch models."
+	stoppedEarlyNoticeFmt = "\n⚠️  The model stopped without an answer (reason: %s). " +
+		"Try rerunning, or switch models.\n"
+)
+
 // todoStatus is one of the three DeepAgents todo states.
 type todoStatus string
 
@@ -207,20 +217,8 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 
 			return ErrInterrupted
 		}
-		if errors.Is(err, errBudgetExceeded) {
-			fmt.Fprintf(w, "\n⚠️  Budget reached — %s. Stopping; restart with a higher limit to continue.\n",
-				a.metrics.BudgetReason())
-
-			return nil
-		}
-		if errors.Is(err, errIterationLimit) {
-			fmt.Fprintln(w, "\n⚠️  Reached the iteration limit without a final answer.")
-
-			return nil
-		}
-		if errors.Is(err, errNoAnswer) {
-			fmt.Fprintf(w, "\n⚠️  The model returned %d empty responses in a row and could not "+
-				"produce an answer. Try rerunning, or switch models.\n", maxConsecutiveEmpty)
+		if notice, ok := a.stopNotice(err); ok {
+			fmt.Fprint(w, notice)
 
 			return nil
 		}
@@ -231,6 +229,34 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 	a.history = append(a.history, schema.UserMessage(task), schema.AssistantMessage(answer, nil))
 
 	return nil
+}
+
+// stopNotice maps a non-fatal run-stop sentinel to the operator notice Run
+// prints, reporting ok=false for anything else (a genuine failure Run must
+// propagate). errStoppedEarly is never returned bare (stoppedEarlyError always
+// wraps it), so there is deliberately no separate case matching the bare
+// sentinel; an unreachable branch would fail the coverage gate.
+func (a *Agent) stopNotice(err error) (string, bool) {
+	switch {
+	case errors.Is(err, errBudgetExceeded):
+		return fmt.Sprintf("\n⚠️  Budget reached — %s. Stopping; restart with a higher limit to continue.\n",
+			a.metrics.BudgetReason()), true
+	case errors.Is(err, errIterationLimit):
+		return "\n⚠️  Reached the iteration limit without a final answer.\n", true
+	case errors.Is(err, errNoAnswer):
+		return fmt.Sprintf("\n⚠️  The model returned %d empty responses in a row and could not "+
+			"produce an answer. Try rerunning, or switch models.\n", maxConsecutiveEmpty), true
+	case errors.Is(err, errOutputLimit):
+		return outputLimitNotice + "\n", true
+	case errors.Is(err, errContentFiltered):
+		return contentFilteredNotice + "\n", true
+	}
+
+	if stoppedEarly, ok := errors.AsType[*stoppedEarlyError](err); ok {
+		return fmt.Sprintf(stoppedEarlyNoticeFmt, clampRawReason(stoppedEarly.raw)), true
+	}
+
+	return "", false
 }
 
 // verboseWriter returns the writer sub-runs render verbose output to.
