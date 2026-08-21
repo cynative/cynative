@@ -104,6 +104,51 @@ func (m *blankReasonModel) Generate(
 	}, nil
 }
 
+// answerReasonModel returns a single final answer (text, no tool calls) carrying
+// a chosen stop reason.
+type answerReasonModel struct {
+	text   string
+	reason schema.StopReason
+}
+
+var _ schema.ChatModel = (*answerReasonModel)(nil)
+
+func (m *answerReasonModel) Generate(
+	_ context.Context,
+	_ []*schema.Message,
+	_ []*schema.ToolInfo,
+) (schema.Generation, error) {
+	return schema.Generation{
+		Message:    schema.AssistantMessage(m.text, nil),
+		StopReason: m.reason,
+	}, nil
+}
+
+// toolCallReasonModel issues a tool call on the first turn with a chosen stop
+// reason, then answers on the second.
+type toolCallReasonModel struct {
+	reason schema.StopReason
+	calls  int
+}
+
+var _ schema.ChatModel = (*toolCallReasonModel)(nil)
+
+func (m *toolCallReasonModel) Generate(
+	_ context.Context,
+	_ []*schema.Message,
+	_ []*schema.ToolInfo,
+) (schema.Generation, error) {
+	m.calls++
+	if m.calls == 1 {
+		return schema.Generation{
+			Message:    toolCall("c1", "echo", "{}"),
+			StopReason: m.reason,
+		}, nil
+	}
+
+	return schema.Generation{Message: schema.AssistantMessage("final", nil)}, nil
+}
+
 // echoTool records whether it ran and returns "echoed".
 type echoTool struct {
 	ran *bool
@@ -2390,5 +2435,101 @@ func TestRun_BlankTurnDoesNotDisturbTheToolFailureStreak(t *testing.T) {
 	if rs.consecutiveFailures != 2 {
 		t.Errorf("consecutiveFailures = %d, want 2 (the blank turn neither credits nor resets)",
 			rs.consecutiveFailures)
+	}
+}
+
+func TestRun_TruncatedFinalAnswer_RendersNoticeButDoesNotRecordIt(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Model = &answerReasonModel{text: "a partial report", reason: schema.StopLength}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, want the truncation notice", buf.String())
+	}
+	// The recorded answer must stay byte-identical to what the model produced.
+	if len(a.history) != 2 {
+		t.Fatalf("history length = %d, want 2", len(a.history))
+	}
+	if got := a.history[1].Text(); got != "a partial report" {
+		t.Errorf("recorded answer = %q, want the model text alone", got)
+	}
+}
+
+func TestRun_FinalAnswer_NoNoticeWhenNotTruncated(t *testing.T) {
+	t.Parallel()
+
+	// StopContentFilter and StopOther are included deliberately: on a NON-blank
+	// turn they stay content-authoritative and are returned as answers, so
+	// neither may trigger the truncation notice.
+	for _, reason := range []schema.StopReason{
+		schema.StopNormal, schema.StopUnspecified, schema.StopContentFilter, schema.StopOther,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig()
+			cfg.Model = &answerReasonModel{text: "a complete report", reason: reason}
+			a := New(context.Background(), cfg)
+
+			var buf bytes.Buffer
+			if err := a.Run(context.Background(), "q", &buf); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if strings.Contains(buf.String(), truncatedAnswerNotice) {
+				t.Errorf("reason %q produced a truncation notice it should not have", reason)
+			}
+			if len(a.history) != 2 {
+				t.Errorf("history length = %d, want 2 (this is still a normal answer)", len(a.history))
+			}
+		})
+	}
+}
+
+func TestRun_TruncatedTurnWithToolCalls_StillDispatches(t *testing.T) {
+	t.Parallel()
+
+	// Content stays authoritative: the stop reason refines only the blank case.
+	// Bifrost itself warns the field cannot be trusted to describe content.
+	var ran bool
+	m := &toolCallReasonModel{reason: schema.StopLength}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: &ran}})
+
+	var buf bytes.Buffer
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: &buf}, nil, 5)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !ran {
+		t.Error("tool did not run: a truncated turn's tool calls must still dispatch")
+	}
+	if answer != "final" {
+		t.Errorf("answer = %q, want %q", answer, "final")
+	}
+	if strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, a tool-call turn is not a final answer", buf.String())
+	}
+}
+
+func TestRun_BlankTruncatedTurn_HasNoTruncationNotice(t *testing.T) {
+	t.Parallel()
+
+	// A blank StopLength turn stops via errOutputLimit and gets that notice. It
+	// must not ALSO claim a truncated answer, because there is no answer.
+	cfg := baseConfig()
+	cfg.Model = &blankReasonModel{reason: schema.StopLength}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, want only the output-limit notice", buf.String())
 	}
 }

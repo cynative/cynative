@@ -111,6 +111,12 @@ const emptyTurnDirective = "Your previous response was empty: it contained neith
 // denial convention (trusted host/user signal, not untrusted tool output).
 const deniedInterruptResult = "Tool not run: the operator interrupted the turn."
 
+// truncatedAnswerNotice warns that a final answer was cut off at the model's
+// output limit. It is rendered, never recorded: concatenating it into the answer
+// would put a host annotation into session history for the model to reason about
+// on the next turn.
+const truncatedAnswerNotice = "\n⚠️  This answer reached the model's output limit and may be incomplete."
+
 // toolset indexes the tools the loop dispatches against and the schemas offered
 // to the model.
 type toolset struct {
@@ -134,6 +140,10 @@ type runState struct {
 	// that carries text or a tool call. At maxConsecutiveEmpty the run gives up.
 	// It lives here, not on *Agent, so concurrent sub-runs share no mutable state.
 	consecutiveEmpty int
+	// answerTruncated records that this run's final answer stopped on the model's
+	// output limit, so a caller can mark a conclusion the model did not finish.
+	// It lives here, not on *Agent, so concurrent sub-runs stay race-free.
+	answerTruncated bool
 }
 
 // runScopedTool is implemented by the in-package orchestration tools that need
@@ -291,6 +301,11 @@ func (a *Agent) acceptTurn(
 	// answer and exiting 0.
 	if herr := a.haltErr(); herr != nil {
 		return turn, "", false, herr
+	}
+
+	if gen.StopReason == schema.StopLength {
+		rs.answerTruncated = true
+		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
 
 	return turn, msg.Text(), true, nil

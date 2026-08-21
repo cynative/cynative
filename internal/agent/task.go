@@ -58,6 +58,12 @@ const (
 	subagentStoppedEarly = "Sub-agent stopped: the model ended the turn without an answer."
 )
 
+// subagentTruncatedMarker tells the parent model that a sub-agent's
+// conclusion was cut off. The sub-run renders its own notice to the verbose
+// writer, which is [io.Discard] without -v, so without this the parent would
+// build on a truncated finding with no signal. Host-authored: no backend text.
+const subagentTruncatedMarker = "[The sub-agent's answer reached the model's output limit and may be incomplete.]"
+
 // subagentStop maps a sub-run's non-fatal stop conditions to the notice the parent
 // model sees. It reports false for a nil error and for the fatal ones (interrupt,
 // budget, audit failure), which must propagate to the parent run instead.
@@ -151,6 +157,10 @@ func (t *taskTool) runScoped(ctx context.Context, rs *runState, argumentsInJSON 
 	}
 	if err != nil {
 		return "", err
+	}
+
+	if sub.answerTruncated {
+		answer += "\n\n" + subagentTruncatedMarker
 	}
 
 	// The summary is shaped by a sub-investigation of external data, so fence it

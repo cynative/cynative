@@ -318,6 +318,41 @@ func TestTaskTool_RunNoAnswer(t *testing.T) {
 	}
 }
 
+func TestTaskTool_TruncatedSubagentConclusion_MarksTheSummary(t *testing.T) {
+	t.Parallel()
+
+	m := &answerReasonModel{text: "a partial finding", reason: schema.StopLength}
+	a := newTestAgent(m, map[string]schema.InvokableTool{})
+	a.maxSubagentIter = 3
+
+	got, err := newTaskTool(a).runScoped(context.Background(), rootState(io.Discard), `{"description":"look into x"}`)
+	if err != nil {
+		t.Fatalf("runScoped: %v", err)
+	}
+	if !strings.Contains(got, subagentTruncatedMarker) {
+		t.Errorf("parent-facing summary = %q, want the truncation marker", got)
+	}
+	if !strings.Contains(got, "a partial finding") {
+		t.Errorf("parent-facing summary = %q, want it to still carry the sub-agent's text", got)
+	}
+}
+
+func TestTaskTool_CompleteSubagentConclusion_HasNoMarker(t *testing.T) {
+	t.Parallel()
+
+	m := &answerReasonModel{text: "a complete finding", reason: schema.StopNormal}
+	a := newTestAgent(m, map[string]schema.InvokableTool{})
+	a.maxSubagentIter = 3
+
+	got, err := newTaskTool(a).runScoped(context.Background(), rootState(io.Discard), `{"description":"look into x"}`)
+	if err != nil {
+		t.Fatalf("runScoped: %v", err)
+	}
+	if strings.Contains(got, subagentTruncatedMarker) {
+		t.Errorf("summary = %q, want no truncation marker", got)
+	}
+}
+
 func TestSubagentStop_NewStopReasons(t *testing.T) {
 	t.Parallel()
 
