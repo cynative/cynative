@@ -348,7 +348,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   variants: `TextBlock`, `ToolCallBlock` (the raw JSON arguments as the model produced them),
   `ToolResultBlock`. `ChatModel{Generate}` takes the offered tools as a direct
   `tools []*ToolInfo` argument (tool-less calls pass nil; there is no per-call options
-  machinery). `InvokableTool{Info, Run}` plus the optional `StructuredRunner`; `Usage` is the
+  machinery) and returns a `Generation`, not a bare `*Message`: the assistant message plus the
+  normalized `StopReason` and the backend's raw reason string. The reason lives outside
+  `Message` because it is generation metadata, not transcript content, and a `Message` field
+  would be silently dropped by any clone site that rebuilds a message from `Role` and
+  `Content` alone. `InvokableTool{Info, Run}` plus the optional `StructuredRunner`; `Usage` is the
   per-call token accounting. `ReflectParams[T]()` generates a tool's JSON Schema from a Go
   struct via invopop/jsonschema, configured with inlined definitions and
   `additionalProperties:false` so strict-mode providers accept it.
@@ -395,15 +399,27 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   interrupt/resume). `Agent.run` (`loop.go`) calls `model.Generate`, renders the assistant turn,
   and returns its text when there are no tool calls; otherwise it dispatches each tool call,
   appends a `ToolMessage` per result, and loops. A turn carrying **neither** text nor a tool
-  call is not an answer: `acceptTurn` retries it with `emptyTurnDirective` and ends the run
-  with `errNoAnswer` after `maxConsecutiveEmpty` (3) in a row, while exhausting `maxIter` ends
-  it with `errIterationLimit`. The two are distinct sentinels because a single empty string
-  used to mean both, so a model that returned nothing was reported as an iteration limit on a
-  run with most of its budget left (#271). **A blank turn is never appended to the
-  transcript**: it re-encodes to a content-less assistant message that Bifrost's Anthropic
-  adapter serializes as `"content": []` and its OpenAI adapter as a bare role, both rejected by
-  those APIs; Gemini's adapter drops it, which is why replaying one went unnoticed. Tool
-  failures and unknown-tool names come back as tool-result content, never a
+  call is not an answer: `blankTurn` classifies it by content alone, and only afterward does
+  `acceptTurn` consult the backend's `StopReason` to decide what happens next; the reason is
+  advisory, since Bifrost does not guarantee it describes content, so it can only refine the
+  response, never override the content classification. A blank turn reporting `stop`,
+  `tool_calls`, or nothing keeps the original behavior: `acceptTurn` retries it with
+  `emptyTurnDirective` and ends the run with `errNoAnswer` after `maxConsecutiveEmpty` (3) in a
+  row, while exhausting `maxIter` ends it with `errIterationLimit`. The two are distinct
+  sentinels because a single empty string used to mean both, so a model that returned nothing
+  was reported as an iteration limit on a run with most of its budget left (#271); the retry
+  stays bounded rather than reason-gated because seven distinct Gemini conditions produce a
+  blank turn reporting a plain `stop`, and no reason can tell one of those apart from a
+  genuinely stuck model. A blank turn reporting `length`, `content_filter`, or a reason
+  cynative does not recognize ends the run at once instead, with `errOutputLimit`,
+  `errContentFiltered`, or `errStoppedEarly`, since re-asking cannot change any of those
+  outcomes. **A blank turn is never appended to the transcript**: it re-encodes to a
+  content-less assistant message that Bifrost's Anthropic adapter serializes as `"content": []`
+  and its OpenAI adapter as a bare role, both rejected by those APIs; Gemini's adapter drops
+  it, which is why replaying one went unnoticed. A non-blank final answer that stops on
+  `length` instead renders a one-line truncation notice; the notice is rendered, never
+  recorded, so session history stays byte-identical to the model's own text. Tool failures and
+  unknown-tool names come back as tool-result content, never a
   Go error, so the model can self-correct. `Run` seeds the working transcript from the agent's
   clean Q&A history (prior questions and final answers only; intermediate plans/steps/tool
   output render live but are not replayed) plus the system message and the new question, then
@@ -447,8 +463,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     Depth-0 only, max 16 findings per call, 16 KiB evidence clamp with `</evidence>` escaping,
     and **strict fail-closed parsing**: a missing, unknown, malformed, refused, truncated,
     timed-out, or budget-skipped verdict degrades to insufficient_evidence, so no parse problem
-    can mint VERIFIED. Each pass has a coarse budget backstop (`BudgetExceeded()` checked before
-    the pass).
+    can mint VERIFIED. Truncation is not a parse failure and is caught before parsing ever
+    runs: the whole pass degrades when `Generate` returns no message, or when its `StopReason`
+    is anything but a normal or unreported stop, so a `length`-cut response whose JSON happens
+    to parse cleanly still cannot mint VERIFIED. Each pass has a coarse budget backstop
+    (`BudgetExceeded()` checked before the pass).
   - `prompt.go` teaches the workflow (plan with `write_todos`, script with `code_execution` over
     `http_request`, delegate with `task`, stop and answer when done), carries a
     positively-framed `SCOPE:` clause near the top (right after the identity preamble and
