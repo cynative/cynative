@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -1196,7 +1197,7 @@ func TestVerifyFindings_NormalStop_StillVerifies(t *testing.T) {
 
 	// The complement: the gate must not break the happy path.
 	for _, reason := range []schema.StopReason{schema.StopNormal, schema.StopUnspecified} {
-		t.Run(string(reason), func(t *testing.T) {
+		t.Run(cmp.Or(string(reason), "unspecified"), func(t *testing.T) {
 			t.Parallel()
 
 			a := newVerifierAgent(stopReasonVerifierModel{reason: reason})

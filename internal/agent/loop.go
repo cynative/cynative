@@ -303,6 +303,8 @@ func (a *Agent) acceptTurn(
 		return turn, "", false, herr
 	}
 
+	// A comparison, not a switch: exhaustive does not police it. A future member
+	// leaves this branch inert, which is fine since it only ever fires on StopLength.
 	if gen.StopReason == schema.StopLength {
 		rs.answerTruncated = true
 		fmt.Fprintln(rs.out, truncatedAnswerNotice)

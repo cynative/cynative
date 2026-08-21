@@ -355,13 +355,17 @@ func (t *verifyFindingsTool) runPass(ctx context.Context, lens string, findings 
 // verdict, so only a normal stop and an unreported reason are trusted to have
 // produced a whole answer; every other value, including one this build does not
 // know, degrades the pass.
+//
+// Written as a comparison, not a switch, so exhaustive does not police it: a
+// future member falls into the "every other value" default above and degrades
+// the pass, which is the safe direction and needs no linter to enforce it.
 func abnormalVerifierStop(r schema.StopReason) bool {
 	return r != schema.StopNormal && r != schema.StopUnspecified
 }
 
 // degradedPass returns n insufficient_evidence verdicts carrying reason. Used
 // for every whole-pass failure mode (interrupt, budget, Generate error,
-// timeout, unparseable response).
+// timeout, unparseable response, a nil message, an abnormal stop reason).
 func degradedPass(n int, reason string) []verdictEntry {
 	out := make([]verdictEntry, n)
 	for i := range out {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -2470,7 +2471,7 @@ func TestRun_FinalAnswer_NoNoticeWhenNotTruncated(t *testing.T) {
 	for _, reason := range []schema.StopReason{
 		schema.StopNormal, schema.StopUnspecified, schema.StopContentFilter, schema.StopOther,
 	} {
-		t.Run(string(reason), func(t *testing.T) {
+		t.Run(cmp.Or(string(reason), "unspecified"), func(t *testing.T) {
 			t.Parallel()
 
 			cfg := baseConfig()
