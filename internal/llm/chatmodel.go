@@ -147,6 +147,11 @@ func (c *BifrostChatModel) Generate(
 	}
 
 	c.recordUsage(usageFromBifrost(resp.Usage))
+	reason, raw := stopReasonFrom(choice.FinishReason)
 
-	return schema.Generation{Message: schemaFromBifrostMessage(*choice.Message)}, nil
+	return schema.Generation{
+		Message:    schemaFromBifrostMessage(*choice.Message),
+		StopReason: reason,
+		RawReason:  raw,
+	}, nil
 }

@@ -36,7 +36,11 @@ func (c *captureModel) Generate(
 	c.lastTool = tools
 	c.mu.Unlock()
 
-	return schema.Generation{Message: schema.AssistantMessage("ok", nil)}, nil
+	return schema.Generation{
+		Message:    schema.AssistantMessage("ok", nil),
+		StopReason: schema.StopLength,
+		RawReason:  "length",
+	}, nil
 }
 
 // ghToken returns a github-token-shaped value the production redactor catches.
@@ -132,6 +136,25 @@ func TestRedactingChatModel_ConcurrentGenerateNoRace(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestRedactingChatModel_ForwardsStopReasonUnchanged(t *testing.T) {
+	t.Parallel()
+
+	inner := &captureModel{}
+	m := llm.NewRedactingChatModel(inner, redact.New())
+
+	gen, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("q")}, nil)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if gen.StopReason != schema.StopLength {
+		t.Errorf("StopReason = %q, want %q - the decorator must forward the whole Generation",
+			gen.StopReason, schema.StopLength)
+	}
+	if gen.RawReason != "length" {
+		t.Errorf("RawReason = %q, want %q", gen.RawReason, "length")
+	}
 }
 
 func TestRedactingChatModel_RedactsGenerateErrorMessage(t *testing.T) {
