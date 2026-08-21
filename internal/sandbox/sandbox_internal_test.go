@@ -23,6 +23,39 @@ func fakeRedact(s string) string {
 // redaction. New requires a non-nil redactor, so call sites pass this not nil.
 func identityRedact(s string) string { return s }
 
+// errRebuild is a static test sentinel for an injected runtime-rebuild failure.
+var errRebuild = errors.New("rebuild failed")
+
+// TestRefresh_RebuildFailureIsRetried pins the fail-closed half of the rebuild:
+// a runtime marked unusable that cannot be rebuilt surfaces the failure and
+// stays marked, so the next Run retries instead of running on a broken VM.
+func TestRefresh_RebuildFailureIsRetried(t *testing.T) {
+	t.Parallel()
+
+	s, err := New(nil, nil, 32*1024, DefaultMaxConcurrency, identityRedact)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	s.dirty = true
+	s.build = func(*Sandbox, map[string]ToolFunc) error { return errRebuild }
+
+	if _, rerr := s.Run(context.Background(), `console.log("x")`, time.Second); !errors.Is(rerr, errRebuild) {
+		t.Fatalf("Run: want errRebuild, got %v", rerr)
+	}
+
+	if !s.dirty {
+		t.Fatal("dirty cleared despite a failed rebuild")
+	}
+
+	s.build = buildRuntime
+
+	out, rerr := s.Run(context.Background(), `console.log("x")`, time.Second)
+	if rerr != nil || out != "x\n" {
+		t.Errorf("after a successful rebuild: out=%q err=%v", out, rerr)
+	}
+}
+
 func TestRunWorker_RedactsToolResult(t *testing.T) {
 	t.Parallel()
 

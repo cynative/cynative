@@ -42,7 +42,7 @@ type codeRunner interface {
 
 // codeArgs is the code_execution tool's argument schema.
 type codeArgs struct {
-	Code           string `json:"code"                      jsonschema_description:"JavaScript to run on the sobek engine (see this tool's description for runtime, helpers, and response shapes). console.log(...) to return output; tool functions are async — await them. State persists across calls only via globalThis; let/const/var/function are scoped to one call."` //nolint:lll // struct tags are indivisible
+	Code           string `json:"code"                      jsonschema_description:"JavaScript to run on the sobek engine (see this tool's description for runtime, helpers, and response shapes). console.log(...) to return output; tool functions are async — await them. State persists across calls only via globalThis, and a call that does not run to completion resets it; let/const/var/function are scoped to one call."` //nolint:lll // struct tags are indivisible
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty" jsonschema_description:"Execution timeout in seconds (1-600, default 120)."`
 }
 

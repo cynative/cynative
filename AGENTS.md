@@ -504,7 +504,32 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   UTF-8-repaired; script errors and timeouts are included in the result string AND signaled
   with the `ErrScript` sentinel (nil error only on success), so callers can record the failure
   without parsing text; the `code_execution` tool converts `ErrScript` back into a plain
-  result string so the model can self-correct.
+  result string so the model can self-correct. **An interrupt that lands inside the VM
+  (rather than while the worker loop is parked) leaves the runtime unusable and forces a
+  rebuild** before the next `Run`, which is what resets `globalThis`: sobek
+  unwinds such an error without unwinding its own call stack, and from then on treats every
+  `RunProgram` as a nested call and stops draining the promise job queue, so `await` never
+  resumes and every later `Run` returns no output and a **nil** error, reporting a script
+  that never ran as a success. The trigger is therefore a non-nil error from `RunProgram` or
+  the worker loop, **or** a still-pending IIFE promise. The rule is "rebuild unless the
+  script finished": only a script that ran to a settled promise, or one that never ran at
+  all (a compile error), keeps `globalThis`. The error arm is deliberately a superset of
+  the errors that really strand the call stack (a top-level throw that escaped the IIFE
+  wrapper is catchable and harmless), since rebuilding needlessly costs one script's
+  `globalThis` while failing to rebuild strands every later `Run`. A
+  rebuild that fails leaves the runtime marked, so the next `Run` retries instead of running
+  on a broken VM. The matching backstop is in `assemble`: an IIFE promise still **pending**
+  once the loop has drained is a failure (`[script did not complete]`), never an empty
+  success, which also covers a script that awaits something no tool call can settle. A
+  pending promise also means the script is still suspended *inside* the runtime, which is
+  why it rebuilds: a script can park on a promise whose resolver it stashed on
+  `globalThis`, and a later `Run` calling that resolver would resume the parked script
+  within itself, running its remaining tool calls under a different `Run`'s context and
+  landing its output in that `Run`'s result. **The pending check is asked of every `Run`,
+  not just the ones that reach that branch**: a `Run` that times out while the worker loop
+  is parked reports no error at all, and a fire-and-forget tool call keeps the loop
+  waiting for exactly as long as the script needs to park itself, so scoping the check to
+  the promise branch left that route open.
   Tool calls are async: each returns a JS Promise backed by a worker goroutine bounded by a
   `maxConcurrency` semaphore (a non-positive value clamps to `DefaultMaxConcurrency` = 16), a
   single loop goroutine drains worker postbacks, and `Run` waits for all workers. The
