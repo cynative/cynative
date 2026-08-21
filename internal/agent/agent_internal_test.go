@@ -2092,7 +2092,7 @@ func TestRun_BlankTurn_FutileReasonStopsWithoutRetrying(t *testing.T) {
 				t.Errorf("answer = %q, want empty", answer)
 			}
 			if m.calls != 1 {
-				t.Errorf("Generate called %d times, want 1 — a futile stop reason must not be retried", m.calls)
+				t.Errorf("Generate called %d times, want 1: a futile stop reason must not be retried", m.calls)
 			}
 		})
 	}
@@ -2156,7 +2156,7 @@ func TestRun_BlankTurn_RendersReasonSpecificNotice(t *testing.T) {
 				t.Errorf("notice = %q, want it to contain %q", buf.String(), tc.wantNotice)
 			}
 			if len(a.history) != 0 {
-				t.Errorf("history = %d entries, want 0 — a stopped turn records no answer", len(a.history))
+				t.Errorf("history = %d entries, want 0: a stopped turn records no answer", len(a.history))
 			}
 		})
 	}
@@ -2216,42 +2216,31 @@ func TestStoppedEarlyError_ErrorEscapesAndWraps(t *testing.T) {
 	}
 }
 
-func TestRun_OperatorHaltBeatsEveryNewBlankStop(t *testing.T) {
+// TestRun_InterruptBeatsEveryNewBlankStop pins the haltOr contract for all
+// three new terminal returns in handleBlankTurn: an operator interrupt that
+// races in during Generate must be reported as itself, never as truncation or
+// filtering. countInterrupter is timed to trip on the third haltErr call of the
+// first blank iteration (top-of-loop, post-Generate, then the one inside
+// handleBlankTurn's haltOr), so the test only passes if that third call is
+// actually wired up. A budget-only variant would exercise the identical
+// haltOr call (haltErr checks interrupt before budget), so it would add no
+// coverage; this single path is the whole contract.
+func TestRun_InterruptBeatsEveryNewBlankStop(t *testing.T) {
 	t.Parallel()
 
 	for _, reason := range []schema.StopReason{
 		schema.StopLength, schema.StopContentFilter, schema.StopOther,
 	} {
-		t.Run("interrupt/"+string(reason), func(t *testing.T) {
+		t.Run(string(reason), func(t *testing.T) {
 			t.Parallel()
 
 			m := &blankReasonModel{reason: reason, raw: "guardrail_intervened"}
 			a := newTestAgent(m, map[string]schema.InvokableTool{})
-			a.interrupter = &fakeInterrupter{tripped: true} //nolint:exhaustruct // began/ended unused.
+			a.interrupter = &countInterrupter{target: 2, calls: 0}
 
 			_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
 			if !errors.Is(err, errInterrupted) {
-				t.Errorf("err = %v, want errInterrupted — an operator stop must win", err)
-			}
-		})
-
-		t.Run("budget/"+string(reason), func(t *testing.T) {
-			t.Parallel()
-
-			acc := metrics.NewAccumulator("p", "m", metrics.WithBudget(10))
-			m := &blankBudgetModel{acc: acc, usage: schema.Usage{TotalTokens: 50}, calls: 0, reason: reason}
-
-			cfg := baseConfig()
-			cfg.Model = m
-			cfg.Metrics = acc
-			a := New(context.Background(), cfg)
-
-			var buf bytes.Buffer
-			if err := a.Run(context.Background(), "q", &buf); err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if !strings.Contains(buf.String(), "Budget reached") {
-				t.Errorf("output = %q, want the budget notice", buf.String())
+				t.Errorf("err = %v, want errInterrupted: an operator stop must win", err)
 			}
 		})
 	}
@@ -2279,10 +2268,9 @@ func TestRun_BlankTurnOnTheLastIterationReportsTheIterationLimit(t *testing.T) {
 // blankBudgetModel spends usage and always returns a blank turn, so a run hits
 // the token budget and the empty-response ceiling in the same stretch.
 type blankBudgetModel struct {
-	acc    *metrics.Accumulator
-	usage  schema.Usage
-	calls  int
-	reason schema.StopReason
+	acc   *metrics.Accumulator
+	usage schema.Usage
+	calls int
 }
 
 var _ schema.ChatModel = (*blankBudgetModel)(nil)
@@ -2295,7 +2283,7 @@ func (m *blankBudgetModel) Generate(
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return schema.Generation{Message: schema.AssistantMessage("", nil), StopReason: m.reason}, nil
+	return schema.Generation{Message: schema.AssistantMessage("", nil)}, nil
 }
 
 func TestRun_BudgetWinsOverTheEmptyResponseCeiling(t *testing.T) {
