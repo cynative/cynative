@@ -130,22 +130,23 @@ func (c *BifrostChatModel) Generate(
 	ctx context.Context,
 	input []*schema.Message,
 	tools []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	bCtx := bschemas.NewBifrostContext(ctx, bschemas.NoDeadline)
 	resp, bErr := c.backend.ChatCompletionRequest(bCtx, c.buildRequest(input, tools))
 	if bErr != nil {
-		return nil, newGenerateError(bErr)
+		return schema.Generation{}, newGenerateError(bErr)
 	}
 	if resp == nil || len(resp.Choices) == 0 {
-		return nil, &GenerateError{Message: "bifrost returned no choices"} //nolint:exhaustruct // no status/code.
+		//nolint:exhaustruct // no status/code.
+		return schema.Generation{}, &GenerateError{Message: "bifrost returned no choices"}
 	}
 	choice := resp.Choices[0]
 	if choice.ChatNonStreamResponseChoice == nil || choice.Message == nil {
 		//nolint:exhaustruct // no status/code.
-		return nil, &GenerateError{Message: "bifrost returned no message in choice"}
+		return schema.Generation{}, &GenerateError{Message: "bifrost returned no message in choice"}
 	}
 
 	c.recordUsage(usageFromBifrost(resp.Usage))
 
-	return schemaFromBifrostMessage(*choice.Message), nil
+	return schema.Generation{Message: schemaFromBifrostMessage(*choice.Message)}, nil
 }

@@ -32,14 +32,14 @@ func (m *scriptedModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	if m.calls >= len(m.msgs) {
-		return nil, errors.New("scriptedModel: out of scripted messages")
+		return schema.Generation{}, errors.New("scriptedModel: out of scripted messages")
 	}
 	msg := m.msgs[m.calls]
 	m.calls++
 
-	return msg, nil
+	return schema.Generation{Message: msg}, nil
 }
 
 // capturingModel records the messages passed to its most recent Generate call
@@ -56,14 +56,14 @@ func (m *capturingModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.seen = msgs
 	m.calls++
 	if m.ret == nil {
-		return nil, errors.New("capturingModel: no return scripted")
+		return schema.Generation{}, errors.New("capturingModel: no return scripted")
 	}
 
-	return m.ret, nil
+	return schema.Generation{Message: m.ret}, nil
 }
 
 // errModel always errors from Generate.
@@ -75,8 +75,8 @@ func (*errModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
-	return nil, errors.New("generate boom")
+) (schema.Generation, error) {
+	return schema.Generation{}, errors.New("generate boom")
 }
 
 // echoTool records whether it ran and returns "echoed".
@@ -750,15 +750,19 @@ func (concurrentScriptModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	last := msgs[len(msgs)-1]
 	switch {
 	case last.Role == schema.User && last.Text() == "sub job":
-		return toolCall("s1", "write_todos", `{"todos":[{"content":"sub step","status":"pending"}]}`), nil
+		msg := toolCall("s1", "write_todos", `{"todos":[{"content":"sub step","status":"pending"}]}`)
+
+		return schema.Generation{Message: msg}, nil
 	case last.Role == schema.User:
-		return toolCall("p1", "task", `{"description":"sub job"}`), nil
+		msg := toolCall("p1", "task", `{"description":"sub job"}`)
+
+		return schema.Generation{Message: msg}, nil
 	default:
-		return schema.AssistantMessage("done", nil), nil
+		return schema.Generation{Message: schema.AssistantMessage("done", nil)}, nil
 	}
 }
 
@@ -877,11 +881,11 @@ func (m *budgetLoopModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return toolCall("c1", "echo", "{}"), nil
+	return schema.Generation{Message: toolCall("c1", "echo", "{}")}, nil
 }
 
 func TestRun_BudgetHaltsTurnWithNotice(t *testing.T) {
@@ -928,11 +932,11 @@ func (m *budgetAnswerModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return schema.AssistantMessage("THE-ANSWER", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("THE-ANSWER", nil)}, nil
 }
 
 func TestRun_BudgetHaltsOnOverBudgetFinalAnswer(t *testing.T) {
@@ -982,18 +986,20 @@ func (m *multiToolBudgetModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	last := msgs[len(msgs)-1]
 	if last.Role == schema.User && last.Text() == "sub" {
 		m.acc.AddUsage(schema.Usage{TotalTokens: 50}) // sub-run crosses the budget.
 
-		return schema.AssistantMessage("sub done", nil), nil
+		return schema.Generation{Message: schema.AssistantMessage("sub done", nil)}, nil
 	}
 
-	return schema.AssistantMessage("", []schema.ToolCallBlock{
+	msg := schema.AssistantMessage("", []schema.ToolCallBlock{
 		{ID: "t1", Name: "task", Arguments: `{"description":"sub"}`},
 		{ID: "e1", Name: "echo", Arguments: "{}"},
-	}), nil
+	})
+
+	return schema.Generation{Message: msg}, nil
 }
 
 func TestRun_BudgetHaltsBeforeRemainingToolCalls(t *testing.T) {
@@ -1357,10 +1363,12 @@ type ctxWaitModel struct{}
 
 var _ schema.ChatModel = ctxWaitModel{}
 
-func (ctxWaitModel) Generate(ctx context.Context, _ []*schema.Message, _ []*schema.ToolInfo) (*schema.Message, error) {
+func (ctxWaitModel) Generate(
+	ctx context.Context, _ []*schema.Message, _ []*schema.ToolInfo,
+) (schema.Generation, error) {
 	<-ctx.Done()
 
-	return nil, ctx.Err()
+	return schema.Generation{}, ctx.Err()
 }
 
 // TestRun_CancelsHungModelCallOnInterrupt verifies that the first graceful stop cancels
@@ -1852,13 +1860,13 @@ func (m *transcriptModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.seen = append(m.seen, append([]*schema.Message(nil), msgs...))
 	if len(m.seen) > len(m.msgs) {
-		return nil, errors.New("transcriptModel: out of scripted messages")
+		return schema.Generation{}, errors.New("transcriptModel: out of scripted messages")
 	}
 
-	return m.msgs[len(m.seen)-1], nil
+	return schema.Generation{Message: m.msgs[len(m.seen)-1]}, nil
 }
 
 func TestRun_EmptyTurnRetriesInsteadOfEndingTheRun(t *testing.T) {
@@ -2066,11 +2074,11 @@ func (m *blankBudgetModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return schema.AssistantMessage("", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("", nil)}, nil
 }
 
 func TestRun_BudgetWinsOverTheEmptyResponseCeiling(t *testing.T) {

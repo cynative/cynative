@@ -43,15 +43,15 @@ func TestBifrostChatModel_Generate(t *testing.T) {
 		t.Fatalf("NewBifrostChatModel: %v", err)
 	}
 
-	out, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+	gen, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if out.Text() != "hello back" {
-		t.Errorf("content = %q, want %q", out.Text(), "hello back")
+	if gen.Message.Text() != "hello back" {
+		t.Errorf("content = %q, want %q", gen.Message.Text(), "hello back")
 	}
-	if out.Role != schema.Assistant {
-		t.Errorf("role = %q, want %q", out.Role, schema.Assistant)
+	if gen.Message.Role != schema.Assistant {
+		t.Errorf("role = %q, want %q", gen.Message.Role, schema.Assistant)
 	}
 	// The request must carry the configured provider and model.
 	calls := mock.ChatCompletionRequestCalls()
@@ -649,9 +649,9 @@ func TestBifrostChatModel_ConcurrentGenerate(t *testing.T) {
 	var wg sync.WaitGroup
 	for range callers {
 		wg.Go(func() {
-			out, gerr := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
-			if gerr != nil || out.Text() != "ok" {
-				t.Errorf("concurrent Generate = (%v, %v)", out, gerr)
+			gen, gerr := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+			if gerr != nil || gen.Message.Text() != "ok" {
+				t.Errorf("concurrent Generate = (%v, %v)", gen, gerr)
 			}
 		})
 	}

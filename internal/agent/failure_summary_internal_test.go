@@ -24,10 +24,10 @@ func (m *budgetSummaryModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 
-	return schema.AssistantMessage("summary text", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("summary text", nil)}, nil
 }
 
 // answerOnceModel returns a scriptedModel producing one assistant text message.

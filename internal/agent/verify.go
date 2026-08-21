@@ -334,13 +334,13 @@ func (t *verifyFindingsTool) runPass(ctx context.Context, lens string, findings 
 		schema.SystemMessage(verifierSystemPrompt),
 		schema.UserMessage(buildPassMessage(lens, findings)),
 	}
-	resp, err := t.agent.model.Generate(pctx, msgs, nil)
+	gen, err := t.agent.model.Generate(pctx, msgs, nil)
 	t.agent.metrics.AddRoundTrip()
 	if err != nil {
 		return degradedPass(len(findings), "verification error: "+err.Error())
 	}
 
-	return parsePass(resp.Text(), len(findings))
+	return parsePass(gen.Message.Text(), len(findings))
 }
 
 // degradedPass returns n insufficient_evidence verdicts carrying reason. Used

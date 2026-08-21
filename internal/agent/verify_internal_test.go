@@ -584,14 +584,16 @@ func (m batchModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	n := strings.Count(msgs[len(msgs)-1].Text(), "<finding id=")
 	entries := make([]string, n)
 	for i := range n {
 		entries[i] = `"` + findingID(i) + `":{"verdict":"` + m.verdict + `","justification":"because"}`
 	}
 
-	return schema.AssistantMessage("{"+strings.Join(entries, ",")+"}", nil), nil
+	msg := schema.AssistantMessage("{"+strings.Join(entries, ",")+"}", nil)
+
+	return schema.Generation{Message: msg}, nil
 }
 
 // lensSplitModel confirms under the benign lens and refutes under the
@@ -605,12 +607,16 @@ func (lensSplitModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	if strings.Contains(msgs[len(msgs)-1].Text(), lensSufficiency) {
-		return schema.AssistantMessage(`{"f1":{"verdict":"refuted","justification":"does not prove it"}}`, nil), nil
+		msg := schema.AssistantMessage(`{"f1":{"verdict":"refuted","justification":"does not prove it"}}`, nil)
+
+		return schema.Generation{Message: msg}, nil
 	}
 
-	return schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"holds up"}}`, nil), nil
+	msg := schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"holds up"}}`, nil)
+
+	return schema.Generation{Message: msg}, nil
 }
 
 // mixedSplitModel confirms under the benign lens and returns insufficient under
@@ -623,14 +629,18 @@ func (mixedSplitModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	if strings.Contains(msgs[len(msgs)-1].Text(), lensSufficiency) {
-		return schema.AssistantMessage(
+		msg := schema.AssistantMessage(
 			`{"f1":{"verdict":"insufficient_evidence","justification":"merely suggests"}}`, nil,
-		), nil
+		)
+
+		return schema.Generation{Message: msg}, nil
 	}
 
-	return schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"holds up"}}`, nil), nil
+	msg := schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"holds up"}}`, nil)
+
+	return schema.Generation{Message: msg}, nil
 }
 
 // stallModel blocks until its context is canceled, then returns the context
@@ -643,10 +653,10 @@ func (stallModel) Generate(
 	ctx context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	<-ctx.Done()
 
-	return nil, ctx.Err()
+	return schema.Generation{}, ctx.Err()
 }
 
 // newVerifierAgent builds a test agent with the given model.
@@ -948,10 +958,11 @@ func (longJustificationModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	just := strings.Repeat("x", 2*maxJustificationBytes)
+	msg := schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"`+just+`"}}`, nil)
 
-	return schema.AssistantMessage(`{"f1":{"verdict":"confirmed","justification":"`+just+`"}}`, nil), nil
+	return schema.Generation{Message: msg}, nil
 }
 
 func TestVerifyFindings_ClampsLongJustification(t *testing.T) {

@@ -123,7 +123,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 		// poll mirrors invokeIO's in-flight cancellation.
 		gctx, gcancel := context.WithCancel(ctx)
 		gstop := a.cancelOnInterrupt(gcancel, interruptPollInterval)
-		msg, err := a.model.Generate(gctx, turn, a.tools.infos)
+		gen, err := a.model.Generate(gctx, turn, a.tools.infos)
 		gstop()
 		gcancel()
 		a.metrics.AddRoundTrip()
@@ -151,7 +151,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 
 		var answer string
 		var done bool
-		turn, answer, done, err = a.acceptTurn(turn, msg, rs)
+		turn, answer, done, err = a.acceptTurn(turn, gen.Message, rs)
 		if err != nil {
 			return "", err
 		}
@@ -161,7 +161,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 
 		// A retried blank turn carries no tool calls, so this loop is a no-op and
 		// the run falls through to the next iteration.
-		for _, tc := range toolCallsOf(msg) {
+		for _, tc := range toolCallsOf(gen.Message) {
 			a.metrics.AddToolCall()
 			var halt string
 			turn, halt, err = a.dispatchAndTrack(ctx, rs, tc, turn)

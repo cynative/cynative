@@ -42,7 +42,7 @@ func (a *Agent) Welcome(ctx context.Context) (string, error) {
 	}
 
 	wctx, cancel := context.WithTimeout(ctx, timeout)
-	resp, err := a.model.Generate(wctx, []*schema.Message{
+	gen, err := a.model.Generate(wctx, []*schema.Message{
 		schema.SystemMessage(a.systemPrompt),
 		schema.UserMessage(welcomeUserInstruction),
 	}, nil)
@@ -56,6 +56,7 @@ func (a *Agent) Welcome(ctx context.Context) (string, error) {
 
 		return "", err
 	}
+	resp := gen.Message
 	if resp == nil || resp.Text() == "" {
 		return "", nil
 	}
