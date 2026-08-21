@@ -378,8 +378,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     multi-part Gemini reply, which reached the agent loop as an empty turn and ended the run
     (#271). Refusals are read too, from **both** carriers Bifrost uses (the `refusal`
     content-block type and the OpenAI-shaped `ChatAssistantMessage.Refusal` field beside a
-    null content), so a refusal becomes the run's answer instead of a blank turn the loop
-    retries three times and reports as an empty response. `.Reasoning`/`.ReasoningDetails`
+    null content), so a refusal becomes the run's answer instead of a blank turn whose fate
+    then depends on the reported stop reason, anywhere from an immediate `errStoppedEarly`
+    halt to the bounded retry that ends in `errNoAnswer`. `.Reasoning`/`.ReasoningDetails`
     stay unread on purpose: a reasoning-only turn is not an answer and should be retried.
     A provider that adds a further prose carrier would present as an empty turn again.
   - Env references resolve through the injected `LookupEnv`, never the process environment:
