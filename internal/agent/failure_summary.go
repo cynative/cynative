@@ -113,6 +113,13 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 	}
 	a.renderTurn(msg, rs.out)
 
+	// The summary is rendered, returned as the turn's answer, and recorded in
+	// history, so a truncated one is a truncated final answer.
+	if gen.StopReason == schema.StopLength {
+		rs.answerTruncated = true
+		fmt.Fprintln(rs.out, truncatedAnswerNotice)
+	}
+
 	// Mirror the loop's post-render final-answer check: a stop (or budget cross)
 	// landing while the summary is written surfaces ErrInterrupted/130 instead of
 	// recording the rendered summary and exiting 0.
