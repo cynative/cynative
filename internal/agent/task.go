@@ -50,6 +50,12 @@ const subagentDelegationGuidance = "Sub-agents cannot themselves delegate with t
 const (
 	subagentIterationLimit = "Sub-agent reached its iteration limit without a conclusion."
 	subagentNoAnswer       = "Sub-agent stopped: the model returned repeated empty responses."
+	// The three below deliberately carry no backend-supplied text. These notices
+	// re-enter the parent transcript unfenced as trusted host output, so admitting
+	// a provider-controlled string here would be an instruction-laundering path.
+	subagentOutputLimit  = "Sub-agent stopped: the model reached its output limit before answering."
+	subagentFiltered     = "Sub-agent stopped: the model's content filter blocked the response."
+	subagentStoppedEarly = "Sub-agent stopped: the model ended the turn without an answer."
 )
 
 // subagentStop maps a sub-run's non-fatal stop conditions to the notice the parent
@@ -61,6 +67,12 @@ func subagentStop(err error) (bool, string) {
 		return true, subagentIterationLimit
 	case errors.Is(err, errNoAnswer):
 		return true, subagentNoAnswer
+	case errors.Is(err, errOutputLimit):
+		return true, subagentOutputLimit
+	case errors.Is(err, errContentFiltered):
+		return true, subagentFiltered
+	case errors.Is(err, errStoppedEarly):
+		return true, subagentStoppedEarly
 	default:
 		return false, ""
 	}
