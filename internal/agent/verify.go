@@ -313,7 +313,8 @@ func (t *verifyFindingsTool) runPasses(ctx context.Context, findings []findingAr
 // runPass runs one batched verification pass and returns one verdictEntry per
 // finding (by index). It degrades EVERY finding in the pass to
 // insufficient_evidence — never confirmed — on a graceful stop, an exhausted
-// budget, a Generate error/timeout, or any parse failure.
+// budget, a Generate error/timeout, a nil message, an abnormal stop reason, or
+// any parse failure.
 func (t *verifyFindingsTool) runPass(ctx context.Context, lens string, findings []findingArg) []verdictEntry {
 	if t.agent.interrupted() {
 		return degradedPass(len(findings), "verification skipped: interrupted")
@@ -339,8 +340,23 @@ func (t *verifyFindingsTool) runPass(ctx context.Context, lens string, findings 
 	if err != nil {
 		return degradedPass(len(findings), "verification error: "+err.Error())
 	}
+	if gen.Message == nil {
+		return degradedPass(len(findings), "verification error: model returned no message")
+	}
+	if abnormalVerifierStop(gen.StopReason) {
+		return degradedPass(len(findings), "verification incomplete: the model stopped early")
+	}
 
 	return parsePass(gen.Message.Text(), len(findings))
+}
+
+// abnormalVerifierStop reports whether a stop reason means the verdict JSON may
+// be incomplete or withheld. The verifier is fail-closed and issues a security
+// verdict, so only a normal stop and an unreported reason are trusted to have
+// produced a whole answer; every other value, including one this build does not
+// know, degrades the pass.
+func abnormalVerifierStop(r schema.StopReason) bool {
+	return r != schema.StopNormal && r != schema.StopUnspecified
 }
 
 // degradedPass returns n insufficient_evidence verdicts carrying reason. Used

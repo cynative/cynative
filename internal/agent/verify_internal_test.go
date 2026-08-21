@@ -596,6 +596,35 @@ func (m batchModel) Generate(
 	return schema.Generation{Message: msg}, nil
 }
 
+// stopReasonVerifierModel returns batchModel's well-formed confirming payload
+// with a chosen stop reason, so a test can prove the reason gates the parse
+// rather than the JSON being malformed. nilMsg models a successful response
+// carrying no message at all.
+type stopReasonVerifierModel struct {
+	reason schema.StopReason
+	nilMsg bool
+}
+
+var _ schema.ChatModel = stopReasonVerifierModel{}
+
+func (m stopReasonVerifierModel) Generate(
+	ctx context.Context,
+	msgs []*schema.Message,
+	tools []*schema.ToolInfo,
+) (schema.Generation, error) {
+	if m.nilMsg {
+		return schema.Generation{StopReason: m.reason}, nil //nolint:exhaustruct // nil message is the case under test.
+	}
+
+	gen, err := batchModel{verdict: verdictConfirmed}.Generate(ctx, msgs, tools)
+	if err != nil {
+		return schema.Generation{}, err
+	}
+	gen.StopReason = m.reason
+
+	return gen, nil
+}
+
 // lensSplitModel confirms under the benign lens and refutes under the
 // sufficiency lens, keyed on the lens text in the user message (stateless →
 // race-free, deterministic regardless of pass order).
@@ -1130,5 +1159,71 @@ func TestVerifyFindings_InterruptSuppressesPanel(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "Verification panel") {
 		t.Errorf("an interrupted verification must not render the panel, got %q", buf.String())
+	}
+}
+
+func TestVerifyFindings_AbnormalStop_DoesNotVerifyEvenWhenTheJSONParses(t *testing.T) {
+	t.Parallel()
+
+	// A truncated or withheld response can still carry syntactically valid JSON.
+	// Parsing it would mint VERIFIED from a generation the backend declared
+	// incomplete, which is what AGENTS.md's fail-closed contract forbids.
+	for _, reason := range []schema.StopReason{
+		schema.StopLength, schema.StopContentFilter, schema.StopToolCalls, schema.StopOther,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
+
+			a := newVerifierAgent(stopReasonVerifierModel{reason: reason})
+			a.renderer = echoRenderer
+
+			out, err := newVerifyFindingsTool(a).runScoped(context.Background(), rootState(io.Discard), oneFinding)
+			if err != nil {
+				t.Fatalf("runScoped: %v", err)
+			}
+			if !strings.Contains(out, "Public bucket: UNVERIFIED") {
+				t.Errorf("result = %q, want UNVERIFIED for stop reason %q", out, reason)
+			}
+			if strings.Contains(out, "VERIFIED") && !strings.Contains(out, "UNVERIFIED") {
+				t.Errorf("result = %q, minted VERIFIED from an unfinished generation", out)
+			}
+		})
+	}
+}
+
+func TestVerifyFindings_NormalStop_StillVerifies(t *testing.T) {
+	t.Parallel()
+
+	// The complement: the gate must not break the happy path.
+	for _, reason := range []schema.StopReason{schema.StopNormal, schema.StopUnspecified} {
+		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
+
+			a := newVerifierAgent(stopReasonVerifierModel{reason: reason})
+			a.renderer = echoRenderer
+
+			out, err := newVerifyFindingsTool(a).runScoped(context.Background(), rootState(io.Discard), oneFinding)
+			if err != nil {
+				t.Fatalf("runScoped: %v", err)
+			}
+			if !strings.Contains(out, "Public bucket: VERIFIED") {
+				t.Errorf("result = %q, want VERIFIED for stop reason %q", out, reason)
+			}
+		})
+	}
+}
+
+func TestVerifyFindings_NilMessage_DegradesRatherThanPanics(t *testing.T) {
+	t.Parallel()
+
+	a := newVerifierAgent(stopReasonVerifierModel{reason: schema.StopNormal, nilMsg: true})
+	a.renderer = echoRenderer
+
+	out, err := newVerifyFindingsTool(a).runScoped(context.Background(), rootState(io.Discard), oneFinding)
+	if err != nil {
+		t.Fatalf("runScoped: %v", err)
+	}
+	if !strings.Contains(out, "Public bucket: UNVERIFIED") {
+		t.Errorf("result = %q, want UNVERIFIED", out)
 	}
 }
