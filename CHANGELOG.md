@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.10.0](https://github.com/cynative/cynative/compare/v1.9.4...v1.10.0) (2026-08-22)
+
+
+### Features
+
+* surface the model stop reason so the loop can tell truncation from a blank turn ([#276](https://github.com/cynative/cynative/issues/276)) ([22ae3e1](https://github.com/cynative/cynative/commit/22ae3e1d7f5142fe9a9313d44611676c08515875))
+
+
+### Bug Fixes
+
+* rebuild the sandbox runtime after a Run leaves it unusable ([#282](https://github.com/cynative/cynative/issues/282)) ([d0384e8](https://github.com/cynative/cynative/commit/d0384e81e342a39545c5df72beecbeecef75153d))
+* recover from empty model turns instead of ending the run ([#272](https://github.com/cynative/cynative/issues/272)) ([b39a37f](https://github.com/cynative/cynative/commit/b39a37fec738210e51f30dedfb1adae9efef54fd))
+
+
+### Dependencies
+
+* bump github.com/ipfs/boxo from 0.42.1 to 0.42.2 ([7a3d93b](https://github.com/cynative/cynative/commit/7a3d93bf27843c65b2ca8cf9102afcce075a2376))
+* bump github.com/nunnatsa/ginkgolinter from 0.23.1 to 0.24.0 ([7a3d93b](https://github.com/cynative/cynative/commit/7a3d93bf27843c65b2ca8cf9102afcce075a2376))
+* bump github.com/slack-go/slack from 0.27.0 to 0.29.0 ([22a252c](https://github.com/cynative/cynative/commit/22a252c7cab54e389f26ada769c47ae8bd978de6))
+* bump github.com/stretchr/testify from 1.12.0 to 1.12.1 ([7a3d93b](https://github.com/cynative/cynative/commit/7a3d93bf27843c65b2ca8cf9102afcce075a2376))
+* bump golang.org/x/exp/typeparams from 0.0.0-20260718201538-764159d718ef to 0.0.0-20260811152304-ee035b5b010f ([7a3d93b](https://github.com/cynative/cynative/commit/7a3d93bf27843c65b2ca8cf9102afcce075a2376))
+
 ## [1.9.4](https://github.com/cynative/cynative/compare/v1.9.3...v1.9.4) (2026-08-18)
 
 
