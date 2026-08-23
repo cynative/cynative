@@ -24,10 +24,10 @@ func (m *budgetSummaryModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 
-	return schema.AssistantMessage("summary text", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("summary text", nil)}, nil
 }
 
 // answerOnceModel returns a scriptedModel producing one assistant text message.
@@ -345,5 +345,53 @@ func TestFailureSummary_CancelsHungSummaryOnInterrupt(t *testing.T) {
 	got, err := a.failureSummary(context.Background(), rs, []*schema.Message{schema.UserMessage("q")})
 	if !errors.Is(err, errInterrupted) {
 		t.Errorf("hung summary + interrupt: got (%q, %v), want errInterrupted", got, err)
+	}
+}
+
+func TestFailureSummary_Truncated_RendersNoticeAndReturnsModelTextOnly(t *testing.T) {
+	t.Parallel()
+
+	m := &answerReasonModel{text: "I am stuck because", reason: schema.StopLength}
+	a := newTestAgent(m, map[string]schema.InvokableTool{})
+	a.maxConsecutiveFailures = 3
+	a.renderer = echoRenderer
+
+	var buf bytes.Buffer
+	rs := &runState{depth: 0, out: &buf, runID: "r"} //nolint:exhaustruct // counters zero-init is correct.
+
+	got, err := a.failureSummary(context.Background(), rs, []*schema.Message{schema.UserMessage("q")})
+	if err != nil {
+		t.Fatalf("failureSummary: %v", err)
+	}
+	if !strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, want the truncation notice", buf.String())
+	}
+	if got != "I am stuck because" {
+		t.Errorf("answer = %q, want the model text alone", got)
+	}
+	if !rs.answerTruncated {
+		t.Error("answerTruncated = false, want true so a sub-agent summary is marked for the parent")
+	}
+}
+
+func TestFailureSummary_NotTruncated_NoNotice(t *testing.T) {
+	t.Parallel()
+
+	m := &answerReasonModel{text: "I am stuck because", reason: schema.StopNormal}
+	a := newTestAgent(m, map[string]schema.InvokableTool{})
+	a.maxConsecutiveFailures = 3
+	a.renderer = echoRenderer
+
+	var buf bytes.Buffer
+	rs := &runState{depth: 0, out: &buf, runID: "r"} //nolint:exhaustruct // counters zero-init is correct.
+
+	if _, err := a.failureSummary(context.Background(), rs, []*schema.Message{schema.UserMessage("q")}); err != nil {
+		t.Fatalf("failureSummary: %v", err)
+	}
+	if strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, want no truncation notice", buf.String())
+	}
+	if rs.answerTruncated {
+		t.Error("answerTruncated = true, want false")
 	}
 }

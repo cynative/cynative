@@ -29,18 +29,20 @@ func (m *twoStepModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls++
 
 	if m.calls == 1 {
-		return schema.AssistantMessage("", []schema.ToolCallBlock{
+		msg := schema.AssistantMessage("", []schema.ToolCallBlock{
 			{ID: "c1", Name: "echo", Arguments: "{}"},
-		}), nil
+		})
+
+		return schema.Generation{Message: msg}, nil
 	}
 
-	return schema.AssistantMessage("final", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("final", nil)}, nil
 }
 
 // seqModel returns scripted messages in order and records every transcript it
@@ -58,17 +60,17 @@ func (m *seqModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.seen = append(m.seen, msgs)
 	if m.calls >= len(m.msgs) {
-		return nil, errors.New("seqModel: out of scripted messages")
+		return schema.Generation{}, errors.New("seqModel: out of scripted messages")
 	}
 	msg := m.msgs[m.calls]
 	m.calls++
 
-	return msg, nil
+	return schema.Generation{Message: msg}, nil
 }
 
 // assistantCall builds an assistant message carrying a single tool call.
@@ -383,26 +385,30 @@ func (m *verifierScriptModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	if strings.Contains(msgs[0].Text(), "adversarial reviewer") {
-		return schema.AssistantMessage(
+		msg := schema.AssistantMessage(
 			`{"f1":{"verdict":"confirmed","justification":"evidence holds"},`+
 				`"f2":{"verdict":"refuted","justification":"the key was rotated"}}`, nil,
-		), nil
+		)
+
+		return schema.Generation{Message: msg}, nil
 	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.turns++
 	if m.turns == 1 {
-		return assistantCall("v1", "verify_findings",
+		msg := assistantCall("v1", "verify_findings",
 			`{"findings":[`+
 				`{"title":"Open SG","claim":"sg-1 allows 0.0.0.0/0","evidence":"IpRanges: 0.0.0.0/0"},`+
-				`{"title":"Stale key","claim":"key k1 is stale","evidence":"k1 rotated yesterday"}]}`), nil
+				`{"title":"Stale key","claim":"key k1 is stale","evidence":"k1 rotated yesterday"}]}`)
+
+		return schema.Generation{Message: msg}, nil
 	}
 
 	// turns > 2 is unreachable: the scripted supervisor makes exactly two non-verifier turns (tool call, then final answer).
-	return schema.AssistantMessage("report: Open SG (verified)", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("report: Open SG (verified)", nil)}, nil
 }
 
 // TestIntegration_VerifierPanel drives supervisor → verify_findings → mixed

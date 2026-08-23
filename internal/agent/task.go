@@ -50,7 +50,19 @@ const subagentDelegationGuidance = "Sub-agents cannot themselves delegate with t
 const (
 	subagentIterationLimit = "Sub-agent reached its iteration limit without a conclusion."
 	subagentNoAnswer       = "Sub-agent stopped: the model returned repeated empty responses."
+	// The three below deliberately carry no backend-supplied text. These notices
+	// re-enter the parent transcript unfenced as trusted host output, so admitting
+	// a provider-controlled string here would be an instruction-laundering path.
+	subagentOutputLimit  = "Sub-agent stopped: the model reached its output limit before answering."
+	subagentFiltered     = "Sub-agent stopped: the model's content filter blocked the response."
+	subagentStoppedEarly = "Sub-agent stopped: the model ended the turn without an answer."
 )
+
+// subagentTruncatedMarker tells the parent model that a sub-agent's
+// conclusion was cut off. The sub-run renders its own notice to the verbose
+// writer, which is [io.Discard] without -v, so without this the parent would
+// build on a truncated finding with no signal. Host-authored: no backend text.
+const subagentTruncatedMarker = "[The sub-agent's answer reached the model's output limit and may be incomplete.]"
 
 // subagentStop maps a sub-run's non-fatal stop conditions to the notice the parent
 // model sees. It reports false for a nil error and for the fatal ones (interrupt,
@@ -61,6 +73,12 @@ func subagentStop(err error) (bool, string) {
 		return true, subagentIterationLimit
 	case errors.Is(err, errNoAnswer):
 		return true, subagentNoAnswer
+	case errors.Is(err, errOutputLimit):
+		return true, subagentOutputLimit
+	case errors.Is(err, errContentFiltered):
+		return true, subagentFiltered
+	case errors.Is(err, errStoppedEarly):
+		return true, subagentStoppedEarly
 	default:
 		return false, ""
 	}
@@ -139,6 +157,10 @@ func (t *taskTool) runScoped(ctx context.Context, rs *runState, argumentsInJSON 
 	}
 	if err != nil {
 		return "", err
+	}
+
+	if sub.answerTruncated {
+		answer += "\n\n" + subagentTruncatedMarker
 	}
 
 	// The summary is shaped by a sub-investigation of external data, so fence it

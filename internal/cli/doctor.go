@@ -188,7 +188,7 @@ func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool
 	defer cm.Shutdown()
 
 	nonce := d.newDoctorProbeNonce()
-	msg, err := cm.Generate(pctx, []*schema.Message{
+	gen, err := cm.Generate(pctx, []*schema.Message{
 		schema.UserMessage(fmt.Sprintf(doctorProbePromptFmt, nonce)),
 	}, nil)
 	if err != nil {
@@ -197,6 +197,7 @@ func (d *deps) probeLiveLLM(ctx context.Context, cfg config.Config, verbose bool
 
 		return err
 	}
+	msg := gen.Message
 	// Case-insensitive: some models normalize token casing in the echo.
 	if msg == nil || !strings.Contains(strings.ToLower(msg.Text()), strings.ToLower(nonce)) {
 		d.ui.RenderLLM(d.errOut, llmDoctorProbeMismatchStatus(cfg))

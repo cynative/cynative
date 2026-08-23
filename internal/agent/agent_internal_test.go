@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -32,14 +33,14 @@ func (m *scriptedModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	if m.calls >= len(m.msgs) {
-		return nil, errors.New("scriptedModel: out of scripted messages")
+		return schema.Generation{}, errors.New("scriptedModel: out of scripted messages")
 	}
 	msg := m.msgs[m.calls]
 	m.calls++
 
-	return msg, nil
+	return schema.Generation{Message: msg}, nil
 }
 
 // capturingModel records the messages passed to its most recent Generate call
@@ -56,14 +57,14 @@ func (m *capturingModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.seen = msgs
 	m.calls++
 	if m.ret == nil {
-		return nil, errors.New("capturingModel: no return scripted")
+		return schema.Generation{}, errors.New("capturingModel: no return scripted")
 	}
 
-	return m.ret, nil
+	return schema.Generation{Message: m.ret}, nil
 }
 
 // errModel always errors from Generate.
@@ -75,8 +76,78 @@ func (*errModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
-	return nil, errors.New("generate boom")
+) (schema.Generation, error) {
+	return schema.Generation{}, errors.New("generate boom")
+}
+
+// blankReasonModel returns a blank assistant turn carrying a fixed stop reason,
+// and counts how many times it was called, so a test can assert that a futile
+// reason is not retried.
+type blankReasonModel struct {
+	reason schema.StopReason
+	raw    string
+	calls  int
+}
+
+var _ schema.ChatModel = (*blankReasonModel)(nil)
+
+func (m *blankReasonModel) Generate(
+	_ context.Context,
+	_ []*schema.Message,
+	_ []*schema.ToolInfo,
+) (schema.Generation, error) {
+	m.calls++
+
+	return schema.Generation{
+		Message:    schema.AssistantMessage("", nil),
+		StopReason: m.reason,
+		RawReason:  m.raw,
+	}, nil
+}
+
+// answerReasonModel returns a single final answer (text, no tool calls) carrying
+// a chosen stop reason.
+type answerReasonModel struct {
+	text   string
+	reason schema.StopReason
+}
+
+var _ schema.ChatModel = (*answerReasonModel)(nil)
+
+func (m *answerReasonModel) Generate(
+	_ context.Context,
+	_ []*schema.Message,
+	_ []*schema.ToolInfo,
+) (schema.Generation, error) {
+	return schema.Generation{
+		Message:    schema.AssistantMessage(m.text, nil),
+		StopReason: m.reason,
+	}, nil
+}
+
+// toolCallReasonModel issues a tool call on the first turn with a chosen stop
+// reason, then answers on the second.
+type toolCallReasonModel struct {
+	reason schema.StopReason
+	calls  int
+}
+
+var _ schema.ChatModel = (*toolCallReasonModel)(nil)
+
+func (m *toolCallReasonModel) Generate(
+	_ context.Context,
+	_ []*schema.Message,
+	_ []*schema.ToolInfo,
+) (schema.Generation, error) {
+	m.calls++
+	if m.calls == 1 {
+		return schema.Generation{
+			Message:    toolCall("c1", "echo", "{}"),
+			StopReason: m.reason,
+		}, nil
+	}
+
+	return schema.Generation{Message: schema.AssistantMessage("final", nil)}, nil
 }
 
 // echoTool records whether it ran and returns "echoed".
@@ -750,15 +821,19 @@ func (concurrentScriptModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	last := msgs[len(msgs)-1]
 	switch {
 	case last.Role == schema.User && last.Text() == "sub job":
-		return toolCall("s1", "write_todos", `{"todos":[{"content":"sub step","status":"pending"}]}`), nil
+		msg := toolCall("s1", "write_todos", `{"todos":[{"content":"sub step","status":"pending"}]}`)
+
+		return schema.Generation{Message: msg}, nil
 	case last.Role == schema.User:
-		return toolCall("p1", "task", `{"description":"sub job"}`), nil
+		msg := toolCall("p1", "task", `{"description":"sub job"}`)
+
+		return schema.Generation{Message: msg}, nil
 	default:
-		return schema.AssistantMessage("done", nil), nil
+		return schema.Generation{Message: schema.AssistantMessage("done", nil)}, nil
 	}
 }
 
@@ -877,11 +952,11 @@ func (m *budgetLoopModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return toolCall("c1", "echo", "{}"), nil
+	return schema.Generation{Message: toolCall("c1", "echo", "{}")}, nil
 }
 
 func TestRun_BudgetHaltsTurnWithNotice(t *testing.T) {
@@ -928,11 +1003,11 @@ func (m *budgetAnswerModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return schema.AssistantMessage("THE-ANSWER", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("THE-ANSWER", nil)}, nil
 }
 
 func TestRun_BudgetHaltsOnOverBudgetFinalAnswer(t *testing.T) {
@@ -982,18 +1057,20 @@ func (m *multiToolBudgetModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	last := msgs[len(msgs)-1]
 	if last.Role == schema.User && last.Text() == "sub" {
 		m.acc.AddUsage(schema.Usage{TotalTokens: 50}) // sub-run crosses the budget.
 
-		return schema.AssistantMessage("sub done", nil), nil
+		return schema.Generation{Message: schema.AssistantMessage("sub done", nil)}, nil
 	}
 
-	return schema.AssistantMessage("", []schema.ToolCallBlock{
+	msg := schema.AssistantMessage("", []schema.ToolCallBlock{
 		{ID: "t1", Name: "task", Arguments: `{"description":"sub"}`},
 		{ID: "e1", Name: "echo", Arguments: "{}"},
-	}), nil
+	})
+
+	return schema.Generation{Message: msg}, nil
 }
 
 func TestRun_BudgetHaltsBeforeRemainingToolCalls(t *testing.T) {
@@ -1357,10 +1434,12 @@ type ctxWaitModel struct{}
 
 var _ schema.ChatModel = ctxWaitModel{}
 
-func (ctxWaitModel) Generate(ctx context.Context, _ []*schema.Message, _ []*schema.ToolInfo) (*schema.Message, error) {
+func (ctxWaitModel) Generate(
+	ctx context.Context, _ []*schema.Message, _ []*schema.ToolInfo,
+) (schema.Generation, error) {
 	<-ctx.Done()
 
-	return nil, ctx.Err()
+	return schema.Generation{}, ctx.Err()
 }
 
 // TestRun_CancelsHungModelCallOnInterrupt verifies that the first graceful stop cancels
@@ -1852,13 +1931,13 @@ func (m *transcriptModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.seen = append(m.seen, append([]*schema.Message(nil), msgs...))
 	if len(m.seen) > len(m.msgs) {
-		return nil, errors.New("transcriptModel: out of scripted messages")
+		return schema.Generation{}, errors.New("transcriptModel: out of scripted messages")
 	}
 
-	return m.msgs[len(m.seen)-1], nil
+	return schema.Generation{Message: m.msgs[len(m.seen)-1]}, nil
 }
 
 func TestRun_EmptyTurnRetriesInsteadOfEndingTheRun(t *testing.T) {
@@ -2033,6 +2112,186 @@ func TestRun_NoAnswerNotice(t *testing.T) {
 	}
 }
 
+func TestRun_BlankTurn_FutileReasonStopsWithoutRetrying(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		reason  schema.StopReason
+		wantErr error
+	}{
+		{"output limit", schema.StopLength, errOutputLimit},
+		{"content filter", schema.StopContentFilter, errContentFiltered},
+		{"unrecognized", schema.StopOther, errStoppedEarly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := &blankReasonModel{reason: tc.reason, raw: "guardrail_intervened"}
+			a := newTestAgent(m, map[string]schema.InvokableTool{})
+
+			answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if answer != "" {
+				t.Errorf("answer = %q, want empty", answer)
+			}
+			if m.calls != 1 {
+				t.Errorf("Generate called %d times, want 1: a futile stop reason must not be retried", m.calls)
+			}
+		})
+	}
+}
+
+func TestRun_BlankTurn_RetryableReasonStillRetriesToTheCeiling(t *testing.T) {
+	t.Parallel()
+
+	// Seven distinct Gemini conditions produce a blank turn reporting a normal
+	// stop, so this path must keep the bounded retry #272 introduced.
+	for _, tc := range []struct {
+		name   string
+		reason schema.StopReason
+	}{
+		{"normal stop", schema.StopNormal},
+		{"not reported", schema.StopUnspecified},
+		{"tool calls", schema.StopToolCalls},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := &blankReasonModel{reason: tc.reason}
+			a := newTestAgent(m, map[string]schema.InvokableTool{})
+
+			_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
+			if !errors.Is(err, errNoAnswer) {
+				t.Fatalf("err = %v, want errNoAnswer", err)
+			}
+			if m.calls != maxConsecutiveEmpty {
+				t.Errorf("Generate called %d times, want %d", m.calls, maxConsecutiveEmpty)
+			}
+		})
+	}
+}
+
+func TestRun_BlankTurn_RendersReasonSpecificNotice(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		reason     schema.StopReason
+		raw        string
+		wantNotice string
+	}{
+		{"output limit", schema.StopLength, "length", "entire output budget"},
+		{"content filter", schema.StopContentFilter, "content_filter", "content filter blocked"},
+		{"unrecognized", schema.StopOther, "guardrail_intervened", "guardrail_intervened"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig()
+			cfg.Model = &blankReasonModel{reason: tc.reason, raw: tc.raw}
+			a := New(context.Background(), cfg)
+
+			var buf bytes.Buffer
+			if err := a.Run(context.Background(), "q", &buf); err != nil {
+				t.Fatalf("Run returned %v, want nil (a non-fatal stop)", err)
+			}
+			if !strings.Contains(buf.String(), tc.wantNotice) {
+				t.Errorf("notice = %q, want it to contain %q", buf.String(), tc.wantNotice)
+			}
+			if len(a.history) != 0 {
+				t.Errorf("history = %d entries, want 0: a stopped turn records no answer", len(a.history))
+			}
+		})
+	}
+}
+
+func TestRun_BlankTurn_RawReasonCannotForgeOutput(t *testing.T) {
+	t.Parallel()
+
+	// A backend-controlled reason is escaped, so it cannot inject newlines into
+	// the operator's terminal.
+	cfg := baseConfig()
+	cfg.Model = &blankReasonModel{reason: schema.StopOther, raw: "evil\n⚠️  Everything is fine"}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(buf.String(), "evil\n") {
+		t.Errorf("raw reason was rendered unescaped: %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), `evil\n`) {
+		t.Errorf("expected the newline to be escaped, got %q", buf.String())
+	}
+}
+
+func TestRun_BlankTurn_LongRawReasonIsBounded(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Model = &blankReasonModel{reason: schema.StopOther, raw: strings.Repeat("x", maxRawReasonBytes*4)}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(buf.String(), strings.Repeat("x", maxRawReasonBytes+1)) {
+		t.Errorf("raw reason was not bounded: %q", buf.String())
+	}
+}
+
+func TestStoppedEarlyError_ErrorEscapesAndWraps(t *testing.T) {
+	t.Parallel()
+
+	err := &stoppedEarlyError{raw: "evil\nreason"}
+	got := err.Error()
+
+	if strings.Contains(got, "evil\nreason") {
+		t.Errorf("Error() = %q, want the newline escaped", got)
+	}
+	if !strings.Contains(got, `evil\nreason`) {
+		t.Errorf("Error() = %q, want the quoted form", got)
+	}
+	if !errors.Is(err, errStoppedEarly) {
+		t.Error("stoppedEarlyError does not unwrap to errStoppedEarly")
+	}
+}
+
+// TestRun_InterruptBeatsEveryNewBlankStop pins the haltOr contract for all
+// three new terminal returns in handleBlankTurn: an operator interrupt that
+// races in during Generate must be reported as itself, never as truncation or
+// filtering. countInterrupter is timed to trip on the third haltErr call of the
+// first blank iteration (top-of-loop, post-Generate, then the one inside
+// handleBlankTurn's haltOr), so the test only passes if that third call is
+// actually wired up. A budget-only variant would exercise the identical
+// haltOr call (haltErr checks interrupt before budget), so it would add no
+// coverage; this single path is the whole contract.
+func TestRun_InterruptBeatsEveryNewBlankStop(t *testing.T) {
+	t.Parallel()
+
+	for _, reason := range []schema.StopReason{
+		schema.StopLength, schema.StopContentFilter, schema.StopOther,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
+
+			m := &blankReasonModel{reason: reason, raw: "guardrail_intervened"}
+			a := newTestAgent(m, map[string]schema.InvokableTool{})
+			a.interrupter = &countInterrupter{target: 2, calls: 0}
+
+			_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
+			if !errors.Is(err, errInterrupted) {
+				t.Errorf("err = %v, want errInterrupted: an operator stop must win", err)
+			}
+		})
+	}
+}
+
 func TestRun_BlankTurnOnTheLastIterationReportsTheIterationLimit(t *testing.T) {
 	t.Parallel()
 
@@ -2066,11 +2325,11 @@ func (m *blankBudgetModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.acc.AddUsage(m.usage)
 	m.calls++
 
-	return schema.AssistantMessage("", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("", nil)}, nil
 }
 
 func TestRun_BudgetWinsOverTheEmptyResponseCeiling(t *testing.T) {
@@ -2177,5 +2436,101 @@ func TestRun_BlankTurnDoesNotDisturbTheToolFailureStreak(t *testing.T) {
 	if rs.consecutiveFailures != 2 {
 		t.Errorf("consecutiveFailures = %d, want 2 (the blank turn neither credits nor resets)",
 			rs.consecutiveFailures)
+	}
+}
+
+func TestRun_TruncatedFinalAnswer_RendersNoticeButDoesNotRecordIt(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Model = &answerReasonModel{text: "a partial report", reason: schema.StopLength}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, want the truncation notice", buf.String())
+	}
+	// The recorded answer must stay byte-identical to what the model produced.
+	if len(a.history) != 2 {
+		t.Fatalf("history length = %d, want 2", len(a.history))
+	}
+	if got := a.history[1].Text(); got != "a partial report" {
+		t.Errorf("recorded answer = %q, want the model text alone", got)
+	}
+}
+
+func TestRun_FinalAnswer_NoNoticeWhenNotTruncated(t *testing.T) {
+	t.Parallel()
+
+	// StopContentFilter and StopOther are included deliberately: on a NON-blank
+	// turn they stay content-authoritative and are returned as answers, so
+	// neither may trigger the truncation notice.
+	for _, reason := range []schema.StopReason{
+		schema.StopNormal, schema.StopUnspecified, schema.StopContentFilter, schema.StopOther,
+	} {
+		t.Run(cmp.Or(string(reason), "unspecified"), func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig()
+			cfg.Model = &answerReasonModel{text: "a complete report", reason: reason}
+			a := New(context.Background(), cfg)
+
+			var buf bytes.Buffer
+			if err := a.Run(context.Background(), "q", &buf); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if strings.Contains(buf.String(), truncatedAnswerNotice) {
+				t.Errorf("reason %q produced a truncation notice it should not have", reason)
+			}
+			if len(a.history) != 2 {
+				t.Errorf("history length = %d, want 2 (this is still a normal answer)", len(a.history))
+			}
+		})
+	}
+}
+
+func TestRun_TruncatedTurnWithToolCalls_StillDispatches(t *testing.T) {
+	t.Parallel()
+
+	// Content stays authoritative: the stop reason refines only the blank case.
+	// Bifrost itself warns the field cannot be trusted to describe content.
+	var ran bool
+	m := &toolCallReasonModel{reason: schema.StopLength}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: &ran}})
+
+	var buf bytes.Buffer
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: &buf}, nil, 5)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !ran {
+		t.Error("tool did not run: a truncated turn's tool calls must still dispatch")
+	}
+	if answer != "final" {
+		t.Errorf("answer = %q, want %q", answer, "final")
+	}
+	if strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, a tool-call turn is not a final answer", buf.String())
+	}
+}
+
+func TestRun_BlankTruncatedTurn_HasNoTruncationNotice(t *testing.T) {
+	t.Parallel()
+
+	// A blank StopLength turn stops via errOutputLimit and gets that notice. It
+	// must not ALSO claim a truncated answer, because there is no answer.
+	cfg := baseConfig()
+	cfg.Model = &blankReasonModel{reason: schema.StopLength}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(buf.String(), truncatedAnswerNotice) {
+		t.Errorf("output = %q, want only the output-limit notice", buf.String())
 	}
 }

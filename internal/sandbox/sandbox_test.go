@@ -333,6 +333,138 @@ func TestRun_StatePersistsAcrossCalls(t *testing.T) {
 	}
 }
 
+// interruptRun times out a script mid-execution, which is what leaves the
+// runtime unusable. The generous timeout keeps the interrupt inside the VM
+// (rather than arriving while the worker loop is parked) on a loaded machine.
+func interruptRun(t *testing.T, s *sandbox.Sandbox) {
+	t.Helper()
+
+	out, err := s.Run(context.Background(), `while (true) {}`, 50*time.Millisecond)
+	if !errors.Is(err, sandbox.ErrScript) {
+		t.Fatalf("Run: want sandbox.ErrScript, got %v", err)
+	}
+
+	if !strings.Contains(out, "timed out") {
+		t.Fatalf("expected timeout message, got %q", out)
+	}
+}
+
+// TestRun_InterruptedScriptDoesNotPoisonLaterRuns is the regression guard for
+// the silent-no-op bug: an interrupt landing inside the VM used to leave
+// sobek's call stack unwound, after which it treated every later RunProgram as
+// a nested call and stopped draining the promise job queue. Awaits never
+// resumed, so every later Run on that sandbox returned no output and a nil
+// error, reporting a script that never ran as a success.
+func TestRun_InterruptedScriptDoesNotPoisonLaterRuns(t *testing.T) {
+	t.Parallel()
+
+	s := newSandbox(t, map[string]sandbox.ToolFunc{
+		"echo": func(_ context.Context, _ string) (string, error) { return "1", nil },
+	}, nil)
+
+	for range 3 {
+		interruptRun(t, s)
+
+		if got := run(t, s, `await echo({}); console.log("ok");`); got != "ok\n" {
+			t.Fatalf("reuse after interrupt: got %q, want \"ok\\n\"", got)
+		}
+	}
+}
+
+// TestRun_InterruptedScriptResetsGlobalState pins the cost of that rebuild: the
+// runtime is replaced, so globalThis starts empty for the next Run.
+func TestRun_InterruptedScriptResetsGlobalState(t *testing.T) {
+	t.Parallel()
+
+	s := newSandbox(t, nil, nil)
+
+	run(t, s, `globalThis.counter = 7;`)
+	interruptRun(t, s)
+
+	if got := run(t, s, `console.log(String(globalThis.counter))`); got != "undefined\n" {
+		t.Errorf("state survived the rebuild, got %q", got)
+	}
+}
+
+// TestRun_FailedScriptKeepsGlobalState pins the other half: an ordinary script
+// failure leaves the runtime intact, so a rebuild (and the state loss it costs)
+// is reserved for the interrupts that actually need one.
+func TestRun_FailedScriptKeepsGlobalState(t *testing.T) {
+	t.Parallel()
+
+	for _, code := range []string{`throw new Error("boom")`, `this is not js`} {
+		s := newSandbox(t, nil, nil)
+
+		run(t, s, `globalThis.counter = 7;`)
+		runFailed(t, s, code)
+
+		if got := run(t, s, `console.log(String(globalThis.counter))`); got != "7\n" {
+			t.Errorf("%s: state did not persist, got %q", code, got)
+		}
+	}
+}
+
+// TestRun_UnsettlableAwaitIsAFailure covers a script suspended on something no
+// tool call can ever settle. The worker loop drains at once (nothing is in
+// flight) so no timeout fires, and the IIFE promise is left pending; reporting
+// that as a failure is what keeps it from reading as an empty success.
+func TestRun_UnsettlableAwaitIsAFailure(t *testing.T) {
+	t.Parallel()
+
+	got := runFailed(t, newSandbox(t, nil, nil), `console.log("before"); await new Promise(() => {});`)
+	if !strings.Contains(got, "before") || !strings.Contains(got, "did not complete") {
+		t.Errorf("got %q", got)
+	}
+}
+
+// TestRun_SuspendedScriptCannotResumeInALaterRun pins what makes that report
+// honest. A script can park on a promise whose resolver it stashed on
+// globalThis; without the rebuild, a later Run calling that resolver resumed the
+// parked script inside itself, so its remaining tool calls ran under a different
+// Run's context and its output landed in that Run's result.
+//
+// The second case reaches the same state through the timeout branch, which
+// reports no error at all: a fire-and-forget tool call keeps the worker loop
+// waiting until the Run times out while the script parks on its own promise, so
+// the resolver outlives the Run. Both are pinned because which one a script hits
+// is a timing question, and only one of them used to be caught.
+func TestRun_SuspendedScriptCannotResumeInALaterRun(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		code string
+	}{
+		{"drains immediately", `await new Promise(r => { globalThis.wake = r; }); await tool({});`},
+		{"times out with a call in flight", `tool({}); await new Promise(r => { globalThis.wake = r; });`},
+	} {
+		var calls atomic.Int64
+
+		s := newSandbox(t, map[string]sandbox.ToolFunc{
+			"tool": func(ctx context.Context, _ string) (string, error) {
+				calls.Add(1)
+				<-ctx.Done()
+
+				return "", ctx.Err()
+			},
+		}, nil)
+
+		if _, err := s.Run(context.Background(), tc.code, 50*time.Millisecond); !errors.Is(err, sandbox.ErrScript) {
+			t.Fatalf("%s: Run: want sandbox.ErrScript, got %v", tc.name, err)
+		}
+
+		before := calls.Load()
+
+		if got := run(t, s, `console.log(typeof globalThis.wake);`); got != "undefined\n" {
+			t.Errorf("%s: parked script survived the rebuild, got %q", tc.name, got)
+		}
+
+		if n := calls.Load() - before; n != 0 {
+			t.Errorf("%s: parked script made %d tool call(s) after its own Run ended", tc.name, n)
+		}
+	}
+}
+
 func TestRun_ConcurrentCallsSerialize(t *testing.T) {
 	t.Parallel()
 

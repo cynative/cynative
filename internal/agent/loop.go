@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -55,6 +56,49 @@ var errNoAnswer = errors.New("agent: model returned no answer")
 // the only other stop. Three means one blank plus two retries.
 const maxConsecutiveEmpty = 3
 
+// errOutputLimit ends a run whose model spent its entire output budget before
+// emitting a visible token. Retrying cannot help: neither the request nor the
+// configuration changes between attempts.
+var errOutputLimit = errors.New("agent: model output limit reached")
+
+// errContentFiltered ends a run whose model response was withheld by a content
+// filter. Like the output limit, it is futile to retry.
+var errContentFiltered = errors.New("agent: model response was filtered")
+
+// errStoppedEarly ends a run whose model reported a terminal stop reason cynative
+// does not recognize. It is never returned bare: stoppedEarlyError wraps it, so
+// the operator notice can name the reason while [errors.Is] still matches.
+var errStoppedEarly = errors.New("agent: model stopped without an answer")
+
+// maxRawReasonBytes bounds how much of a backend-supplied stop reason reaches the
+// operator's terminal.
+const maxRawReasonBytes = 64
+
+// stoppedEarlyError carries the backend's raw stop reason to the Run notice. A
+// bare sentinel cannot hold data, and stashing the reason on *Agent would break
+// the guarantee that concurrent sub-runs share no mutable state.
+type stoppedEarlyError struct{ raw string }
+
+func (e *stoppedEarlyError) Error() string {
+	return "agent: model stopped with reason " + clampRawReason(e.raw)
+}
+
+// Unwrap lets callers keep matching with [errors.Is](err, errStoppedEarly).
+func (e *stoppedEarlyError) Unwrap() error { return errStoppedEarly }
+
+// clampRawReason renders a backend-supplied stop reason safely for an operator
+// notice. The value is provider-influenced text, so it is truncated and then
+// quoted: [strconv.Quote] escapes control characters and newlines, which is what
+// stops a crafted reason from forging extra lines in the terminal, and it renders
+// any byte left invalid by the truncation as an escape rather than raw output.
+func clampRawReason(raw string) string {
+	if len(raw) > maxRawReasonBytes {
+		raw = raw[:maxRawReasonBytes]
+	}
+
+	return strconv.Quote(raw)
+}
+
 // emptyTurnDirective is appended as a trusted host message after a blank turn.
 // Resending the transcript unchanged tends to reproduce the same blank response,
 // so the retry carries an explicit instruction instead — the same shape as
@@ -66,6 +110,12 @@ const emptyTurnDirective = "Your previous response was empty: it contained neith
 // operator interrupted before the tool was dispatched; it matches the unframed
 // denial convention (trusted host/user signal, not untrusted tool output).
 const deniedInterruptResult = "Tool not run: the operator interrupted the turn."
+
+// truncatedAnswerNotice warns that a final answer was cut off at the model's
+// output limit. It is rendered, never recorded: concatenating it into the answer
+// would put a host annotation into session history for the model to reason about
+// on the next turn.
+const truncatedAnswerNotice = "\n⚠️  This answer reached the model's output limit and may be incomplete."
 
 // toolset indexes the tools the loop dispatches against and the schemas offered
 // to the model.
@@ -90,6 +140,10 @@ type runState struct {
 	// that carries text or a tool call. At maxConsecutiveEmpty the run gives up.
 	// It lives here, not on *Agent, so concurrent sub-runs share no mutable state.
 	consecutiveEmpty int
+	// answerTruncated records that this run's final answer stopped on the model's
+	// output limit, so a caller can mark a conclusion the model did not finish.
+	// It lives here, not on *Agent, so concurrent sub-runs stay race-free.
+	answerTruncated bool
 }
 
 // runScopedTool is implemented by the in-package orchestration tools that need
@@ -105,7 +159,9 @@ type runScopedTool interface {
 // terminates when the model emits an assistant turn that carries text and no
 // tool calls — the final answer. A turn carrying neither is not an answer: it is
 // retried with a directive, and after maxConsecutiveEmpty in a row the run ends
-// with errNoAnswer. Exhausting maxIter ends it with errIterationLimit. Both are
+// with errNoAnswer. A blank turn whose stop reason is length, content_filter, or
+// unrecognized ends the run at once instead, since re-asking cannot change a
+// futile stop. Exhausting maxIter ends it with errIterationLimit. All are
 // non-fatal and distinguishable, so the caller reports the stop that actually
 // happened. Tool failures and unknown tools come back as tool-result content,
 // never as a Go error, so the model can self-correct. A non-nil error from
@@ -123,7 +179,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 		// poll mirrors invokeIO's in-flight cancellation.
 		gctx, gcancel := context.WithCancel(ctx)
 		gstop := a.cancelOnInterrupt(gcancel, interruptPollInterval)
-		msg, err := a.model.Generate(gctx, turn, a.tools.infos)
+		gen, err := a.model.Generate(gctx, turn, a.tools.infos)
 		gstop()
 		gcancel()
 		a.metrics.AddRoundTrip()
@@ -151,7 +207,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 
 		var answer string
 		var done bool
-		turn, answer, done, err = a.acceptTurn(turn, msg, rs)
+		turn, answer, done, err = a.acceptTurn(turn, gen, rs)
 		if err != nil {
 			return "", err
 		}
@@ -161,7 +217,7 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 
 		// A retried blank turn carries no tool calls, so this loop is a no-op and
 		// the run falls through to the next iteration.
-		for _, tc := range toolCallsOf(msg) {
+		for _, tc := range toolCallsOf(gen.Message) {
 			a.metrics.AddToolCall()
 			var halt string
 			turn, halt, err = a.dispatchAndTrack(ctx, rs, tc, turn)
@@ -225,15 +281,11 @@ func blankTurn(msg *schema.Message) bool {
 // why appending one went unnoticed. The retry therefore carries a host directive
 // in place of the blank turn rather than a repaired version of it.
 func (a *Agent) acceptTurn(
-	turn []*schema.Message, msg *schema.Message, rs *runState,
+	turn []*schema.Message, gen schema.Generation, rs *runState,
 ) ([]*schema.Message, string, bool, error) {
+	msg := gen.Message
 	if blankTurn(msg) {
-		rs.consecutiveEmpty++
-		if rs.consecutiveEmpty >= maxConsecutiveEmpty {
-			return turn, "", false, a.haltOr(errNoAnswer)
-		}
-
-		return append(turn, schema.UserMessage(emptyTurnDirective)), "", false, nil
+		return a.handleBlankTurn(turn, gen, rs)
 	}
 
 	rs.consecutiveEmpty = 0
@@ -251,7 +303,44 @@ func (a *Agent) acceptTurn(
 		return turn, "", false, herr
 	}
 
+	// A comparison, not a switch: exhaustive does not police it. A future member
+	// leaves this branch inert, which is fine since it only ever fires on StopLength.
+	if gen.StopReason == schema.StopLength {
+		rs.answerTruncated = true
+		fmt.Fprintln(rs.out, truncatedAnswerNotice)
+	}
+
 	return turn, msg.Text(), true, nil
+}
+
+// handleBlankTurn decides what to do about an assistant turn carrying neither
+// text nor a tool call. A stop reason that re-asking cannot fix ends the run at
+// once; everything else keeps the bounded retry.
+//
+// Every terminal return goes through haltOr, so an interrupt or budget crossing
+// that raced in during Generate is reported as itself rather than as truncation.
+func (a *Agent) handleBlankTurn(
+	turn []*schema.Message, gen schema.Generation, rs *runState,
+) ([]*schema.Message, string, bool, error) {
+	switch gen.StopReason {
+	case schema.StopLength:
+		return turn, "", false, a.haltOr(errOutputLimit)
+	case schema.StopContentFilter:
+		return turn, "", false, a.haltOr(errContentFiltered)
+	case schema.StopOther:
+		return turn, "", false, a.haltOr(&stoppedEarlyError{raw: gen.RawReason})
+	case schema.StopUnspecified, schema.StopNormal, schema.StopToolCalls:
+		// Retryable. A blank turn reporting a normal stop is usually transient,
+		// and seven distinct Gemini conditions reach here reporting exactly that,
+		// so no reason can separate them, so the bounded retry stays.
+	}
+
+	rs.consecutiveEmpty++
+	if rs.consecutiveEmpty >= maxConsecutiveEmpty {
+		return turn, "", false, a.haltOr(errNoAnswer)
+	}
+
+	return append(turn, schema.UserMessage(emptyTurnDirective)), "", false, nil
 }
 
 // dispatchAndTrack dispatches one tool call, appends its result to turn, updates the

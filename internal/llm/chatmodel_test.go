@@ -43,15 +43,15 @@ func TestBifrostChatModel_Generate(t *testing.T) {
 		t.Fatalf("NewBifrostChatModel: %v", err)
 	}
 
-	out, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+	gen, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if out.Text() != "hello back" {
-		t.Errorf("content = %q, want %q", out.Text(), "hello back")
+	if gen.Message.Text() != "hello back" {
+		t.Errorf("content = %q, want %q", gen.Message.Text(), "hello back")
 	}
-	if out.Role != schema.Assistant {
-		t.Errorf("role = %q, want %q", out.Role, schema.Assistant)
+	if gen.Message.Role != schema.Assistant {
+		t.Errorf("role = %q, want %q", gen.Message.Role, schema.Assistant)
 	}
 	// The request must carry the configured provider and model.
 	calls := mock.ChatCompletionRequestCalls()
@@ -61,6 +61,58 @@ func TestBifrostChatModel_Generate(t *testing.T) {
 	req := calls[0].Req
 	if string(req.Provider) != "openai" || req.Model != "gpt-4o" {
 		t.Errorf("request provider/model = %q/%q, want openai/gpt-4o", req.Provider, req.Model)
+	}
+}
+
+// TestBifrostChatModel_Generate_CarriesFinishReason verifies Generate calls
+// stopReasonFrom on the response's finish reason: a passing unit test of
+// stopReasonFrom alone would not notice if Generate never called it.
+func TestBifrostChatModel_Generate_CarriesFinishReason(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		reason   *string
+		wantStop schema.StopReason
+		wantRaw  string
+	}{
+		{"truncated", new("length"), schema.StopLength, "length"},
+		{"normal", new("stop"), schema.StopNormal, "stop"},
+		{"nil is unspecified", nil, schema.StopUnspecified, ""},
+		{"empty is unspecified", new(""), schema.StopUnspecified, ""},
+		{"unrecognized", new("guardrail_intervened"), schema.StopOther, "guardrail_intervened"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			mock := &llm.BifrostBackendMock{ //nolint:exhaustruct // only needed funcs set
+				ChatCompletionRequestFunc: func(
+					_ *bschemas.BifrostContext, _ *bschemas.BifrostChatRequest,
+				) (*bschemas.BifrostChatResponse, *bschemas.BifrostError) {
+					return assistantRespReason("hello back", tc.reason), nil
+				},
+				ShutdownFunc: func() {},
+			}
+
+			m, err := llm.NewBifrostChatModel(context.Background(), testAccount(), llm.WithBackend(mock))
+			if err != nil {
+				t.Fatalf("NewBifrostChatModel: %v", err)
+			}
+
+			gen, err := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			if gen.StopReason != tc.wantStop {
+				t.Errorf("StopReason = %q, want %q", gen.StopReason, tc.wantStop)
+			}
+			if gen.RawReason != tc.wantRaw {
+				t.Errorf("RawReason = %q, want %q", gen.RawReason, tc.wantRaw)
+			}
+			if gen.Message.Text() != "hello back" {
+				t.Errorf("Message.Text() = %q, want %q", gen.Message.Text(), "hello back")
+			}
+		})
 	}
 }
 
@@ -649,9 +701,9 @@ func TestBifrostChatModel_ConcurrentGenerate(t *testing.T) {
 	var wg sync.WaitGroup
 	for range callers {
 		wg.Go(func() {
-			out, gerr := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
-			if gerr != nil || out.Text() != "ok" {
-				t.Errorf("concurrent Generate = (%v, %v)", out, gerr)
+			gen, gerr := m.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}, nil)
+			if gerr != nil || gen.Message.Text() != "ok" {
+				t.Errorf("concurrent Generate = (%v, %v)", gen, gerr)
 			}
 		})
 	}

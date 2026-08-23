@@ -45,19 +45,19 @@ func (f *fakeChatModel) Generate(
 	_ context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	i := f.calls
 	f.calls++
 
 	if i < len(f.errs) && f.errs[i] != nil {
-		return nil, f.errs[i]
+		return schema.Generation{}, f.errs[i]
 	}
 
 	if i < len(f.responses) {
-		return f.responses[i], nil
+		return schema.Generation{Message: f.responses[i]}, nil
 	}
 
-	return schema.AssistantMessage("done", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("done", nil)}, nil
 }
 
 func (f *fakeChatModel) Shutdown() {}
@@ -71,12 +71,12 @@ func (c *ctxAwareModel) Generate(
 	ctx context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return schema.Generation{}, err
 	}
 
-	return schema.AssistantMessage("x", nil), nil
+	return schema.Generation{Message: schema.AssistantMessage("x", nil)}, nil
 }
 
 func (c *ctxAwareModel) Shutdown() {}
@@ -1240,17 +1240,17 @@ func (m *welcomeDiscModel) Generate(
 	_ context.Context,
 	msgs []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	isWelcome := len(msgs) > 0 && msgs[len(msgs)-1].Text() != "task"
 	if isWelcome {
 		if m.failWelcome {
-			return nil, errors.New("boom")
+			return schema.Generation{}, errors.New("boom")
 		}
 
-		return assistantMsg(welcomeMarker), nil
+		return schema.Generation{Message: assistantMsg(welcomeMarker)}, nil
 	}
 
-	return assistantMsg("task answer"), nil
+	return schema.Generation{Message: assistantMsg("task answer")}, nil
 }
 
 func (m *welcomeDiscModel) Shutdown() {}
@@ -2035,16 +2035,16 @@ func (m *seqBlockThenAnswerModel) Generate(
 	ctx context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	m.calls++
 	if m.calls == 1 {
 		// First call: block until context expires (simulates welcome timeout).
 		<-ctx.Done()
 
-		return nil, ctx.Err()
+		return schema.Generation{}, ctx.Err()
 	}
 
-	return schema.AssistantMessage(m.answer, nil), nil
+	return schema.Generation{Message: schema.AssistantMessage(m.answer, nil)}, nil
 }
 
 func (m *seqBlockThenAnswerModel) Shutdown() {}

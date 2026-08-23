@@ -336,8 +336,9 @@ console.log(JSON.stringify(all.filter((x) => x.clusters.length > 0), null, 2));
   approval before it runs (skip with `--auto-approve`; stream each inner call
   with `-v`).
 - **Stateful within a session**: values saved on `globalThis` persist across
-  calls during an interactive session; top-level `let`/`const`/`var`/
-  `function` are scoped to a single call.
+  calls during an interactive session, as long as the call runs to completion
+  (one that times out or is left suspended resets them); top-level
+  `let`/`const`/`var`/`function` are scoped to a single call.
 - **Bounded**: scripts run under a timeout (default 120s) and a capped output
   size.
 

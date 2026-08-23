@@ -77,7 +77,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 	// hung/slow summarize does not wait out the provider timeout.
 	gctx, gcancel := context.WithCancel(ctx)
 	gstop := a.cancelOnInterrupt(gcancel, interruptPollInterval)
-	msg, err := a.model.Generate(gctx, turn, nil) // nil tools — the model cannot call tools.
+	gen, err := a.model.Generate(gctx, turn, nil) // nil tools — the model cannot call tools.
 	gstop()
 	gcancel()
 	a.metrics.AddRoundTrip()
@@ -101,6 +101,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 
 		return deterministicFailureNotice, nil //nolint:nilerr // Generate error is not fatal; fall back to deterministic notice.
 	}
+	msg := gen.Message
 	text := ""
 	if msg != nil {
 		text = strings.TrimSpace(msg.Text())
@@ -117,6 +118,16 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 	// recording the rendered summary and exiting 0.
 	if herr := a.haltErr(); herr != nil {
 		return "", herr
+	}
+
+	// The summary is rendered, returned as the turn's answer, and recorded in
+	// history, so a truncated one is a truncated final answer.
+	//
+	// A comparison, not a switch: exhaustive does not police it. A future member
+	// leaves this branch inert, which is fine since it only ever fires on StopLength.
+	if gen.StopReason == schema.StopLength {
+		rs.answerTruncated = true
+		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
 
 	return msg.Text(), nil

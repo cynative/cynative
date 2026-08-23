@@ -101,10 +101,10 @@ func (*blockingModel) Generate(
 	ctx context.Context,
 	_ []*schema.Message,
 	_ []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	<-ctx.Done()
 
-	return nil, ctx.Err()
+	return schema.Generation{}, ctx.Err()
 }
 
 func TestWelcome_TimedOut_ReturnsSentinel(t *testing.T) {

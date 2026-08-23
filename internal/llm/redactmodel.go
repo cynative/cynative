@@ -33,17 +33,20 @@ func NewRedactingChatModel(inner schema.ChatModel, redactor *redact.Redactor) *R
 // Generate redacts a copy of msgs and delegates to the inner model, passing the
 // tools (tool schemas) through unchanged. Any *GenerateError returned by the
 // inner model has its Message field redacted before it reaches the caller.
+//
+// The inner Generation is returned WHOLE. Reconstructing one from gen.Message
+// would drop the stop reason and silently defeat the loop's truncation handling.
 func (m *RedactingChatModel) Generate(
 	ctx context.Context, msgs []*schema.Message, tools []*schema.ToolInfo,
-) (*schema.Message, error) {
+) (schema.Generation, error) {
 	redacted := make([]*schema.Message, len(msgs))
 	for i, msg := range msgs {
 		redacted[i] = m.redactMessage(msg)
 	}
 
-	resp, err := m.inner.Generate(ctx, redacted, tools)
+	gen, err := m.inner.Generate(ctx, redacted, tools)
 
-	return resp, m.redactGenerateError(err)
+	return gen, m.redactGenerateError(err)
 }
 
 // redactGenerateError returns err with a *GenerateError's Message redacted. The

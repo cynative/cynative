@@ -1,7 +1,9 @@
 // Package sandbox runs untrusted JavaScript in an embedded sobek runtime,
 // exposing host capabilities to scripts only through explicitly registered tool
-// functions. A single runtime persists for the sandbox's lifetime, so state set
-// by one Run is visible to later Runs.
+// functions. One runtime persists across Runs, so state set by one Run is
+// visible to later Runs, but only when the script actually finished: a Run that
+// leaves its script interrupted or suspended forces a rebuild (and a fresh,
+// empty globalThis) before the next Run.
 package sandbox
 
 import (
@@ -33,10 +35,11 @@ var ErrScript = errors.New("sandbox: script execution failed")
 type ToolFunc func(ctx context.Context, argsJSON string) (string, error)
 
 const (
-	noOutputMessage  = "[script completed with no output]"
-	emptyObject      = "{}"
-	verboseClipLimit = 200
-	interruptReason  = "sandbox: execution interrupted"
+	noOutputMessage   = "[script completed with no output]"
+	incompleteMessage = "[script did not complete]"
+	emptyObject       = "{}"
+	verboseClipLimit  = 200
+	interruptReason   = "sandbox: execution interrupted"
 )
 
 // DefaultMaxConcurrency is the default cap on how many inner tool calls run
@@ -54,6 +57,15 @@ type Sandbox struct {
 	verbose   io.Writer
 	redact    func(string) string
 	sem       chan struct{}
+
+	// funcs is retained so a runtime left unusable by an interrupted Run can be
+	// rebuilt; build is the runtime factory, defaulted branch-free to the
+	// shell's buildRuntime so a test can inject a failing one. dirty records
+	// that the last Run left the runtime unusable, so the next one rebuilds
+	// before running anything.
+	funcs map[string]ToolFunc
+	build func(s *Sandbox, funcs map[string]ToolFunc) error
+	dirty bool
 
 	// Per-run state, owned by the loop goroutine (set under mu at the start of
 	// each Run). runCtx is the in-flight Run's timeout context; pending carries
@@ -93,9 +105,11 @@ func New(
 		verbose:   verbose,
 		redact:    redact,
 		sem:       make(chan struct{}, maxConcurrency),
+		funcs:     funcs,
+		build:     buildRuntime,
 	}
 
-	return s, buildRuntime(s, funcs)
+	return s, s.build(s, funcs)
 }
 
 // Run executes code on the persistent runtime and returns its captured output.
@@ -106,6 +120,10 @@ func New(
 func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if err := s.refresh(); err != nil {
+		return "", err
+	}
 
 	s.out.Reset()
 
@@ -130,14 +148,19 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 		}
 	})
 
-	var value sobek.Value
+	var (
+		value   sobek.Value
+		execErr error
+	)
 
 	prog, runErr := compileWrapped(code)
 	if runErr == nil {
-		value, runErr = s.vm.RunProgram(prog)
-		if runErr == nil {
-			runErr = s.loop()
+		value, execErr = s.vm.RunProgram(prog)
+		if execErr == nil {
+			execErr = s.loop()
 		}
+
+		runErr = execErr
 	}
 
 	// Release any parked workers, then wait for every worker and the watchdog to
@@ -152,7 +175,23 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 
 	// Pass the parent ctx (not runCtx) so assemble/ctxSuffix can distinguish
 	// caller cancellation from an expiring internal timeout.
-	out, failed := s.assemble(ctx, value, runErr, timeout)
+	out, failed, suspendedScript := s.assemble(ctx, value, runErr, timeout)
+
+	// Rebuild unless the script actually finished. Two distinct things strand a
+	// runtime and both are caught here. An error out of RunProgram or the loop
+	// means an interrupt unwound without unwinding sobek's own call stack, after
+	// which sobek treats every later RunProgram as a nested call and stops
+	// draining the promise job queue: awaits never resume, so every later Run
+	// quietly returns no output. A still-pending IIFE promise means the script
+	// is suspended inside the runtime, where a later Run could resume it. Only a
+	// script that ran to a settled promise, or one that never ran at all (a
+	// compile error), keeps globalThis. The error arm is deliberately a superset
+	// of the errors that really strand the call stack (a top-level throw that
+	// escaped the IIFE wrapper is catchable and harmless), because the two
+	// mistakes are not symmetric: rebuilding needlessly costs one script's
+	// globalThis, while not rebuilding strands every later Run of the session.
+	s.dirty = execErr != nil || suspendedScript
+
 	if failed {
 		return out, ErrScript
 	}
@@ -160,14 +199,35 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 	return out, nil
 }
 
+// refresh rebuilds the runtime when the previous Run left it unusable. It runs
+// under the Run mutex, before anything touches the VM. The dirty flag is
+// cleared only once a rebuild succeeds, so a failed rebuild is retried by the
+// next Run rather than leaving a broken runtime in service.
+func (s *Sandbox) refresh() error {
+	if !s.dirty {
+		return nil
+	}
+
+	if err := s.build(s, s.funcs); err != nil {
+		return fmt.Errorf("sandbox: rebuild runtime: %w", err)
+	}
+
+	s.dirty = false
+
+	return nil
+}
+
 // assemble builds the result string from the output buffer plus a trailing
-// diagnostic and reports whether the run failed. It reports a timeout/cancellation
-// first (the runCtx fired), then an uncatchable run error, then a rejected IIFE
-// promise (an uncaught script or tool error). A fulfilled promise contributes
-// nothing and is not a failure: only console output returns.
+// diagnostic, reports whether the run failed, and reports whether the runtime is
+// left holding a suspended script. It reports a timeout/cancellation
+// first (the runCtx fired), then an uncatchable run error, then an IIFE promise
+// that did not fulfil: either rejected (an uncaught script or tool error) or
+// still pending (the script awaited something that can never settle). A
+// fulfilled promise contributes nothing and is not a failure: only console
+// output returns.
 func (s *Sandbox) assemble(
 	ctx context.Context, value sobek.Value, runErr error, timeout time.Duration,
-) (string, bool) {
+) (string, bool, bool) {
 	out := s.out.String()
 	failed := false
 
@@ -179,13 +239,30 @@ func (s *Sandbox) assemble(
 		out += "\n[error] " + runErr.Error()
 		failed = true
 	default:
-		if p, ok := value.Export().(*sobek.Promise); ok && p.State() == sobek.PromiseStateRejected {
-			out += "\n[error] " + p.Result().String()
+		if p, ok := value.Export().(*sobek.Promise); ok && p.State() != sobek.PromiseStateFulfilled {
+			out += promiseFailure(p)
 			failed = true
 		}
 	}
 
-	return s.finalize(out), failed
+	return s.finalize(out), failed, suspended(value)
+}
+
+// suspended reports whether the script is still parked inside the runtime. It is
+// asked of every Run, not only the ones that reach the promise branch: a Run that
+// times out while the worker loop is parked reports no error at all, and a script
+// can hold exactly that state open on purpose with a fire-and-forget tool call
+// (which keeps the loop waiting) while it awaits a promise whose resolver it
+// stashed on globalThis. A nil value is a Run that never produced one, i.e. a
+// compile error or an interrupt out of RunProgram, so nothing is parked.
+func suspended(value sobek.Value) bool {
+	if value == nil {
+		return false
+	}
+
+	p, ok := value.Export().(*sobek.Promise)
+
+	return ok && p.State() == sobek.PromiseStatePending
 }
 
 // ctxSuffix renders a timeout vs. a parent cancellation.
@@ -195,6 +272,17 @@ func ctxSuffix(ctx context.Context, timeout time.Duration) string {
 	}
 
 	return fmt.Sprintf("\n[execution timed out after %s]", timeout)
+}
+
+// promiseFailure renders why the IIFE promise did not fulfil. Pending means the
+// worker loop drained with the script still suspended; reporting that keeps an
+// unfinishable script from being mistaken for one that simply printed nothing.
+func promiseFailure(p *sobek.Promise) string {
+	if p.State() == sobek.PromiseStatePending {
+		return "\n" + incompleteMessage
+	}
+
+	return "\n[error] " + p.Result().String()
 }
 
 // finalize truncates to maxOutput, repairs invalid UTF-8, and substitutes a
