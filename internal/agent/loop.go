@@ -56,9 +56,11 @@ var errNoAnswer = errors.New("agent: model returned no answer")
 // the only other stop. Three means one blank plus two retries.
 const maxConsecutiveEmpty = 3
 
-// errOutputLimit ends a run whose model spent its entire output budget before
-// emitting a visible token. Retrying cannot help: neither the request nor the
-// configuration changes between attempts.
+// errOutputLimit ends a run the model's output limit made unwinnable: a blank
+// turn whose entire output budget went to invisible tokens (retrying cannot
+// help: neither the request nor the configuration changes between attempts),
+// or maxConsecutiveTruncated tool-call turns in a row cut off at that limit
+// (the bounded retry with truncatedCallsDirective changed nothing).
 var errOutputLimit = errors.New("agent: model output limit reached")
 
 // errContentFiltered ends a run whose model response was withheld by a content
@@ -106,6 +108,25 @@ func clampRawReason(raw string) string {
 const emptyTurnDirective = "Your previous response was empty: it contained neither text nor a " +
 	"tool call. Continue the investigation with a tool call, or give your final answer as text."
 
+// maxConsecutiveTruncated is how many length-truncated tool-call turns a run
+// tolerates in a row before giving up with errOutputLimit. Like the blank-turn
+// ceiling, the retry is bounded so a model that deterministically overruns its
+// output budget cannot burn every remaining iteration on billed round-trips.
+const maxConsecutiveTruncated = 3
+
+// truncatedCallsDirective is appended as a trusted host message in place of a
+// length-truncated tool-call turn's refused calls, steering the retry toward
+// smaller output the same way emptyTurnDirective steers a blank turn.
+const truncatedCallsDirective = "Your previous response hit the output limit midway through writing " +
+	"tool calls, so none of them were run. Re-issue the work in smaller steps: shorter arguments, " +
+	"or fewer tool calls per turn."
+
+// truncatedCallsNotice warns the operator that a turn's tool calls were refused
+// because the response was cut at the model's output limit. Rendered, never
+// recorded, like truncatedAnswerNotice.
+const truncatedCallsNotice = "\n⚠️  The response was cut off at the model's output limit; " +
+	"its tool calls were not run."
+
 // deniedInterruptResult is the model-facing message returned by invokeIO when the
 // operator interrupted before the tool was dispatched; it matches the unframed
 // denial convention (trusted host/user signal, not untrusted tool output).
@@ -140,6 +161,11 @@ type runState struct {
 	// that carries text or a tool call. At maxConsecutiveEmpty the run gives up.
 	// It lives here, not on *Agent, so concurrent sub-runs share no mutable state.
 	consecutiveEmpty int
+	// consecutiveTruncated counts length-truncated tool-call turns in this run;
+	// reset by any accepted turn. A blank turn neither counts nor resets, so
+	// alternating failure shapes cannot stretch the retry budget. At
+	// maxConsecutiveTruncated the run gives up with errOutputLimit.
+	consecutiveTruncated int
 	// answerTruncated records that this run's final answer stopped on the model's
 	// output limit, so a caller can mark a conclusion the model did not finish.
 	// It lives here, not on *Agent, so concurrent sub-runs stay race-free.
@@ -161,7 +187,10 @@ type runScopedTool interface {
 // retried with a directive, and after maxConsecutiveEmpty in a row the run ends
 // with errNoAnswer. A blank turn whose stop reason is length, content_filter, or
 // unrecognized ends the run at once instead, since re-asking cannot change a
-// futile stop. Exhausting maxIter ends it with errIterationLimit. All are
+// futile stop. A tool-call turn reporting StopLength is quarantined: nothing
+// dispatches, the retry carries truncatedCallsDirective, and after
+// maxConsecutiveTruncated in a row the run ends with errOutputLimit.
+// Exhausting maxIter ends it with errIterationLimit. All are
 // non-fatal and distinguishable, so the caller reports the stop that actually
 // happened. Tool failures and unknown tools come back as tool-result content,
 // never as a Go error, so the model can self-correct. A non-nil error from
@@ -207,7 +236,8 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 
 		var answer string
 		var done bool
-		turn, answer, done, err = a.acceptTurn(turn, gen, rs)
+		var calls []schema.ToolCallBlock
+		turn, calls, answer, done, err = a.acceptTurn(turn, gen, rs)
 		if err != nil {
 			return "", err
 		}
@@ -215,9 +245,11 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 			return answer, nil
 		}
 
-		// A retried blank turn carries no tool calls, so this loop is a no-op and
-		// the run falls through to the next iteration.
-		for _, tc := range toolCallsOf(gen.Message) {
+		// The dispatch set comes from acceptTurn, never from gen.Message directly:
+		// a retried blank turn and a quarantined truncated turn both return no
+		// calls, so this loop is a no-op and the run falls through to the next
+		// iteration.
+		for _, tc := range calls {
 			a.metrics.AddToolCall()
 			var halt string
 			turn, halt, err = a.dispatchAndTrack(ctx, rs, tc, turn)
@@ -246,17 +278,6 @@ func (a *Agent) haltOr(fallback error) error {
 	return fallback
 }
 
-// toolCallsOf returns a turn's tool calls, tolerating the nil message blankTurn
-// admits: schema.Message's accessors dereference their receiver, so the retry
-// path must not reach for them directly.
-func toolCallsOf(msg *schema.Message) []schema.ToolCallBlock {
-	if msg == nil {
-		return nil
-	}
-
-	return msg.ToolCalls()
-}
-
 // blankTurn reports whether an assistant turn carries nothing the run can use:
 // no tool call, and no text once trimmed. Providers produce these on truncation,
 // a content filter, or a reasoning-only response, and a lossy provider
@@ -271,8 +292,10 @@ func blankTurn(msg *schema.Message) bool {
 }
 
 // acceptTurn classifies one assistant turn and extends the transcript. It
-// returns the updated turn, the final answer when the run is over, whether it is
-// over, and a halt error.
+// returns the updated turn, the tool calls the run may dispatch, the final
+// answer when the run is over, whether it is over, and a halt error. The
+// dispatch set is the classification's verdict: a blank or quarantined turn
+// returns none, so the loop cannot dispatch what acceptTurn refused.
 //
 // A blank turn is NOT appended: an assistant message with neither content nor
 // tool calls re-encodes to a content-less message that Bifrost's Anthropic
@@ -280,27 +303,42 @@ func blankTurn(msg *schema.Message) bool {
 // both of which those APIs reject. Gemini's adapter drops it instead, which is
 // why appending one went unnoticed. The retry therefore carries a host directive
 // in place of the blank turn rather than a repaired version of it.
+//
+// A tool-call turn reporting StopLength is quarantined the same way: the model
+// demonstrably did not finish writing the calls, so none of them dispatch. This
+// is the one place the stop reason refines a NON-blank turn, and only because
+// no content signal can replace it: truncation can land on a valid-JSON
+// boundary, so even parseable arguments cannot be trusted.
 func (a *Agent) acceptTurn(
 	turn []*schema.Message, gen schema.Generation, rs *runState,
-) ([]*schema.Message, string, bool, error) {
+) ([]*schema.Message, []schema.ToolCallBlock, string, bool, error) {
 	msg := gen.Message
 	if blankTurn(msg) {
-		return a.handleBlankTurn(turn, gen, rs)
+		next, err := a.handleBlankTurn(turn, gen, rs)
+
+		return next, nil, "", false, err
 	}
 
 	rs.consecutiveEmpty = 0
+	if len(msg.ToolCalls()) > 0 && gen.StopReason == schema.StopLength {
+		next, err := a.refuseTruncatedCalls(turn, msg, rs)
+
+		return next, nil, "", false, err
+	}
+	rs.consecutiveTruncated = 0
+
 	turn = append(turn, msg)
 	a.renderTurn(msg, rs.out)
 
-	if len(msg.ToolCalls()) > 0 {
-		return turn, "", false, nil
+	if calls := msg.ToolCalls(); len(calls) > 0 {
+		return turn, calls, "", false, nil
 	}
 
 	// Re-check after rendering: a stop that landed while the final answer was
 	// being written still surfaces ErrInterrupted/130 instead of recording the
 	// answer and exiting 0.
 	if herr := a.haltErr(); herr != nil {
-		return turn, "", false, herr
+		return turn, nil, "", false, herr
 	}
 
 	// A comparison, not a switch: exhaustive does not police it. A future member
@@ -310,7 +348,37 @@ func (a *Agent) acceptTurn(
 		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
 
-	return turn, msg.Text(), true, nil
+	return turn, nil, msg.Text(), true, nil
+}
+
+// refuseTruncatedCalls quarantines a tool-call turn cut off at the model's
+// output limit. The calls are refused wholesale and never replayed: a
+// half-written call re-encodes hazardously (Bifrost's Anthropic adapter passes
+// invalid-JSON arguments through raw, which can fail every subsequent request
+// in the session), and the reason belongs to the whole generation, so a call
+// that happens to parse proves nothing about the batch. The turn's prose is
+// kept byte-identical in a text-only projection (a whitespace-only projection
+// is skipped, like a blank turn); the retry carries a host directive in place
+// of the calls. At maxConsecutiveTruncated in a row the run gives up with
+// errOutputLimit, through haltOr, so an operator stop or budget crossing that
+// raced in is reported as itself.
+func (a *Agent) refuseTruncatedCalls(
+	turn []*schema.Message, msg *schema.Message, rs *runState,
+) ([]*schema.Message, error) {
+	rs.consecutiveTruncated++
+
+	if text := msg.Text(); strings.TrimSpace(text) != "" {
+		projected := schema.AssistantMessage(text, nil)
+		turn = append(turn, projected)
+		a.renderTurn(projected, rs.out)
+	}
+	fmt.Fprintln(rs.out, truncatedCallsNotice)
+
+	if rs.consecutiveTruncated >= maxConsecutiveTruncated {
+		return turn, a.haltOr(errOutputLimit)
+	}
+
+	return append(turn, schema.UserMessage(truncatedCallsDirective)), nil
 }
 
 // handleBlankTurn decides what to do about an assistant turn carrying neither
@@ -321,14 +389,14 @@ func (a *Agent) acceptTurn(
 // that raced in during Generate is reported as itself rather than as truncation.
 func (a *Agent) handleBlankTurn(
 	turn []*schema.Message, gen schema.Generation, rs *runState,
-) ([]*schema.Message, string, bool, error) {
+) ([]*schema.Message, error) {
 	switch gen.StopReason {
 	case schema.StopLength:
-		return turn, "", false, a.haltOr(errOutputLimit)
+		return turn, a.haltOr(errOutputLimit)
 	case schema.StopContentFilter:
-		return turn, "", false, a.haltOr(errContentFiltered)
+		return turn, a.haltOr(errContentFiltered)
 	case schema.StopOther:
-		return turn, "", false, a.haltOr(&stoppedEarlyError{raw: gen.RawReason})
+		return turn, a.haltOr(&stoppedEarlyError{raw: gen.RawReason})
 	case schema.StopUnspecified, schema.StopNormal, schema.StopToolCalls:
 		// Retryable. A blank turn reporting a normal stop is usually transient,
 		// and seven distinct Gemini conditions reach here reporting exactly that,
@@ -337,10 +405,10 @@ func (a *Agent) handleBlankTurn(
 
 	rs.consecutiveEmpty++
 	if rs.consecutiveEmpty >= maxConsecutiveEmpty {
-		return turn, "", false, a.haltOr(errNoAnswer)
+		return turn, a.haltOr(errNoAnswer)
 	}
 
-	return append(turn, schema.UserMessage(emptyTurnDirective)), "", false, nil
+	return append(turn, schema.UserMessage(emptyTurnDirective)), nil
 }
 
 // dispatchAndTrack dispatches one tool call, appends its result to turn, updates the

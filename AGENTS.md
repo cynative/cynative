@@ -417,7 +417,19 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   outcomes. **A blank turn is never appended to the transcript**: it re-encodes to a
   content-less assistant message that Bifrost's Anthropic adapter serializes as `"content": []`
   and its OpenAI adapter as a bare role, both rejected by those APIs; Gemini's adapter drops
-  it, which is why replaying one went unnoticed. A non-blank final answer that stops on
+  it, which is why replaying one went unnoticed. A **tool-call turn reporting `length` is
+  quarantined** (#277): none of its calls dispatch, because the model demonstrably did not
+  finish writing them and truncation can land on a valid-JSON boundary, so even parseable
+  arguments prove nothing (this is the one place the reason refines a non-blank turn, since no
+  content signal can replace it). The refused calls are never replayed either: Bifrost's
+  Anthropic adapter re-encodes invalid-JSON arguments raw into `tool_use.input`, so a truncated
+  call kept in the transcript can fail every later request in the session. The turn's prose is
+  kept byte-identical in a text-only projection, the retry carries `truncatedCallsDirective`,
+  and `maxConsecutiveTruncated` (3) in a row ends the run with `errOutputLimit`; the streak is
+  reset by any accepted turn, while a blank turn neither counts nor resets it, so alternating
+  failure shapes cannot stretch the retry budget. Refused calls credit neither
+  `metrics.AddToolCall` nor the consecutive-failure streak, and write no audit records: nothing
+  was dispatched. A non-blank final answer that stops on
   `length` instead renders a one-line truncation notice; the notice is rendered, never
   recorded, so session history stays byte-identical to the model's own text. Tool failures and
   unknown-tool names come back as tool-result content, never a

@@ -2492,28 +2492,381 @@ func TestRun_FinalAnswer_NoNoticeWhenNotTruncated(t *testing.T) {
 	}
 }
 
-func TestRun_TruncatedTurnWithToolCalls_StillDispatches(t *testing.T) {
+// genScriptModel returns scripted Generations in order (so a turn can carry
+// both tool calls and a stop reason) and records the transcript passed to each
+// call, so a test can assert what a retry replays. Once exhausted it errors.
+type genScriptModel struct {
+	gens []schema.Generation
+	seen [][]*schema.Message
+}
+
+var _ schema.ChatModel = (*genScriptModel)(nil)
+
+func (m *genScriptModel) Generate(
+	_ context.Context,
+	msgs []*schema.Message,
+	_ []*schema.ToolInfo,
+) (schema.Generation, error) {
+	m.seen = append(m.seen, append([]*schema.Message(nil), msgs...))
+	if len(m.seen) > len(m.gens) {
+		return schema.Generation{}, errors.New("genScriptModel: out of scripted generations")
+	}
+
+	return m.gens[len(m.seen)-1], nil
+}
+
+// truncatedCallTurn builds a StopLength generation carrying text and one echo
+// tool call with the given arguments.
+func truncatedCallTurn(text, args string) schema.Generation {
+	return schema.Generation{
+		Message: schema.AssistantMessage(text, []schema.ToolCallBlock{
+			{ID: "c1", Name: "echo", Arguments: args},
+		}),
+		StopReason: schema.StopLength,
+	}
+}
+
+// plainTurn builds a generation with no stop reason from an assistant message.
+func plainTurn(msg *schema.Message) schema.Generation {
+	return schema.Generation{Message: msg} //nolint:exhaustruct // no reason reported
+}
+
+// countingTool counts its runs under the tool name "echo".
+type countingTool struct{ runs int }
+
+var _ schema.InvokableTool = (*countingTool)(nil)
+
+func (*countingTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "echo", Desc: "echo tool", Params: nil}
+}
+
+func (t *countingTool) Run(context.Context, string) (string, error) {
+	t.runs++
+
+	return "echoed", nil
+}
+
+// transcriptContains reports whether substr appears anywhere in the transcript:
+// text blocks, tool-call names or arguments, or tool-result content.
+func transcriptContains(msgs []*schema.Message, substr string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m.Text(), substr) {
+			return true
+		}
+		for _, tc := range m.ToolCalls() {
+			if strings.Contains(tc.Name, substr) || strings.Contains(tc.Arguments, substr) {
+				return true
+			}
+		}
+		for _, tr := range m.ToolResults() {
+			if strings.Contains(tr.Content, substr) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func TestRun_TruncatedTurnWithToolCalls_RefusesDispatch(t *testing.T) {
 	t.Parallel()
 
-	// Content stays authoritative: the stop reason refines only the blank case.
-	// Bifrost itself warns the field cannot be trusted to describe content.
+	// The stop reason gates dispatch: a turn cut at the output limit may carry a
+	// half-written call, and truncation can land on a valid-JSON boundary — the
+	// {} arguments here parse cleanly and must be refused anyway.
 	var ran bool
 	m := &toolCallReasonModel{reason: schema.StopLength}
 	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: &ran}})
 
 	var buf bytes.Buffer
-	answer, err := a.run(context.Background(), &runState{depth: 0, out: &buf}, nil, 5)
+	rs := &runState{depth: 0, out: &buf}
+	answer, err := a.run(context.Background(), rs, nil, 5)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !ran {
-		t.Error("tool did not run: a truncated turn's tool calls must still dispatch")
+	if ran {
+		t.Error("tool ran: a truncated turn's tool calls must not dispatch")
 	}
 	if answer != "final" {
 		t.Errorf("answer = %q, want %q", answer, "final")
 	}
+	if rs.answerTruncated {
+		t.Error("answerTruncated = true, want false: the final answer itself was not truncated")
+	}
 	if strings.Contains(buf.String(), truncatedAnswerNotice) {
 		t.Errorf("output = %q, a tool-call turn is not a final answer", buf.String())
+	}
+}
+
+func TestRun_TruncatedToolCallTurn_ReplaysTextAndDirectiveNotTheCalls(t *testing.T) {
+	t.Parallel()
+
+	// The retry must not replay the refused calls: Bifrost's Anthropic adapter
+	// re-encodes invalid-JSON arguments raw into tool_use.input, so a truncated
+	// call kept in the transcript can fail every subsequent request. The turn's
+	// prose is kept byte-identical; the calls and their arguments vanish.
+	m := &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("partial plan", `{"url": "https://exa`),
+		plainTurn(schema.AssistantMessage("final", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
+
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(m.seen) != 2 {
+		t.Fatalf("Generate called %d times, want 2", len(m.seen))
+	}
+
+	retry := m.seen[1]
+	var projected *schema.Message
+	for _, msg := range retry {
+		if msg.Role == schema.Assistant {
+			projected = msg
+		}
+	}
+	if projected == nil {
+		t.Fatal("retry transcript has no assistant message: the turn's prose must be kept")
+	}
+	if got := projected.Text(); got != "partial plan" {
+		t.Errorf("projected text = %q, want it byte-identical to the model's prose", got)
+	}
+	if n := len(projected.ToolCalls()); n != 0 {
+		t.Errorf("projected message carries %d tool calls, want 0", n)
+	}
+	if transcriptContains(retry, `{"url"`) {
+		t.Error("the truncated arguments were replayed; they must be dropped from the transcript")
+	}
+	last := retry[len(retry)-1]
+	if last.Role != schema.User || !strings.Contains(last.Text(), "none of them were run") {
+		t.Errorf("last message = %+v, want the host truncation directive", last)
+	}
+}
+
+func TestRun_TruncatedToolCallTurn_TextlessTurnRetriesWithOnlyTheDirective(t *testing.T) {
+	t.Parallel()
+
+	// A truncated turn with calls but no prose leaves nothing worth keeping: the
+	// retry carries the directive alone, never an empty assistant message (which
+	// re-encodes to a content-less message some providers reject).
+	m := &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("", `{"x":`),
+		plainTurn(schema.AssistantMessage("final", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
+
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(m.seen) != 2 {
+		t.Fatalf("Generate called %d times, want 2", len(m.seen))
+	}
+	for _, msg := range m.seen[1] {
+		if msg.Role == schema.Assistant {
+			t.Errorf("retry transcript carries an assistant message %+v, want none", msg)
+		}
+	}
+	last := m.seen[1][len(m.seen[1])-1]
+	if last.Role != schema.User || !strings.Contains(last.Text(), "none of them were run") {
+		t.Errorf("last message = %+v, want the host truncation directive", last)
+	}
+}
+
+func TestRun_RepeatedTruncatedToolCallTurns_StopWithTheOutputLimit(t *testing.T) {
+	t.Parallel()
+
+	// A model that keeps truncating mid-call would otherwise burn every
+	// remaining iteration on billed round-trips; the fourth scripted answer must
+	// never be requested.
+	tool := &countingTool{runs: 0}
+	m := &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("a", `{"x":`),
+		truncatedCallTurn("b", `{"x":`),
+		truncatedCallTurn("c", `{"x":`),
+		plainTurn(schema.AssistantMessage("should not appear", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": tool})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if !errors.Is(err, errOutputLimit) {
+		t.Fatalf("err = %v, want errOutputLimit", err)
+	}
+	if answer != "" {
+		t.Errorf("answer = %q, want empty", answer)
+	}
+	if len(m.seen) != 3 {
+		t.Errorf("Generate called %d times, want 3", len(m.seen))
+	}
+	if tool.runs != 0 {
+		t.Errorf("tool ran %d times, want 0", tool.runs)
+	}
+}
+
+func TestRun_TruncatedStreakResetsOnAProductiveTurn(t *testing.T) {
+	t.Parallel()
+
+	// The ceiling counts CONSECUTIVE truncated turns. Occasional truncation
+	// between productive turns must not accumulate into a give-up, and only the
+	// productive turn's call dispatches.
+	tool := &countingTool{runs: 0}
+	m := &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("a", `{"x":`),
+		truncatedCallTurn("b", `{"x":`),
+		plainTurn(toolCall("c1", "echo", "{}")),
+		truncatedCallTurn("c", `{"x":`),
+		truncatedCallTurn("d", `{"x":`),
+		plainTurn(schema.AssistantMessage("done", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": tool})
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "done" {
+		t.Errorf("answer = %q, want done", answer)
+	}
+	if tool.runs != 1 {
+		t.Errorf("tool ran %d times, want 1 (only the productive turn dispatches)", tool.runs)
+	}
+}
+
+func TestRun_ABlankTurnDoesNotResetTheTruncationStreak(t *testing.T) {
+	t.Parallel()
+
+	// A retryable blank between truncated turns is not progress: the truncation
+	// ceiling still fires on the third truncated turn, so alternating failure
+	// shapes cannot stretch the retry budget.
+	m := &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("a", `{"x":`),
+		truncatedCallTurn("b", `{"x":`),
+		plainTurn(schema.AssistantMessage("", nil)),
+		truncatedCallTurn("c", `{"x":`),
+		plainTurn(schema.AssistantMessage("should not appear", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
+
+	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if !errors.Is(err, errOutputLimit) {
+		t.Fatalf("err = %v, want errOutputLimit", err)
+	}
+	if len(m.seen) != 4 {
+		t.Errorf("Generate called %d times, want 4", len(m.seen))
+	}
+}
+
+func TestRun_TruncatedToolCallTurn_DoesNotDisturbTheToolFailureStreak(t *testing.T) {
+	t.Parallel()
+
+	// The two ceilings count different things: consecutiveFailures counts failed
+	// tool calls, the truncation streak counts refused turns. A truncated turn
+	// between two failing tool calls must neither credit the failure streak
+	// (nothing was dispatched) nor reset it, so the failure halt still fires on
+	// the second failure.
+	tool := &countingTool{runs: 0}
+	m := &genScriptModel{gens: []schema.Generation{
+		plainTurn(toolCall("c1", "boom", "{}")),
+		truncatedCallTurn("mid plan", `{"x":`),
+		plainTurn(toolCall("c2", "boom", "{}")),
+		plainTurn(schema.AssistantMessage("stuck: I need credentials", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"boom": &errTool{}, "echo": tool})
+	a.maxConsecutiveFailures = 2
+
+	rs := &runState{depth: 0, out: io.Discard}
+	answer, err := a.run(context.Background(), rs, nil, 32)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if answer != "stuck: I need credentials" {
+		t.Errorf("answer = %q, want the failure summary", answer)
+	}
+	if rs.consecutiveFailures != 2 {
+		t.Errorf("consecutiveFailures = %d, want 2 (the truncated turn neither credits nor resets)",
+			rs.consecutiveFailures)
+	}
+	if tool.runs != 0 {
+		t.Errorf("the truncated turn's call ran %d times, want 0", tool.runs)
+	}
+}
+
+func TestRun_TruncatedToolCallTurn_RendersRefusalNoticeAndRecordsCleanHistory(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Model = &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("half a plan", `{"x":`),
+		plainTurn(schema.AssistantMessage("done", nil)),
+	}}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "q", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "half a plan") {
+		t.Errorf("output = %q, want the turn's prose rendered", out)
+	}
+	if !strings.Contains(out, "were not run") {
+		t.Errorf("output = %q, want the refusal notice", out)
+	}
+	if strings.Contains(out, truncatedAnswerNotice) {
+		t.Errorf("output = %q, must not claim a truncated final answer", out)
+	}
+	// History keeps only the clean Q&A pair; neither the projection nor the
+	// directive leaks into it.
+	if len(a.history) != 2 {
+		t.Fatalf("history length = %d, want 2", len(a.history))
+	}
+	if got := a.history[1].Text(); got != "done" {
+		t.Errorf("recorded answer = %q, want %q", got, "done")
+	}
+}
+
+func TestRun_InterruptBeatsTheTruncationCeiling(t *testing.T) {
+	t.Parallel()
+
+	// Checks per quarantined iteration: top-of-loop and post-Generate. Trip on
+	// the 7th (0-based 6): the ceiling's own terminal check, so a stop that
+	// landed during the third truncated turn is reported as the operator's
+	// interrupt, not as a model output problem.
+	ci := &countInterrupter{target: 6, calls: 0}
+	m := &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("a", `{"x":`),
+		truncatedCallTurn("b", `{"x":`),
+		truncatedCallTurn("c", `{"x":`),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
+	a.interrupter = ci
+
+	_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
+	if !errors.Is(err, errInterrupted) {
+		t.Fatalf("err = %v, want errInterrupted", err)
+	}
+	if errors.Is(err, errOutputLimit) {
+		t.Error("an operator stop must not be reported as a model output problem")
+	}
+}
+
+func TestRun_TruncatedToolCallTurn_CountsNoToolCallMetric(t *testing.T) {
+	t.Parallel()
+
+	// AddToolCall's contract is a dispatched call; a refused batch counts none.
+	acc := metrics.NewAccumulator("p", "m")
+	cfg := baseConfig()
+	cfg.Metrics = acc
+	cfg.Model = &genScriptModel{gens: []schema.Generation{
+		truncatedCallTurn("a", `{"x":`),
+		plainTurn(schema.AssistantMessage("done", nil)),
+	}}
+	a := New(context.Background(), cfg)
+
+	if err := a.Run(context.Background(), "q", io.Discard); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := acc.Snapshot().ToolCalls; got != 0 {
+		t.Errorf("ToolCalls = %d, want 0: a refused batch dispatches nothing", got)
 	}
 }
 
