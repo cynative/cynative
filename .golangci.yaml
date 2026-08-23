@@ -258,6 +258,25 @@ linters:
           deny:
             - pkg: log$
               desc: Use log/slog instead, see https://go.dev/blog/slog
+        # internal/schema is a pure leaf (see its package doc and the AGENTS.md
+        # bullet): it imports only the standard library and
+        # github.com/invopop/jsonschema, and no internal import may ever be
+        # added, because the whole llm/agent/tools/ui spine depends on it, so
+        # an upward import here is a cycle waiting to happen. The
+        # allowlist pins that contract exactly. The '$'-suffixed entries are
+        # exact matches, so the self-import exception (schema's external tests
+        # import the package under test) cannot widen into a prefix hole, and
+        # test files are deliberately in scope. depguard sees only the active
+        # build context and golangci-lint drops diagnostics from generated
+        # files; internal/schema's TestPackageIsPureLeaf closes those gaps by
+        # parsing every file in the package directory.
+        "schema-pure-leaf":
+          files:
+            - "**/internal/schema/**"
+          allow:
+            - $gostd
+            - github.com/invopop/jsonschema$
+            - github.com/cynative/cynative/internal/schema$
 
     embeddedstructfieldcheck:
       # Checks that sync.Mutex and sync.RWMutex are not used as embedded fields.

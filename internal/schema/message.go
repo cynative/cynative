@@ -1,7 +1,10 @@
 // Package schema is the provider-agnostic message and tool "currency" shared by
 // the llm, agent, tools, and ui packages. It is a pure leaf: it imports only the
 // standard library and github.com/invopop/jsonschema, so nothing it depends on can
-// create an import cycle. No internal import may ever be added here.
+// create an import cycle. No internal import may ever be added here. The contract
+// is pinned twice: the depguard "schema-pure-leaf" rule fails lint at the point of
+// the edit, and TestPackageIsPureLeaf parses every file in this directory, covering
+// the build-tagged and generated files depguard cannot see.
 package schema
 
 import "strings"

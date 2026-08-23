@@ -344,7 +344,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - **`internal/schema`**: the provider-agnostic message/tool currency shared by `llm`, `agent`,
   `tools`, and `ui`. A pure leaf: it imports only the standard library and
   `github.com/invopop/jsonschema`, and **no internal import may ever be added** (nothing it
-  depends on can create a cycle). `Message{Role, Content []Block}` with three sealed block
+  depends on can create a cycle). The contract is pinned twice: the depguard `schema-pure-leaf`
+  rule in `.golangci.yaml` fails lint at the point of the edit (exact-match allowlist; the
+  external tests' self-import is the one sanctioned extra), and `TestPackageIsPureLeaf` parses
+  every file in the package directory, covering the build-tagged and generated files depguard
+  cannot see. `Message{Role, Content []Block}` with three sealed block
   variants: `TextBlock`, `ToolCallBlock` (the raw JSON arguments as the model produced them),
   `ToolResultBlock`. `ChatModel{Generate}` takes the offered tools as a direct
   `tools []*ToolInfo` argument (tool-less calls pass nil; there is no per-call options
