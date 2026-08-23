@@ -320,7 +320,8 @@ func (a *Agent) acceptTurn(
 	}
 
 	rs.consecutiveEmpty = 0
-	if len(msg.ToolCalls()) > 0 && gen.StopReason == schema.StopLength {
+	calls := msg.ToolCalls()
+	if len(calls) > 0 && gen.StopReason == schema.StopLength {
 		next, err := a.refuseTruncatedCalls(turn, msg, rs)
 
 		return next, nil, "", false, err
@@ -330,7 +331,7 @@ func (a *Agent) acceptTurn(
 	turn = append(turn, msg)
 	a.renderTurn(msg, rs.out)
 
-	if calls := msg.ToolCalls(); len(calls) > 0 {
+	if len(calls) > 0 {
 		return turn, calls, "", false, nil
 	}
 
