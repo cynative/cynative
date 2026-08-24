@@ -220,7 +220,9 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 		if notice, ok := a.stopNotice(err); ok {
 			fmt.Fprint(w, notice)
 
-			return nil
+			// The notice explains the outcome to the operator; the umbrella lets a
+			// scripted one-shot exit non-zero while errors.Is still reaches the cause.
+			return fmt.Errorf("%w: %w", ErrNoAnswer, err)
 		}
 
 		return err
@@ -243,7 +245,7 @@ func (a *Agent) stopNotice(err error) (string, bool) {
 			a.metrics.BudgetReason()), true
 	case errors.Is(err, errIterationLimit):
 		return "\n⚠️  Reached the iteration limit without a final answer.\n", true
-	case errors.Is(err, errNoAnswer):
+	case errors.Is(err, errEmptyResponses):
 		return fmt.Sprintf("\n⚠️  The model returned %d empty responses in a row and could not "+
 			"produce an answer. Try rerunning, or switch models.\n", maxConsecutiveEmpty), true
 	case errors.Is(err, errOutputLimit):

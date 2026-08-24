@@ -535,7 +535,7 @@ func TestRun_IterationLimitNotice(t *testing.T) {
 	t.Parallel()
 
 	// The model always calls a tool, so run exhausts maxIter and returns "":
-	// Run prints the notice and records nothing.
+	// Run prints the notice, records nothing, and reports the no-answer sentinel.
 	cfg := baseConfig()
 	cfg.Cfg.MaxIterations = 1
 	cfg.Model = &scriptedModel{msgs: []*schema.Message{toolCall("c1", "echo", "{}")}}
@@ -544,8 +544,8 @@ func TestRun_IterationLimitNotice(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 
 	if !strings.Contains(buf.String(), "Reached the iteration limit") {
@@ -973,8 +973,8 @@ func TestRun_BudgetHaltsTurnWithNotice(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 
 	if model.calls != 1 {
@@ -1025,8 +1025,8 @@ func TestRun_BudgetHaltsOnOverBudgetFinalAnswer(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 
 	if model.calls != 1 {
@@ -1090,8 +1090,8 @@ func TestRun_BudgetHaltsBeforeRemainingToolCalls(t *testing.T) {
 	a.maxSubagentIter = 3
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "go", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "go", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 
 	if ran {
@@ -1603,8 +1603,8 @@ func TestRun_MaxConsecutiveFailuresZeroDisables(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "scan", &buf); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := a.Run(context.Background(), "scan", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer (iteration limit)", err)
 	}
 	out := buf.String()
 	if strings.Contains(out, "Stopped after") {
@@ -2008,8 +2008,8 @@ func TestRun_RepeatedEmptyTurnsGiveUpBeforeExhaustingIterations(t *testing.T) {
 	a := newTestAgent(model, map[string]schema.InvokableTool{})
 
 	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 32)
-	if !errors.Is(err, errNoAnswer) {
-		t.Fatalf("err = %v, want errNoAnswer", err)
+	if !errors.Is(err, errEmptyResponses) {
+		t.Fatalf("err = %v, want errEmptyResponses", err)
 	}
 	if answer != "" {
 		t.Errorf("answer = %q, want empty", answer)
@@ -2097,8 +2097,8 @@ func TestRun_NoAnswerNotice(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 
 	if !strings.Contains(buf.String(), "empty responses in a row") {
@@ -2164,8 +2164,8 @@ func TestRun_BlankTurn_RetryableReasonStillRetriesToTheCeiling(t *testing.T) {
 			a := newTestAgent(m, map[string]schema.InvokableTool{})
 
 			_, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
-			if !errors.Is(err, errNoAnswer) {
-				t.Fatalf("err = %v, want errNoAnswer", err)
+			if !errors.Is(err, errEmptyResponses) {
+				t.Fatalf("err = %v, want errEmptyResponses", err)
 			}
 			if m.calls != maxConsecutiveEmpty {
 				t.Errorf("Generate called %d times, want %d", m.calls, maxConsecutiveEmpty)
@@ -2195,8 +2195,8 @@ func TestRun_BlankTurn_RendersReasonSpecificNotice(t *testing.T) {
 			a := New(context.Background(), cfg)
 
 			var buf bytes.Buffer
-			if err := a.Run(context.Background(), "q", &buf); err != nil {
-				t.Fatalf("Run returned %v, want nil (a non-fatal stop)", err)
+			if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+				t.Fatalf("Run = %v, want ErrNoAnswer (a non-fatal stop)", err)
 			}
 			if !strings.Contains(buf.String(), tc.wantNotice) {
 				t.Errorf("notice = %q, want it to contain %q", buf.String(), tc.wantNotice)
@@ -2218,8 +2218,8 @@ func TestRun_BlankTurn_RawReasonCannotForgeOutput(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 	if strings.Contains(buf.String(), "evil\n") {
 		t.Errorf("raw reason was rendered unescaped: %q", buf.String())
@@ -2237,8 +2237,8 @@ func TestRun_BlankTurn_LongRawReasonIsBounded(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 	if strings.Contains(buf.String(), strings.Repeat("x", maxRawReasonBytes+1)) {
 		t.Errorf("raw reason was not bounded: %q", buf.String())
@@ -2306,7 +2306,7 @@ func TestRun_BlankTurnOnTheLastIterationReportsTheIterationLimit(t *testing.T) {
 	if !errors.Is(err, errIterationLimit) {
 		t.Fatalf("err = %v, want errIterationLimit", err)
 	}
-	if errors.Is(err, errNoAnswer) {
+	if errors.Is(err, errEmptyResponses) {
 		t.Error("a single blank turn must not report the empty-response ceiling")
 	}
 }
@@ -2348,8 +2348,8 @@ func TestRun_BudgetWinsOverTheEmptyResponseCeiling(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 
 	out := buf.String()
@@ -2382,7 +2382,7 @@ func TestRun_InterruptDuringABlankStreakBeatsTheEmptyCeiling(t *testing.T) {
 	if !errors.Is(err, errInterrupted) {
 		t.Fatalf("err = %v, want errInterrupted", err)
 	}
-	if errors.Is(err, errNoAnswer) {
+	if errors.Is(err, errEmptyResponses) {
 		t.Error("an operator stop must not be reported as a model failure")
 	}
 }
@@ -2849,7 +2849,7 @@ func TestRun_TruncationCeilingOnTheLastIterationStillReportsTheOutputLimit(t *te
 	// When the third truncated turn is also the last allowed iteration, the
 	// ceiling's specific diagnosis wins over the generic iteration limit, the
 	// same resolution the blank-turn ceiling uses (handleBlankTurn returns
-	// errNoAnswer inside the iteration). A truncation streak still below its
+	// errEmptyResponses inside the iteration). A truncation streak still below its
 	// ceiling when maxIter expires keeps reporting errIterationLimit, since the
 	// loop exit stays authoritative for plain exhaustion.
 	m := &genScriptModel{gens: []schema.Generation{
@@ -2958,8 +2958,8 @@ func TestRun_BlankTruncatedTurn_HasNoTruncationNotice(t *testing.T) {
 	a := New(context.Background(), cfg)
 
 	var buf bytes.Buffer
-	if err := a.Run(context.Background(), "q", &buf); err != nil {
-		t.Fatalf("Run: %v", err)
+	if err := a.Run(context.Background(), "q", &buf); !errors.Is(err, ErrNoAnswer) {
+		t.Fatalf("Run = %v, want ErrNoAnswer", err)
 	}
 	if strings.Contains(buf.String(), truncatedAnswerNotice) {
 		t.Errorf("output = %q, want only the output-limit notice", buf.String())

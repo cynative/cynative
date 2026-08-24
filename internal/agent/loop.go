@@ -43,10 +43,18 @@ var ErrInterrupted = errInterrupted
 // gochecknoglobals.
 var errIterationLimit = errors.New("agent: iteration limit reached")
 
-// errNoAnswer ends a run whose model returned maxConsecutiveEmpty blank turns in
-// a row. Run renders its own notice and recovers; like the iteration limit it is
-// not fatal.
-var errNoAnswer = errors.New("agent: model returned no answer")
+// errEmptyResponses ends a run whose model returned maxConsecutiveEmpty blank
+// turns in a row. Run renders its own notice and recovers; like the iteration
+// limit it is not fatal.
+var errEmptyResponses = errors.New("agent: model returned no answer")
+
+// ErrNoAnswer is the exported umbrella for every futile stop Run recovers from
+// (budget, iteration limit, repeated-empty, output limit, content filter,
+// stopped-early): the run completed without producing an answer. Run wraps the
+// specific cause with it after rendering the operator notice, so the cli can map
+// a scripted one-shot to a distinct exit code while the interactive loop keeps
+// treating the turn as non-fatal.
+var ErrNoAnswer = errors.New("agent: run produced no answer")
 
 // maxConsecutiveEmpty is how many blank assistant turns a run tolerates in a row
 // before giving up. A blank turn is retried because it is usually transient, but
@@ -185,7 +193,7 @@ type runScopedTool interface {
 // terminates when the model emits an assistant turn that carries text and no
 // tool calls — the final answer. A turn carrying neither is not an answer: it is
 // retried with a directive, and after maxConsecutiveEmpty in a row the run ends
-// with errNoAnswer. A blank turn whose stop reason is length, content_filter, or
+// with errEmptyResponses. A blank turn whose stop reason is length, content_filter, or
 // unrecognized ends the run at once instead, since re-asking cannot change a
 // futile stop. A tool-call turn reporting StopLength is quarantined: nothing
 // dispatches, the retry carries truncatedCallsDirective, and after
@@ -267,9 +275,10 @@ func (a *Agent) run(ctx context.Context, rs *runState, turn []*schema.Message, m
 
 // haltOr returns a pending operator-facing halt (interrupt, then budget) in
 // preference to fallback. Every terminal return that is not itself a halt goes
-// through it: Run maps errIterationLimit and errNoAnswer to a notice and exit 0,
-// so a stop that landed after the last checkpoint would otherwise be reported as
-// a model or budget-shaped failure and swallow the operator's Ctrl-C.
+// through it: Run maps errIterationLimit and errEmptyResponses to a notice and
+// ErrNoAnswer, so a stop that landed after the last checkpoint would otherwise
+// be reported as a model or budget-shaped failure and swallow the operator's
+// Ctrl-C.
 func (a *Agent) haltOr(fallback error) error {
 	if err := a.haltErr(); err != nil {
 		return err
@@ -406,7 +415,7 @@ func (a *Agent) handleBlankTurn(
 
 	rs.consecutiveEmpty++
 	if rs.consecutiveEmpty >= maxConsecutiveEmpty {
-		return turn, a.haltOr(errNoAnswer)
+		return turn, a.haltOr(errEmptyResponses)
 	}
 
 	return append(turn, schema.UserMessage(emptyTurnDirective)), nil

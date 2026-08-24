@@ -71,7 +71,7 @@ func subagentStop(err error) (bool, string) {
 	switch {
 	case errors.Is(err, errIterationLimit):
 		return true, subagentIterationLimit
-	case errors.Is(err, errNoAnswer):
+	case errors.Is(err, errEmptyResponses):
 		return true, subagentNoAnswer
 	case errors.Is(err, errOutputLimit):
 		return true, subagentOutputLimit

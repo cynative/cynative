@@ -292,7 +292,12 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   once; a TTY without `-p` enters an interactive follow-up loop (optionally seeded by a
   positional arg) that survives transient turn errors; `exit`/`quit`/EOF ends it, and it
   aborts only on context cancellation, a fail-closed audit-write failure, or an LLM generation
-  failure before the first successful turn. Piped stdin (1 MiB-capped, UTF-8-repaired)
+  failure before the first successful turn. A one-shot whose run ends in a futile stop
+  (`agent.ErrNoAnswer`) exits `exitNoAnswer` (2), distinct from the generic 1, so a scripted
+  caller can tell "no answer produced" from an execution failure without parsing stdout; an
+  interactive session swallows the same sentinel (`runTask`/`handleTurnError`) and continues,
+  and a failing deferred audit close still replaces it (exit 1), so the outcome sentinel
+  cannot mask a durability failure. Piped stdin (1 MiB-capped, UTF-8-repaired)
   combined with a positional task is folded in as untrusted `<piped_input>` context
   (`agent.WrapPipedInput`). A bare interactive session opens with `Agent.Welcome`, gated on all
   four of: interactive, no seed task, no configured token budget, and at least one registered
@@ -384,7 +389,7 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     content-block type and the OpenAI-shaped `ChatAssistantMessage.Refusal` field beside a
     null content), so a refusal becomes the run's answer instead of a blank turn whose fate
     then depends on the reported stop reason, anywhere from an immediate `errStoppedEarly`
-    halt to the bounded retry that ends in `errNoAnswer`. `.Reasoning`/`.ReasoningDetails`
+    halt to the bounded retry that ends in `errEmptyResponses`. `.Reasoning`/`.ReasoningDetails`
     stay unread on purpose: a reasoning-only turn is not an answer and should be retried.
     A provider that adds a further prose carrier would present as an empty turn again.
   - Env references resolve through the injected `LookupEnv`, never the process environment:
@@ -409,8 +414,8 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   advisory, since Bifrost does not guarantee it describes content, so it can only refine the
   response, never override the content classification. A blank turn reporting `stop`,
   `tool_calls`, or nothing keeps the original behavior: `acceptTurn` retries it with
-  `emptyTurnDirective` and ends the run with `errNoAnswer` after `maxConsecutiveEmpty` (3) in a
-  row, while exhausting `maxIter` ends it with `errIterationLimit`. The two are distinct
+  `emptyTurnDirective` and ends the run with `errEmptyResponses` after `maxConsecutiveEmpty` (3)
+  in a row, while exhausting `maxIter` ends it with `errIterationLimit`. The two are distinct
   sentinels because a single empty string used to mean both, so a model that returned nothing
   was reported as an iteration limit on a run with most of its budget left (#271); the retry
   stays bounded rather than reason-gated because seven distinct Gemini conditions produce a
@@ -452,7 +457,11 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
     loop checks `BudgetExceeded()` at the top of every iteration, after each model response,
     and after each tool dispatch; on exceed it returns the `errBudgetExceeded` sentinel and
     `Run` renders a
-    one-line notice and stops the turn with no partial answer recorded. The bound is cumulative
+    one-line notice and stops the turn with no partial answer recorded. Every such futile stop
+    (budget, iteration limit, repeated-empty, output limit, content filter, stopped-early)
+    leaves `Run` as the exported `ErrNoAnswer` wrapping the specific cause — rendered notice
+    first, history untouched — which the cli maps to exit 2 in one-shot and swallows in an
+    interactive session. The bound is cumulative
     across the main loop, `task` sub-runs, and the verifier, and is per-session (it survives
     `StartTurn`). Interrupt: Esc or a first Ctrl-C (via the host `Interrupter`, checked at the
     top of each iteration, after `Generate`, and before every I/O dispatch) surfaces as

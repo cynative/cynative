@@ -206,6 +206,21 @@ func TestSilenceGracefulStop_SilencesLLMUnavailable(t *testing.T) {
 	}
 }
 
+func TestSilenceGracefulStop_SilencesNoAnswer(t *testing.T) {
+	t.Parallel()
+
+	// The no-answer notice was already rendered inside Run, so cobra must not
+	// print a duplicate Error line; the error still propagates for ExitCodeFor.
+	cmd := &cobra.Command{} //nolint:exhaustruct // only SilenceErrors is under test.
+	err := silenceGracefulStop(cmd, agent.ErrNoAnswer)
+	if !errors.Is(err, agent.ErrNoAnswer) {
+		t.Errorf("must return the no-answer error so ExitCodeFor maps it to 2, got %v", err)
+	}
+	if !cmd.SilenceErrors {
+		t.Error("SilenceErrors should be set for ErrNoAnswer (notice already rendered)")
+	}
+}
+
 func TestNewRootCmd_Version(t *testing.T) {
 	t.Parallel()
 

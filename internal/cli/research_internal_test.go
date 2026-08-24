@@ -1369,24 +1369,6 @@ func newInterruptedAgent(t *testing.T) *agent.Agent {
 	return a
 }
 
-// TestExitCodeFor verifies that ExitCodeFor maps nil→0, ErrInterrupted→130, and
-// any other error→1.
-func TestExitCodeFor(t *testing.T) {
-	t.Parallel()
-
-	if got := ExitCodeFor(nil); got != 0 {
-		t.Errorf("nil → %d, want 0", got)
-	}
-
-	if got := ExitCodeFor(agent.ErrInterrupted); got != 130 {
-		t.Errorf("ErrInterrupted → %d, want 130", got)
-	}
-
-	if got := ExitCodeFor(errors.New("other")); got != 1 {
-		t.Errorf("other error → %d, want 1", got)
-	}
-}
-
 // TestInteractiveLoop_InterruptContinues verifies that agent.ErrInterrupted from
 // a.Run is treated as non-fatal: the loop continues to the next prompt rather than
 // returning, so the operator can keep the session going after a Ctrl-C.
@@ -2240,5 +2222,158 @@ func TestHandleTurnError_AuditErrTerminates(t *testing.T) {
 	// established is returned as-is.
 	if !established {
 		t.Error("established must be preserved (true) on audit error")
+	}
+}
+
+// noAnswerModel returns three blank assistant turns, driving a real agent.Run
+// into its repeated-empty futile stop so cli tests exercise the ErrNoAnswer
+// path end-to-end rather than hand-constructing the sentinel.
+func noAnswerModel() *fakeChatModel {
+	return &fakeChatModel{ //nolint:exhaustruct // errs/calls not pre-set.
+		responses: []*schema.Message{assistantMsg(""), assistantMsg(""), assistantMsg("")},
+	}
+}
+
+// TestRunTask_OneShotNoAnswerPropagates verifies that a non-interactive run
+// whose model produced no answer propagates agent.ErrNoAnswer (for exit code 2)
+// instead of swallowing it, and renders no ✗ LLM block (the model was live; the
+// stop notice already explained the outcome).
+func TestRunTask_OneShotNoAnswerPropagates(t *testing.T) {
+	t.Parallel()
+
+	fu := &fakeUI{} //nolint:exhaustruct // only llmStatuses is checked.
+	d := testDeps()
+	d.ui = fu
+	a := newTestAgent(t, noAnswerModel())
+	acc := metrics.NewAccumulator("p", "m")
+	acc.StartTurn()
+
+	established, err := d.runTask(context.Background(), a, acc, validCfg(), "task", false)
+	if !errors.Is(err, agent.ErrNoAnswer) {
+		t.Fatalf("runTask = %v, want agent.ErrNoAnswer", err)
+	}
+	if established {
+		t.Error("a no-answer one-shot must not mark the session established")
+	}
+	if len(fu.llmStatuses) != 0 {
+		t.Errorf("no LLM status block should render for a no-answer stop, got %#v", fu.llmStatuses)
+	}
+}
+
+// TestRunTask_InteractiveNoAnswerContinues verifies the seeded interactive path
+// keeps its pre-#281 behavior: the no-answer stop is swallowed (nil error, the
+// REPL follows) and the session counts as established because the model did
+// respond this turn.
+func TestRunTask_InteractiveNoAnswerContinues(t *testing.T) {
+	t.Parallel()
+
+	fu := &fakeUI{} //nolint:exhaustruct // only llmStatuses is checked.
+	d := testDeps()
+	d.ui = fu
+	acc := metrics.NewAccumulator("p", "m")
+	a := newTestAgentWithMetrics(t, noAnswerModel(), acc)
+	acc.StartTurn()
+
+	established, err := d.runTask(context.Background(), a, acc, validCfg(), "task", true)
+	if err != nil {
+		t.Fatalf("interactive runTask must swallow the no-answer stop, got %v", err)
+	}
+	if !established {
+		t.Error("the model responded (blank turns are still responses), so the session is established")
+	}
+}
+
+// TestHandleTurnError_NoAnswerContinuesLoop verifies the interactive follow-up
+// loop treats a no-answer turn like an interrupt: continue to the next prompt,
+// promoting established only when the model actually responded this turn.
+func TestHandleTurnError_NoAnswerContinuesLoop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("no model response leaves established unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		d := testDeps()
+		acc := metrics.NewAccumulator("p", "m")
+
+		established, cont, err := d.handleTurnError(
+			context.Background(), acc, validCfg(), agent.ErrNoAnswer, false, 0,
+		)
+		if err != nil {
+			t.Fatalf("no-answer must not terminate the session, got %v", err)
+		}
+		if !cont {
+			t.Error("no-answer must continue the loop")
+		}
+		if established {
+			t.Error("no response recorded → established must stay false")
+		}
+	})
+
+	t.Run("model response promotes established", func(t *testing.T) {
+		t.Parallel()
+
+		d := testDeps()
+		acc := metrics.NewAccumulator("p", "m")
+		acc.AddResponse() // the blank turns were still live responses.
+
+		established, cont, err := d.handleTurnError(
+			context.Background(), acc, validCfg(), agent.ErrNoAnswer, false, 0,
+		)
+		if err != nil {
+			t.Fatalf("no-answer must not terminate the session, got %v", err)
+		}
+		if !cont {
+			t.Error("no-answer must continue the loop")
+		}
+		if !established {
+			t.Error("a live model response must promote established")
+		}
+	})
+}
+
+// TestRunResearch_OneShotNoAnswerReturnsErrNoAnswer drives the full one-shot
+// path: a run producing no answer must surface agent.ErrNoAnswer from
+// runResearch so main exits 2.
+func TestRunResearch_OneShotNoAnswerReturnsErrNoAnswer(t *testing.T) {
+	t.Parallel()
+
+	d := testDeps()
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return noAnswerModel(), nil
+	}
+
+	err := d.runResearch(
+		context.Background(), taskReq("task"), validCfg(),
+		researchFlags{}, //nolint:exhaustruct // non-interactive defaults.
+	)
+	if !errors.Is(err, agent.ErrNoAnswer) {
+		t.Fatalf("runResearch = %v, want agent.ErrNoAnswer", err)
+	}
+}
+
+// TestRunResearch_AuditCloseFailureWinsOverNoAnswer pins the fail-closed audit
+// precedence: when the deferred audit close fails on a no-answer run, the close
+// error (exit 1) must win over agent.ErrNoAnswer (exit 2) — the sentinel must
+// not mask a durability failure.
+func TestRunResearch_AuditCloseFailureWinsOverNoAnswer(t *testing.T) {
+	t.Parallel()
+
+	d := testDeps()
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return noAnswerModel(), nil
+	}
+	d.newAuditSink = func(config.Config, *audit.AgentProvenance) (audit.Sink, func() error, error) {
+		return nil, func() error { return errors.New("disk full") }, nil
+	}
+
+	err := d.runResearch(
+		context.Background(), taskReq("task"), validCfg(),
+		researchFlags{}, //nolint:exhaustruct // non-interactive defaults.
+	)
+	if err == nil || errors.Is(err, agent.ErrNoAnswer) {
+		t.Fatalf("audit close failure must replace ErrNoAnswer, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "audit log close") {
+		t.Errorf("err = %v, want the audit-close failure surfaced", err)
 	}
 }

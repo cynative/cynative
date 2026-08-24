@@ -136,12 +136,14 @@ e2e_run_bounded() {
 # clear, distinct failure. Returns:
 #   0  success (rc 0 and no budget notice on stdout) - run domain assertions.
 #   2  timeout (rc 124).
-#   3  budget hit: "Budget reached" appears on stdout. The agent writes this to
-#      stdout and exits 0, so the answer never lands; without this branch a
-#      budget hit reads as a bogus "answer missing". Callers treat 3 as fatal and
-#      do NOT retry (a retry only burns more credits and re-hits the ceiling).
-#   1  any other non-zero rc (provider / config / access).
-# Order matters: timeout, then budget (exits 0), then the generic rc branch.
+#   3  budget hit: "Budget reached" appears on stdout. The agent renders the
+#      notice to stdout and exits 2 (no answer produced), so the budget grep
+#      must run before the generic rc branch or a budget hit would read as a
+#      retryable provider failure. Callers treat 3 as fatal and do NOT retry
+#      (a retry only burns more credits and re-hits the ceiling).
+#   1  any other non-zero rc (a no-answer exit 2 for a non-budget reason lands
+#      here too: retryable, like the "answer missing" miss it used to be).
+# Order matters: timeout, then budget, then the generic rc branch.
 e2e_classify_run() {
 	if [ "$1" -eq 124 ]; then
 		printf 'FAIL: timed out after %ss\n' "$4" >&2

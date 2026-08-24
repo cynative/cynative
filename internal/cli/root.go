@@ -88,11 +88,12 @@ starting a research session.`,
 }
 
 // silenceGracefulStop suppresses Cobra's duplicate "Error: ..." line for a graceful
-// operator interrupt — the agent already rendered the stop notice — while still
-// returning the error so ExitCodeFor maps it to 130. Any other error prints as usual.
+// operator interrupt or a no-answer stop — the agent already rendered the stop
+// notice — while still returning the error so ExitCodeFor maps it (130 for the
+// interrupt, 2 for no answer). Any other error prints as usual.
 func silenceGracefulStop(cmd *cobra.Command, err error) error {
-	if errors.Is(err, agent.ErrInterrupted) || errors.Is(err, ErrLLMUnavailable) ||
-		errors.Is(err, ErrDoctorNotReady) {
+	if errors.Is(err, agent.ErrInterrupted) || errors.Is(err, agent.ErrNoAnswer) ||
+		errors.Is(err, ErrLLMUnavailable) || errors.Is(err, ErrDoctorNotReady) {
 		cmd.SilenceErrors = true
 	}
 

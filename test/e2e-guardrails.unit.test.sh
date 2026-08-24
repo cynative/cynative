@@ -150,8 +150,10 @@ if (
 	printf 'answer text\n' > "$td/ok.out"
 	: > "$td/empty.err"
 	printf 'boom\n' > "$td/boom.err"
-	# The agent writes the budget notice to STDOUT and exits 0 on a budget hit;
-	# only the ASCII "Budget reached" substring is load-bearing.
+	# The agent writes the budget notice to STDOUT and exits 2 (no answer
+	# produced) on a budget hit; only the ASCII "Budget reached" substring is
+	# load-bearing, and the budget classification must win over the generic
+	# non-zero-rc branch.
 	printf 'Budget reached - token budget reached: 100 / 50 tokens. Stopping;\n' > "$td/budget.out"
 
 	# Capture classify_run's rc without tripping set -e on its intentional
@@ -162,8 +164,10 @@ if (
 
 	[ "$(classrc 0   "$td/ok.out"     "$td/empty.err" 60)" -eq 0 ] || exit 1  # ok
 	[ "$(classrc 124 "$td/ok.out"     "$td/empty.err" 60)" -eq 2 ] || exit 1  # timeout
-	[ "$(classrc 0   "$td/budget.out" "$td/empty.err" 60)" -eq 3 ] || exit 1  # budget (rc 0!)
+	[ "$(classrc 2   "$td/budget.out" "$td/empty.err" 60)" -eq 3 ] || exit 1  # budget (live shape: exit 2)
+	[ "$(classrc 0   "$td/budget.out" "$td/empty.err" 60)" -eq 3 ] || exit 1  # budget beats a clean rc too
 	[ "$(classrc 1   "$td/ok.out"     "$td/boom.err"  60)" -eq 1 ] || exit 1  # generic
+	[ "$(classrc 2   "$td/ok.out"     "$td/empty.err" 60)" -eq 1 ] || exit 1  # non-budget no-answer: retryable
 	[ "$(classrc 124 "$td/budget.out" "$td/empty.err" 60)" -eq 2 ] || exit 1  # timeout dominates
 ); then pass "classify_run maps ok/timeout/budget/failure to 0/2/3/1"; else fail "classify_run"; fi
 

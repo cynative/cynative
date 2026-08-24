@@ -303,8 +303,10 @@ func (d *deps) runResearch(ctx context.Context, req runRequest, cfg config.Confi
 	}
 	defer func() {
 		// Fail-closed: a close/flush failure means the final audit records may not be
-		// durable, so surface it as the command's error — without masking an earlier one.
-		if cerr := closeAudit(); cerr != nil && err == nil {
+		// durable, so surface it as the command's error — without masking an earlier
+		// one. ErrNoAnswer is an outcome, not a failure: the close error replaces it
+		// (exit 1), so the no-answer sentinel cannot mask a durability failure.
+		if cerr := closeAudit(); cerr != nil && (err == nil || errors.Is(err, agent.ErrNoAnswer)) {
 			err = fmt.Errorf("audit log close: %w", cerr)
 		}
 	}()
@@ -468,6 +470,16 @@ func (d *deps) runTask(
 	// first turn is treated as a graceful shutdown, not a dead-LLM startup failure.
 	if ctx.Err() != nil {
 		return false, nil //nolint:nilerr // context cancel is a graceful exit, not an error.
+	}
+	// A no-answer stop already rendered its notice inside Run. Interactive: the
+	// session continues into the REPL (the model responded, so a recorded
+	// response also proves liveness); one-shot: propagate so main exits 2.
+	if errors.Is(runErr, agent.ErrNoAnswer) {
+		if interactive {
+			return modelResponded(acc, respBefore), nil
+		}
+
+		return false, runErr
 	}
 	if errors.Is(runErr, llm.ErrGenerate) {
 		// Only treat as a dead LLM when the model never responded this turn (no
@@ -677,6 +689,17 @@ func (d *deps) handleTurnError(
 		// later transient llm.ErrGenerate is a normal turn error rather than a
 		// failed-startup abort. A pre-Generate interrupt (no response) proves
 		// nothing, so established is left unchanged.
+		if modelResponded(acc, respBefore) {
+			established = true
+		}
+
+		return established, true, nil
+	}
+
+	// A no-answer stop already rendered its notice inside Run; resume the loop.
+	// Like the interrupt arm, established is promoted only on a recorded model
+	// response (a blank turn is still a live response).
+	if errors.Is(err, agent.ErrNoAnswer) {
 		if modelResponded(acc, respBefore) {
 			established = true
 		}
