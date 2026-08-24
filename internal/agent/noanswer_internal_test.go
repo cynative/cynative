@@ -115,3 +115,24 @@ func TestRun_FutileStopsReturnErrNoAnswer(t *testing.T) {
 		})
 	}
 }
+
+// TestRun_StoppedEarlyKeepsRawReasonThroughTheWrap pins that the umbrella wrap
+// preserves the concrete *stoppedEarlyError, not just the bare sentinel: the
+// raw backend reason must stay reachable via errors.As for diagnostics.
+func TestRun_StoppedEarlyKeepsRawReasonThroughTheWrap(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig()
+	cfg.Model = &blankReasonModel{reason: schema.StopOther, raw: "guardrail_x", calls: 0}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	err := a.Run(context.Background(), "q", &buf)
+	stoppedEarly, ok := errors.AsType[*stoppedEarlyError](err)
+	if !ok {
+		t.Fatalf("Run = %v, want the concrete *stoppedEarlyError preserved through the wrap", err)
+	}
+	if stoppedEarly.raw != "guardrail_x" {
+		t.Errorf("raw = %q, want the backend reason preserved", stoppedEarly.raw)
+	}
+}

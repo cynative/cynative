@@ -228,7 +228,7 @@ configuration reference.
 
 ## Sessions and approvals
 
-`cynative` opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`). The exit code carries the verdict for scripts: 0 when a report was produced, 2 when the run completed without an answer (the notice names the reason - iteration or token budget, an empty or filtered model response), 130 on interrupt, and 1 for any other failure.
+`cynative` opens an interactive session (full line editing and history with arrow keys); `cynative "task"` runs the task then stays interactive; `-p` / `--print` runs a single task non-interactively and exits - for scripts and pipes (e.g. `cat main.tf | cynative -p "review this Terraform for misconfigurations"`). The exit code carries the verdict for scripts: 0 when a report was produced, 2 when the run completed without an answer (the notice names the reason - iteration or token budget, an empty or filtered model response), 130 on interrupt, 143 on SIGTERM, and 1 for any other failure.
 
 Cynative calls your stack using the credentials already in your shell - it keeps no separate credential store. **Always provide the least-privileged, read-only credential needed**.
 

@@ -141,9 +141,11 @@ e2e_run_bounded() {
 #      must run before the generic rc branch or a budget hit would read as a
 #      retryable provider failure. Callers treat 3 as fatal and do NOT retry
 #      (a retry only burns more credits and re-hits the ceiling).
-#   1  any other non-zero rc (a no-answer exit 2 for a non-budget reason lands
-#      here too: retryable, like the "answer missing" miss it used to be).
-# Order matters: timeout, then budget, then the generic rc branch.
+#   1  any other non-zero rc. A non-budget no-answer exit 2 is retryable (the
+#      same miss it classified as "answer missing" when such runs exited 0) but
+#      gets its own message and a STDOUT tail, since the agent renders the stop
+#      notice to stdout, not stderr.
+# Order matters: timeout, then budget, then no-answer, then the generic branch.
 e2e_classify_run() {
 	if [ "$1" -eq 124 ]; then
 		printf 'FAIL: timed out after %ss\n' "$4" >&2
@@ -153,6 +155,11 @@ e2e_classify_run() {
 		printf 'FAIL: token budget reached - raise the token limit (E2E_MAX_TOKENS / SMOKE_MAX_TOKENS / GCP_E2E_MAX_TOKENS / AWS_E2E_MAX_TOKENS / GH_E2E_MAX_TOKENS). Notice:\n' >&2
 		grep -F 'Budget reached' "$2" >&2 || true
 		return 3
+	fi
+	if [ "$1" -eq 2 ]; then
+		printf 'FAIL: run completed without an answer (exit 2). stdout tail:\n' >&2
+		tail -n 5 "$2" >&2
+		return 1
 	fi
 	if [ "$1" -ne 0 ]; then
 		printf 'FAIL: provider/config/access (exit %s). stderr tail:\n' "$1" >&2
