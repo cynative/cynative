@@ -118,7 +118,7 @@ func TestRun_FutileStopsReturnErrNoAnswer(t *testing.T) {
 
 // TestRun_StoppedEarlyKeepsRawReasonThroughTheWrap pins that the umbrella wrap
 // preserves the concrete *stoppedEarlyError, not just the bare sentinel: the
-// raw backend reason must stay reachable via errors.As for diagnostics.
+// raw backend reason must stay reachable via [errors.As] for diagnostics.
 func TestRun_StoppedEarlyKeepsRawReasonThroughTheWrap(t *testing.T) {
 	t.Parallel()
 
