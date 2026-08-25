@@ -37,6 +37,15 @@ runrc() {
 	if connector_run_phase "$@" >/dev/null 2>&1; then echo 0; else echo $?; fi
 }
 
+# runrc_err ERRFILE ARGS... - like runrc, but keep connector_run_phase's own stderr in
+# ERRFILE so a case can assert on the diagnostics (the cynative#286 waiver note, or a
+# replayed classifier FAIL).
+runrc_err() {
+	_ef=$1
+	shift
+	if connector_run_phase "$@" >/dev/null 2>"$_ef"; then echo 0; else echo $?; fi
+}
+
 # ---- arbitrate: the 8 rows ported from the suites' former --selftest -----------
 if (
 	_af=0
@@ -117,6 +126,131 @@ if (
 		*) exit 1 ;;
 	esac
 ); then pass "connector_run_phase: argv starts with PROVIDER MODE AUDIT TARGET"; else fail "connector_run_phase argv fidelity"; fi
+
+# ---- connector_run_phase: deny-mode waiver (cynative#286) -----------------------
+# A parser-proven canary/secretscan attempt whose run completed without a final
+# answer (exit 2) is accepted, never retried: the retry's audit truncation would
+# erase the records that already proved the phase. The waiver is scoped to exit 2
+# exactly (the CLI turns a failed audit-log close into exit 1, so rc 2 also proves
+# the log the parser judged was complete), the posture and footer gates still run,
+# and the classifier's no-answer FAIL is replaced by an explanatory note so a
+# passing phase never logs a FAIL.
+
+# ---- waiver: canary + parser 0 + rc 2 -> accepted, posture ran, note not FAIL ---
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc_err "$td/phase_err" gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 0 ] || exit 1
+	[ -e "$td/posture_ran" ] || exit 1
+	grep -q 'accepting (cynative#286)' "$td/phase_err" || exit 1
+	grep -q 'FAIL: run completed without an answer' "$td/phase_err" && exit 1
+	exit 0
+); then pass "connector_run_phase: canary waiver - parser 0 + rc 2 accepted, posture ran, note replaces the FAIL"; else fail "connector_run_phase canary waiver"; fi
+
+# ---- waiver: secretscan is a deny mode too --------------------------------------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 2 tool calls\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc gcp secretscan "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 0 ] || exit 1
+	[ -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: secretscan waiver - parser 0 + rc 2 accepted"; else fail "connector_run_phase secretscan waiver"; fi
+
+# ---- no waiver in read mode: the answer text IS evidence there ------------------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	printf 'expect-marker\n' > "$td/out"
+	: > "$td/audit"
+	[ "$(runrc gcp read "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj expect-marker '')" -eq 1 ] || exit 1
+	[ ! -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: read mode + rc 2 still retries (no waiver)"; else fail "connector_run_phase read no-waiver"; fi
+
+# ---- no waiver for an unproven attempt: parser miss (1) + rc 2 still retries ----
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_miss.py 1
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc gcp canary "$td/p_miss.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 1 ] || exit 1
+	[ ! -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: canary parser miss + rc 2 still retries (proof required)"; else fail "connector_run_phase miss no-waiver"; fi
+
+# ---- no waiver on exit 1: only rc 2 proves the audit log closed cleanly ---------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 1 60 "$td/posture" proj '' '')" -eq 1 ] || exit 1
+	[ ! -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: canary parser 0 + rc 1 still retries (audit durability unknown)"; else fail "connector_run_phase rc1 no-waiver"; fi
+
+# ---- no waiver over a budget verdict: 3 stays fatal and its FAIL is replayed ----
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	printf 'Budget reached (16000 tokens)\n' > "$td/out"
+	: > "$td/audit"
+	[ "$(runrc_err "$td/phase_err" gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 3 ] || exit 1
+	[ ! -e "$td/posture_ran" ] || exit 1
+	grep -q 'token budget reached' "$td/phase_err" || exit 1
+); then pass "connector_run_phase: canary rc 2 + budget notice still 3, FAIL replayed"; else fail "connector_run_phase budget dominance"; fi
+
+# ---- no waiver on a timeout: a killed run's audit may be truncated --------------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 124 60 "$td/posture" proj '' '')" -eq 2 ] || exit 1
+	[ ! -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: canary parser 0 + rc 124 still times out (no waiver)"; else fail "connector_run_phase timeout no-waiver"; fi
+
+# ---- no waiver for an unknown mode: the allowlist is explicit -------------------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc gcp future "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 1 ] || exit 1
+	[ ! -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: unknown mode + rc 2 still retries (explicit allowlist)"; else fail "connector_run_phase unknown-mode no-waiver"; fi
+
+# ---- a waived attempt still runs the soft gates: missing footer -> 1 ------------
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'no footer here\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	[ "$(runrc gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 1 ] || exit 1
+	# The posture callback DID run: proof the waiver engaged and the failure came
+	# from the footer gate, not from arbitration.
+	[ -e "$td/posture_ran" ] || exit 1
+); then pass "connector_run_phase: a waived attempt still fails the footer gate"; else fail "connector_run_phase waiver soft-gates"; fi
 
 # ---- e2e_pin_audit_size ---------------------------------------------------------
 if (

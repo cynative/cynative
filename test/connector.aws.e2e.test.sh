@@ -272,7 +272,9 @@ canary_phase() {
 	if e2e_run_bounded "$timeout_s" "$workdir/canary.audit.log" "$workdir/canary.out" "$workdir/canary.err" \
 		"$bin" "$workdir/config.yaml" "$(e2e_canary_prompt "$_call")"; then _rc=0; else _rc=$?; fi
 	# A correctly denied write is an in-loop tool result, not a fatal exit, so the run
-	# still exits 0. The classifier only catches a real run failure (timeout, budget,
+	# normally still exits 0; a driver that then produces no final answer exits 2,
+	# which deny mode waives when the parser already proved the denial (cynative#286).
+	# The classifier still catches a real run failure (timeout, budget,
 	# crash); the audit parser inside connector_run_phase is what judges the boundary,
 	# and a write that SUCCEEDED, or any call that cannot be shown to have stayed on the
 	# machine, exits 4: fatal, never retried, because a retry would truncate the audit
