@@ -130,11 +130,13 @@ if (
 # ---- connector_run_phase: deny-mode waiver (cynative#286) -----------------------
 # A parser-proven canary/secretscan attempt whose run completed without a final
 # answer (exit 2) is accepted, never retried: the retry's audit truncation would
-# erase the records that already proved the phase. The waiver is scoped to exit 2
-# exactly (the CLI turns a failed audit-log close into exit 1, so rc 2 also proves
-# the log the parser judged was complete), the posture and footer gates still run,
-# and the classifier's no-answer FAIL is replaced by an explanatory note so a
-# passing phase never logs a FAIL.
+# erase the records that already proved the phase. The parser's hold is sound
+# however the run ended (write-ahead attempt records plus the orphan-attempt
+# breach; see the waiver comment in connector-e2e.sh), so the exit-2 scoping is
+# deliberate narrowness: every other exit signals an operational failure a retry
+# should surface loudly. The posture and footer gates still run, and the
+# classifier's no-answer FAIL is replaced by an explanatory note so a passing
+# phase never logs a FAIL.
 
 # ---- waiver: canary + parser 0 + rc 2 -> accepted, posture ran, note not FAIL ---
 if (
@@ -188,7 +190,7 @@ if (
 	[ ! -e "$td/posture_ran" ] || exit 1
 ); then pass "connector_run_phase: canary parser miss + rc 2 still retries (proof required)"; else fail "connector_run_phase miss no-waiver"; fi
 
-# ---- no waiver on exit 1: only rc 2 proves the audit log closed cleanly ---------
+# ---- no waiver on exit 1: other failures must surface loudly via the retry ------
 if (
 	td=$(mktemp -d)
 	trap 'rm -rf "$td"' EXIT
@@ -198,7 +200,7 @@ if (
 	: > "$td/out"; : > "$td/audit"
 	[ "$(runrc gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 1 60 "$td/posture" proj '' '')" -eq 1 ] || exit 1
 	[ ! -e "$td/posture_ran" ] || exit 1
-); then pass "connector_run_phase: canary parser 0 + rc 1 still retries (audit durability unknown)"; else fail "connector_run_phase rc1 no-waiver"; fi
+); then pass "connector_run_phase: canary parser 0 + rc 1 still retries (outside the exit-2 allowlist)"; else fail "connector_run_phase rc1 no-waiver"; fi
 
 # ---- no waiver over a budget verdict: 3 stays fatal and its FAIL is replayed ----
 if (
@@ -238,7 +240,7 @@ if (
 	grep -q 'FAIL: run completed without an answer' "$td/phase_err" || exit 1
 ); then pass "connector_run_phase: waiver survives an uncreatable buffer (unbuffered fallback)"; else fail "connector_run_phase waiver buffer fallback"; fi
 
-# ---- no waiver on a timeout: a killed run's audit may be truncated --------------
+# ---- no waiver on a timeout: outside the deliberately narrow exit-2 allowlist ---
 if (
 	td=$(mktemp -d)
 	trap 'rm -rf "$td"' EXIT
