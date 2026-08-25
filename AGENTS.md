@@ -195,10 +195,13 @@ writes the gitignored `*_mock_test.go` mocks. **Run `make generate` before
   audit truncation would erase the evidence), and a first-line credential prepass fails closed (4) if
   credential material was logged. In the deny modes (canary/secretscan) a parser-proven attempt is
   accepted even when the run itself exits 2 with no final answer: the prose adds no evidence there,
-  and retrying would truncate away records that already proved the phase. The waiver is scoped to
-  exit 2 exactly, because a failed audit-log close replaces the no-answer outcome with exit 1, so
-  rc 2 also proves the parser judged a completely written log; timeouts, budget hits, and every
-  read-mode or unknown-mode outcome keep the strict behavior (#286). **Sanctioning a read is a security decision, not a
+  and retrying would truncate away records that already proved the phase. The hold is trustworthy
+  however the run ended, because the audit is write-ahead on both dispatch paths (the attempt
+  record lands before the request runs; a failed attempt-write refuses to run it) and the sweep
+  exits 4 on an unsanctioned attempt with no proven denial, so a crash-shortened log cannot hide
+  a dispatched call. The waiver still keeps to exit 2 exactly, the CLI's no-answer outcome (a
+  failed audit-log close exits 1 instead); timeouts, budget hits, and every other exit, mode, or
+  parser verdict keep the strict behavior (#286). **Sanctioning a read is a security decision, not a
   convenience**: `sweep_calls` exempts a sanctioned call from the fatal unsanctioned sweep
   *without looking at its result*, so whatever the read family admits can no longer be caught
   having succeeded. gcp/aws/github use the per-record `is_sanctioned_read`, which must stay a

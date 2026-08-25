@@ -327,8 +327,8 @@ canary_phase() {
 	# A correctly denied write is an in-loop tool result, not a fatal exit, so the run
 	# normally still exits 0; a driver that then produces no final answer exits 2,
 	# which deny mode waives when the parser already proved the denial (cynative#286).
-	# The classifier still catches a real run failure (timeout, budget,
-	# crash); the audit parser inside connector_run_phase is what judges the boundary,
+	# The classifier still catches a timeout or a budget hit; the audit parser inside
+	# connector_run_phase is what judges the boundary,
 	# and a write that SUCCEEDED, or any call that cannot be shown to have stayed on the
 	# machine, exits 4: fatal, never retried, because a retry would truncate the audit
 	# log and erase the evidence.

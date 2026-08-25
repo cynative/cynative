@@ -6,7 +6,7 @@
 # timeout guardrails (test/lib/e2e-guardrails.sh), which every caller here needs
 # anyway.
 #
-# Every caller of this file lives directly in test/ (the three connector suites plus
+# Every caller of this file lives directly in test/ (the four connector suites plus
 # this library's own unit test), so `dirname "$0"` at source time always resolves to
 # test/ - the same $0-relative trick the suites already use to find `root`/`here`.
 #
@@ -91,24 +91,30 @@ connector_run_phase() {
 	# is the audit records the parser just validated - the model's closing prose adds
 	# nothing - so a parser hold (0) on a run that completed without a final answer
 	# must not become a retry: the retry's audit truncation would erase the records
-	# that already proved the phase. The waiver is scoped to exit 2 EXACTLY. Exit 2 is
-	# the CLI's no-answer outcome, and a failed deferred audit-log close REPLACES it
-	# with exit 1, so rc 2 also proves the log the parser judged was completely
-	# written; a generic rc 1 proves nothing and stays a retry. A timeout stays a
-	# retry too (rc 124 classifies to 2 below): SIGTERM bypasses the CLI's deferred
-	# close and the parser tolerates a kill-truncated final audit line, so parser
-	# proof under a kill is weaker evidence. A budget verdict (3) still dominates via
-	# the classifier, whose stderr is buffered on this one path because its no-answer
-	# FAIL line would otherwise sit in the log of a phase that then passes: on the
-	# waived verdict (1) an explanatory note replaces it, on any other verdict it is
-	# replayed verbatim. The mode allowlist is explicit so an unknown future mode
-	# keeps the strict behavior. Read mode is untouched: there the answer text is
-	# part of the evidence, and a no-answer run really is a miss.
+	# that already proved the phase. The hold is trustworthy however the run ended,
+	# because the audit is write-ahead on both dispatch paths (the attempt record is
+	# written BEFORE the request runs, and a failed attempt-write refuses to run it)
+	# and the sweep exits 4 on any unsanctioned attempt without a proven denial, so
+	# a log cut short by a crash cannot hide a call the boundary should have caught.
+	# The waiver is still scoped to exit 2 EXACTLY, the CLI's no-answer outcome (a
+	# failed deferred audit-log close replaces it with exit 1): every other nonzero
+	# exit signals an operational failure - provider, config, audit durability - that
+	# a retry should surface loudly rather than wave past, and a timeout keeps its
+	# retry the same way (rc 124 classifies to 2 below). A budget verdict (3) still
+	# dominates via the classifier, whose stderr is buffered on this one path because
+	# its no-answer FAIL line would otherwise sit in the log of a phase that then
+	# passes: on the waived verdict (1) an explanatory note replaces it, on any other
+	# verdict it is replayed verbatim. The mode allowlist is explicit so an unknown
+	# future mode keeps the strict behavior. Read mode is untouched: there the answer
+	# text is part of the evidence, and a no-answer run really is a miss.
 	_waive=0
 	case "$_mode" in
 		canary | secretscan) if [ "$_p" = 0 ] && [ "$_rc" = 2 ]; then _waive=1; fi ;;
 	esac
-	if [ "$_waive" = 1 ] && : > "$_out.classify-err" 2>/dev/null; then
+	# `true`, not `:`, creates the buffer: a redirection failure on the special
+	# builtin `:` exits a non-interactive POSIX shell outright, while on the regular
+	# builtin `true` it just fails the command, landing in the unbuffered fallback.
+	if [ "$_waive" = 1 ] && true > "$_out.classify-err" 2>/dev/null; then
 		if e2e_classify_run "$_rc" "$_out" "$_err" "$_timeout" 2>"$_out.classify-err"; then
 			_c=0
 		else

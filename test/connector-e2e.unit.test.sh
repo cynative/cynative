@@ -211,8 +211,32 @@ if (
 	: > "$td/audit"
 	[ "$(runrc_err "$td/phase_err" gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 3 ] || exit 1
 	[ ! -e "$td/posture_ran" ] || exit 1
-	grep -q 'token budget reached' "$td/phase_err" || exit 1
+	# The buffered classifier stderr is replayed verbatim: the FAIL prefix and the
+	# grep'd notice line both survive.
+	grep -q 'FAIL: token budget reached' "$td/phase_err" || exit 1
+	grep -q 'Budget reached (16000 tokens)' "$td/phase_err" || exit 1
 ); then pass "connector_run_phase: canary rc 2 + budget notice still 3, FAIL replayed"; else fail "connector_run_phase budget dominance"; fi
+
+# ---- waiver fallback: an uncreatable buffer file must not kill the shell --------
+# The buffer is created with `true >`, not `: >`: a redirection failure on the
+# special builtin `:` exits a non-interactive POSIX shell outright, which would
+# bypass the retry loop and artifact collection. With `true` the failure lands in
+# the unbuffered fallback: the waiver still accepts, at the cost of the classifier
+# FAIL line preceding the note.
+if (
+	td=$(mktemp -d)
+	trap 'rm -rf "$td"' EXIT
+	mkparser "$td" p_clean.py 0
+	mkposture "$td"
+	printf 'footer: 1 tool call\n' > "$td/err"
+	: > "$td/out"; : > "$td/audit"
+	# A directory squatting on the buffer path makes its creation fail.
+	mkdir "$td/out.classify-err"
+	[ "$(runrc_err "$td/phase_err" gcp canary "$td/p_clean.py" "$td/audit" "$td/out" "$td/err" 2 60 "$td/posture" proj '' '')" -eq 0 ] || exit 1
+	[ -e "$td/posture_ran" ] || exit 1
+	grep -q 'accepting (cynative#286)' "$td/phase_err" || exit 1
+	grep -q 'FAIL: run completed without an answer' "$td/phase_err" || exit 1
+); then pass "connector_run_phase: waiver survives an uncreatable buffer (unbuffered fallback)"; else fail "connector_run_phase waiver buffer fallback"; fi
 
 # ---- no waiver on a timeout: a killed run's audit may be truncated --------------
 if (
