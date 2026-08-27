@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.10.1](https://github.com/cynative/cynative/compare/v1.10.0...v1.10.1) (2026-08-27)
+
+
+### Dependencies
+
+* bump github.com/bytedance/sonic from 1.15.2 to 1.15.3 ([ea3329d](https://github.com/cynative/cynative/commit/ea3329d1d6b5795aeb0da55df62ea24bb7eb92c0))
+* bump github.com/google/go-containerregistry from 0.21.9 to 0.22.0 ([1e635bd](https://github.com/cynative/cynative/commit/1e635bdcd2d05ca93ecb2b98208e6b1f93b4bca1))
+* bump github.com/goreleaser/goreleaser/v2 from 2.17.1 to 2.18.0 ([ea3329d](https://github.com/cynative/cynative/commit/ea3329d1d6b5795aeb0da55df62ea24bb7eb92c0))
+* bump github.com/uudashr/iface from 1.5.0 to 1.5.1 ([1e635bd](https://github.com/cynative/cynative/commit/1e635bdcd2d05ca93ecb2b98208e6b1f93b4bca1))
+
 ## [1.10.0](https://github.com/cynative/cynative/compare/v1.9.4...v1.10.0) (2026-08-25)
 
 
