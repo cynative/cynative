@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/cynative/cynative/internal/cache"
 )
 
 func readMapFixture(t *testing.T) []byte {
@@ -40,7 +38,7 @@ func seedIAMDatasetDisk(t *testing.T, fixture []byte) string {
 	t.Helper()
 	dir := t.TempDir()
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return fixture, nil },
 	})
 	if got := reg.Lookup(t.Context(), "logs", []string{"logs"}, "StartLiveTail"); len(got) == 0 {
@@ -116,7 +114,7 @@ func TestIAMDatasetRegistry_lazyFetchOnceAndLookup(t *testing.T) {
 	fixture := readMapFixture(t)
 	calls := 0
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			calls++
 			return fixture, nil
@@ -137,7 +135,7 @@ func TestIAMDatasetRegistry_retriesAfterTransientFailure(t *testing.T) {
 	fixture := readMapFixture(t)
 	calls := 0
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			calls++
 			if calls == 1 {
@@ -163,7 +161,7 @@ func TestIAMDatasetRegistry_retriesAfterTransientFailure(t *testing.T) {
 func TestIAMDatasetRegistry_fetchFailureReturnsNil(t *testing.T) {
 	t.Parallel()
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("network") },
 	})
 	if got := reg.Lookup(t.Context(), "s3", []string{"s3"}, "PutBucketLifecycleConfiguration"); got != nil {
@@ -175,7 +173,7 @@ func TestIAMDatasetRegistry_diskHitSkipsFetch(t *testing.T) {
 	t.Parallel()
 	dir := seedIAMDatasetDisk(t, readMapFixture(t))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("should not fetch") },
 	})
 	if got := reg.Lookup(t.Context(), "logs", []string{"logs"}, "StartLiveTail"); len(got) != 1 {
@@ -187,11 +185,9 @@ func TestIAMDatasetRegistry_staleDiskFallsBackOnFetchFailure(t *testing.T) {
 	t.Parallel()
 	dir := seedIAMDatasetDisk(t, readMapFixture(t))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{
-			Dir:   dir,
-			TTL:   time.Hour,
-			Clock: func() time.Time { return time.Now().Add(48 * time.Hour) },
-		},
+		Dir:     dir,
+		TTL:     time.Hour,
+		Clock:   func() time.Time { return time.Now().Add(48 * time.Hour) },
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("network") },
 	})
 	if got := reg.Lookup(t.Context(), "logs", []string{"logs"}, "StartLiveTail"); len(got) != 1 {
@@ -202,7 +198,7 @@ func TestIAMDatasetRegistry_staleDiskFallsBackOnFetchFailure(t *testing.T) {
 func TestIAMDatasetRegistry_corruptFetchedReturnsNil(t *testing.T) {
 	t.Parallel()
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return []byte("{bad"), nil },
 	})
 	if got := reg.Lookup(t.Context(), "s3", []string{"s3"}, "PutBucketLifecycleConfiguration"); got != nil {
@@ -217,7 +213,7 @@ func TestIAMDatasetRegistry_missingMetaFallsThroughToFetch(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "iam-dataset", "map.json"), readMapFixture(t))
 	called := false
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			called = true
 			return readMapFixture(t), nil
@@ -237,7 +233,7 @@ func TestIAMDatasetRegistry_corruptMetaFallsThroughToFetch(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, "iam-dataset", "map.meta"), []byte("{bad"))
 	called := false
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			called = true
 			return readMapFixture(t), nil
@@ -258,7 +254,7 @@ func TestIAMDatasetRegistry_corruptDiskMapFallsThroughToFetch(t *testing.T) {
 		[]byte(`{"service":"iam-dataset","sha256":"deadbeef","fetched_at":"2024-01-01T00:00:00Z"}`))
 	called := false
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			called = true
 			return readMapFixture(t), nil
@@ -277,7 +273,7 @@ func TestIAMDatasetRegistry_persistMkdirFailureStillReturnsParsed(t *testing.T) 
 	mustWrite(t, blocker, []byte("file-not-dir"))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
 		// MkdirAll(blocker/iam-dataset) fails: blocker is a file.
-		Config:  cache.Config{Dir: blocker, TTL: time.Hour, Clock: time.Now},
+		Dir: blocker, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return readMapFixture(t), nil },
 	})
 	if got := reg.Lookup(t.Context(), "logs", []string{"logs"}, "StartLiveTail"); len(got) != 1 {
@@ -291,7 +287,7 @@ func TestIAMDatasetRegistry_mapWriteFailureStillReturnsParsed(t *testing.T) {
 	// Place a directory where map.json should be written so os.WriteFile fails.
 	mustMkdir(t, filepath.Join(dir, "iam-dataset", "map.json"))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return readMapFixture(t), nil },
 	})
 	if got := reg.Lookup(t.Context(), "logs", []string{"logs"}, "StartLiveTail"); len(got) != 1 {
@@ -333,7 +329,7 @@ func TestIAMDataset_LookupSDKID(t *testing.T) {
 func TestIAMDatasetRegistry_LookupSDKID(t *testing.T) {
 	t.Parallel()
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return readMapFixture(t), nil },
 	})
 	got := reg.LookupSDKID(t.Context(), "S3 Control", "GetPublicAccessBlock")
@@ -345,7 +341,7 @@ func TestIAMDatasetRegistry_LookupSDKID(t *testing.T) {
 func TestIAMDatasetRegistry_LookupSDKID_unavailableReturnsNil(t *testing.T) {
 	t.Parallel()
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("network") },
 	})
 	if got := reg.LookupSDKID(t.Context(), "S3 Control", "GetPublicAccessBlock"); got != nil {

@@ -80,14 +80,12 @@ var (
 // at most once by ensureReady via [sync.Once]. Tests substitute their own
 // closure; the production wiring lives in buildHardenedAWSProvider.
 func newAWSProvider(cfg aws.Config, doLazyResolve func(ctx context.Context) error) *awsProvider {
-	return &awsProvider{ //nolint:exhaustruct // zero lazyInit.once + nil action fields are intentional.
-		cfg:      cfg,
-		signHTTP: defaultAWSSignHTTP,
-		lazyInit: lazyInit{
-			prefix:           "aws_hardening",
-			bootstrapTimeout: hardeningBootstrapTimeout,
-			doLazyResolve:    doLazyResolve,
-		}, //nolint:exhaustruct // once/err zero.
+	return &awsProvider{ //nolint:exhaustruct // zero lazyInit once/err + nil action fields are intentional.
+		cfg:              cfg,
+		signHTTP:         defaultAWSSignHTTP,
+		prefix:           "aws_hardening",
+		bootstrapTimeout: hardeningBootstrapTimeout,
+		doLazyResolve:    doLazyResolve,
 	}
 }
 

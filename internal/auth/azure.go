@@ -50,14 +50,12 @@ func newAzureProvider(
 	scope string,
 	doLazyResolve func(ctx context.Context) error,
 ) *azureProvider {
-	return &azureProvider{ //nolint:exhaustruct // zero lazyInit + nil scoped/hardening fields are intentional.
-		catalog: catalog,
-		scope:   scope,
-		lazyInit: lazyInit{
-			prefix:           "azure_hardening",
-			bootstrapTimeout: hardeningBootstrapTimeout,
-			doLazyResolve:    doLazyResolve,
-		}, //nolint:exhaustruct // once/err zero.
+	return &azureProvider{ //nolint:exhaustruct // zero lazyInit once/err + nil scoped/hardening fields are intentional.
+		catalog:          catalog,
+		scope:            scope,
+		prefix:           "azure_hardening",
+		bootstrapTimeout: hardeningBootstrapTimeout,
+		doLazyResolve:    doLazyResolve,
 	}
 }
 

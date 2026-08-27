@@ -192,7 +192,7 @@ func TestAWSProvider_InjectAuth_MissingService(t *testing.T) {
 	t.Parallel()
 
 	p := &awsProvider{
-		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }},
+		doLazyResolve: func(_ context.Context) error { return nil },
 	} //nolint:exhaustruct // test struct
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
@@ -217,7 +217,7 @@ func TestAWSProvider_InjectAuth_InvalidJSON(t *testing.T) {
 	t.Parallel()
 
 	p := &awsProvider{
-		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }},
+		doLazyResolve: func(_ context.Context) error { return nil },
 	} //nolint:exhaustruct // test struct
 	req, _ := http.NewRequestWithContext(
 		context.Background(), http.MethodGet,
@@ -246,7 +246,7 @@ func TestAWSProvider_InjectAuth_CredRetrieveError(t *testing.T) {
 				},
 			),
 		},
-		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }}, //nolint:exhaustruct // test
+		doLazyResolve: func(_ context.Context) error { return nil },
 	}
 	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "us-east-1"},
@@ -333,7 +333,7 @@ func TestAWSProvider_InjectAuth_BodyReadError(t *testing.T) {
 			Region:      "us-east-1",
 			Credentials: aws.CredentialsProviderFunc(fakeAWSCreds),
 		},
-		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }}, //nolint:exhaustruct // test
+		doLazyResolve: func(_ context.Context) error { return nil },
 	}
 	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "us-east-1"},
@@ -374,7 +374,7 @@ func TestAWSProvider_InjectAuth_SignError(t *testing.T) {
 		) error {
 			return errors.New("sign boom")
 		},
-		lazyInit: lazyInit{doLazyResolve: func(_ context.Context) error { return nil }}, //nolint:exhaustruct // test
+		doLazyResolve: func(_ context.Context) error { return nil },
 	}
 	rawArgs := marshalArgs(t, awsProviderName, map[string]any{
 		"aws_auth": map[string]string{"service": "s3", "region": "us-east-1"},
@@ -2065,12 +2065,12 @@ func aksClientFor(baseURL string, httpClient *http.Client) aksNewClientFunc {
 	) (*armcontainerservice.ManagedClustersClient, error) {
 		return armcontainerservice.NewManagedClustersClient(
 			subscriptionID, cred,
-			&arm.ClientOptions{ClientOptions: policy.ClientOptions{
+			&arm.ClientOptions{
 				Transport: httpClient,
 				Cloud: cloud.Configuration{Services: map[cloud.ServiceName]cloud.ServiceConfiguration{
 					cloud.ResourceManager: {Endpoint: baseURL, Audience: baseURL},
 				}},
-			}},
+			},
 		)
 	}
 }

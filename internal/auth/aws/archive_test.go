@@ -15,7 +15,6 @@ import (
 	"time"
 
 	awsh "github.com/cynative/cynative/internal/auth/aws"
-	"github.com/cynative/cynative/internal/cache"
 )
 
 func newArchive(
@@ -25,7 +24,7 @@ func newArchive(
 ) *awsh.ModelArchive {
 	t.Helper()
 	return awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: clock,
 		Fetcher: fetcher,
 	})
 }
@@ -56,7 +55,7 @@ func s3TarGz(t *testing.T) []byte {
 func seedArchiveDisk(t *testing.T, cacheDir string, tgz []byte, fetchedAt time.Time) {
 	t.Helper()
 	seed := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: cacheDir, TTL: time.Hour, Clock: fixedClock(fetchedAt)},
+		Dir: cacheDir, TTL: time.Hour, Clock: fixedClock(fetchedAt),
 		Fetcher: func(context.Context) ([]byte, error) { return tgz, nil },
 	})
 	if _, err := seed.Resolve(t.Context(), "s3"); err != nil {
@@ -91,7 +90,7 @@ func seedRawArchive(t *testing.T, raw []byte, prefix, modelDir, version string) 
 		t.Fatal(err)
 	}
 	return awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config: cache.Config{Dir: cacheDir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 10))},
+		Dir: cacheDir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 10)),
 		Fetcher: func(context.Context) ([]byte, error) {
 			t.Error("fetcher must not be called when disk is fresh")
 			return nil, errors.New("unexpected")
@@ -210,7 +209,7 @@ func TestModelArchive_Resolve_freshDiskSkipsFetch(t *testing.T) {
 	tgz := s3TarGz(t)
 	seedArchiveDisk(t, dir, tgz, time.Unix(1000, 0))
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 30))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 30)),
 		Fetcher: func(context.Context) ([]byte, error) {
 			t.Error("fetcher must not be called when disk is fresh")
 			return nil, errors.New("unexpected")
@@ -228,7 +227,7 @@ func TestModelArchive_Resolve_staleDiskRefetches(t *testing.T) {
 	seedArchiveDisk(t, dir, s3TarGz(t), time.Unix(1000, 0))
 	var calls int
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0).Add(2 * time.Hour))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0).Add(2 * time.Hour)),
 		Fetcher: func(context.Context) ([]byte, error) {
 			calls++
 			return s3TarGz(t), nil
@@ -248,7 +247,7 @@ func TestModelArchive_Resolve_staleDiskFallbackOnFetchError(t *testing.T) {
 	dir := t.TempDir()
 	seedArchiveDisk(t, dir, s3TarGz(t), time.Unix(1000, 0))
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0).Add(2 * time.Hour))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0).Add(2 * time.Hour)),
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("network down") },
 	})
 	models, err := a.Resolve(t.Context(), "s3")
@@ -265,7 +264,7 @@ func TestModelArchive_Resolve_loadsPersistedIndexWithoutRebuild(t *testing.T) {
 	// Fresh archive on the same dir within TTL: tarball + index both load from
 	// disk, so useArchive takes the persisted-index branch (no rebuild).
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 10))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 10)),
 		Fetcher: func(context.Context) ([]byte, error) {
 			t.Error("fetcher must not be called when disk is fresh")
 			return nil, errors.New("unexpected")
@@ -290,7 +289,7 @@ func TestModelArchive_tryLoadIndex_malformedJSONRebuilds(t *testing.T) {
 	}
 	// No tarball on disk → fetch, then tryLoadIndex sees malformed JSON → rebuild.
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0)),
 		Fetcher: func(context.Context) ([]byte, error) { return tgz, nil },
 	})
 	models, err := a.Resolve(t.Context(), "s3")
@@ -313,7 +312,7 @@ func TestModelArchive_tryLoadIndex_shaMismatchRebuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0)),
 		Fetcher: func(context.Context) ([]byte, error) { return tgz, nil },
 	})
 	models, err := a.Resolve(t.Context(), "s3")
@@ -336,7 +335,7 @@ func TestModelArchive_tryLoadIndex_emptyPrefixesRebuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0)),
 		Fetcher: func(context.Context) ([]byte, error) { return tgz, nil },
 	})
 	models, err := a.Resolve(t.Context(), "s3")
@@ -354,7 +353,7 @@ func TestModelArchive_persistIndex_mkdirFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0)),
 		Fetcher: func(context.Context) ([]byte, error) { return s3TarGz(t), nil },
 	})
 	models, err := a.Resolve(t.Context(), "s3")
@@ -372,7 +371,7 @@ func TestModelArchive_persistIndex_writeFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := awsh.NewModelArchive(awsh.ModelArchiveConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0))},
+		Dir: dir, TTL: time.Hour, Clock: fixedClock(time.Unix(1000, 0)),
 		Fetcher: func(context.Context) ([]byte, error) { return s3TarGz(t), nil },
 	})
 	models, err := a.Resolve(t.Context(), "s3")

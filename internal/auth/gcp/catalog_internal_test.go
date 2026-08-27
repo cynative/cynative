@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/cynative/cynative/internal/cache"
 )
 
 // injectMethods replaces the methods of the named service in c's fetcher with
@@ -638,9 +636,7 @@ func TestApplyDefaults_KeepsSuppliedValues(t *testing.T) {
 	got := applyDefaults(CatalogConfig{          //nolint:exhaustruct // only overridden fields matter
 		DirectoryURL: "https://example.test/apis",
 		HTTPClient:   client,
-		Config: cache.Config{
-			Clock: func() time.Time { return time.Unix(0, 0) },
-		}, //nolint:exhaustruct // only Clock
+		Clock:        func() time.Time { return time.Unix(0, 0) },
 	})
 
 	if got.DirectoryURL != "https://example.test/apis" {

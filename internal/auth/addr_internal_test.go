@@ -187,7 +187,7 @@ func TestAuthorizeAddr_DefaultAllowPublic(t *testing.T) {
 func TestAuthorizeAddr_ProviderAllowsInternal(t *testing.T) {
 	t.Parallel()
 
-	p := &addrAuthProvider{addrFakeProvider: addrFakeProvider{name: "k8s", addrAllowed: true}}
+	p := &addrAuthProvider{name: "k8s", addrAllowed: true}
 	ip := netip.MustParseAddr("10.0.0.5")
 
 	if err := AuthorizeAddr(context.Background(), "k8s", ip, []Provider{p}, nil); err != nil {
@@ -198,7 +198,7 @@ func TestAuthorizeAddr_ProviderAllowsInternal(t *testing.T) {
 func TestAuthorizeAddr_ProviderDeniesPublic(t *testing.T) {
 	t.Parallel()
 
-	p := &addrAuthProvider{addrFakeProvider: addrFakeProvider{name: "k8s", addrAllowed: false}}
+	p := &addrAuthProvider{name: "k8s", addrAllowed: false}
 	ip := netip.MustParseAddr("93.184.216.34")
 
 	err := AuthorizeAddr(context.Background(), "k8s", ip, []Provider{p}, nil)
@@ -211,7 +211,7 @@ func TestAuthorizeAddr_ProviderError(t *testing.T) {
 	t.Parallel()
 
 	boom := errors.New("addr boom")
-	p := &addrAuthProvider{addrFakeProvider: addrFakeProvider{name: "k8s", addrErr: boom}}
+	p := &addrAuthProvider{name: "k8s", addrErr: boom}
 	ip := netip.MustParseAddr("10.0.0.5")
 
 	err := AuthorizeAddr(context.Background(), "k8s", ip, []Provider{p}, nil)

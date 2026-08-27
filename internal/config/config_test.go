@@ -154,12 +154,10 @@ func TestValidateLLM(t *testing.T) {
 		{
 			"negative max_retries",
 			llm.ProviderEntry{
-				ProviderConfig: schemas.ProviderConfig{
-					NetworkConfig: schemas.NetworkConfig{MaxRetries: -1},
-				},
-				Provider: "openai",
-				Model:    "gpt-5",
-				Keys:     []schemas.Key{{Value: schemas.SecretVar{Val: "k"}}},
+				NetworkConfig: schemas.NetworkConfig{MaxRetries: -1},
+				Provider:      "openai",
+				Model:         "gpt-5",
+				Keys:          []schemas.Key{{Value: schemas.SecretVar{Val: "k"}}},
 			},
 			llm.ErrInvalidMaxRetries,
 		}, //nolint:exhaustruct // partial entry by design

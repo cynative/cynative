@@ -94,19 +94,19 @@ func TestAKSClusterTLSMaterial(t *testing.T) {
 		{name: "all empty", cfg: &rest.Config{}},
 		{
 			name:   "CA only",
-			cfg:    &rest.Config{TLSClientConfig: rest.TLSClientConfig{CAData: ca}},
+			cfg:    &rest.Config{CAData: ca},
 			wantCA: base64.StdEncoding.EncodeToString(ca),
 		},
 		{
 			name:     "full CA+cert+key",
-			cfg:      &rest.Config{TLSClientConfig: rest.TLSClientConfig{CAData: ca, CertData: cert, KeyData: key}},
+			cfg:      &rest.Config{CAData: ca, CertData: cert, KeyData: key},
 			wantCA:   base64.StdEncoding.EncodeToString(ca),
 			wantCert: base64.StdEncoding.EncodeToString(cert),
 			wantKey:  base64.StdEncoding.EncodeToString(key),
 		},
 		{
 			name:   "cert present but key empty",
-			cfg:    &rest.Config{TLSClientConfig: rest.TLSClientConfig{CAData: ca, CertData: cert}},
+			cfg:    &rest.Config{CAData: ca, CertData: cert},
 			wantCA: base64.StdEncoding.EncodeToString(ca),
 		},
 	}

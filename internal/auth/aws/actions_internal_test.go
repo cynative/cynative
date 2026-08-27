@@ -4,8 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/cynative/cynative/internal/cache"
 )
 
 type fakeSRGetter struct {
@@ -182,7 +180,7 @@ func TestActionResolver_failsClosedWhenServiceRefUnavailable(t *testing.T) {
 func TestActionResolver_bug4_S3NamesResolveViaServiceRef(t *testing.T) {
 	t.Parallel()
 	sr := NewServiceRefRegistry(ServiceRefRegistryConfig{
-		Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context, string) ([]byte, error) { return readSRFixture(t), nil },
 	})
 	r := NewActionResolver(sr, &fakeDSLookuper{actions: nil, gotSDK: nil})

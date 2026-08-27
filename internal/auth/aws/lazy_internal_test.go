@@ -51,13 +51,11 @@ func TestLazyResolve_succeeds(t *testing.T) {
 func TestLazyResolve_PolicyError_returnsNotReady(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("no such policy")
-	iamMock := &iamFullAPIMock{ //nolint:exhaustruct // simulateAPIMock not needed here
-		iamAPIMock: iamAPIMock{ //nolint:exhaustruct // only GetPolicy is exercised
-			GetPolicyFunc: func(
-				_ context.Context, _ *iam.GetPolicyInput, _ ...func(*iam.Options),
-			) (*iam.GetPolicyOutput, error) {
-				return nil, cause
-			},
+	iamMock := &iamFullAPIMock{ //nolint:exhaustruct // only GetPolicy is exercised
+		GetPolicyFunc: func(
+			_ context.Context, _ *iam.GetPolicyInput, _ ...func(*iam.Options),
+		) (*iam.GetPolicyOutput, error) {
+			return nil, cause
 		},
 	}
 

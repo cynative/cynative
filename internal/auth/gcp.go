@@ -48,13 +48,11 @@ func newGCPProvider(
 	catalog gcphardening.Catalog,
 	doLazyResolve func(ctx context.Context) error,
 ) *gcpProvider {
-	return &gcpProvider{ //nolint:exhaustruct // zero lazyInit + nil tokenSource/hardeningAction are intentional.
-		catalog: catalog,
-		lazyInit: lazyInit{
-			prefix:           "gcp_hardening",
-			bootstrapTimeout: hardeningBootstrapTimeout,
-			doLazyResolve:    doLazyResolve,
-		}, //nolint:exhaustruct // once/err zero.
+	return &gcpProvider{ //nolint:exhaustruct // zero lazyInit once/err + nil tokenSource/hardeningAction intentional.
+		catalog:          catalog,
+		prefix:           "gcp_hardening",
+		bootstrapTimeout: hardeningBootstrapTimeout,
+		doLazyResolve:    doLazyResolve,
 	}
 }
 

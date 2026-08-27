@@ -30,7 +30,7 @@ if (
 	printf '%s' "$out" | grep -Fq "desc \"$desc\"" || exit 1
 	printf '%s' "$out" | grep -Fq 'homepage "https://github.com/cynative/cynative"' || exit 1
 	printf '%s' "$out" | grep -Fq 'license "Apache-2.0"' || exit 1
-	printf '%s' "$out" | grep -Fq 'depends_on macos: :monterey' || exit 1
+	printf '%s' "$out" | grep -Fq 'depends_on macos: :ventura' || exit 1
 	printf '%s' "$out" | grep -Fq 'cynative_Darwin_arm64.tar.gz' || exit 1
 	printf '%s' "$out" | grep -Fq 'cynative_Darwin_x86_64.tar.gz' || exit 1
 	printf '%s' "$out" | grep -Fq 'cynative_Linux_arm64.tar.gz' || exit 1
@@ -43,7 +43,7 @@ if (
 	# Ruby interpolation for brew-time version, not the shell-filled one in urls.
 	printf '%s' "$out" | grep -Fq 'v#{version}/' || exit 1
 	exit 0
-); then pass "render-formula renders version/arches/urls/hashes/meta and :monterey floor"; else fail "render-formula happy path"; fi
+); then pass "render-formula renders version/arches/urls/hashes/meta and :ventura floor"; else fail "render-formula happy path"; fi
 
 # ---- the version stanza is load-bearing; do not "fix" the audit by removing it
 # `brew audit --strict` calls the stanza redundant with the version it scans

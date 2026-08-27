@@ -12,7 +12,6 @@ import (
 	"time"
 
 	azurehardening "github.com/cynative/cynative/internal/auth/azure"
-	"github.com/cynative/cynative/internal/cache"
 )
 
 // armEndpointsBody is the 2022 object shape for one cloud's /metadata/endpoints.
@@ -43,7 +42,7 @@ func TestCatalogShellFetchAndProbe(t *testing.T) {
 	defer srv.Close()
 
 	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:     cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		HTTPClient: srv.Client(),
 		// Point all three clouds at the test server (public used; gov/china may 404
 		// gracefully — the catalog stands on the reachable cloud).
@@ -76,7 +75,7 @@ func TestCatalogShellRejects2019ArrayShape(t *testing.T) {
 	defer srv.Close()
 
 	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		HTTPClient:   srv.Client(),
 		MetadataURLs: map[string]string{"AzureCloud": srv.URL + "/metadata/endpoints"},
 		BaseURL:      srv.URL,
@@ -104,7 +103,7 @@ func TestCatalogShellStaleCacheFallback(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: dir, TTL: time.Millisecond, Clock: time.Now},
+		Dir: dir, TTL: time.Millisecond, Clock: time.Now,
 		HTTPClient:   srv.Client(),
 		MetadataURLs: map[string]string{"AzureCloud": srv.URL + "/metadata/endpoints"},
 		BaseURL:      srv.URL,
@@ -149,7 +148,7 @@ func TestCatalogShellProviderOpsFailureIsCachedUntilTTL(t *testing.T) {
 	defer srv.Close()
 
 	cfg := azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		HTTPClient:   srv.Client(),
 		MetadataURLs: map[string]string{"AzureCloud": srv.URL + "/metadata/endpoints"},
 		BaseURL:      srv.URL,
@@ -195,7 +194,7 @@ func TestCatalogShellFetchError(t *testing.T) {
 	defer srv.Close()
 
 	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		HTTPClient:   srv.Client(),
 		MetadataURLs: map[string]string{"AzureCloud": srv.URL + "/metadata/endpoints"},
 		BaseURL:      srv.URL,
@@ -224,7 +223,7 @@ func TestCatalogShellCloudScoped(t *testing.T) {
 
 	dir := t.TempDir()
 	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		HTTPClient:   srv.Client(),
 		Cloud:        "AzureUSGovernment",
 		MetadataURLs: map[string]string{"AzureUSGovernment": srv.URL + "/metadata/endpoints"},
@@ -290,7 +289,7 @@ func TestCatalogShellRejectsCrossCloudCache(t *testing.T) {
 	}
 
 	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		HTTPClient:   srv.Client(),
 		Cloud:        "AzureUSGovernment",
 		MetadataURLs: map[string]string{"AzureUSGovernment": srv.URL + "/metadata/endpoints"},

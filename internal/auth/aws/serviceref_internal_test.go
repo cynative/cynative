@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/cynative/cynative/internal/cache"
 )
 
 func readSRFixture(t *testing.T) []byte {
@@ -93,7 +91,7 @@ func TestServiceRefRegistry_inMemoryCacheHit(t *testing.T) {
 	fixture := readSRFixture(t)
 	calls := 0
 	reg := NewServiceRefRegistry(ServiceRefRegistryConfig{
-		Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(_ context.Context, _ string) ([]byte, error) {
 			calls++
 			return fixture, nil
@@ -113,7 +111,7 @@ func TestServiceRefRegistry_inMemoryCacheHit(t *testing.T) {
 func TestServiceRefRegistry_missAndFetchFailureReturnsNil(t *testing.T) {
 	t.Parallel()
 	reg := NewServiceRefRegistry(ServiceRefRegistryConfig{
-		Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(_ context.Context, _ string) ([]byte, error) {
 			return nil, errors.New("simulated network failure")
 		},
@@ -127,7 +125,7 @@ func TestServiceRefRegistry_perServiceCaches(t *testing.T) {
 	t.Parallel()
 	fixture := readSRFixture(t)
 	reg := NewServiceRefRegistry(ServiceRefRegistryConfig{
-		Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(_ context.Context, service string) ([]byte, error) {
 			if service == "missing" {
 				return nil, errors.New("no such service")

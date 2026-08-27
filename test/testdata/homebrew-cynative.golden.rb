@@ -5,11 +5,11 @@ class Cynative < Formula
   license "Apache-2.0"
 
   on_macos do
-    # cynative is built with Go 1.26, whose macOS floor is 12 (Monterey), so gate
+    # cynative is built with Go 1.27, whose macOS floor is 13 (Ventura), so gate
     # installs there — unsupported hosts fail before downloading an unrunnable binary.
-    # A bare symbol means ">= that release"; the ">= :monterey" string form is
+    # A bare symbol means ">= that release"; the ">= :ventura" string form is
     # deprecated and errors on current brew ("unknown or unsupported macOS version").
-    depends_on macos: :monterey
+    depends_on macos: :ventura
 
     on_arm do
       url "https://github.com/cynative/cynative/releases/download/v#{version}/cynative_Darwin_arm64.tar.gz"

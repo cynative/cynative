@@ -8,7 +8,6 @@ import (
 	"time"
 
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
-	"github.com/cynative/cynative/internal/cache"
 )
 
 func TestCatalogShellFetchAndCache(t *testing.T) {
@@ -27,7 +26,7 @@ func TestCatalogShellFetchAndCache(t *testing.T) {
 	defer srv.Close()
 
 	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),
@@ -73,7 +72,7 @@ func TestCatalogShellMergesMultiVersionDocs(t *testing.T) {
 	defer srv.Close()
 
 	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),
@@ -111,7 +110,7 @@ func TestCatalogShellStaleCacheFallback(t *testing.T) {
 	dir := t.TempDir()
 	// First call: cache populated.
 	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: dir, TTL: time.Millisecond, Clock: time.Now}, // expire immediately.
+		Dir: dir, TTL: time.Millisecond, Clock: time.Now, // expire immediately.
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),
@@ -128,7 +127,7 @@ func TestCatalogShellStaleCacheFallback(t *testing.T) {
 	// attempt a fresh fetch; server now returns 503 so it should fall back to stale cache.
 	unavailable = true
 	cat2 := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: dir, TTL: time.Millisecond, Clock: time.Now},
+		Dir: dir, TTL: time.Millisecond, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),
@@ -167,7 +166,7 @@ func TestCatalogShellPartialFetchIsCachedUntilTTL(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),
@@ -222,7 +221,7 @@ func TestCatalogShellPermanentDocMissingStillCaches(t *testing.T) {
 	defer srv.Close()
 
 	cfg := gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),
@@ -257,7 +256,7 @@ func TestCatalogShellEmptyDirectoryError(t *testing.T) {
 	defer srv.Close()
 
 	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		HTTPClient:   srv.Client(),
 	})
@@ -281,7 +280,7 @@ func TestCatalogShellDirectoryFetchError(t *testing.T) {
 	defer srv.Close()
 
 	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		HTTPClient:   srv.Client(),
 	})
@@ -311,7 +310,7 @@ func TestCatalogShellAllDocsTransientErrors(t *testing.T) {
 	defer srv.Close()
 
 	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
-		Config:       cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
 		DirectoryURL: srv.URL + "/discovery/v1/apis",
 		BaseURL:      srv.URL + "/",
 		HTTPClient:   srv.Client(),

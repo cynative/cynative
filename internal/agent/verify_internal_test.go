@@ -173,8 +173,9 @@ func TestParsePass_ValueDecodeError(t *testing.T) {
 func TestParsePass_UnterminatedAfterEntry(t *testing.T) {
 	t.Parallel()
 
-	// A complete first entry but no closing brace: dec.More() ends the loop, then
-	// reading the closing '}' token errors (covers the closing-token-error branch).
+	// A complete first entry but no closing brace: since Go 1.27, dec.More()
+	// reports another entry and the in-loop key read errors at end of input (the
+	// closing-token arm is exercised directly in TestDecodeVerdictObject_DefenseInDepth).
 	got := parsePass(`{"f1":{"verdict":"confirmed","justification":"x"}`, 1)
 	if got[0].Verdict == verdictConfirmed {
 		t.Fatalf("unterminated object minted confirmed: %+v (FAIL-OPEN)", got[0])
@@ -444,6 +445,11 @@ func TestDecodeVerdictObject_DefenseInDepth(t *testing.T) {
 		"first token error": {`@`, nil},
 		// A non-string key token errors at the in-loop dec.Token (keyErr arm).
 		"non-string key": {`{1:2}`, nil},
+		// A ']' after a complete entry ends dec.More, so consuming the closing '}'
+		// errors (closing-token arm). Only a direct call reaches it: the
+		// parsePass-level gate rejects this input first, and on a merely truncated
+		// object Go 1.27's More reports another entry, erroring at the key read.
+		"array close after entry": {`{"f1":{"verdict":"refuted","justification":"r"}]`, nil},
 		// A repeated outer key hits the seen-map guard → errDuplicateFindingID.
 		"duplicate key": {
 			`{"f1":{"verdict":"refuted","justification":"r"},"f1":{"verdict":"confirmed","justification":"c"}}`,

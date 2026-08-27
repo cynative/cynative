@@ -1698,8 +1698,8 @@ func TestExecute_DispatchesAuthorizeActionAfterHostBeforeInject(t *testing.T) {
 
 	var calls []string
 	op := &orderingProviderWithCA{
-		orderingProvider: orderingProvider{calls: &calls},
-		caCert:           loopback.CACert,
+		calls:  &calls,
+		caCert: loopback.CACert,
 	}
 
 	args := fmt.Sprintf(

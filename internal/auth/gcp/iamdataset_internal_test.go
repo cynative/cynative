@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/cynative/cynative/internal/cache"
 )
 
 func readFixture(t *testing.T) []byte {
@@ -40,7 +38,7 @@ func seedIAMDatasetDisk(t *testing.T, fixture []byte) string {
 	t.Helper()
 	dir := t.TempDir()
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return fixture, nil },
 	})
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) == 0 {
@@ -99,7 +97,7 @@ func TestIAMDatasetRegistry(t *testing.T) {
 		t.Parallel()
 		calls := 0
 		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-			Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Dir: t.TempDir(), TTL: time.Hour, Clock: clock,
 			Fetcher: func(context.Context) ([]byte, error) { calls++; return fixture, nil },
 		})
 		if got := reg.Lookup(context.Background(), "compute.instances.get"); len(got) != 1 {
@@ -115,7 +113,7 @@ func TestIAMDatasetRegistry(t *testing.T) {
 		t.Parallel()
 		calls := 0
 		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-			Config: cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Dir: t.TempDir(), TTL: time.Hour, Clock: clock,
 			Fetcher: func(context.Context) ([]byte, error) {
 				calls++
 				if calls == 1 {
@@ -140,7 +138,7 @@ func TestIAMDatasetRegistry(t *testing.T) {
 	t.Run("fetch error no disk", func(t *testing.T) {
 		t.Parallel()
 		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-			Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Dir: t.TempDir(), TTL: time.Hour, Clock: clock,
 			Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("boom") },
 		})
 		if got := reg.Lookup(context.Background(), "compute.instances.get"); got != nil {
@@ -151,7 +149,7 @@ func TestIAMDatasetRegistry(t *testing.T) {
 	t.Run("fetch parse error", func(t *testing.T) {
 		t.Parallel()
 		reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-			Config:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: clock},
+			Dir: t.TempDir(), TTL: time.Hour, Clock: clock,
 			Fetcher: func(context.Context) ([]byte, error) { return []byte("bad"), nil },
 		})
 		if got := reg.Lookup(context.Background(), "x"); got != nil {
@@ -164,7 +162,7 @@ func TestIAMDatasetRegistry_diskHitSkipsFetch(t *testing.T) {
 	t.Parallel()
 	dir := seedIAMDatasetDisk(t, readFixture(t))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("should not fetch") },
 	})
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {
@@ -177,7 +175,7 @@ func TestIAMDatasetRegistry_staleDiskFallsBackOnFetchFailure(t *testing.T) {
 	dir := seedIAMDatasetDisk(t, readFixture(t))
 	aheadClock := func() time.Time { return time.Now().Add(48 * time.Hour) }
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: aheadClock},
+		Dir: dir, TTL: time.Hour, Clock: aheadClock,
 		Fetcher: func(context.Context) ([]byte, error) { return nil, errors.New("network") },
 	})
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {
@@ -192,7 +190,7 @@ func TestIAMDatasetRegistry_missingMetaFallsThroughToFetch(t *testing.T) {
 	mustWriteGCP(t, filepath.Join(dir, "iam-dataset", "gcp-map.json"), readFixture(t))
 	called := false
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			called = true
 			return readFixture(t), nil
@@ -212,7 +210,7 @@ func TestIAMDatasetRegistry_corruptMetaFallsThroughToFetch(t *testing.T) {
 	mustWriteGCP(t, filepath.Join(dir, "iam-dataset", "gcp-map.meta"), []byte("{bad"))
 	called := false
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			called = true
 			return readFixture(t), nil
@@ -233,7 +231,7 @@ func TestIAMDatasetRegistry_corruptDiskMapFallsThroughToFetch(t *testing.T) {
 		[]byte(`{"fetched_at":"2024-01-01T00:00:00Z"}`))
 	called := false
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config: cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) {
 			called = true
 			return readFixture(t), nil
@@ -252,7 +250,7 @@ func TestIAMDatasetRegistry_persistMkdirFailureStillReturnsParsed(t *testing.T) 
 	mustWriteGCP(t, blocker, []byte("file-not-dir"))
 	// MkdirAll(blocker/iam-dataset) fails: blocker is a file.
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: blocker, TTL: time.Hour, Clock: time.Now},
+		Dir: blocker, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return readFixture(t), nil },
 	})
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {
@@ -266,7 +264,7 @@ func TestIAMDatasetRegistry_mapWriteFailureStillReturnsParsed(t *testing.T) {
 	// Place a directory where gcp-map.json should be written so os.WriteFile fails.
 	mustMkdirGCP(t, filepath.Join(dir, "iam-dataset", "gcp-map.json"))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return readFixture(t), nil },
 	})
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {
@@ -280,7 +278,7 @@ func TestIAMDatasetRegistry_metaWriteFailureStillReturnsParsed(t *testing.T) {
 	// Place a directory where gcp-map.meta should be written so os.WriteFile fails.
 	mustMkdirGCP(t, filepath.Join(dir, "iam-dataset", "gcp-map.meta"))
 	reg := NewIAMDatasetRegistry(IAMDatasetRegistryConfig{
-		Config:  cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now},
+		Dir: dir, TTL: time.Hour, Clock: time.Now,
 		Fetcher: func(context.Context) ([]byte, error) { return readFixture(t), nil },
 	})
 	if got := reg.Lookup(t.Context(), "compute.instances.get"); len(got) != 1 {

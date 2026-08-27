@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/cynative/cynative/internal/cache"
 )
 
 func fakeCatalogData() CatalogData {
@@ -672,7 +670,7 @@ func TestApplyDefaults_KeepsSuppliedValues(t *testing.T) {
 	got := applyDefaults(CatalogConfig{ //nolint:exhaustruct // only the overridden fields matter
 		HTTPClient:   client,
 		MetadataURLs: urls,
-		Config:       cache.Config{Clock: clk}, //nolint:exhaustruct // only Clock matters
+		Clock:        clk,
 	})
 
 	if got.HTTPClient != client {
