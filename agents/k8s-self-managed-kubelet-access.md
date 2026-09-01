@@ -14,11 +14,11 @@ A denied, unreachable, partial or empty read is not a clean result: name the res
 
 Where nothing meets the question above, say so in the report's first sentence and before any count or inventory, naming the objects it asks about rather than referring to them, and say there which of three answers it is: they are absent, or they are present and clean, or they were not read. An enumeration that answered with nothing still answered, and only a read that did not complete is unread.
 
-Stop here if every kubelet uses `Webhook` authorization with `authentication.anonymous.enabled` false, `authentication.x509.clientCAFile` set, `rotateCertificates` true and `readOnlyPort` either 0 or absent, and the API server has `--kubelet-certificate-authority`, `--kubelet-client-certificate` and `--kubelet-client-key` set. Report the cluster-wide `authorization.mode`, `readOnlyPort` value and `rotateCertificates` state once, whether the ConfigMap carries `tlsCertFile` and `tlsPrivateKeyFile`, and the node names the pod specifications carry, and end.
+Stop here if the cluster-wide kubelet configuration sets `Webhook` authorization with `authentication.anonymous.enabled` false, `authentication.x509.clientCAFile` set, `rotateCertificates` true and `readOnlyPort` either 0 or absent, and the API server has `--kubelet-certificate-authority`, `--kubelet-client-certificate` and `--kubelet-client-key` set. Report the cluster-wide `authorization.mode`, `readOnlyPort` value and `rotateCertificates` state once, whether the ConfigMap carries `tlsCertFile` and `tlsPrivateKeyFile`, and the node names the pod specifications carry, and end.
 
 Only for the kubelets that are not clean:
 
-Report `authorization.mode: AlwaysAllow` with `authentication.anonymous.enabled` true together, and resolve whether any NetworkPolicy restricts pod traffic to node addresses - without one, every pod in the cluster reaches port 10250 on every node. The ConfigMap carries one value for the whole cluster, so no node is affected in isolation: report the pods scheduled to each of the nodes the pod specifications name.
+Report `authorization.mode: AlwaysAllow` on its own, since it authorizes any authenticated caller regardless of `authentication.anonymous.enabled`, and report `authentication.anonymous.enabled` true alongside it where both hold, then resolve whether any NetworkPolicy restricts pod traffic to node addresses - without one, every pod in the cluster reaches port 10250 on every node. The ConfigMap carries one value for the whole cluster, so no node is affected in isolation: report the pods scheduled to each of the nodes the pod specifications name.
 
 Report a non-zero `readOnlyPort` with the number the field holds and the pods scheduled to those same nodes, since the port it names returns their specifications and status to any caller that reaches a node address, and rank it above an authenticated port that a binding happens to expose.
 
@@ -26,7 +26,7 @@ Where `authorization.mode` is `Webhook`, the kubelet delegates each request to t
 
 Report `--kubelet-certificate-authority` unset on the API server, which leaves kubelet certificates unverified, with the network the control plane and nodes share, and report `rotateCertificates` false as a persistence property against the nodes named above: node credentials remain valid indefinitely.
 
-Report an unauthenticated kubelet listener as intentional where the evidence supports it: a NetworkPolicy restricting pod traffic to node addresses, or a `readOnlyPort` whose only consumer is a monitoring DaemonSet in this cluster whose pods you can name. Name the evidence. An unauthenticated listener with no such evidence is not intentional.
+Report an unauthenticated kubelet listener as intentional where the evidence supports it: a `readOnlyPort` whose only consumer is a monitoring DaemonSet in this cluster whose pods you can name. A NetworkPolicy that names node addresses is not that evidence on its own, since whether a CNI enforces it against traffic to a node is outside what this agent reads. Name the evidence. An unauthenticated listener with no such evidence is not intentional.
 
 
 Order findings by risk, most consequential first.

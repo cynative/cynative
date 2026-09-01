@@ -16,11 +16,11 @@ Stop here if no value passes the filter. Report the regions the sweep covered an
 
 Only for the values that are not clean:
 
-Establish reach using the account's own APIs and nothing else. An `AKIA` identifier resolves to an IAM user whose permissions you can read. A database host in a connection string either matches an RDS, Redshift, DocumentDB or ElastiCache endpoint in the account or it does not, and where it matches nothing the finding is that the credential's reach cannot be bounded from here. DocumentDB's cluster endpoints come back from the same RDS enumeration, told apart by `Engine`, rather than from an enumeration of its own.
+Establish reach using the account's own APIs and nothing else. An `AKIA` identifier resolves to an IAM user whose permissions you can read; where it resolves to the account root user instead or matches no IAM user, the finding is that its reach cannot be bounded that way. A database host in a connection string either matches an RDS, Redshift, DocumentDB, Neptune or ElastiCache endpoint in the account or it does not, and where it matches nothing the finding is that the credential's reach cannot be bounded from here. DocumentDB's and Neptune's cluster endpoints come back from the same RDS enumeration, told apart by `Engine`, rather than from an enumeration of their own.
 
 Report which permission already exposes each value: Lambda environment variables to `lambda:GetFunctionConfiguration`, CloudFormation outputs to `cloudformation:DescribeStacks`, ECS task definitions to `ecs:DescribeTaskDefinition`, Batch job definitions to `batch:DescribeJobDefinitions`, and Step Functions definitions to `states:DescribeStateMachine`.
 
-Name the Secrets Manager secrets from the count above whose name matches the key or resource carrying a value you retained, and report the creation date of any with rotation disabled next to the copy found elsewhere: the secret has not been rotated since it was created.
+Name the Secrets Manager secrets from the count above whose name matches the key or resource carrying a value you retained, and report the creation date of any with rotation disabled next to the copy found elsewhere: automatic rotation has been off since that date, not that the value itself has never changed.
 
 Report a retained value as intentional where the evidence supports it: an `AKIA` identifier whose IAM user's permissions reach only what a bucket policy in this account already grants to everyone, or a value the account's own deployment substitutes at runtime, evidenced by an SSM parameter or a Secrets Manager secret of the same name. Name the evidence. A retained value with no such evidence is not intentional.
 

@@ -16,7 +16,7 @@ Stop here if no inbound allow rule from `Internet`, `*` or `0.0.0.0/0` reaches T
 
 Only for the rules that are not clean:
 
-Resolve the effective inbound rule set per interface by combining the group associated with the interface and the group associated with its subnet, both of which the rule listing above already returned, rather than asking the platform for the effective set: that operation is `Microsoft.Network/networkInterfaces/effectiveNetworkSecurityGroups/action`, an action rather than a read. Rules apply at both the subnet and the interface and are evaluated in priority order with the first match winning, so report the effective outcome rather than a single rule. Report whether the attached virtual machine is running.
+Resolve the effective inbound rule set per interface from the group associated with the interface and the group associated with its subnet, both of which the rule listing above already returned, rather than asking the platform for the effective set: that operation is `Microsoft.Network/networkInterfaces/effectiveNetworkSecurityGroups/action`, an action rather than a read. The two groups are evaluated independently, each in its own priority order with the first match winning, and traffic reaches the interface only where both admit it, so report the effective outcome rather than a single rule. Report whether the attached virtual machine is running.
 
 For each reachable machine, read its system-assigned and user-assigned managed identities and their role assignments, and report those with the rule.
 

@@ -22,7 +22,7 @@ Rank the public bindings by the role's permissions: `roles/secretmanager.secretA
 
 For public Cloud Functions the invoker binding is how an HTTP function is served, so resolve the function's runtime service account and report its project bindings as the finding.
 
-For the datasets and buckets you reported above, read whether each has a customer-managed key and compare the principals holding data-read access against the principals holding `roles/cloudkms.cryptoKeyDecrypter` on the key that would protect it. Report the resources where those sets differ, since that difference is what a key adds, and where they are the same name the resource within the count.
+For the datasets and buckets you reported above, read whether each has a customer-managed key and compare the principals holding data-read access against the principals holding `roles/cloudkms.cryptoKeyDecrypter` or another role granting `cloudkms.cryptoKeyVersions.useToDecrypt` on the key that would protect it. Report the resources where those sets differ, since that difference is what a key adds, and where they are the same name the resource within the count.
 
 State for each binding whether `constraints/iam.allowedPolicyMemberDomains` is enforced at its project: an unenforced constraint makes the binding a gap, and an enforced one with an exception makes it a granted exception, and those are different findings.
 

@@ -18,7 +18,7 @@ Stop here if every record target resolves to a resource in the account or the or
 
 Only for the records that are not clean:
 
-Report each with its position in the zone. A name under the same registrable domain as the application shares that domain's cookie scope; a name under a domain used for nothing else does not. Read whether the parent domain's records include the application itself to establish which case applies.
+Report each with its position in the zone. A name under the same registrable domain as the application can share that domain's cookie scope, but only where the application's own `Set-Cookie` response shows a `Domain` attribute at that scope or host-only behavior; the parent domain's records establish neither, so read the cookie evidence itself and mark the cookie-scope impact unresolved where it is unavailable.
 
 Resolve targets against the organization's account list where the API allows it, since a record may point at a resource in another account the organization owns. Where it does not, report the record as unresolved rather than as dangling.
 

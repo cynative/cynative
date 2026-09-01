@@ -20,7 +20,7 @@ Resolve which workloads pull from each by reading the container image references
 
 Report registries with the admin user enabled: the admin credential is a shared password with push permission that attributes to no principal in the registry logs. Report `anonymousPullEnabled` separately from public network access, since the first controls whether a caller needs credentials to read image contents and the second only controls reachability.
 
-Resolve the role assignments granting `AcrPush` or a role containing `Microsoft.ContainerRegistry/registries/push/write` and report that principal set.
+Resolve the role assignments granting `AcrPush` or a role containing `Microsoft.ContainerRegistry/registries/push/write`; where a registry's `roleAssignmentMode` is `AbacRepositoryPermissions`, `AcrPush` is not honored there, so also resolve roles that grant repository write through `dataActions`, such as `Container Registry Repository Writer`, crediting a principal only where its assignment condition, if any, still permits the write. Report that principal set.
 
 Where vulnerability assessment is enabled, filter the assessments to images a running workload references and report those with the workload's identity and network exposure. Where it is disabled, report the running image digests carrying no assessment.
 

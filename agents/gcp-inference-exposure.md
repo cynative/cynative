@@ -14,7 +14,7 @@ Stop here if no Vertex AI endpoint grants `aiplatform.endpoints.predict` to a pr
 
 Only for the endpoints and keys that are not clean:
 
-Report the principal each unrestricted key maps to, and resolve the project's enabled service list and report it as the key's scope, since an unrestricted key reaches every one of them rather than the one it was cut for.
+Resolve the project's enabled service list and report it as the key's scope, since an unrestricted key reaches every one of them rather than the one it was cut for: a standard API key identifies its project rather than a principal, and carries no IAM binding to resolve.
 
 Report each endpoint's predict bindings with the principal type of every member, since `allUsers` and `allAuthenticatedUsers` need no account in this organization while a service account outside it needs one somebody else controls.
 

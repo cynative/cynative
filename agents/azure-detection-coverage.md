@@ -24,7 +24,7 @@ Only for the subscriptions that are not clean:
 
 Name what each uncovered subscription contains, name the services from the plan tier table above whose tier leaves it unwatched, and state whether it is uncovered alone or as part of a tenant-wide absence. A subscription that diverges from the rest of the tenant and a tenant that is uniformly uncovered are both findings; report the second once at the tenant level with the subscriptions it covers rather than repeating it per subscription.
 
-Resolve each alert's action group and report alerts whose action group has no email, webhook or automation receiver. Do the same for the subscription's security contact: report an empty contact address with the configured minimum alert severity and attack path risk level.
+Resolve each alert's action group and report alerts whose action group has no receiver, matching the gate's own criterion. Do the same for the subscription's security contact: report an empty contact address with the configured minimum alert severity and attack path risk level.
 
 Report flow logs written to storage with no Log Analytics workspace separately from flow logs being off: those are retained and unqueryable. Name the regions from the Network Watcher count above that hold resources and have no watcher.
 

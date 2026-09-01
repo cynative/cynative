@@ -31,8 +31,8 @@ Call shapes a run has proven:
 
 Role definitions: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleDefinitions` on `management.azure.com`; one definition at `GET /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleDefinitions/{roleDefinitionId}`, and the tenant-wide set at `GET /providers/Microsoft.Authorization/roleDefinitions`.
 
-Role assignments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleAssignments` on `management.azure.com`; one group's assignments at `GET /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Authorization/roleAssignments`.
+Role assignments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/roleAssignments` on `management.azure.com`; one resource group's assignments at `GET /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Authorization/roleAssignments`; one management group's at `GET /providers/Microsoft.Management/managementGroups/{groupId}/providers/Microsoft.Authorization/roleAssignments`.
 
-Deny assignments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/denyAssignments` on `management.azure.com`; one group's at `GET /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Authorization/denyAssignments`.
+Deny assignments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Authorization/denyAssignments` on `management.azure.com`; one resource group's at `GET /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Authorization/denyAssignments`; one management group's at `GET /providers/Microsoft.Management/managementGroups/{groupId}/providers/Microsoft.Authorization/denyAssignments`.
 
-Tenants and subscriptions: `GET /tenants` and `GET /subscriptions` on `management.azure.com`; the group listing at `GET /subscriptions/{subscriptionId}/resourcegroups`.
+Tenants, subscriptions and management groups: `GET /tenants` and `GET /subscriptions` on `management.azure.com`; the resource group listing at `GET /subscriptions/{subscriptionId}/resourcegroups`; the management group listing at `GET /providers/Microsoft.Management/managementGroups`.
