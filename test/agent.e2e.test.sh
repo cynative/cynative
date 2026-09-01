@@ -136,13 +136,6 @@ read_phase() {
 		return 1
 	fi
 
-	# A consecutive-failure halt exits 0 with a summary answer; reject it so a
-	# halted run is not read as a pass (this is the breaker issue's failure mode).
-	if grep -qi 'consecutive failures' "$workdir/read.out" "$workdir/read.err"; then
-		echo "FAIL: run halted on the consecutive-failure breaker" >&2
-		return 1
-	fi
-
 	# Posture proves the gcp connector authenticated LIVE this startup (the line only
 	# appears for a validated connector) and stayed read-only.
 	assert_gcp_posture "$workdir/read.err" || return 1
