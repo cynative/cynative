@@ -118,6 +118,15 @@ try {
         throw "cynative.exe not at the archive root of $archiveName"
     }
 
+    # NOTICE must ship in the archive too: the archives.files list in
+    # .goreleaser.yaml is explicit, which replaces goreleaser's default set
+    # wholesale, so a dropped entry there would silently stop shipping
+    # attribution.
+    $noticePath = Join-Path $tmp 'NOTICE'
+    if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) {
+        throw "NOTICE not at the archive root of $archiveName"
+    }
+
     # Native-arch proof: Windows 11 ARM runs x64 binaries transparently, so
     # --version alone cannot catch a wrong-arch exe in the zip.
     $machine = Get-CynSmokePeMachine -Path $exePath

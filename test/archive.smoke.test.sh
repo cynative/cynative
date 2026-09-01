@@ -65,6 +65,12 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 tar -xzf "$ARCHIVE_PATH" -C "$tmp" cynative \
 	|| fail "member 'cynative' not extractable from $archive_name (missing, nested, or ./-prefixed?)"
 
+# NOTICE must ship in the archive too: the archives.files list in
+# .goreleaser.yaml is explicit, which replaces goreleaser's default set
+# wholesale, so a dropped entry there would silently stop shipping
+# attribution.
+tar -tzf "$ARCHIVE_PATH" | grep -qx 'NOTICE' || fail "archive $archive_name is missing the NOTICE member"
+
 # A regular file (not a symlink smuggled under the member name) with the
 # executable bit preserved; -x is the assertion install.sh masks with chmod.
 [ ! -L "$tmp/cynative" ] || fail "extracted 'cynative' is a symlink, expected a regular file"

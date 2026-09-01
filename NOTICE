@@ -1,0 +1,22 @@
+Cynative
+Copyright the Cynative authors
+
+This product includes the built-in agent definitions under agents/, whose
+security condition sets were derived from Prowler
+(https://github.com/prowler-cloud/prowler), Copyright the Prowler authors,
+licensed under the Apache License, Version 2.0. A copy of that license is at
+http://www.apache.org/licenses/LICENSE-2.0.
+
+What was derived and what was not:
+
+  - The set of conditions each agent looks for was derived from the critical
+    and high severity checks in Prowler's catalogue.
+
+  - No Prowler source code is included.
+
+  - No Prowler prose is included. Prowler's check titles, descriptions, risk
+    and remediation text are not reproduced, quoted or paraphrased. Every line
+    of every agent prompt was written for this repository.
+
+  - Some Prowler checks carry tags referencing external benchmarks such as CIS.
+    No benchmark text is included and none was consulted.
