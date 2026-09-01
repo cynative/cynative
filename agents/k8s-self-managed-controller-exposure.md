@@ -1,0 +1,30 @@
+---
+description: Check a self-managed Kubernetes cluster's controller manager and scheduler for exposed endpoints and for credentials shared across every controller.
+---
+
+Research whether this cluster's controller manager and scheduler expose their endpoints on the node network and whether every controller runs as one identity. Both components are read from their own pods, so this agent applies to a self-managed control plane only: where a pod enumeration that answered returns no such pods, the control plane is provider-managed and runs both outside the cluster, and the answer is that this agent does not apply rather than a page of unresolved arguments. An enumeration that failed is not that answer and settles nothing: report it as unresolved rather than as an absent control plane. This agent has a single stage, and the reason is that none of the arguments it reads means anything on its own: each one has to be qualified by a cluster-wide read - which pods are scheduled where, which NetworkPolicies exist, which service accounts exist, which ConfigMap carries the cluster's certificate authority bundle - before it can be reported at all. There is no subset of this work that settles the question more cheaply, so there is nothing for a gate to defer.
+
+Take `--bind-address` on both components, `--authentication-kubeconfig` and `--authorization-kubeconfig` on both, and `--use-service-account-credentials`, `--service-account-private-key-file` and `--root-ca-file` on the controller manager.
+
+An argument the command does not carry is not unread: each component takes its own documented default for that version, so resolve the effective value and report the argument as defaulted rather than as configured or as missing. `--bind-address` defaults to `0.0.0.0` on both components and `--use-service-account-credentials` defaults to false, so an absent argument in either place is the finding rather than a gap in the read, and it is the same finding as the argument present and open.
+
+A denied, unreachable, partial or empty read is not a clean result: name the resource and the field you could not read and mark it unresolved rather than reporting clean, and name the bound beside the finding. Where every read above is denied, the report is that list of unresolved reads.
+
+Where nothing meets the question above, say so in the report's first sentence and before any count or inventory, naming the objects it asks about rather than referring to them, and say there which of three answers it is: they are absent, or they are present and clean, or they were not read. An enumeration that answered with nothing still answered, and only a read that did not complete is unread.
+
+Report `--bind-address` values other than `127.0.0.1` together with whether `--authentication-kubeconfig` and `--authorization-kubeconfig` are set on the same component, and with whether any NetworkPolicy restricts pod traffic to node addresses. A bound address with neither kubeconfig serves the metrics and debug endpoints to anything that can reach the port; with both, the endpoints require authentication and authorization, and the finding is the reachability rather than the exposure. Report which of those two states each component is in rather than reporting the address alone.
+
+Report `--use-service-account-credentials=false` together with the per-controller service accounts present in `kube-system`, which are the identities not being used while every controller runs as the controller-manager identity.
+
+Read which pods mount the directory containing the file named by `--service-account-private-key-file`, and report with their namespaces the ones that are not a component the key belongs to. The API server and the controller manager mount that directory because they sign and verify with what is in it, so reporting them is reporting the control plane running. That file is the signing key for legacy secret-based tokens, so a `hostPath` mount of the directory holding it into anything else permits minting such a token for any service account in the cluster.
+
+Report `--root-ca-file` unset together with the count of service accounts in the cluster. It fills the bundle in a legacy token secret only; a projected token takes its bundle from the `kube-root-ca.crt` ConfigMap, so read that ConfigMap in the namespaces those accounts sit in and report which of the two paths carries a bundle to verify the API server against.
+
+Report a `--bind-address` other than `127.0.0.1` as intentional where the evidence supports it: `--authentication-kubeconfig` and `--authorization-kubeconfig` both set on that component, or a NetworkPolicy in `kube-system` restricting pod traffic to node addresses. Name the evidence. A bound endpoint with no such evidence is not intentional.
+
+
+Order findings by risk, most consequential first.
+
+Call shapes a run has proven:
+
+Kubernetes API: `GET /api/v1/pods`, `GET /api/v1/configmaps`, `GET /api/v1/serviceaccounts` and `GET /api/v1/namespaces`; network policies at `GET /apis/networking.k8s.io/v1/networkpolicies`; the server version at `GET /version`.

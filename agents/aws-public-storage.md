@@ -1,0 +1,42 @@
+---
+description: Resolve effective public and cross-account access to S3 buckets, Multi-Region Access Points, ECR repositories and Glacier vaults.
+---
+
+Research which S3 buckets, Multi-Region Access Points, ECR repositories and Glacier vaults in this account are readable or writable by an anonymous principal, by any authenticated AWS principal, or by an account outside this organization.
+
+Resolve the effective outcome per bucket from four inputs together - the account-level Block Public Access configuration, the bucket-level Block Public Access configuration, the bucket ACL and the bucket policy - taking the most restrictive combination of the account-level and bucket-level values wherever the two differ.
+
+Read the Block Public Access configuration as four separate settings, because only two of them change what is already stored. `IgnorePublicAcls` suppresses an existing public ACL grant, and `RestrictPublicBuckets` confines a bucket whose policy is public to service principals and callers inside the account, taking the named cross-account delegations in that same policy with it. `BlockPublicAcls` and `BlockPublicPolicy` only reject a new ACL or a new policy that would be public, so a bucket carrying those two over a stored public grant still resolves as exposed. None of the four reaches a policy that names an outside account without being public, so resolve cross-account read from the policy itself.
+
+Enumerate the account's Multi-Region Access Points and read each one's own `PublicAccessBlock`, which the listing itself carries; it is an additional input to the same resolution, combining with the account-level configuration by the same most-restrictive rule the bucket-level configuration follows. An ECR repository and a Glacier vault carry a resource policy and nothing else - no ACL and no Block Public Access - so the policy alone settles them; both are regional, so enumerate the enabled regions from the account and list repositories and vaults once per region in that result rather than per region in a list of your own. Read which accounts this organization holds, because that is what places an account inside it or outside. Nothing else in this agent runs until that resolution is done.
+
+Read the default root object of each CloudFront distribution whose origin is an S3 bucket in this account, in the same pass and from the distribution's configuration rather than the summary the list call returns, which is the only place `DefaultRootObject` appears. A distribution with none forwards a request for its root URL to the origin, so what a viewer gets back is whatever that origin returns for the bucket root - a listing only where the bucket itself admits the caller. That makes it a property of the bucket behind the distribution rather than a question about public access, and it is reported against that bucket rather than gating anything here.
+
+A condition narrows a `Principal: "*"` grant only where its operator belongs to the key's own type and its value is bounded. `aws:PrincipalOrgID`, `aws:PrincipalOrgPaths`, `aws:PrincipalAccount`, `aws:SourceAccount`, `aws:SourceVpc` and `aws:SourceVpce` are string keys: they narrow under `StringEquals` with a literal value, and under `StringLike` only where the wildcard leaves the identifier itself fixed, so `o-*` under `StringLike` narrows nothing. `aws:SourceArn` and `aws:PrincipalArn` are ARN keys: they narrow under `ArnEquals`, and under `ArnLike` only where the account field of the pattern is literal. `aws:SourceIp` is an IP key: it narrows under `IpAddress` with a prefix other than `0.0.0.0/0` or `::/0`, and `NotIpAddress` on the same key does not narrow it. An IP key under a string operator, or an ARN key under `IpAddress`, is a type mismatch: do not credit it as a restriction, and report the statement as unresolved. The negated operators `StringNotEquals`, `StringNotLike`, `ArnNotEquals` and `ArnNotLike` exclude a set rather than bounding one, and neither they nor a condition value of `*` narrow the grant. A key that appears in the statement but does not apply to the grant, because it sits in a different statement or the action ignores it, does not narrow it either. Do not match on the presence of a key name anywhere in the serialized policy; evaluate the operator and the value against the statement that carries the grant.
+
+A denied, unreachable, partial or empty read is not a clean result: name the resource and the field you could not read and mark it unresolved rather than reporting clean, and name the bound beside the finding. Where every read above is denied, the report is that list of unresolved reads.
+
+Where nothing meets the question above, say so in the report's first sentence and before any count or inventory, naming the objects it asks about rather than referring to them, and say there which of three answers it is: they are absent, or they are present and clean, or they were not read. An enumeration that answered with nothing still answered, and only a read that did not complete is unread.
+
+Stop here if no bucket, Multi-Region Access Point, repository or vault resolves as anonymously readable, any-authenticated readable, publicly writable or readable by an account outside the organization. Report the resolved counts with the account-level and bucket-level Block Public Access configurations - `BlockPublicAcls`, `IgnorePublicAcls`, `BlockPublicPolicy` and `RestrictPublicBuckets` - the `PublicAccessBlock` of each Multi-Region Access Point, the ACL and policy outcome per resource, with the ECR repository policy and the Glacier vault policy named among them since a policy is the only input either carries, the regions the repository and vault enumerations covered and the enabled-region listing they took them from, and the CloudFront distributions with no default root object named against their origin bucket, the count of accounts the organization holds, stated as this account being in no organization where that is the answer, and which of the bucket, access point, repository and vault enumerations above answered and which did not, naming each one that did not rather than counting it as zero, and end.
+
+Only for the resources that resolved as exposed:
+
+Report public write first - an anonymous or any-authenticated principal holding `s3:PutObject` or an ACL write grant - and identify which of those buckets the account references elsewhere as an origin, a log destination or a Lambda event source. Then report cross-account read, resolving each account ID against the organization's account list.
+
+Name the origin buckets already reported above within the default root object count.
+
+Report a bucket or repository as intentional where the evidence supports it: a public resolution that the account's own configuration explains - a bucket policy granting only `s3:GetObject` on a website-configured bucket, an origin access identity or origin access control naming a CloudFront distribution that fronts it, a `Payer` of `Requester` on the bucket's request payment configuration, which is how a published dataset makes its readers carry the transfer cost, or an ECR repository policy granting `*` the pull actions `ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer` and no action that writes or deletes an image. Name the evidence. A resource resolving as public with no such evidence is not intentional.
+
+
+Order findings by risk, most consequential first.
+
+Call shapes a run has proven:
+
+Multi-Region Access Points: `GET /v20180820/mrap/instances` on `{account}.s3-control.us-west-2.amazonaws.com`, with the account in `x-amz-account-id`.
+
+Glacier: `GET /-/vaults` on `glacier.<region>.amazonaws.com`, with an `x-amz-glacier-version` of `2012-06-01`.
+
+EC2: `GET /?Action=DescribeRegions&Version=2016-11-15` on `ec2.<region>.amazonaws.com`. STS: `GET /?Action=GetCallerIdentity&Version=2011-06-15` on `sts.amazonaws.com`.
+
+Organizations: `X-Amz-Target: AWSOrganizationsV20161128.{Operation}` on `organizations.us-east-1.amazonaws.com`.

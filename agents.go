@@ -5,17 +5,16 @@ import (
 	"io/fs"
 )
 
-// builtinAgents embeds the built-in agent files. The all: prefix is
-// load-bearing: it includes dot-prefixed files, and the directory currently
-// holds only .keep. Without it the build fails with "pattern agents: cannot
-// embed directory agents: contains no embeddable files", because an empty
-// directory cannot be committed to git either.
+// builtinAgents embeds the built-in agent files, each at "agents/<name>.md".
+// The pattern is agents/*.md rather than the directory, so only agent markdown
+// enters the binary and a stray hidden or nested file cannot ship unnoticed;
+// the manifest test in internal/cli pins the embedded set to the expected 45.
 //
 // This lives at the module root for the same reason about.go does: go:embed
 // cannot reference a parent directory, so no package under internal/ can embed
 // a top-level directory.
 //
-//go:embed all:agents
+//go:embed agents/*.md
 var builtinAgents embed.FS
 
 // BuiltinAgents returns the embedded built-in agent tree, rooted at the module,

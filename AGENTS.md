@@ -268,14 +268,14 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 
 - **`cmd/cynative`**: a thin `main` that calls `cli.Execute()`.
 
-- **`agents.go`** (package `cynative`, module root): `//go:embed all:agents` plus a one-line
+- **`agents.go`** (package `cynative`, module root): `//go:embed agents/*.md` plus a one-line
   accessor for the built-in agent tier. It sits at the root for the same reason `about.go`
-  does: `go:embed` cannot reference a parent directory. The `all:` prefix is load-bearing —
-  it includes dot-prefixed files, and the directory ships holding only `.keep`; plain
-  `//go:embed agents` fails to compile with "contains no embeddable files", and an empty
-  directory cannot be committed to git either. The accessor returns the whole tree rather
-  than the `fs.Sub` subtree because that error cannot occur for a fixed valid path, and a
-  defensive branch here could never be covered.
+  does: `go:embed` cannot reference a parent directory. The directory now ships the 45
+  built-in agent files and is embedded as `agents/*.md` rather than the whole directory, so
+  only agent markdown enters the binary and a stray hidden or nested file cannot ship
+  unnoticed; the exact set is pinned by the manifest test in `internal/cli`. The accessor
+  returns the whole tree rather than the `fs.Sub` subtree because that error cannot occur for
+  a fixed valid path, and a defensive branch here could never be covered.
 
 - **`about.go`** (package `cynative`, module root): the README is the single source for two
   runtime values, each extracted from between a pair of HTML-comment markers in `README.md`.
