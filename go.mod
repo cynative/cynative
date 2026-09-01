@@ -34,7 +34,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	google.golang.org/api v0.294.0
+	google.golang.org/api v0.295.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/client-go v0.37.0
@@ -262,7 +262,7 @@ require (
 	github.com/go-toolsmith/typep v1.1.0 // indirect
 	github.com/go-xmlfmt/xmlfmt v1.1.3 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/godoc-lint/godoc-lint v0.11.2 // indirect
+	github.com/godoc-lint/godoc-lint v0.11.4 // indirect
 	github.com/gofrs/flock v0.13.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
