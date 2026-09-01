@@ -24,7 +24,7 @@ Report the key count per account, each key's creation date and, where the API re
 
 Resolve which service accounts each holder of `roles/iam.serviceAccountTokenCreator` can impersonate and follow the chain until it terminates, then report the most privileged account reachable at the end.
 
-For unrestricted API keys, resolve the project's enabled service list and report it as the key's scope. A key restricted only by HTTP referrer carries no server-side restriction, so report the referrer restriction with the API target list rather than treating it as bounding.
+For unrestricted API keys, resolve the project's enabled service list and report the subset of it that accepts API key authorization as the key's scope, since an unrestricted key reaches every one of those rather than the one it was cut for: a standard API key identifies its project rather than a principal, and carries no IAM binding to resolve. Name an enabled service that instead requires an IAM-authorized credential as enabled but not reached by the key, since a standard API key cannot stand in for one. A key restricted only by HTTP referrer carries no server-side restriction, so report the referrer restriction with the API target list rather than treating it as bounding.
 
 Where the default service accounts still hold editor, report the count of instances and functions running as each.
 
