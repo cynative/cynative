@@ -1,6 +1,6 @@
 .PHONY: check check-go check-scripts mod-tidy-check lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	llm-tools-smoke homebrew-smoke install-script-smoke
+	llm-tools-smoke agent-e2e homebrew-smoke install-script-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -324,6 +324,12 @@ llm-smoke:
 # credentials and skips cleanly when none are set.
 llm-tools-smoke:
 	sh test/llm-tools.smoke.test.sh
+
+# agent-e2e: live built-in AGENT end-to-end test. Standalone (NOT part of
+# `make check`): runs the real `cynative -p --agent <builtin>` against a real GCP
+# fixture and needs real credentials; skips cleanly when the fixture env is unset.
+agent-e2e:
+	sh test/agent.e2e.test.sh
 
 # connector-%-e2e: live connector end-to-end tests (cynative#39, cynative#52,
 # cynative#53, cynative#117). Standalone (NOT part of `make check`): runs the real
