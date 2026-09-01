@@ -175,3 +175,10 @@ Agent: my-aws-public-datastores  [user: /home/you/.cynative/agents/my-aws-public
 
 `cynative agents list` shows the same information ahead of time, and every
 audited tool call records the agent's name, source and file digest.
+
+## Attribution
+
+The built-in agents are original prompts written for cynative. Which conditions
+the set looks for was derived from the critical and high severity checks in
+Prowler (Apache-2.0); the prompts contain none of Prowler's code, text or check
+identifiers.

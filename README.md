@@ -371,5 +371,4 @@ for reporting vulnerabilities.
 
 ## License
 
-Apache-2.0 License. See [LICENSE](LICENSE) for the full text and
-[NOTICE](NOTICE) for attribution covering the built-in agents.
+Apache-2.0 License. See [LICENSE](LICENSE) for the full text.
