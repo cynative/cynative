@@ -4,7 +4,7 @@ description: Determine which EC2 instances expose their instance profile through
 
 Research which EC2 instances in this account hand their instance profile credentials to a request the instance can be made to issue, and what those roles reach.
 
-Read `HttpTokens`, `HttpEndpoint` and `HttpPutResponseHopLimit` wherever they are set - on running instances, in the account-level default, on every launch template version and on every Auto Scaling launch configuration - and read which instances carry both a public address and an instance profile. Read `EnclaveOptions.Enabled` on each running instance too: a host with an enclave can pass that same instance profile's credentials to the workload isolated inside it over vsock, so the token setting there can govern two credential holders rather than one. EC2 and Auto Scaling are regional, so enumerate the enabled regions from the account and read once per region in that result rather than per region in a list of your own. The account-level default is unset in a new account and stays unset until someone sets it, so it describes what the next launch inherits rather than what the running instances do, and it is reported rather than tested in the condition below.
+Read `HttpTokens`, `HttpEndpoint` and `HttpPutResponseHopLimit` wherever they are set - on running instances, in the account-level default, on every launch template version and on every Auto Scaling launch configuration - and read which instances carry both a public address and an instance profile. Read `EnclaveOptions.Enabled` on each running instance too: an enclave can receive that same instance profile's credentials from the parent over vsock, but only where the workload is built to forward them, and `EnclaveOptions.Enabled` alone proves the enclave is attached, not that forwarding happens. EC2 and Auto Scaling are regional, so enumerate the enabled regions from the account and read once per region in that result rather than per region in a list of your own. The account-level default is unset in a new account and stays unset until someone sets it, so it describes what the next launch inherits rather than what the running instances do, and it is reported rather than tested in the condition below.
 
 The hop limit is the IP TTL on the metadata service's responses. At 1 the response cannot cross the extra hop into a container on a bridge network; above 1 it can, which puts the instance profile within reach of every container on the host whatever the token setting is.
 
@@ -20,7 +20,7 @@ Resolve the instance profile's effective permissions and report those rather tha
 
 Rank those instances by whether they also carry a public address, which puts an externally reachable process on the same host as the credential source.
 
-Name the enclave hosts inside the count above and rank one above an equivalent instance with no enclave, since the same token setting can decide for both the host and the workload sealed inside it.
+Name the enclave hosts inside the count above rather than folding them into it silently: `EnclaveOptions.Enabled` proves the enclave is attached, not that it receives the instance profile's credentials, so report the capability beside the finding rather than ranking the host above an equivalent instance with no enclave.
 
 Report a launch template version or launch configuration setting `HttpTokens` to `optional` in full where an Auto Scaling group or a running instance references it, since the next launch inherits it, and leave the unreferenced versions in the count.
 

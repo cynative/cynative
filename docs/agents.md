@@ -178,7 +178,7 @@ audited tool call records the agent's name, source and file digest.
 
 ## Attribution
 
-The built-in agents are original prompts written for cynative. Which conditions
-the set looks for was derived from the critical and high severity checks in
-Prowler (Apache-2.0); the prompts contain none of Prowler's code, text or check
+The built-in agents are original prompts written for cynative. The conditions
+these agents check were derived from the critical and high severity checks in
+Prowler (Apache-2.0). The prompts contain none of Prowler's code, text or check
 identifiers.

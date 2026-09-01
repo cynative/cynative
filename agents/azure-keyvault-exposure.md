@@ -18,7 +18,7 @@ Only for the vaults that are not clean:
 
 For vaults on the legacy access policy model, report each access policy entry with its object ID and the secret permissions it holds. Access policy entries are scoped to the whole vault rather than to individual secrets, so an entry carrying a secret permission carries it on every secret the vault holds.
 
-For vaults on the Azure RBAC model, report each role assignment at the vault's own scope or inherited from above it that grants a data-plane role over secrets or keys, such as Key Vault Secrets User, Key Vault Secrets Officer or Key Vault Administrator, naming the principal, the role and the scope it was assigned at. A role assigned at the subscription or resource group reaches every vault beneath it, not only the one under review.
+For vaults on the Azure RBAC model, report each role assignment scoped at the vault, at an individual secret, key or certificate within it, or inherited from above the vault, that grants a data-plane role over secrets or keys, such as Key Vault Secrets User, Key Vault Secrets Officer or Key Vault Administrator, naming the principal, the role, the scope it was assigned at and any deny assignment or assignment condition bounding it. A role assigned at the subscription or resource group reaches every vault beneath it, not only the one under review.
 
 Report the network configuration as a combination rather than a single field, since a private endpoint does not disable public access on its own.
 

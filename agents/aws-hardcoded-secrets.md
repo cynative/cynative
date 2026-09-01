@@ -20,7 +20,7 @@ Establish reach using the account's own APIs and nothing else. An `AKIA` identif
 
 Report which permission already exposes each value: Lambda environment variables to `lambda:GetFunctionConfiguration`, CloudFormation outputs to `cloudformation:DescribeStacks`, ECS task definitions to `ecs:DescribeTaskDefinition`, Batch job definitions to `batch:DescribeJobDefinitions`, and Step Functions definitions to `states:DescribeStateMachine`.
 
-Name the Secrets Manager secrets from the count above whose name matches the key or resource carrying a value you retained, and report the creation date of any with rotation disabled next to the copy found elsewhere: automatic rotation has been off since that date, not that the value itself has never changed.
+Name the Secrets Manager secrets from the count above whose name matches the key or resource carrying a value you retained, and report the creation date of any with rotation disabled next to the copy found elsewhere: automatic rotation is disabled, and the secret was created on that date, not that the value itself has never changed and not that rotation has been off since creation.
 
 Report a retained value as intentional where the evidence supports it: an `AKIA` identifier whose IAM user's permissions reach only what a bucket policy in this account already grants to everyone, or a value the account's own deployment substitutes at runtime, evidenced by an SSM parameter or a Secrets Manager secret of the same name. Name the evidence. A retained value with no such evidence is not intentional.
 
