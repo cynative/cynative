@@ -64,30 +64,30 @@ cat findings.json | cynative -p "triage these findings by exploitability"
 
 ## Your first agent
 
-An agent is a markdown file: one line of description, then the prompt. The filename is the name. To add your own, create `~/.cynative/agents/` and write one in it. Cynative does not create this directory for you:
+The binary ships a set of built-in agents. `cynative agents list` shows them,
+and `cynative agents show <name>` prints the exact file one would run. To make
+your own version, copy a built-in to your agents directory under a new name and
+edit it:
 
 ```bash
 mkdir -p ~/.cynative/agents
 
-cat > ~/.cynative/agents/aws-public-data-stores.md <<'EOF'
----
-description: Finds publicly accessible data stores in an AWS account.
----
-Check S3, RDS snapshots, EBS snapshots and public AMIs for exposure.
-Report each finding with the resource ARN and how it is reachable.
-EOF
-
-cynative -p --agent aws-public-data-stores
+cynative agents show aws-public-datastores > ~/.cynative/agents/my-aws-public-datastores.md
+# edit ~/.cynative/agents/my-aws-public-datastores.md, then:
+cynative -p --agent my-aws-public-datastores
 ```
 
-See [docs/agents.md](docs/agents.md) for the format.
+An agent is a markdown file: strict YAML frontmatter whose only key is
+`description`, then the prompt body. The filename is the name. A file in
+`~/.cynative/agents/` wins over a built-in of the same name, so give your copy a
+distinct name to keep both. See [docs/agents.md](docs/agents.md) for the format.
 
 ## Running agents
 
 ```bash
-cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
-cynative -p --agent aws-public-data-stores                    # without
-cynative --agent aws-public-data-stores                       # seeds an interactive session
+cynative -p --agent aws-public-datastores "AWS account 128149835728 only"   # with a task
+cynative -p --agent aws-public-datastores                    # without
+cynative --agent aws-public-datastores                       # seeds an interactive session
 ```
 
 `--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin, so the same file runs interactively while you develop it and non-interactively once it settles.
