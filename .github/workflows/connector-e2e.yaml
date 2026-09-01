@@ -632,6 +632,7 @@ jobs:
           VERTEX_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
           VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
           E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+          E2E_EXPECT: ${{ vars.GCP_E2E_EXPECT }}
         run: |
           missing=
           [ -n "${PROJECT}" ]       || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
@@ -640,6 +641,7 @@ jobs:
           [ -n "${VERTEX_MODEL}" ]  || missing="${missing} CYNATIVE_CLI_CI_VERTEX_MODEL"
           [ -n "${VERTEX_REGION}" ] || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
           [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
+          [ -n "${E2E_EXPECT}" ]    || missing="${missing} GCP_E2E_EXPECT"
           if [ -n "${missing}" ]; then
             echo "::error::missing repo variables:${missing}"
             exit 1
@@ -677,6 +679,10 @@ jobs:
           CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
           CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
           GCP_E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+          # The fixture project NUMBER, never in the prompt: the read phase binds the
+          # agent's fixture read to the bytes Google returned by requiring it in an
+          # untruncated 200 body in the audit log.
+          GCP_E2E_EXPECT: ${{ vars.GCP_E2E_EXPECT }}
           # Generous per-run limits (a tool-driven agent run needs more than the no-tool
           # defaults); the job timeout bounds the whole run.
           AGENT_E2E_TIMEOUT: "200"
