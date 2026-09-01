@@ -18,7 +18,7 @@ Stop here if the cluster-wide kubelet configuration sets `Webhook` authorization
 
 Only for the kubelets that are not clean:
 
-Report `authorization.mode: AlwaysAllow` on its own, since it authorizes any authenticated caller regardless of `authentication.anonymous.enabled`, and report `authentication.anonymous.enabled` true alongside it where both hold, then resolve whether any NetworkPolicy restricts pod traffic to node addresses - without one, every pod in the cluster reaches port 10250 on every node. The ConfigMap carries one value for the whole cluster, so no node is affected in isolation: report the pods scheduled to each of the nodes the pod specifications name.
+Report `authorization.mode: AlwaysAllow` on its own, since it authorizes any authenticated caller regardless of `authentication.anonymous.enabled`, and report `authentication.anonymous.enabled` true alongside it where both hold, then resolve whether any NetworkPolicy restricts pod traffic to node addresses - without one, nothing this agent reads restricts pod traffic to port 10250 on any node, though a host firewall, cloud security group or other node-level control it does not read could still narrow that. The ConfigMap carries one value for the whole cluster, so no node is affected in isolation: report the pods scheduled to each of the nodes the pod specifications name.
 
 Report a non-zero `readOnlyPort` with the number the field holds and the pods scheduled to those same nodes, since the port it names returns their specifications and status to any caller that reaches a node address, and rank it above an authenticated port that a binding happens to expose.
 
