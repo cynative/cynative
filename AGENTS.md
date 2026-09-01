@@ -1349,13 +1349,17 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
 - `.github/dependabot.yml` runs one daily `multi-ecosystem-group` (`all-dependencies`) across
   gomod, github-actions, cargo (`/tools/rcodesign`), and gitsubmodule, with the `deps` commit
   prefix. `allow: dependency-type: all` is what turns on **indirect** (transitive) module updates.
-  Three `ignore:` entries exist purely to keep the gate green, each with a documented exit
+  Four `ignore:` entries exist purely to keep the gate green, each with a documented exit
   condition: `github.com/charmbracelet/x/exp/*` wholesale (untagged monorepo submodules that
   Dependabot mis-resolves to the tagged root, failing the gomod update outright),
   `denis-tingaikin/go-header` semver-major (v1 is an API rewrite `golangci-lint` cannot compile
-  against, so it breaks `make lint`), and `go.digitalxero.dev/go-msix` semver-major (v1 breaks
-  goreleaser's nfpm MSIX packager, so it breaks `make snapshot`). Minor/patch stay allowed on the
-  latter two.
+  against, so it breaks `make lint`), `alecthomas/go-check-sumtype` semver-major plus
+  semver-minor (v0.5.0 replaced the exported Config/Run API with an analyzer-style one
+  `golangci-lint` cannot compile against, so it breaks `make lint`; the minor ignore is
+  load-bearing because Dependabot classifies 0.4 -> 0.5 positionally as semver-minor), and
+  `go.digitalxero.dev/go-msix` semver-major (v1 breaks goreleaser's nfpm MSIX packager, so it
+  breaks `make snapshot`). Minor/patch stay allowed on go-header and go-msix, patch only on
+  go-check-sumtype.
 - The macOS packaging toolchain (the `pkg-tools.yaml` required check) is built by
   `scripts/release/install-pkg-tools.sh` from two git submodules, `third_party/bomutils` and
   `third_party/xar`, plus `tools/rcodesign` (a Cargo stub that pins the `apple-codesign`
