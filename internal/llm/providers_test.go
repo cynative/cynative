@@ -32,12 +32,12 @@ func TestCanonicalEnvKeyLookup_MatchesChatProviders(t *testing.T) {
 	}
 }
 
-// TestChatProviders_ExcludedTriple hardcodes the non-chat exclusions:
+// TestChatProviders_ExcludedPair hardcodes the non-chat exclusions:
 // StandardProviders minus ChatProviders() must be exactly
-// {elevenlabs, runway, runware}, and each must be rejected at config
+// {elevenlabs, runway}, and each must be rejected at config
 // validation. An exclusion silently added, dropped, or no longer present
 // upstream fails here until re-triaged against the Bifrost sources.
-func TestChatProviders_ExcludedTriple(t *testing.T) {
+func TestChatProviders_ExcludedPair(t *testing.T) {
 	t.Parallel()
 
 	chat := llm.ChatProviders()
@@ -47,7 +47,7 @@ func TestChatProviders_ExcludedTriple(t *testing.T) {
 			got = append(got, p)
 		}
 	}
-	want := []schemas.ModelProvider{schemas.Elevenlabs, schemas.Runway, schemas.Runware}
+	want := []schemas.ModelProvider{schemas.Elevenlabs, schemas.Runway}
 	slices.Sort(got)
 	slices.Sort(want)
 
@@ -88,6 +88,7 @@ func TestCanonicalEnvKey_HappyPath(t *testing.T) {
 		{schemas.Parasail, "PARASAIL_API_KEY", true},
 		{schemas.Fireworks, "FIREWORKS_API_KEY", true},
 		{schemas.Replicate, "REPLICATE_API_TOKEN", true},
+		{schemas.Runware, "RUNWARE_API_KEY", true},
 		{schemas.OpencodeGo, "OPENCODE_API_KEY", true},
 		{schemas.OpencodeZen, "OPENCODE_API_KEY", true},
 		{schemas.Bedrock, "", false},

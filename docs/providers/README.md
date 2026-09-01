@@ -38,6 +38,7 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `parasail`     | `PARASAIL_API_KEY`                 | [parasail.md](parasail.md) |
 | `fireworks`    | `FIREWORKS_API_KEY`                | [fireworks.md](fireworks.md) |
 | `replicate`    | `REPLICATE_API_TOKEN`              | [replicate.md](replicate.md) |
+| `runware`      | `RUNWARE_API_KEY`                  | [runware.md](runware.md) |
 | `deepseek`     | `DEEPSEEK_API_KEY`                 | [deepseek.md](deepseek.md) |
 | `sarvam`       | `SARVAM_API_KEY`                   | [sarvam.md](sarvam.md) |
 | `wafer`        | `WAFER_API_KEY`                    | [wafer.md](wafer.md) |

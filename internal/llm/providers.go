@@ -39,13 +39,12 @@ func ValidateProvider(entry *ProviderEntry) error {
 var nonChatProviders = map[schemas.ModelProvider]bool{
 	schemas.Elevenlabs: true,
 	schemas.Runway:     true,
-	schemas.Runware:    true,
 }
 
 // ChatProviders returns every provider cynative can select: Bifrost's
 // canonical schemas.StandardProviders minus the non-chat exclusions. Deriving
 // the catalog keeps it current across Bifrost bumps; the package tests pin
-// the exclusion triple and tie each chat provider to a CanonicalEnvKeyLookup
+// the exclusion pair and tie each chat provider to a CanonicalEnvKeyLookup
 // row and a docs/providers/<name>.md guide.
 func ChatProviders() []schemas.ModelProvider {
 	providers := make([]schemas.ModelProvider, 0, len(schemas.StandardProviders))
@@ -89,6 +88,7 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.Parasail:      "PARASAIL_API_KEY",
 	schemas.Fireworks:     "FIREWORKS_API_KEY",
 	schemas.Replicate:     "REPLICATE_API_TOKEN",
+	schemas.Runware:       "RUNWARE_API_KEY",
 	schemas.OpencodeGo:    "OPENCODE_API_KEY",
 	schemas.OpencodeZen:   "OPENCODE_API_KEY",
 	schemas.DeepSeek:      "DEEPSEEK_API_KEY",
