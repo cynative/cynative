@@ -4,7 +4,7 @@ description: Determine which pods reach their node, what that node holds and whi
 
 Research which pods in this cluster can reach their node, and which pod specifications carry secret values in plaintext.
 
-Scan every pod's containers, init containers and ephemeral containers for the fields that cross the node boundary - `privileged`, `SYS_ADMIN` in added capabilities, `hostPath` volume mounts taking the host path from the volume and the read-only flag from the mount that references it, `hostPID`, `hostIPC`, `hostNetwork`, `hostPort` and Windows `hostProcess` - and for environment variables carrying a literal value rather than a `secretKeyRef`. Select on the variable rather than on every literal: a name containing `PASSWORD`, `SECRET`, `TOKEN`, `KEY`, `CREDENTIAL` or `PASSPHRASE`, or a value that is a private key block, a bearer token or a connection string carrying a password. The bound is there because a pod specification is mostly literal configuration, so an unbounded scan returns the cluster's environment rather than its secrets.
+Scan every pod's containers, init containers and ephemeral containers for the fields that cross the node boundary - `privileged`, `SYS_ADMIN` in added capabilities, `hostPath` volume mounts taking the host path from the volume and the read-only flag from the mount that references it, `hostPID`, `hostIPC`, `hostNetwork` and Windows `hostProcess` - for `hostPort`, which exposes the container on the node's network interface without crossing that boundary itself - and for environment variables carrying a literal value rather than a `secretKeyRef`. Select on the variable rather than on every literal: a name containing `PASSWORD`, `SECRET`, `TOKEN`, `KEY`, `CREDENTIAL` or `PASSPHRASE`, or a value that is a private key block, a bearer token or a connection string carrying a password. The bound is there because a pod specification is mostly literal configuration, so an unbounded scan returns the cluster's environment rather than its secrets.
 
 Read each pod's `ownerReferences` and its `kubernetes.io/config.source` annotation: a pod whose annotation holds `file` and whose `ownerReferences` name the node rather than a controller is a static pod, which the kubelet started from a manifest on that node and is how a self-managed control plane runs its own components.
 
@@ -21,6 +21,8 @@ Stop here if the only containers setting `privileged`, `SYS_ADMIN`, `hostPath`, 
 Only for the pods that are not clean:
 
 For each pod reaching the node, report the service accounts mounted on that node's other pods and what else is scheduled there, resolved from the node name each pod specification already carries rather than from the node object. A `hostPath` mount of `/`, `/var/lib/kubelet`, `/etc/kubernetes`, a node certificate directory, or the container runtime socket - `/run/containerd/containerd.sock` on a current cluster and `/var/run/docker.sock` on one still running Docker - is the node; report the path and the read-only state.
+
+Report `hostPort` as inbound exposure on the node's network interface rather than as a pod reaching the node: it does not carry the container's access to the node's filesystem, processes or credentials with it. Name the port, the pod and the namespace.
 
 Report `hostNetwork` with what it reaches on that node - the kubelet port and any loopback-bound node service - and `hostPID` and `hostIPC` with the processes and memory of the other containers on the host.
 
