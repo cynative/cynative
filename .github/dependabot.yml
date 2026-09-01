@@ -32,6 +32,17 @@ updates:
       # when that happens.
       - dependency-name: "github.com/denis-tingaikin/go-header"
         update-types: ["version-update:semver-major"]
+      # go-check-sumtype v0.5.0 is a breaking API rewrite (the exported Config
+      # and Run were replaced by an analysis.Analyzer-style API) that
+      # golangci-lint (v2.13.2, the latest release, which calls the old API)
+      # cannot compile against, so forcing the bump on this indirect module
+      # breaks `go tool golangci-lint`. Patch updates stay allowed; minor is
+      # ignored too because Dependabot classifies 0.4 -> 0.5 positionally as
+      # semver-minor. Once golangci-lint itself requires >= v0.5.0 the module
+      # graph will follow without Dependabot's help. Drop this entry when that
+      # happens.
+      - dependency-name: "github.com/alecthomas/go-check-sumtype"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # go-msix v1 is a breaking API rewrite (Builder became an interface,
       # Build takes a context, the Manifest/Identity/Resource types were
       # removed) that goreleaser's nfpm (v2.47.0, the latest release) still
