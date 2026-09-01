@@ -80,6 +80,7 @@ aws-oidc|aws|matrix|25|output_env_credentials=true
 gcp-wif|gcp|matrix|20|-
 gcp-wif|gke|matrix|30|-
 github-app|github|static|35|-
+agent-e2e|agent|static|25|-
 EOF
 
 python3 - "$workflow" "$tmp/expected" >"$tmp/actual" <<'PY'
@@ -151,17 +152,23 @@ EXPECTED_IF = {
                            "needs.prepare.result == 'success' && "
                            "(needs.prepare.outputs.selector == '' || "
                            "needs.prepare.outputs.selector == 'github')"),
+    ("agent-e2e", None): ("github.repository == 'cynative/cynative' && "
+                          "needs.prepare.result == 'success' && "
+                          "(needs.prepare.outputs.selector == '' || "
+                          "needs.prepare.outputs.selector == 'agent')"),
     # A matrix leg is selected on the STEP, because a job-level if cannot read matrix.
     ("gcp-wif", "e2e"): ("${{ needs.prepare.outputs.selector == '' || "
                          "needs.prepare.outputs.selector == matrix.connector }}"),
     ("aws-oidc", "e2e"): ("${{ needs.prepare.outputs.selector == '' || "
                           "needs.prepare.outputs.selector == matrix.connector }}"),
     ("github-app", "e2e"): "",
+    ("agent-e2e", "e2e"): "",
     ("gcp-wif", "sentinel"): ("${{ always() && (needs.prepare.outputs.selector == '' || "
                               "needs.prepare.outputs.selector == matrix.connector) }}"),
     ("aws-oidc", "sentinel"): ("${{ always() && (needs.prepare.outputs.selector == '' || "
                                "needs.prepare.outputs.selector == matrix.connector) }}"),
     ("github-app", "sentinel"): "${{ always() }}",
+    ("agent-e2e", "sentinel"): "${{ always() }}",
     ("gate-assert", None): "${{ always() }}",
 }
 
@@ -189,6 +196,9 @@ EXPECTED_STEPS = {
     "github-app": ["uses:actions/checkout", "name:Assert the exact checkout",
                    "uses:actions/setup-go", "name:Preflight the required repo ", "aws",
                    "apptoken", "e2e", "sentinel"],
+    "agent-e2e": ["uses:actions/checkout", "name:Assert the exact checkout",
+                  "uses:actions/setup-go", "name:Preflight the required repo ", "auth",
+                  "name:Add quota project to the WIF", "e2e", "sentinel"],
     "gate-assert": ["uses:actions/checkout", "assert"],
 }
 EXPECTED_RUNNER = "ubuntu-latest"
@@ -216,9 +226,15 @@ EXPECTED_ENV_KEYS = {
         "GH_E2E_EXPECT_NO_AWS", "GH_E2E_TIMEOUT", "GH_E2E_MAX_TOKENS", "GH_E2E_REQUIRE_RUN",
         "GH_E2E_CANARY",
     },
+    ("agent-e2e", "e2e"): {
+        "CYNATIVE_LLM_PROVIDER", "CYNATIVE_LLM_MODEL", "CYNATIVE_LLM_VERTEX_PROJECT_ID",
+        "CYNATIVE_LLM_VERTEX_REGION", "GCP_E2E_PROJECT", "AGENT_E2E_TIMEOUT",
+        "AGENT_E2E_MAX_TOKENS", "AGENT_E2E_REQUIRE_RUN", "AGENT_E2E_CANARY", "CREDS_FILE",
+    },
     ("gcp-wif", "sentinel"): {"CONNECTOR", "ACTUAL_TOTAL", "EXPECTED_TOTAL", "E2E_OUTCOME"},
     ("aws-oidc", "sentinel"): {"CONNECTOR", "ACTUAL_TOTAL", "EXPECTED_TOTAL", "E2E_OUTCOME"},
     ("github-app", "sentinel"): {"E2E_OUTCOME"},
+    ("agent-e2e", "sentinel"): {"E2E_OUTCOME"},
     ("gate-assert", "assert"): {"SELECTOR", "MODE", "ROSTER", "JOBS", "NEEDS_JSON", "RESULTS",
                                 "PROOFS", "CHECKOUT_SHA"},
 }
@@ -293,6 +309,19 @@ EXPECTED_RUN = {
         "exit 1",
         "fi",
         "printf 'proof_github=success\\n' >>\"$GITHUB_OUTPUT\"",
+    ],
+    ("agent-e2e", "e2e"): [
+        'export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"',
+        'CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")"',
+        "export CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS",
+        "make agent-e2e",
+    ],
+    ("agent-e2e", "sentinel"): [
+        'if [ "$E2E_OUTCOME" != success ]; then',
+        'echo "::error::agent e2e outcome=$E2E_OUTCOME"',
+        "exit 1",
+        "fi",
+        "printf 'proof_agent=success\\n' >>\"$GITHUB_OUTPUT\"",
     ],
 }
 
@@ -566,6 +595,19 @@ try:
 except OSError as err:
     problems.append("cannot read the Makefile to pin the connector-%%-e2e recipe: %s" % err)
 
+# The agent-e2e leg has its own target rather than the connector-%-e2e pattern rule, so the
+# pin above says nothing about it. Pin it the same way: a no-op agent-e2e recipe would green
+# this leg while the workflow still reads as pinned.
+WANT_AGENT_RECIPE = "agent-e2e:\n\tsh test/agent.e2e.test.sh\n"
+try:
+    with open("Makefile", encoding="utf-8") as makefile:
+        if WANT_AGENT_RECIPE not in makefile.read():
+            problems.append("the Makefile's agent-e2e recipe is not the pinned two lines; a "
+                            "no-op recipe bypasses the live agent suite while the workflow "
+                            "still reads as pinned")
+except OSError as err:
+    problems.append("cannot read the Makefile to pin the agent-e2e recipe: %s" % err)
+
 if problems:
     for p in problems:
         sys.stderr.write("  %s\n" % p)
@@ -580,7 +622,7 @@ LC_ALL=C sort -o "$tmp/actual" "$tmp/actual"
 # Sorted comparison, so declaration order is free but the MULTISET is pinned. A set
 # comparison would not catch a duplicated row.
 if cmp -s "$tmp/expected" "$tmp/actual"; then
-	printf 'ok   connector-e2e roster matches the canonical roster (4 legs, 3 jobs)\n'
+	printf 'ok   connector-e2e roster matches the canonical roster (5 legs, 4 jobs)\n'
 else
 	printf 'FAIL: connector-e2e.yaml roster does not match the canonical roster.\n'
 	printf '  only in canonical:\n'

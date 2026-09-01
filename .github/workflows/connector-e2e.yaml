@@ -3,6 +3,8 @@ name: Live connector e2e
 # The live connector e2es against the real GCP, AWS, GitHub and GKE fixtures: a
 # read of a fact that only the real provider can supply, plus a write canary denied
 # before the request leaves the machine, proving read-only enforcement end to end.
+# A static agent-e2e job runs alongside them, exercising the shipped built-in `--agent`
+# path against the GCP fixture the same way.
 #
 # Two entry points. The Release Pipeline calls it as a PRE-PUBLISH GATE, and maintainers
 # can dispatch it manually with an optional connector filter.
@@ -36,7 +38,7 @@ on:
         type: choice
         required: true
         default: all
-        options: [all, gcp, aws, github, gke]
+        options: [all, agent, gcp, aws, github, gke]
 
 permissions: {}
 
@@ -60,8 +62,8 @@ jobs:
   # this workflow's own repository and commit (see below), so it always runs cynative's
   # own contract script, never a foreign caller's copy. The actual defense that keeps a
   # foreign caller off a credential-bearing job is the per-job
-  # `if: github.repository == 'cynative/cynative'` guard on gcp-wif, aws-oidc, and
-  # github-app below; this job is not a substitute for those guards, and they must not
+  # `if: github.repository == 'cynative/cynative'` guard on gcp-wif, aws-oidc, github-app
+  # and agent-e2e below; this job is not a substitute for those guards, and they must not
   # be removed as redundant. The contract logic lives in a script with offline unit
   # tests under `make sh-test`, not inline, so it is exercised on every PR rather than
   # only on a live release run.
@@ -100,7 +102,7 @@ jobs:
           CALL_REF: ${{ inputs.ref }}
           TRIGGER_SHA: ${{ github.sha }}
           SELECTOR: ${{ inputs.connector }}
-          SELECTORS: gcp aws github gke
+          SELECTORS: agent gcp aws github gke
           DISPATCH_POLICY: filtered
         run: sh scripts/ci/ci-gate-contract.sh >>"$GITHUB_OUTPUT"
 
@@ -580,6 +582,129 @@ jobs:
           fi
           printf 'proof_github=success\n' >>"$GITHUB_OUTPUT"
 
+  # ---- agent-e2e (built-in agent) ------------------------------------------
+  # A static job, not a matrix: the built-in agent import is a single suite. It reuses the
+  # gcp-wif Workload Identity Federation into cynative-cli-ci (Vertex drives the loop and
+  # the gcp fixture backs the run), so the filename-pinned WIF trust condition still admits
+  # it. It proves a release ships a working `--agent <builtin>` path end to end: the agent
+  # loads, drives the loop against the real fixture, and the write canary is denied.
+  agent-e2e:
+    name: Built-in agent read + canary
+    needs: prepare
+    if: >-
+      github.repository == 'cynative/cynative' &&
+      needs.prepare.result == 'success' &&
+      (needs.prepare.outputs.selector == '' ||
+       needs.prepare.outputs.selector == 'agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token for Workload Identity Federation
+    outputs:
+      proof_agent: ${{ steps.sentinel.outputs.proof_agent }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.checkout_sha }}
+          persist-credentials: false
+      - name: Assert the exact checkout
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.checkout_sha }}
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::checked out $actual, expected $EXPECTED"
+            exit 1
+          fi
+          echo "Testing SHA $actual"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Static job: the job-level if already gates it, so no step-level if and no matrix
+      # context. A direct check that the WIF/Vertex/fixture inputs this run consumes are all
+      # present, failing loudly on a missing or renamed repo variable before the suite runs.
+      - name: Preflight the required repo variables
+        env:
+          PROJECT: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          WIF_PROVIDER: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
+          SA: ${{ vars.CYNATIVE_CLI_CI_SA }}
+          VERTEX_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
+          E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+        run: |
+          missing=
+          [ -n "${PROJECT}" ]       || missing="${missing} CYNATIVE_CLI_CI_PROJECT"
+          [ -n "${WIF_PROVIDER}" ]  || missing="${missing} CYNATIVE_CLI_CI_WIF_PROVIDER"
+          [ -n "${SA}" ]            || missing="${missing} CYNATIVE_CLI_CI_SA"
+          [ -n "${VERTEX_MODEL}" ]  || missing="${missing} CYNATIVE_CLI_CI_VERTEX_MODEL"
+          [ -n "${VERTEX_REGION}" ] || missing="${missing} CYNATIVE_CLI_CI_VERTEX_REGION"
+          [ -n "${E2E_PROJECT}" ]   || missing="${missing} GCP_E2E_PROJECT"
+          if [ -n "${missing}" ]; then
+            echo "::error::missing repo variables:${missing}"
+            exit 1
+          fi
+      # Keyless WIF into cynative-cli-ci, same as gcp-wif. GOOGLE_APPLICATION_CREDENTIALS is
+      # exported downstream so the gcp connector registers and the agent run has a fixture to
+      # read and a boundary to probe.
+      - name: Authenticate to GCP (Workload Identity Federation)
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          workload_identity_provider: ${{ vars.CYNATIVE_CLI_CI_WIF_PROVIDER }}
+          service_account: ${{ vars.CYNATIVE_CLI_CI_SA }}
+          create_credentials_file: true
+          export_environment_variables: false
+      # The auth action writes an external_account creds file with no quota_project_id.
+      # Inject the fixture project as quota_project_id, the field cynative reads as its ADC
+      # project fallback, keeping the run keyless.
+      - name: Add quota project to the WIF credentials file
+        env:
+          CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+          QUOTA_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+        run: |
+          tmp="$(mktemp)"
+          jq --arg p "$QUOTA_PROJECT" '. + {quota_project_id: $p}' "$CREDS_FILE" >"$tmp"
+          mv "$tmp" "$CREDS_FILE"
+      - name: Run the agent e2e
+        id: e2e
+        env:
+          # Vertex drives the loop; fed inline so it does not depend on ADC fallback, while
+          # GOOGLE_APPLICATION_CREDENTIALS lights the gcp connector for the run.
+          CYNATIVE_LLM_PROVIDER: vertex
+          CYNATIVE_LLM_MODEL: ${{ vars.CYNATIVE_CLI_CI_VERTEX_MODEL }}
+          CYNATIVE_LLM_VERTEX_PROJECT_ID: ${{ vars.CYNATIVE_CLI_CI_PROJECT }}
+          CYNATIVE_LLM_VERTEX_REGION: ${{ vars.CYNATIVE_CLI_CI_VERTEX_REGION }}
+          GCP_E2E_PROJECT: ${{ vars.GCP_E2E_PROJECT }}
+          # Generous per-run limits (a tool-driven agent run needs more than the no-tool
+          # defaults); the job timeout bounds the whole run.
+          AGENT_E2E_TIMEOUT: "200"
+          AGENT_E2E_MAX_TOKENS: "60000"
+          # The harness treats only the exact string 1 as required, so a renamed variable
+          # cannot let the suite skip green on the release path.
+          AGENT_E2E_REQUIRE_RUN: "1"
+          # Explicit, never the suite default: a *_CANARY=0 reaching this leg would green a
+          # read-only run and leave the write boundary unprobed on the release path.
+          AGENT_E2E_CANARY: "1"
+          CREDS_FILE: ${{ steps.auth.outputs.credentials_file_path }}
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="$CREDS_FILE"
+          CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS="$(cat "$CREDS_FILE")"
+          export CYNATIVE_LLM_VERTEX_AUTH_CREDENTIALS
+          make agent-e2e
+      - name: Sentinel
+        id: sentinel
+        if: ${{ always() }}
+        env:
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+        run: |
+          if [ "$E2E_OUTCOME" != success ]; then
+            echo "::error::agent e2e outcome=$E2E_OUTCOME"
+            exit 1
+          fi
+          printf 'proof_agent=success\n' >>"$GITHUB_OUTPUT"
+
   # ---- The gate's fail-closed assertion ------------------------------------
   # The `if:` is bare always() with ZERO conjuncts. The old per-suite version was
   # `always() && inputs.gate`, safe only because gate was mandatory on the call path.
@@ -588,7 +713,7 @@ jobs:
   # skipped job.
   gate-assert:
     name: Assert the gate actually ran
-    needs: [prepare, gcp-wif, aws-oidc, github-app]
+    needs: [prepare, gcp-wif, aws-oidc, github-app, agent-e2e]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -610,8 +735,8 @@ jobs:
         env:
           SELECTOR: ${{ needs.prepare.outputs.selector }}
           MODE: ${{ needs.prepare.outputs.mode }}
-          ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app gke:gcp-wif
-          JOBS: gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always github-app:github-app:always
+          ROSTER: gcp:gcp-wif aws:aws-oidc github:github-app gke:gcp-wif agent:agent-e2e
+          JOBS: gcp-wif:gcp-wif:always aws-oidc:aws-oidc:always github-app:github-app:always agent-e2e:agent-e2e:always
           # The actual dependency set this job waits on, so the script can catch a
           # job that was added to needs but never added to JOBS (or vice versa).
           NEEDS_JSON: ${{ toJSON(needs) }}
@@ -619,11 +744,13 @@ jobs:
             gcp-wif=${{ needs.gcp-wif.result }}
             aws-oidc=${{ needs.aws-oidc.result }}
             github-app=${{ needs.github-app.result }}
+            agent-e2e=${{ needs.agent-e2e.result }}
           PROOFS: |
             gcp-wif.gcp=${{ needs.gcp-wif.outputs.proof_gcp }}
             aws-oidc.aws=${{ needs.aws-oidc.outputs.proof_aws }}
             github-app.github=${{ needs.github-app.outputs.proof_github }}
             gcp-wif.gke=${{ needs.gcp-wif.outputs.proof_gke }}
+            agent-e2e.agent=${{ needs.agent-e2e.outputs.proof_agent }}
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout_sha }}
         run: |
           sh scripts/ci/ci-gate-assert.sh &&
