@@ -16,7 +16,7 @@ Stop here if the admin user is disabled on every registry, `anonymousPullEnabled
 
 Only for the registries that are not clean:
 
-Resolve which workloads pull from each by reading the container image references Resource Manager returns: Container Apps container images, App Service container settings, and the AKS cluster's attached registry list. Pod-level image references are not in Resource Manager, so where an AKS cluster attaches the registry say the cluster pulls from it without claiming which workloads do.
+Resolve which workloads pull from each by reading the container image references Resource Manager returns: Container Apps container images and App Service container settings. AKS carries no attached-registry list on the cluster resource: `--attach-acr` grants the cluster's kubelet identity `AcrPull` through a role assignment at the registry's scope, so read each cluster's kubelet identity and resolve its role assignments at that scope instead. Pod-level image references and image-pull secrets are not in Resource Manager, so where a cluster's kubelet identity holds an assignment at the registry say the cluster pulls from it without claiming which workloads do.
 
 Report registries with the admin user enabled: the admin credential is a shared password with push permission that attributes to no principal in the registry logs. Report `anonymousPullEnabled` separately from public network access, since the first controls whether a caller needs credentials to read image contents and the second only controls reachability.
 
