@@ -24,7 +24,7 @@ Report a non-zero `readOnlyPort` with the number the field holds and the pods sc
 
 Where `authorization.mode` is `Webhook`, the kubelet delegates each request to the API server's authorizer, so the port is reachable but every call is decided by whatever holds `nodes/proxy`. Report the mode as bounding rather than open, and say that the bindings that decide it are outside what this agent reads.
 
-Report `--kubelet-certificate-authority` unset on the API server, which leaves kubelet certificates unverified, with the network the control plane and nodes share, and report `rotateCertificates` false as a persistence property against the nodes named above: node credentials remain valid indefinitely.
+Report `--kubelet-certificate-authority` unset on the API server, which leaves kubelet certificates unverified, with the network the control plane and nodes share, and report `rotateCertificates` false against the nodes named above: the kubelet will not renew its client certificate on its own, and its actual lifetime is unresolved unless the certificate itself is read.
 
 Report an unauthenticated kubelet listener as intentional where the evidence supports it: a `readOnlyPort` whose only consumer is a monitoring DaemonSet in this cluster whose pods you can name. A NetworkPolicy that names node addresses is not that evidence on its own, since whether a CNI enforces it against traffic to a node is outside what this agent reads. Name the evidence. An unauthenticated listener with no such evidence is not intentional.
 

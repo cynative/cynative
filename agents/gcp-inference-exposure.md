@@ -14,11 +14,11 @@ Stop here if no Vertex AI endpoint grants `aiplatform.endpoints.predict` to a pr
 
 Only for the endpoints and keys that are not clean:
 
-Resolve the project's enabled service list and report it as the key's scope, since an unrestricted key reaches every one of them rather than the one it was cut for: a standard API key identifies its project rather than a principal, and carries no IAM binding to resolve.
+Resolve the project's enabled service list and report the subset of it that accepts API key authorization as the key's scope, since an unrestricted key reaches every one of those rather than the one it was cut for: a standard API key identifies its project rather than a principal, and carries no IAM binding to resolve. Name an enabled service that instead requires an IAM-authorized credential as enabled but not reached by the key, since a standard API key cannot stand in for one.
 
-Report each endpoint's predict bindings, direct and inherited from the project, with the principal type of every member, since `allUsers` and `allAuthenticatedUsers` need no account in this organization while a service account outside it needs one somebody else controls.
+Report each endpoint's predict bindings, direct and inherited from the project, with the principal type of every member: `allUsers` and `allAuthenticatedUsers` need no account and are always outside this organization, a service account is outside it where its own project is not one the organization's own project listing carries, and a `user`, `group`, `domain`, `principal` or `principalSet` member's organization membership is not established by anything read here, so report it as unresolved rather than as inside or outside.
 
-Report a reachable endpoint or unrestricted key as intentional where the evidence supports it: a Vertex AI endpoint whose predict binding names a service account in this same organization, or a key whose restrictions name the single API the project's own configuration records it serving. Name the evidence. An endpoint granting predict to a principal outside the organization with no such evidence is not intentional.
+Report a reachable endpoint or unrestricted key as intentional where the evidence supports it: an endpoint whose every predict binding granting predict to a principal outside the organization independently names a service account in this same organization, or a key whose restrictions name the single API the project's own configuration records it serving. Name the evidence. An endpoint carrying a predict binding that, considered on its own without regard to any other binding on the endpoint, grants predict to a principal outside the organization with no such evidence is not intentional.
 
 
 Order findings by risk, most consequential first.

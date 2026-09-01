@@ -52,9 +52,24 @@ snapshot_parser() {
 }
 
 e2e_require_env agent.e2e "${AGENT_E2E_REQUIRE_RUN:-}" \
-	CYNATIVE_LLM_PROVIDER CYNATIVE_LLM_MODEL GCP_E2E_PROJECT GCP_E2E_EXPECT || exit 0
+	CYNATIVE_LLM_PROVIDER CYNATIVE_LLM_MODEL GCP_E2E_PROJECT GCP_E2E_EXPECT \
+	GOOGLE_APPLICATION_CREDENTIALS || exit 0
 
-e2e_require_cmd go "needed to build cynative" || exit 1
+# The suite runs under an empty HOME (so no user agent shadows the built-in),
+# which disables file-based ADC, so GOOGLE_APPLICATION_CREDENTIALS must name a
+# readable creds file. Treat a set-but-unreadable path like a missing
+# prerequisite: skip unless a run is required.
+if [ ! -r "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+	if [ "${AGENT_E2E_REQUIRE_RUN:-}" = "1" ]; then
+		echo "FAIL: GOOGLE_APPLICATION_CREDENTIALS is not a readable file but AGENT_E2E_REQUIRE_RUN=1" >&2
+		exit 1
+	fi
+	echo "skip: agent.e2e (GOOGLE_APPLICATION_CREDENTIALS is not a readable file)" >&2
+	exit 0
+fi
+
+# Go is only needed to build; a prebuilt binary passed as $1 skips the build.
+[ -n "${1:-}" ] || e2e_require_cmd go "needed to build cynative" || exit 1
 e2e_require_cmd timeout || exit 1
 e2e_require_cmd python3 || exit 1
 e2e_require_cmd base64 || exit 1
@@ -88,11 +103,11 @@ e2e_isolate_env "$workdir"
 unset CYNATIVE_CONNECTORS_GCP_ROLE || true
 
 # Empty HOME so no user-tier agent in ~/.cynative/agents can shadow the built-in.
-# Moving HOME also disables file-based ADC, so require an explicit readable creds file.
+# The readable-creds-file precondition was already enforced before the build.
 export HOME="$workdir/home"
 mkdir -p "$HOME"
-if [ -z "${GOOGLE_APPLICATION_CREDENTIALS:-}" ] || [ ! -r "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
-	echo "FAIL: GOOGLE_APPLICATION_CREDENTIALS must point at a readable creds file (empty HOME disables ADC)" >&2
+if [ ! -r "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+	echo "FAIL: GOOGLE_APPLICATION_CREDENTIALS is not readable" >&2
 	exit 1
 fi
 

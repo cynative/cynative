@@ -26,7 +26,7 @@ Name the resources currently running from each configured-but-unattached source 
 
 Name the SageMaker notebooks, training jobs and models inside the SageMaker counts above, and report each one's direct internet access or missing isolation as outward reach the workload itself opens, not an inbound path the account's perimeter failed to close.
 
-Report each confidential-workload host from the count above with the ports its groups admit and what its instance profile reaches, and rank it above an ordinary instance admitting the same ports.
+Report each confidential-workload host from the count above whose chain closes, with the ports its groups admit and what its instance profile reaches, and rank it above an ordinary instance admitting the same ports.
 
 Report exposure as intentional where the evidence supports it: an interface behind an internet-facing load balancer whose target group health checks pass on 80 or 443, an EKS endpoint whose access CIDRs name a bounded range, or a Lightsail instance whose open ports are the ones its blueprint serves. Name the evidence. A port open to the world on a resource with no such evidence is not intentional.
 
