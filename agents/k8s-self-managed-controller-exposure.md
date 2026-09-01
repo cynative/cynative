@@ -20,7 +20,7 @@ Read which pods mount the directory containing the file named by `--service-acco
 
 Report `--root-ca-file` unset together with the count of service accounts in the cluster. It fills the bundle in a legacy token secret only; a projected token takes its bundle from the `kube-root-ca.crt` ConfigMap, so read that ConfigMap in the namespaces those accounts sit in and report which of the two paths carries a bundle to verify the API server against.
 
-Report a `--bind-address` outside the loopback range (`127.0.0.0/8` or `::1`) as intentional where the evidence supports it: `--authentication-kubeconfig` and `--authorization-kubeconfig` both set on that component. A NetworkPolicy that names node addresses is not that evidence on its own, since whether a CNI enforces it against traffic to a node is outside what this agent reads. Name the evidence. A bound endpoint with no such evidence is not intentional.
+Report a `--bind-address` outside the loopback range as intentional where the evidence supports it: `--authentication-kubeconfig` and `--authorization-kubeconfig` both set on that component. A NetworkPolicy that names node addresses is not that evidence on its own, since whether a CNI enforces it against traffic to a node is outside what this agent reads. Name the evidence. A bound endpoint with no such evidence is not intentional.
 
 
 Order findings by risk, most consequential first.
