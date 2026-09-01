@@ -6,7 +6,7 @@ Research which RDS instances, Redshift clusters, OpenSearch domains, MSK cluster
 
 Read the service-level public flag on each: RDS `PubliclyAccessible` and instances outside a VPC, Redshift `PubliclyAccessible`, OpenSearch domains with no VPC options, MSK clusters with public access, DMS instances marked public and MQ brokers with public accessibility. All seven services named here are regional, so enumerate the enabled regions from the account and read once per region in that result rather than per region in a list of your own.
 
-Read the authentication that stands in front of each in the same pass, because a network flag is only half the question this agent asks: whether each AppSync API's default authentication is `API_KEY`, whether each OpenSearch domain has fine-grained access control enabled, and whether each MSK cluster permits unauthenticated client access. An OpenSearch domain inside a VPC with fine-grained access control off is reachable by everything already in that VPC, so it is a finding whatever the network flag says.
+Read the authentication that stands in front of each in the same pass, because a network flag is only half the question this agent asks: whether each AppSync API's default authentication is `API_KEY`, whether each OpenSearch domain has fine-grained access control enabled, and whether each MSK cluster permits unauthenticated client access. An OpenSearch domain inside a VPC with fine-grained access control off is a finding whatever the network flag says, because without it the domain's own access policy is what decides whether everything already in the VPC gets in, and that policy is resolved in the detailed stage below, not here.
 
 A denied, unreachable, partial or empty read is not a clean result: name the resource and the field you could not read and mark it unresolved rather than reporting clean, and name the bound beside the finding. Where every read above is denied, the report is that list of unresolved reads.
 
@@ -16,9 +16,9 @@ Stop here if no RDS instance or Redshift cluster has `PubliclyAccessible` set, n
 
 Only for the endpoints that are not clean:
 
-Resolve the security groups and any service-level network policy in front of each, and report the admitted CIDRs with the finding.
+Resolve the security groups and any service-level network policy in front of each, and report the admitted CIDRs with the finding. For an OpenSearch domain with fine-grained access control off, resolve its own access policy before calling it reachable by everything in the VPC: a policy naming IAM principals requires a signed request from one of them, and only a policy that does not restrict the principal admits every caller already inside.
 
-Report the endpoints reachable without a credential first, which are the fine-grained-access-control and unauthenticated-client cases named in the counts, now with the security groups in front of them and what they hold. For public RDS, Redshift and MQ endpoints the finding is the exposure and the size of the admitted range. For AppSync, report the API key's expiry date and the API's resolvers.
+Report the endpoints reachable without a credential first, which are the fine-grained-access-control cases whose access policy does not restrict the principal, and the unauthenticated-client cases, named in the counts, now with the security groups in front of them and what they hold. For public RDS, Redshift and MQ endpoints the finding is the exposure and the size of the admitted range. For AppSync, report the API key's expiry date and the API's resolvers.
 
 Say what each exposed service holds by reading the resource's own metadata: engine, cluster identifier, database names where the API returns them, index or topic names. Do not infer contents from a resource name alone.
 
