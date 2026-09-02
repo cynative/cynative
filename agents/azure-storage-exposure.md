@@ -20,6 +20,8 @@ Only for the accounts that are not clean:
 
 Enumerate container public access levels from the account's `blobServices/default/containers` collection under Resource Manager, which carries each container's `publicAccess` value, and report the containers actually set to `Blob` or `Container`. `allowBlobPublicAccess` permits a container to be set public but does not make one public, so report the account-level flag separately as the condition that permitted it. Report the account's `publicNetworkAccess` value alongside a public container finding: one set to `Blob` or `Container` on an account with `publicNetworkAccess` `Disabled` is reachable only from inside the private endpoint's network, not the internet.
 
+A container named `$web` survives disabling static website hosting along with everything already uploaded to it, so its presence alone does not establish that the web endpoint is still serving it - name the account and report the static website exposure unresolved rather than as currently anonymous, unless the container's own `publicAccess` is `Blob` or `Container`, which is a live and directly read fact.
+
 Name the accounts from the shared key count above that also have an open network default and `publicNetworkAccess` not `Disabled`, and report those two together. An account key grants full control of every container, does not expire and attributes to no principal in the diagnostic logs.
 
 Report `supportsHttpsTrafficOnly` disabled with the containers and file shares on the account, since an unencrypted request carries the shared access signature or account key that authorized it.
