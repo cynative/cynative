@@ -4,7 +4,7 @@ description: Determine who can push to each Azure container registry, which work
 
 Research who can push images to the container registries in this subscription, which AKS, Container Apps and App Service workloads pull from them, and what the running images carry.
 
-Read each registry's admin user state, `anonymousPullEnabled`, public network access and private endpoint connections. All of these come from Resource Manager. A subscription that has never used a container registry has not registered `Microsoft.ContainerRegistry`, and one that has never bought a Defender plan has not registered `Microsoft.Security`; a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own provider listing, which returns every provider with its `registrationState`, rather than from a path naming one provider, and report it rather than reporting the enumeration as empty or as unresolved. An unregistered `Microsoft.Security` is the enablement state below answered rather than unread: the plan was never bought.
+Read each registry's admin user state, `anonymousPullEnabled`, public network access and private endpoint connections. All of these come from Resource Manager. A subscription that has never used a container registry has not registered `Microsoft.ContainerRegistry`, and one that has never bought a Defender plan has not registered `Microsoft.Security`; a provider in that state holds none of its resource type rather than an unread one: take the registration state from `GET /subscriptions/{id}/providers/{namespace}` for each provider named above, which returns that provider's own `registrationState`, and report it rather than reporting the enumeration as empty or as unresolved. An unregistered `Microsoft.Security` is the enablement state below answered rather than unread: the plan was never bought.
 
 Read whether Defender for Containers vulnerability assessment is enabled for the subscription before reading the assessment count, and keep the two apart. A subscription with scanning switched off reports zero unresolved assessments, which is indistinguishable from a clean one unless the enablement state is read first, so the enablement state and not the count is what decides whether an absence of findings means anything. That enablement is a Defender plan the subscription buys rather than a setting it configures, so it qualifies the count below rather than deciding whether the expensive stage runs.
 
@@ -32,6 +32,6 @@ Order findings by risk, most consequential first.
 
 Call shapes a run has proven:
 
-Resource providers: `GET /subscriptions/{subscriptionId}/providers` on `management.azure.com`.
+Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
 
 Defender for Cloud assessments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Security/assessments` on `management.azure.com`.

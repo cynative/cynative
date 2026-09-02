@@ -18,7 +18,7 @@ Resolve the project's enabled service list and report the subset of it that acce
 
 Report each endpoint's predict bindings, direct and inherited from the project, folder and organization, with the principal type of every member: `allUsers` and `allAuthenticatedUsers` need no account and are always outside this organization, a service account is outside it where its own project is not one the organization's own project listing carries, and a `user`, `group`, `domain`, `principal` or `principalSet` member's organization membership is not established by anything read here, so report it as unresolved rather than as inside or outside.
 
-Report a reachable endpoint or unrestricted key as intentional where the evidence supports it: an endpoint whose every predict binding granting predict to a principal outside the organization independently names a service account in this same organization, or a key whose restrictions name the single API the project's own configuration records it serving. Name the evidence. An endpoint carrying a predict binding that, considered on its own without regard to any other binding on the endpoint, grants predict to a principal outside the organization with no such evidence is not intentional.
+Report a reachable endpoint or unrestricted key as intentional where the evidence supports it: a Vertex AI endpoint whose predict binding names a service account in this same organization, or a key whose restrictions name the single API the project's own configuration records it serving. Name the evidence. An endpoint granting predict to a principal outside the organization with no such evidence is not intentional.
 
 
 Order findings by risk, most consequential first.

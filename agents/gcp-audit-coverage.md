@@ -2,9 +2,9 @@
 description: Determine which activity in a GCP organization would go unrecorded, from the audit configuration each project carries, its load balancer logging and its asset inventory.
 ---
 
-Research which activity in this organization would go unrecorded, and in which projects. Name the project of every resource reported, and take the projects you enumerate from the organization's own project listing rather than from the project the credential defaults to, walking the folder tree beneath the organization rather than only the projects parented directly on it, resolving which organization that is from the `parent` each project carries rather than from an organization listing, which the ceiling does not reach.
+Research which activity in this organization would go unrecorded, and in which projects. Name the project of every resource reported, and take the projects you enumerate from the organization's own project listing rather than from the project the credential defaults to, resolving which organization that is from the `parent` each project carries rather than from an organization listing, which the ceiling does not reach.
 
-Read the IAM audit configuration on each project, whether each HTTP(S) load balancer has logging enabled, and whether the Cloud Asset Inventory API is enabled on the project the credential defaults to, since that project's own activation gates the request rather than any project whose assets it covers. The logging state sits on the load balancer's backend services, and a backend service is global or regional depending on the load balancer, so read both.
+Read the IAM audit configuration on each project, whether each HTTP(S) load balancer has logging enabled, and whether the Cloud Asset Inventory API is enabled on the project the credential defaults to, since that project's own activation gates the request rather than any project whose assets it covers. The logging state sits on the load balancer's backend services, and a backend service is global or regional depending on the load balancer, so read both with a single aggregated backend-service listing per project rather than a region-by-region sweep.
 
 `DATA_READ` is off by default for most services, so its absence is the normal state and requiring it everywhere would describe an ideal rather than a baseline. What distinguishes a finding is divergence: a project whose audit configuration differs from the pattern the organization's other projects share. Comparing the configurations already read is not a further call, which is why that comparison sits in the condition below rather than after it.
 
@@ -35,4 +35,4 @@ Cloud Resource Manager: `GET /v3/projects:search`, and `GET /v3/projects?parent=
 
 Project IAM policy: `POST /v1/projects/{project}:getIamPolicy` on `cloudresourcemanager.googleapis.com`.
 
-Compute Engine: `GET /compute/v1/projects/{project}/global/backendServices` on `compute.googleapis.com`.
+Compute Engine: `GET /compute/v1/projects/{project}/aggregated/backendServices` on `compute.googleapis.com`.

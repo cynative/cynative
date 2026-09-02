@@ -10,7 +10,7 @@ A machine enumeration returns standalone machines and not the instances inside a
 
 The run-command action executes arbitrary commands as root or SYSTEM through the Azure control plane with no network path and no key. It is included in Virtual Machine Contributor and in Contributor, both of which are ubiquitous, so its holder set is an inventory to report rather than a condition that decides anything: an account where only Owner holds it does not exist in practice.
 
-The assessment collection those three states come from is empty both where Defender is watching and has nothing to report and where no Defender plan was ever bought, and nothing in the collection tells the two apart. A subscription that has never bought one has not registered `Microsoft.Security`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own provider listing, which returns every provider with its `registrationState`, rather than from a path naming one provider, and let it qualify the three counts rather than deciding whether the expensive stage runs - the plan is a purchase the subscription makes rather than a setting it configures.
+The assessment collection those three states come from is empty both where Defender is watching and has nothing to report and where no Defender plan was ever bought, and nothing in the collection tells the two apart. A subscription that has never bought one has not registered `Microsoft.Security`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the path naming `Microsoft.Security` alone, which returns its `registrationState` in a body that fits, rather than from the subscription's own whole-provider listing, and let it qualify the three counts rather than deciding whether the expensive stage runs - the plan is a purchase the subscription makes rather than a setting it configures.
 
 Unmanaged disks are close to end of life on Azure and most subscriptions have none. Read the field, but expect the branch to be empty and report it as a count when it is, rather than treating its absence as a result.
 
@@ -38,6 +38,6 @@ Order findings by risk, most consequential first.
 
 Call shapes a run has proven:
 
-Resource providers: `GET /subscriptions/{subscriptionId}/providers` on `management.azure.com`.
+Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
 
 Defender for Cloud assessments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Security/assessments` on `management.azure.com`.

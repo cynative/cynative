@@ -4,7 +4,7 @@ description: Determine who can reach each AKS API server and which Azure princip
 
 Research which AKS clusters in this subscription expose their API server, which permit a static cluster-admin credential to be retrieved, and which authorize without RBAC.
 
-Read each cluster's API server access profile including `authorizedIPRanges`, `disableLocalAccounts`, `enableRBAC`, node pool `enableNodePublicIP`, and the Defender security profile state. A subscription that has never used AKS has not registered `Microsoft.ContainerService`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own provider listing, which returns every provider with its `registrationState`, rather than from a path naming one provider, and report it rather than reporting the enumeration as empty or as unresolved.
+Read each cluster's API server access profile including `authorizedIPRanges`, `disableLocalAccounts`, `enableRBAC`, node pool `enableNodePublicIP`, and the Defender security profile state. A subscription that has never used AKS has not registered `Microsoft.ContainerService`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}`, which returns that provider's `registrationState` in a body that fits, and report it rather than reporting the enumeration as empty or as unresolved.
 
 Take the authorized ranges as values, not as a verdict. Whether a given range covers a provider egress block or an entire corporate network is a judgment about what sits behind an address, which no field returns, so it is second-stage work; the condition below asks only whether a list exists and whether its entries, alone or together, cover the full IPv4 address space, which needs no such judgment: a list containing `0.0.0.0/0`, and a list whose entries add up to the same space without either one on its own, are the same fact.
 
@@ -32,4 +32,4 @@ Order findings by risk, most consequential first.
 
 Call shapes a run has proven:
 
-Resource providers: `GET /subscriptions/{subscriptionId}/providers` on `management.azure.com`.
+Resource provider registration state: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.

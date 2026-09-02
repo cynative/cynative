@@ -6,7 +6,7 @@ Research which subscriptions in this tenant produce no signal from Defender for 
 
 Enumerate the subscriptions, then per subscription read the Defender plan tier for each of these services: servers, App Service, Azure SQL, SQL servers on machines, open-source relational databases, storage, containers, Key Vault, Resource Manager, DNS and Cosmos DB. Read the enablement state of the `WDATP` security setting, which is where the Defender for Endpoint integration sits rather than in a plan tier, and each IoT security solution the subscription holds with whether it is enabled, which is a resource of its own and carries no plan tier either.
 
-A subscription that has never bought a Defender plan has not registered `Microsoft.Security`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own provider listing, which returns every provider with its `registrationState`, rather than from a path naming one provider, and read the plan tiers, the `WDATP` setting and the IoT security solutions under an unregistered provider as absent rather than as unresolved. Absent is this agent's own finding and unresolved is a hole in it, so which of the two a subscription gets decides the answer rather than qualifying it.
+A subscription that has never bought a Defender plan has not registered `Microsoft.Security`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the per-provider path naming `Microsoft.Security`, which returns its `registrationState` in a body that fits, rather than from the subscription's whole-provider listing, and read the plan tiers, the `WDATP` setting and the IoT security solutions under an unregistered provider as absent rather than as unresolved. Absent is this agent's own finding and unresolved is a hole in it, so which of the two a subscription gets decides the answer rather than qualifying it.
 
 Read the security contact address with its minimum alert severity and attack path risk level; whether a subscription-level diagnostic setting exists and which categories it captures; and whether activity log alerts exist for network security group create, update and delete and for policy assignment deletion, each with its action group.
 
@@ -36,4 +36,4 @@ Order findings by risk, most consequential first.
 
 Call shapes a run has proven:
 
-Resource providers: `GET /subscriptions/{subscriptionId}/providers` on `management.azure.com`.
+Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
