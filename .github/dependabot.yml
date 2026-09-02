@@ -24,6 +24,16 @@ updates:
       # (via glamour and via goreleaser -> fang). Revisit if charmbracelet tags
       # the x/exp submodules.
       - dependency-name: "github.com/charmbracelet/x/exp/*"
+      # glob v1.0.0 restructured the repo: the syntax/ast and syntax/lexer
+      # packages are gone, but goreleaser/fileglob (v1.4.0, the latest
+      # release, an indirect module via the goreleaser/v2 tool dependency)
+      # still imports both, so forcing the major bump fails the whole gomod
+      # update outright (dependency_file_not_resolvable at the go mod tidy
+      # step). Minor/patch updates stay allowed, and once fileglob/goreleaser
+      # ship a release built against the v1 layout the module graph will
+      # follow without Dependabot's help. Drop this entry when that happens.
+      - dependency-name: "github.com/gobwas/glob"
+        update-types: ["version-update:semver-major"]
       # go-header v1 is a breaking API rewrite that golangci-lint (which pins
       # the v0.5.x API) cannot compile against, so forcing the major bump on
       # this indirect module breaks `go tool golangci-lint`. Minor/patch
