@@ -43,6 +43,7 @@ check-scripts: shellcheck pwsh-lint pwsh-test sh-test
 
 generate:
 	go generate ./...
+	sh scripts/docs/agents-catalog.sh >/dev/null
 
 lint: generate
 	go tool golangci-lint run

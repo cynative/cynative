@@ -9,7 +9,7 @@ Open-source framework for security agents with live, read-only access to your in
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13851/badge)](https://www.bestpractices.dev/projects/13851)
 
-**[Quickstart](#quickstart) · [Your first agent](#your-first-agent) · [Docs](docs/)**
+**[Quickstart](#quickstart) · [Built-in agents](#built-in-agents) · [Your first agent](#your-first-agent) · [Docs](docs/)**
 
 <!-- BEGIN agent-about -->
 **Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
@@ -17,6 +17,8 @@ Open-source framework for security agents with live, read-only access to your in
 ```bash
 cynative "what in my cloud is publicly exposed that shouldn't be?"
 ```
+
+It ships with **45 built-in agents** for AWS, GCP, Azure, GitHub and Kubernetes - privilege escalation, public exposure, supply chain, detection coverage and more - or you write your own in one markdown file.
 
 It writes and runs code in an ephemeral sandbox, querying your APIs in parallel, so one question fans out across your whole stack. Every finding is cross-checked and traced back to its origin.
 
@@ -52,7 +54,13 @@ export ANTHROPIC_API_KEY=...
 ```
 <!-- END quickstart-example -->
 
-It picks up the credentials already in your shell. Ask it anything:
+It picks up the credentials already in your shell. Run a built-in agent:
+
+```bash
+cynative -p --agent aws-privilege-escalation
+```
+
+Or ask it anything:
 
 ```bash
 cynative -p "which IAM roles can escalate to admin?"
@@ -61,6 +69,28 @@ cynative -p "cloud credentials leaked in source code and their current blast rad
 cynative "live cloud resources absent from IaC - drift" # starts an interactive session
 cat findings.json | cynative -p "triage these findings by exploitability"
 ```
+
+## Built-in agents
+
+45 agents are embedded in the binary. Each one is a reviewed prompt for a
+specific question, so you get an opinionated, evidence-backed answer without
+writing anything.
+
+| | Agents | For example |
+|---|---|---|
+| AWS | 20 | `aws-privilege-escalation`, `aws-public-storage`, `aws-hardcoded-secrets`, `aws-supply-chain` |
+| Azure | 11 | `azure-keyvault-exposure`, `azure-storage-exposure`, `azure-privilege-escalation` |
+| GCP | 5 | `gcp-public-bindings`, `gcp-static-credentials`, `gcp-inference-exposure` |
+| GitHub | 4 | `github-workflow-trust`, `github-unpatched-dependencies`, `github-branch-protection` |
+| Kubernetes | 5 | `k8s-pod-privilege`, `k8s-self-managed-apiserver-access` |
+
+```bash
+cynative agents list            # every agent, with its description
+cynative agents show <name>     # the exact prompt that would run
+```
+
+The full catalog with a one-line description of each agent is in
+[docs/agents-catalog.md](docs/agents-catalog.md).
 
 ## Your first agent
 

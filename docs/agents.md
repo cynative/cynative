@@ -146,6 +146,9 @@ cynative agents list          # every agent, with source and status
 cynative agents show <name>   # the exact file --agent <name> would run
 ```
 
+The built-ins, grouped by provider with their descriptions, are listed in
+[agents-catalog.md](agents-catalog.md) (generated from `agents/*.md`).
+
 `agents show` writes the file bytes to stdout and the source path to stderr, so
 this copies a built-in you want to customize:
 
