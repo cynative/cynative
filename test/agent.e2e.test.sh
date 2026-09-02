@@ -10,8 +10,11 @@
 # Resource Manager 200 for the fixture project whose body carries GCP_E2E_EXPECT,
 # the project number, fed out of band and never in the prompt), so a built-in that
 # called an unrelated or failing endpoint and reported the failure cannot pass; the
-# open-ended reads that follow are otherwise not swept. The sweep is used only for
-# a targeted single-call write canary (reusing the gcp spec).
+# open-ended reads that follow are otherwise not swept. It DOES still run the shared
+# credential prepass (the connector_audit engine's load_records + credential_prepass) over
+# its own audit log, so a regression that logged the live LLM/Vertex credential during the
+# built-in's read run fails the phase fatally even though no sanctioned-read sweep runs. The
+# sweep itself is used only for a targeted single-call write canary (reusing the gcp spec).
 #
 # NOT hermetic and NOT part of `make check`. Skips (exit 0) when the fixture env
 # is unset, unless AGENT_E2E_REQUIRE_RUN=1.
@@ -149,8 +152,51 @@ read_phase() {
 	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
 		"$bin" "$workdir/config.yaml" "$_scope" --agent "$agent_name"; then _rc=0; else _rc=$?; fi
 
-	# Classify FIRST, so a timeout (2, retryable) or a budget stop (3, fatal) is
-	# propagated before any soft assertion turns it into another paid attempt.
+	# SECURITY prepass, BEFORE the classifier and every soft assertion. The witness
+	# check below is positive-evidence only: it passes as long as a Cloud Resource
+	# Manager 200 exists, so a regression that logged the live LLM/Vertex credential
+	# during the built-in's open-ended read run would still green this phase. The
+	# credential prepass that guards that is the SAME one connector_run_phase runs via
+	# the parser in the canary phase - but the canary does not drive the agent, so the
+	# agent's own read audit was never scanned. Run it here, over read.audit.log with
+	# the base64 --live-secrets values in $secret_file (written at the top of the
+	# script, before this phase runs). It reuses the engine directly - load_records +
+	# credential_prepass from the snapshotted parser package, the two functions the
+	# parser's dispatch() runs first on every sweep - the established heredoc-import
+	# reuse pattern in this library (see _e2e_scrub_file in connector-e2e.sh). python3
+	# -B so importing the package writes no __pycache__ into the snapshot.
+	#
+	# It mirrors connector_run_phase's ordering: a security breach (4) DOMINATES a
+	# timeout (2) or a budget stop (3), so it runs before e2e_classify_run and
+	# short-circuits it. Any nonzero exit - a real credential-prepass 4, a fail-closed
+	# load_records, or the guard mapping an unexpected crash to 4 - is a fatal 4, never
+	# a retryable miss (a retry truncates the audit and would erase the evidence).
+	if ! python3 -B - "$workdir/connector_audit_pkg" "$secret_file" "$workdir/read.audit.log" <<'PY'
+import sys
+
+pkg, secrets_path, audit = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.dont_write_bytecode = True
+sys.path.insert(0, pkg)
+try:
+    from connector_audit.engine import credential_prepass, load_records
+    records, raw_lines = load_records(audit)
+    credential_prepass(records, raw_lines, secrets_path)
+except SystemExit:
+    raise  # the engine's own insecure()/die() exit code (4 on a hit) - a real verdict.
+except BaseException as e:  # noqa: BLE001 - any unexpected failure fails closed to 4.
+    print("SECURITY: agent read credential prepass crashed (%s: %s) - failing closed"
+          % (type(e).__name__, e))
+    sys.exit(4)
+print("read credscan: OK (no live credential material in the agent read audit)", file=sys.stderr)
+PY
+	then
+		echo "FAIL: SECURITY: the agent read audit contains live credential material (credential prepass); not retrying" >&2
+		return 4
+	fi
+
+	# Classify (timeout 2 retryable / budget 3 fatal / miss) only after the security
+	# prepass held, so a timeout or budget stop is propagated before any soft assertion
+	# turns it into another paid attempt.
 	e2e_classify_run "$_rc" "$workdir/read.out" "$workdir/read.err" "$timeout_s"
 	_cls=$?
 	[ "$_cls" = 0 ] || return "$_cls"
