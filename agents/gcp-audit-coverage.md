@@ -2,7 +2,7 @@
 description: Determine which activity in a GCP organization would go unrecorded, from the audit configuration each project carries, its load balancer logging and its asset inventory.
 ---
 
-Research which activity in this organization would go unrecorded, and in which projects. Name the project of every resource reported, and take the projects you enumerate from the organization's own project listing rather than from the project the credential defaults to, resolving which organization that is from the `parent` each project carries rather than from an organization listing, which the ceiling does not reach.
+Research which activity in this organization would go unrecorded, and in which projects. Name the project of every resource reported, and take the projects you enumerate from the organization's own project listing rather than from the project the credential defaults to, walking the folder tree beneath the organization rather than only the projects parented directly on it, resolving which organization that is from the `parent` each project carries rather than from an organization listing, which the ceiling does not reach.
 
 Read the IAM audit configuration on each project, whether each HTTP(S) load balancer has logging enabled, and whether the Cloud Asset Inventory API is enabled on the project the credential defaults to, since that project's own activation gates the request rather than any project whose assets it covers. The logging state sits on the load balancer's backend services, and a backend service is global or regional depending on the load balancer, so read both.
 
