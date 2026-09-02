@@ -4,7 +4,7 @@ description: Determine the shortest path to each Azure Key Vault's contents, whe
 
 Research which Key Vaults in this subscription can be reached and read, whether that read would be recorded and which vaults can be permanently destroyed.
 
-Read each vault's permission model, `publicNetworkAccess`, network ACL default action, private endpoint connections, soft delete state, purge protection state, and whether a diagnostic setting with the `AuditEvent` category has a destination.
+Read each vault's permission model, `publicNetworkAccess`, network ACL default action, IP rules and virtual network rules, private endpoint connections, soft delete state, purge protection state, and whether a diagnostic setting with the `AuditEvent` category has a destination.
 
 Soft delete and purge protection are two settings and describe two different outcomes: soft delete decides whether a deleted secret can be recovered at all, purge protection decides whether the recovery window can itself be cancelled. Read both and report both.
 
@@ -12,7 +12,7 @@ A denied, unreachable, partial or empty read is not a clean result: name the res
 
 Where nothing meets the question above, say so in the report's first sentence and before any count or inventory, naming the objects it asks about rather than referring to them, and say there which of three answers it is: they are absent, or they are present and clean, or they were not read. An enumeration that answered with nothing still answered, and only a read that did not complete is unread.
 
-Stop here if every vault uses Azure RBAC, has soft delete and purge protection enabled, and has a diagnostic setting carrying the `AuditEvent` category to a destination. `publicNetworkAccess` and the network ACL default action both ship open and stay open on every vault anything outside a private endpoint reaches, so they describe reachability rather than access and are reported below rather than tested here. Report the vault inventory with the permission model, the soft delete and purge protection state, the `publicNetworkAccess` value, the network ACL default action and the private endpoint connections per vault, and which of the vault and diagnostic setting reads above answered and which did not, naming each one that did not rather than counting it as zero, and end.
+Stop here if every vault uses Azure RBAC, has soft delete and purge protection enabled, and has a diagnostic setting carrying the `AuditEvent` category to a destination. `publicNetworkAccess` and the network ACL default action both ship open and stay open on every vault anything outside a private endpoint reaches, so they describe reachability rather than access and are reported below rather than tested here. Report the vault inventory with the permission model, the soft delete and purge protection state, the `publicNetworkAccess` value, the network ACL default action, IP rules and virtual network rules, and the private endpoint connections per vault, and which of the vault and diagnostic setting reads above answered and which did not, naming each one that did not rather than counting it as zero, and end.
 
 Only for the vaults that are not clean:
 
