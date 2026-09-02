@@ -16,9 +16,9 @@ Stop here if nothing is shared with `all` or with an account outside the organiz
 
 Only for the artifacts that are not clean:
 
-Read the KMS key policy alongside the share attribute. A shared encrypted snapshot whose key policy does not grant the target account cannot be restored by it, so classify on both facts rather than the share alone.
+Read the KMS key policy alongside the share attribute. A shared encrypted snapshot whose key policy does not grant the target account cannot be restored by it, so classify that share as not usable; where the key policy does grant the target account, restoring it also needs an IAM allow inside that account that this agent cannot read, so report the grant as a fact rather than the share as confirmed usable.
 
-Trace each shared artifact to its source volume, instance or cluster where the API records it, and report that source with the IAM role it ran with. A root volume snapshot carries the instance profile credential cache and the user data.
+Trace each shared artifact to its source volume, instance or cluster where the API records it, and report that source with the IAM role it ran with. A root volume snapshot may hold the instance's user data and any credentials an application persisted to disk; this agent does not inspect the filesystem to confirm it, so name that as a risk to evaluate rather than a confirmed hold.
 
 Name the regions from the count above where the block-public-access mode is not the one blocking all sharing, and state which of the two remaining modes is set, since that decides whether a future snapshot can be made public without another control changing.
 

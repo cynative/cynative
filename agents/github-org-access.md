@@ -12,13 +12,15 @@ A denied, unreachable, partial or empty read is not a clean result: name the res
 
 Where nothing meets the question above, say so in the report's first sentence and before any count or inventory, naming the objects it asks about rather than referring to them, and say there which of three answers it is: they are absent, or they are present and clean, or they were not read. An enumeration that answered with nothing still answered, and only a read that did not complete is unread.
 
-Stop here if `default_repository_permission` is `read` or `none`, two-factor authentication is required, repository creation, deletion and transfer are restricted to owners, no outside collaborator holds write or admin and no app holds organization-wide write. Report the member and outside collaborator counts, the visibility levels repository creation permits, the repository deletion and transfer setting, and the installed GitHub Apps with each app's scopes and `repository_selection`, the count of repositories the enumeration covered, and which of the member, collaborator and app enumerations above answered and which did not, naming each one that did not rather than counting it as zero, and end.
+Stop here if `default_repository_permission` is `read` or `none`, two-factor authentication is required, repository creation, deletion and transfer are restricted to owners and no app holds organization-wide write. Report the member and outside collaborator counts, the visibility levels repository creation permits, the repository deletion and transfer setting, and the installed GitHub Apps with each app's scopes and `repository_selection`, the count of repositories the enumeration covered, and which of the member, collaborator and app enumerations above answered and which did not, naming each one that did not rather than counting it as zero, and end.
 
 Only for the principals and apps that are not clean:
 
 Where the base permission is `write` or `admin`, per-repository access lists do not narrow anything, and neither does a branch rule: a rule constrains what a writer may merge rather than who holds write. What that leaves is which repositories with deployment or publishing rights every member can already write to.
 
 Resolve which repositories each owner and administrator without two-factor authentication administers.
+
+An outside collaborator's permission is per repository and the organization's outside-collaborator listing does not carry it: resolve each outside collaborator's permission from the collaborator list of each repository this stage has already named, not from every repository in the organization.
 
 A transfer relocates a repository and its history to an account outside the organization, and a member who can create a public repository publishes organization code without needing one.
 

@@ -4,7 +4,7 @@ description: Determine who can push to each Azure container registry, which work
 
 Research who can push images to the container registries in this subscription, which AKS, Container Apps and App Service workloads pull from them, and what the running images carry.
 
-Read each registry's admin user state, `anonymousPullEnabled`, public network access and private endpoint connections. All of these come from Resource Manager. A subscription that has never used a container registry has not registered `Microsoft.ContainerRegistry`, and one that has never bought a Defender plan has not registered `Microsoft.Security`; a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own provider listing, which returns every provider with its `registrationState`, rather than from a path naming one provider, and report it rather than reporting the enumeration as empty or as unresolved. An unregistered `Microsoft.Security` is the enablement state below answered rather than unread: the plan was never bought.
+Read each registry's admin user state, `anonymousPullEnabled`, public network access and private endpoint connections. All of these come from Resource Manager. A subscription that has never used a container registry has not registered `Microsoft.ContainerRegistry`, and one that has never bought a Defender plan has not registered `Microsoft.Security`; a provider in that state holds none of its resource type rather than an unread one: take the registration state from `GET /subscriptions/{id}/providers/{namespace}` for each provider named above, which returns that provider's own `registrationState`, and report it rather than reporting the enumeration as empty or as unresolved. An unregistered `Microsoft.Security` is the enablement state below answered rather than unread: the plan was never bought.
 
 Read whether Defender for Containers vulnerability assessment is enabled for the subscription before reading the assessment count, and keep the two apart. A subscription with scanning switched off reports zero unresolved assessments, which is indistinguishable from a clean one unless the enablement state is read first, so the enablement state and not the count is what decides whether an absence of findings means anything. That enablement is a Defender plan the subscription buys rather than a setting it configures, so it qualifies the count below rather than deciding whether the expensive stage runs.
 
@@ -16,11 +16,11 @@ Stop here if the admin user is disabled on every registry, `anonymousPullEnabled
 
 Only for the registries that are not clean:
 
-Resolve which workloads pull from each by reading the container image references Resource Manager returns: Container Apps container images, App Service container settings, and the AKS cluster's attached registry list. Pod-level image references are not in Resource Manager, so where an AKS cluster attaches the registry say the cluster pulls from it without claiming which workloads do.
+Resolve which workloads pull from each by reading the container image references Resource Manager returns: Container Apps container images and App Service container settings. AKS carries no attached-registry list on the cluster resource: `--attach-acr` grants the cluster's kubelet identity `AcrPull` through a role assignment at the registry's scope, so read each cluster's kubelet identity and resolve its role assignments at that scope instead. Pod-level image references and image-pull secrets are not in Resource Manager, so where a cluster's kubelet identity holds an assignment at the registry say the cluster pulls from it without claiming which workloads do.
 
 Report registries with the admin user enabled: the admin credential is a shared password with push permission that attributes to no principal in the registry logs. Report `anonymousPullEnabled` separately from public network access, since the first controls whether a caller needs credentials to read image contents and the second only controls reachability.
 
-Resolve the role assignments granting `AcrPush` or a role containing `Microsoft.ContainerRegistry/registries/push/write` and report that principal set.
+Resolve the role assignments granting `AcrPush` or a role containing `Microsoft.ContainerRegistry/registries/push/write`; where a registry's `roleAssignmentMode` is `AbacRepositoryPermissions`, `AcrPush` is not honored there, so also resolve roles that grant repository write through `dataActions`, such as `Container Registry Repository Writer`, crediting a principal only where its assignment condition, if any, still permits the write. Report that principal set.
 
 Where vulnerability assessment is enabled, filter the assessments to images a running workload references and report those with the workload's identity and network exposure. Where it is disabled, report the running image digests carrying no assessment.
 
@@ -32,6 +32,6 @@ Order findings by risk, most consequential first.
 
 Call shapes a run has proven:
 
-Resource providers: `GET /subscriptions/{subscriptionId}/providers` on `management.azure.com`.
+Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
 
 Defender for Cloud assessments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Security/assessments` on `management.azure.com`.

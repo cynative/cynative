@@ -16,7 +16,7 @@ Stop here if basic publishing credentials are disabled for both `ftp` and `scm` 
 
 Only for the apps that are not clean:
 
-Where basic credentials are enabled and `ftpsState` is `AllAllowed`, report the app with its managed identity role assignments, since the publishing password crosses the network in cleartext and permits replacing the code that runs as that identity. Report SCM basic credentials separately with the same role resolution.
+Where basic credentials are enabled and `ftpsState` is `AllAllowed`, report the app with its managed identity role assignments, since the shared password lets whoever holds it replace the code that runs as that identity and crosses the network in cleartext. Where basic credentials are enabled and `ftpsState` is `FtpsOnly` instead, report the app as a count rather than resolving its managed identity roles. Report SCM basic credentials separately with the same role resolution.
 
 Report Function apps with anonymous HTTP triggers, naming the functions, the app's public network access setting and the identity's role assignments. Report `authLevel: admin` triggers alongside them: the key that satisfies an admin trigger is the host master key, which is one credential for every function in the app, so treat holding it as reaching the whole app rather than one route.
 

@@ -24,7 +24,7 @@ For a cluster with no cluster security group, report its node groups and Fargate
 
 Name only the containers that appear in a boundary finding above within the `readonlyRootFilesystem` and `user` counts.
 
-For a revision that no service or task references but that sets `privileged: true`, `pidMode: host`, `ipcMode: host` or `networkMode: host`, resolve the principals holding `ecs:RunTask` on the cluster and report that set, since the revision is one call away from running.
+For a revision that no service or task references but that sets `privileged: true`, `pidMode: host`, `ipcMode: host` or `networkMode: host`, resolve the principals holding `ecs:RunTask` on the cluster and `iam:PassRole` on the revision's `taskRoleArn` and `executionRoleArn` where either is set, and report the principals holding both, since the revision is one call away from running.
 
 Report a host-mode or privileged revision as intentional where the evidence supports it: an image that is a monitoring or logging agent the account runs on every container instance, or a task role whose permissions reach only telemetry endpoints. Name the evidence. A revision with no such evidence is not intentional.
 

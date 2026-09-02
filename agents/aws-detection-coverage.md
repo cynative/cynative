@@ -22,7 +22,7 @@ Report open high and critical GuardDuty findings ahead of every configuration ga
 
 For each uncovered region, name which of the three services is missing and expand the GuardDuty feature gaps in full, stating for each disabled feature which resource type in that region is consequently unwatched.
 
-Resolve each remaining alarm's action ARN to its target and report the alarms that terminate, including actions naming an SNS topic with no subscriptions.
+Resolve each remaining alarm's action ARN to its target and report the alarms that terminate, including actions naming an SNS topic with no confirmed subscriptions.
 
 Where the organization has no delegated administrator or no auto-enable for a service, report the member accounts that would therefore onboard without it.
 

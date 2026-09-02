@@ -1279,7 +1279,9 @@ supplies the shared message/tool types, and `internal/llm` supplies the Bifrost-
   (gcp and gke, #117 - both federate through the same WIF into `cynative-cli-ci`, which is what
   the matrix was built for: onboarding gke was a data change, not a new job), `aws-oidc` is a
   single-row matrix (EKS #116 reuses the same federation the same way), and `github-app` is a
-  static singleton; each family job still
+  static singleton. A static `agent-e2e` job runs alongside them, reusing the gcp-wif WIF
+  federation to gate the shipped built-in `--agent` path (a fixture read plus a write canary).
+  Each family job still
   carries an explicit `github.repository` guard, since these are **public** reusable workflows and
   cloud trust alone does not prove a fork never reaches the credential step. Each leg's sentinel
   step asserts `steps.e2e.outcome`, the value from before `continue-on-error` is applied so it
