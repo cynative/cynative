@@ -38,3 +38,5 @@ Route 53 Domains: `route53domains.us-east-1.amazonaws.com`.
 EC2: `GET /?Action=DescribeRegions&Version=2016-11-15` on `ec2.<region>.amazonaws.com`. STS: `GET /?Action=GetCallerIdentity&Version=2011-06-15` on `sts.amazonaws.com`.
 
 Organizations: `X-Amz-Target: AWSOrganizationsV20161128.{Operation}` on `organizations.us-east-1.amazonaws.com`.
+
+S3 bucket existence: `GET /{bucket}?location` on `s3.us-east-1.amazonaws.com`, signing as `s3`; an absent name answered 404 `NoSuchBucket` and a name beyond the credential's reach 403 `AccessDenied`, where a bare `GET /{bucket}` is refused before it leaves the machine.

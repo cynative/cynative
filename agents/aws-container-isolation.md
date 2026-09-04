@@ -33,7 +33,7 @@ Order findings by risk, most consequential first.
 
 Call shapes a run has proven:
 
-ECS: `X-Amz-Target: AmazonEC2ContainerServiceV20141113.{Operation}` on `ecs.<region>.amazonaws.com`.
+ECS: `X-Amz-Target: AmazonEC2ContainerServiceV20141113.{Operation}` with `Content-Type: application/x-amz-json-1.1` on `ecs.<region>.amazonaws.com`; a request carrying any other content type is answered 400 without naming the header.
 
 EKS: `GET /clusters` on `eks.<region>.amazonaws.com`.
 
