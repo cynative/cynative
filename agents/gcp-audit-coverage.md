@@ -31,7 +31,7 @@ Call shapes a run has proven:
 
 Service enablement: `GET /v1/projects/{project}/services/{service}` on `serviceusage.googleapis.com`.
 
-Cloud Resource Manager: `GET /v3/projects:search`, and `GET /v3/projects?parent=organizations/{id}`, on `cloudresourcemanager.googleapis.com`.
+Cloud Resource Manager: `GET /v3/projects:search`, `GET /v3/projects/{project}`, and `GET /v3/projects?parent=organizations/{id}`, on `cloudresourcemanager.googleapis.com`.
 
 Project IAM policy: `POST /v1/projects/{project}:getIamPolicy` on `cloudresourcemanager.googleapis.com`.
 

@@ -1,12 +1,42 @@
 #!/usr/bin/env sh
 # Regenerates docs/agents-catalog.md from the frontmatter of agents/*.md.
 # Run from the repository root:  sh scripts/docs/agents-catalog.sh
-# CI compares the output to the committed file, so commit both together.
+# Pass --check to render from the index (the agent files and the catalog as they
+# are staged, which in CI is the commit under test) and compare the two, writing
+# nothing; that is how the gate fails a stale catalog. With no argument it rewrites
+# the working tree file. Commit the agent change and the regenerated catalog together.
 set -eu
 
 out="docs/agents-catalog.md"
+mode="write"
+if [ "${1:-}" = "--check" ]; then
+  mode="check"
+elif [ "$#" -gt 0 ]; then
+  echo "usage: $(basename "$0") [--check]" >&2
+  exit 2
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
+
+if [ "$mode" = "check" ]; then
+  # Both sides of the comparison come from the index, so they describe the same
+  # thing: the agents and the catalog as staged. A working-tree copy an earlier
+  # generate step rewrote never enters it, and a partially staged edit can neither
+  # fail the check spuriously nor slip a stale catalog past it.
+  stage="$(mktemp -d)"
+  trap 'rm -rf "$tmp" "$stage"' EXIT
+  git ls-files -z -- agents "$out" | git checkout-index -z --prefix="$stage/" --stdin
+  if [ ! -d "$stage/agents" ]; then
+    echo "error: no agents/ entries in the index; run from the repository root" >&2
+    exit 1
+  fi
+  if [ ! -f "$stage/$out" ]; then
+    echo "error: $out is not in the index; run 'make generate' and git add it" >&2
+    exit 1
+  fi
+  cd "$stage" || exit 1
+fi
 
 group_title() {
   case "$1" in
@@ -59,5 +89,17 @@ total=$(count agents/*.md)
   done
 } > "$tmp"
 
-mv "$tmp" "$out"
-echo "wrote $out ($total agents)"
+if [ "$mode" = "check" ]; then
+  if ! cmp -s "$out" "$tmp"; then
+    echo "error: $out is stale; run 'make generate' and commit the result" >&2
+    diff -u "$out" "$tmp" >&2 || true
+    exit 1
+  fi
+  echo "ok: $out is up to date ($total agents)"
+else
+  # mktemp creates the file 0600; restore the world-readable mode Git tracks so
+  # make generate does not flip docs/agents-catalog.md to owner-only.
+  chmod 0644 "$tmp"
+  mv "$tmp" "$out"
+  echo "wrote $out ($total agents)"
+fi

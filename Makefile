@@ -1,4 +1,4 @@
-.PHONY: check check-go check-scripts mod-tidy-check lint format test generate shell-complexity \
+.PHONY: check check-go check-scripts mod-tidy-check catalog-check lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
 	llm-tools-smoke agent-e2e homebrew-smoke install-script-smoke
 
@@ -29,7 +29,7 @@ TRUSTED_CALLER := cynative/cynative/.github/workflows/release.yaml@refs/heads/ma
 check: check-go check-scripts
 
 # Go-only, 100% go.mod-pinned/hermetic gate; the pre-commit hook runs this.
-check-go: mod-tidy-check generate lint shell-complexity format test windows-build
+check-go: mod-tidy-check generate catalog-check lint shell-complexity format test windows-build
 
 # mod-tidy-check: verify go.mod/go.sum are tidy without mutating them. `-diff`
 # (Go 1.23+) prints the changes tidying would make and exits nonzero if any are
@@ -44,6 +44,14 @@ check-scripts: shellcheck pwsh-lint pwsh-test sh-test
 generate:
 	go generate ./...
 	sh scripts/docs/agents-catalog.sh >/dev/null
+
+# catalog-check: verify docs/agents-catalog.md matches a fresh render of the agent
+# frontmatter without mutating it, so an agent name or description change that
+# forgot to regenerate the catalog fails here instead of shipping stale docs. Both
+# sides come from the index (in CI, the commit under test), so the working-tree copy
+# the generate step above rewrites never enters the comparison.
+catalog-check:
+	sh scripts/docs/agents-catalog.sh --check
 
 lint: generate
 	go tool golangci-lint run
