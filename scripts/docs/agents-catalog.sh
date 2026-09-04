@@ -3,8 +3,9 @@
 # Run from the repository root:  sh scripts/docs/agents-catalog.sh
 # Pass --check to render from the index (the agent files and the catalog as they
 # are staged, which in CI is the commit under test) and compare the two, writing
-# nothing; that is how the gate fails a stale catalog. With no argument it rewrites
-# the working tree file. Commit the agent change and the regenerated catalog together.
+# nothing; that is how the gate fails a stale catalog. Exit 1 means stale or not
+# tracked, exit 2 means bad usage. With no argument it rewrites the working tree
+# file. Commit the agent change and the regenerated catalog together.
 set -eu
 
 out="docs/agents-catalog.md"
@@ -20,13 +21,19 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
 if [ "$mode" = "check" ]; then
-  # Both sides of the comparison come from the index, so they describe the same
-  # thing: the agents and the catalog as staged. A working-tree copy an earlier
-  # generate step rewrote never enters it, and a partially staged edit can neither
-  # fail the check spuriously nor slip a stale catalog past it.
+  # Both sides of the comparison are raw index blobs, so they describe the same
+  # thing: the agents and the catalog exactly as staged. A working-tree copy an
+  # earlier generate step rewrote never enters it, a partially staged edit can
+  # neither fail the check spuriously nor slip a stale catalog past it, and no
+  # end-of-line or smudge conversion touches either side, which checkout-index
+  # would apply. quotePath is off so a non-ASCII name reaches cat-file as the
+  # bytes the index holds rather than C-quoted.
   stage="$(mktemp -d)"
   trap 'rm -rf "$tmp" "$stage"' EXIT
-  git ls-files -z -- agents "$out" | git checkout-index -z --prefix="$stage/" --stdin
+  git -c core.quotePath=false ls-files -- agents "$out" | while IFS= read -r path; do
+    mkdir -p "$stage/$(dirname "$path")"
+    git cat-file blob ":$path" > "$stage/$path"
+  done
   if [ ! -d "$stage/agents" ]; then
     echo "error: no agents/ entries in the index; run from the repository root" >&2
     exit 1
