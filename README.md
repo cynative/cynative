@@ -18,9 +18,9 @@ Open-source framework for security agents with live, read-only access to your in
 cynative "what in my cloud is publicly exposed that shouldn't be?"
 ```
 
-It ships with **45 built-in agents** for AWS, GCP, Azure, GitHub and Kubernetes - privilege escalation, public exposure, supply chain, detection coverage and more - or you write your own in one markdown file.
+**45 built-in agents** for AWS, GCP, Azure, GitHub and Kubernetes - privilege escalation, public exposure, supply chain, detection coverage and more - or you write your own in one markdown file.
 
-It writes and runs code in an ephemeral sandbox, querying your APIs in parallel, so one question fans out across your whole stack. Every finding is cross-checked and traced back to its origin.
+One question fans out across your whole stack: Cynative writes and runs code in an ephemeral sandbox, querying your APIs in parallel. Every finding is cross-checked and traced back to its origin.
 
 Unlike coding agents and MCP servers, it's **read-only by construction**: every call is gated and authorized *before* a credential is attached - point it at production with confidence.
 <!-- END agent-about -->
@@ -57,7 +57,7 @@ export ANTHROPIC_API_KEY=...
 It picks up the credentials already in your shell. Run a built-in agent:
 
 ```bash
-cynative -p --agent aws-privilege-escalation
+cynative -p --agent aws-network-exposure
 ```
 
 Or ask it anything:
@@ -73,12 +73,11 @@ cat findings.json | cynative -p "triage these findings by exploitability"
 ## Built-in agents
 
 45 agents are embedded in the binary. Each one is a reviewed prompt for a
-specific question, so you get an opinionated, evidence-backed answer without
-writing anything.
+specific question.
 
 | | Agents | For example |
 |---|---|---|
-| AWS | 20 | `aws-privilege-escalation`, `aws-public-storage`, `aws-hardcoded-secrets`, `aws-supply-chain` |
+| AWS | 20 | `aws-privilege-escalation`, `aws-public-storage`, `aws-unpatched-workloads`, `aws-supply-chain` |
 | Azure | 11 | `azure-keyvault-exposure`, `azure-storage-exposure`, `azure-privilege-escalation` |
 | GCP | 5 | `gcp-public-bindings`, `gcp-static-credentials`, `gcp-inference-exposure` |
 | GitHub | 4 | `github-workflow-trust`, `github-unpatched-dependencies`, `github-branch-protection` |
@@ -94,10 +93,7 @@ The full catalog with a one-line description of each agent is in
 
 ## Your first agent
 
-The binary ships a set of built-in agents. `cynative agents list` shows them,
-and `cynative agents show <name>` prints the exact file one would run. To make
-your own version, copy a built-in to your agents directory under a new name and
-edit it:
+`cynative agents show <name>` prints the exact file an agent would run. To make your own version, copy it to your agents directory under a new name and edit it:
 
 ```bash
 mkdir -p ~/.cynative/agents
