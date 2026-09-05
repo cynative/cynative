@@ -5,9 +5,9 @@ recurring research task into an artifact you can version and review, instead of
 a block of text pasted at the call site.
 
 ```bash
-cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
-cynative -p --agent aws-public-data-stores                    # without
-cynative --agent aws-public-data-stores                       # seeds an interactive session
+cynative -p --agent aws-public-datastores "AWS account ID 128149835728 only"   # with a task
+cynative -p --agent aws-public-datastores                    # without
+cynative --agent aws-public-datastores                       # seeds an interactive session
 ```
 
 `--agent` composes with `-p`, `--auto-approve`, `--verbose`, `--config` and
@@ -146,11 +146,14 @@ cynative agents list          # every agent, with source and status
 cynative agents show <name>   # the exact file --agent <name> would run
 ```
 
+The built-ins, grouped by provider with their descriptions, are listed in
+[agents-catalog.md](agents-catalog.md) (generated from `agents/*.md`).
+
 `agents show` writes the file bytes to stdout and the source path to stderr, so
 this copies a built-in you want to customize:
 
 ```bash
-cynative agents show aws-public-data-stores > ~/.cynative/agents/my-version.md
+cynative agents show aws-public-datastores > ~/.cynative/agents/my-version.md
 ```
 
 Neither command reads your configuration or touches credentials, so both work on
@@ -170,8 +173,14 @@ agent cannot reach anything your credentials do not already allow.
 Every run prints which file it used:
 
 ```
-Agent: aws-public-data-stores  [user: /home/you/.cynative/agents/aws-public-data-stores.md]
+Agent: my-aws-public-datastores  [user: /home/you/.cynative/agents/my-aws-public-datastores.md]
 ```
 
 `cynative agents list` shows the same information ahead of time, and every
 audited tool call records the agent's name, source and file digest.
+
+## Attribution
+
+The built-in agents are original prompts. The initial set was modelled on the 
+critical and high severity checks in Prowler (Apache-2.0), but contains none of 
+its code, text or check identifiers.

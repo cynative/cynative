@@ -1,6 +1,6 @@
-.PHONY: check check-go check-scripts mod-tidy-check lint format test generate shell-complexity \
+.PHONY: check check-go check-scripts mod-tidy-check catalog-check lint format test generate shell-complexity \
 	windows-build shellcheck pwsh-lint pwsh-test sh-test snapshot install-e2e llm-smoke \
-	llm-tools-smoke homebrew-smoke install-script-smoke
+	llm-tools-smoke agent-e2e homebrew-smoke install-script-smoke
 
 # Pinned external (non-Go) tool versions for check-scripts. Unlike the Go tools
 # (pinned via go.mod / `go tool`), these are NOT Dependabot-managed — Dependabot has
@@ -29,7 +29,7 @@ TRUSTED_CALLER := cynative/cynative/.github/workflows/release.yaml@refs/heads/ma
 check: check-go check-scripts
 
 # Go-only, 100% go.mod-pinned/hermetic gate; the pre-commit hook runs this.
-check-go: mod-tidy-check generate lint shell-complexity format test windows-build
+check-go: mod-tidy-check generate catalog-check lint shell-complexity format test windows-build
 
 # mod-tidy-check: verify go.mod/go.sum are tidy without mutating them. `-diff`
 # (Go 1.23+) prints the changes tidying would make and exits nonzero if any are
@@ -43,6 +43,15 @@ check-scripts: shellcheck pwsh-lint pwsh-test sh-test
 
 generate:
 	go generate ./...
+	sh scripts/docs/agents-catalog.sh >/dev/null
+
+# catalog-check: verify docs/agents-catalog.md matches a fresh render of the agent
+# frontmatter without mutating it, so an agent name or description change that
+# forgot to regenerate the catalog fails here instead of shipping stale docs. Both
+# sides come from the index (in CI, the commit under test), so the working-tree copy
+# the generate step above rewrites never enters the comparison.
+catalog-check:
+	sh scripts/docs/agents-catalog.sh --check
 
 lint: generate
 	go tool golangci-lint run
@@ -324,6 +333,12 @@ llm-smoke:
 # credentials and skips cleanly when none are set.
 llm-tools-smoke:
 	sh test/llm-tools.smoke.test.sh
+
+# agent-e2e: live built-in AGENT end-to-end test. Standalone (NOT part of
+# `make check`): runs the real `cynative -p --agent <builtin>` against a real GCP
+# fixture and needs real credentials; skips cleanly when the fixture env is unset.
+agent-e2e:
+	sh test/agent.e2e.test.sh
 
 # connector-%-e2e: live connector end-to-end tests (cynative#39, cynative#52,
 # cynative#53, cynative#117). Standalone (NOT part of `make check`): runs the real

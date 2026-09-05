@@ -1,0 +1,39 @@
+---
+description: Determine which Azure SQL, MySQL, PostgreSQL, Cosmos DB and Databricks deployments admit outside connections and what authenticates them.
+---
+
+Research which SQL Servers, MySQL and PostgreSQL flexible servers, Cosmos DB accounts and Databricks workspaces in this subscription admit connections from outside the virtual network, and what authenticates those connections. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
+
+Read the firewall rules on each SQL Server, MySQL flexible server and PostgreSQL flexible server, `disableLocalAuth`, `publicNetworkAccess`, `ipRules` or `ipRangeFilter`, and `isVirtualNetworkFilterEnabled` with `virtualNetworkRules` on each Cosmos DB account, and public network access and VNet injection on each Databricks workspace. A firewall rule of 0.0.0.0 to 255.255.255.255 admits the internet; a rule of 0.0.0.0 to 0.0.0.0 is the allow-Azure-services entry, which admits every Azure subscription in every tenant rather than only this one; both read the same way on SQL Server, MySQL flexible servers and PostgreSQL flexible servers. A subscription that has never used one of these five services has not registered its resource provider, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own per-provider listing at `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}`, which returns that provider's `registrationState` in a body that fits, rather than from the whole-provider listing, which truncates on almost every call, and report it rather than reporting the enumeration as empty or as unresolved.
+
+Read the transport settings on the same flexible servers by their own parameter names: `require_secure_transport` on MySQL and PostgreSQL flexible servers, `tls_version` on MySQL, and `ssl_min_protocol_version` on PostgreSQL. The retired single-server `sslEnforcement` property is a different field on a different deployment model and does not appear on the servers this agent scopes to.
+
+Read the SQL Server transparent data encryption state as two facts rather than one: whether TDE is on, and whether its protector is a customer-managed key in a Key Vault or the service-managed key. Read the auditing state and the Defender for SQL state alongside them, and the Databricks workspace customer-managed key configuration.
+
+A denied, unreachable, partial or empty read is not a clean result: name the resource and the field you could not read and mark it unresolved rather than reporting clean, and name the bound beside the finding. Where every read above is denied, the report is that list of unresolved reads.
+
+Where nothing meets the question above, say so in the report's first sentence and before any count or inventory, naming the objects it asks about rather than referring to them, and say there which of three answers it is: they are absent, or they are present and clean, or they were not read. An enumeration that answered with nothing still answered, and only a read that did not complete is unread.
+
+Stop here if no SQL Server, MySQL flexible server or PostgreSQL flexible server carries a rule of 0.0.0.0 to 255.255.255.255 or 0.0.0.0 to 0.0.0.0, every Databricks workspace is VNet-injected with public access disabled, every MySQL and PostgreSQL flexible server has `require_secure_transport` on, every MySQL flexible server is at `tls_version` 1.2 or above and every PostgreSQL flexible server is at `ssl_min_protocol_version` 1.2 or above. Local authentication is how nearly every Cosmos DB client connects and public network access is enabled by default on a new account, so an account permitting either is the common case rather than the exceptional one and gating on either would run the expensive stage almost everywhere; report `disableLocalAuth` and `publicNetworkAccess` as counts instead of gating on them. Report the per-service inventory with each SQL Server's, MySQL flexible server's and PostgreSQL flexible server's firewall rules, each Cosmos DB account's `ipRules` or `ipRangeFilter` and `isVirtualNetworkFilterEnabled` with `virtualNetworkRules`, and each Databricks workspace's public network access and VNet injection state; the transparent data encryption state with each server's TDE protector split into customer-managed and service-managed; the auditing and Defender for SQL states, `disableLocalAuth` and `publicNetworkAccess`, all as counts; the Databricks customer-managed key state; and the registration state of the resource providers named above, and which of the five service enumerations above answered and which did not, naming each one that did not rather than counting it as zero, and end.
+
+Only for the resources that are not clean:
+
+List the databases on each affected server, and report Cosmos DB accounts permitting the account key alongside their public network access, `ipRules` or `ipRangeFilter`, `virtualNetworkRules` with `isVirtualNetworkFilterEnabled`, and private endpoint connections, naming an account unrestricted only where no IP rule and no enabled virtual network rule narrows it. The account key grants full data-plane access, does not expire and attributes to no principal.
+
+For Databricks workspaces without VNet injection, report the public network access setting and the role assignments on the workspace's managed resource group, since the workspace's network path is not governed by the subscription's network controls.
+
+Report each server with `require_secure_transport` off, each MySQL server below `tls_version` 1.2, and each PostgreSQL server below `ssl_min_protocol_version` 1.2, with that server's firewall rules, which describe what shares the path the credentials cross.
+
+Name the affected servers within the TDE, auditing and Defender for SQL counts, and report a server whose TDE protector is service-managed separately from one with no TDE at all: the first encrypts against media loss only, since the service holds the key.
+
+Report a firewall rule as intentional where the evidence supports it: a single address, or a bounded block that another resource in the subscription also names such as a NAT gateway public IP or an application gateway frontend. Name the evidence. A rule spanning the whole address space with no such evidence is not intentional.
+
+
+Order findings by risk, most consequential first.
+
+
+Call shapes a run has proven:
+
+Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.
