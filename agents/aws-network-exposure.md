@@ -20,7 +20,7 @@ Only for the groups and services that are not clean:
 
 Complete the path. Resolve whether the interface's subnet routes to an internet gateway and whether the subnet's network ACL permits the traffic, and report only the rules where that chain closes. Report an EC2 instance as exposed on a port where the chain closes and the instance is running.
 
-For an internet-facing load balancer carrying no security group, read its listeners and the target groups behind them and report the targets each listener reaches, since nothing between the listener and those targets filters what arrives.
+For an internet-facing load balancer carrying no security group, read its listeners and the target groups behind them. The load balancer itself filters nothing, so resolve each target through the security groups on its own interface on the port its target group registers for it, an override where one is set, taking the source to be the client's address where the target group preserves client addresses and the load balancer's own addresses where it does not or where the client's and the target's address families differ. Report a target whose groups deny that source on that port as not reached, and report the network ACLs on the load balancer's subnets and on the target's subnet beside a target its groups admit as unresolved rather than as permitting or denying, since a network ACL is judged per direction and per leg and neither leg's return traffic is resolved here. A target registered by address outside the load balancer's VPC is unresolved too, since the routes that path depends on are not read. The internet gateway route is the load balancer subnets' to have, so a target in a private subnet is not excluded for lacking one.
 
 Resolve the instance profile, task role or managed identity attached to each exposed resource and report its permissions, then rank by what those permissions reach, by whether the resource stores data and, among equals, by how many addresses the admitting prefix covers.
 
@@ -39,7 +39,7 @@ Call shapes a run has proven:
 
 SageMaker: `X-Amz-Target: SageMaker.ListNotebookInstances`, `X-Amz-Target: SageMaker.ListTrainingJobs` and `X-Amz-Target: SageMaker.ListModels`, with a `Content-Type` of `application/x-amz-json-1.1`, on `api.sagemaker.<region>.amazonaws.com`.
 
-ECS: `X-Amz-Target: AmazonEC2ContainerServiceV20141113.{Operation}` on `ecs.<region>.amazonaws.com`.
+ECS: `X-Amz-Target: AmazonEC2ContainerServiceV20141113.{Operation}` with a `Content-Type` of `application/x-amz-json-1.1` on `ecs.<region>.amazonaws.com`.
 
 EKS: `GET /clusters` on `eks.<region>.amazonaws.com`.
 
