@@ -2,7 +2,7 @@
 description: Find the Azure subscriptions, regions and alert paths where activity would produce no signal that reaches anyone.
 ---
 
-Research which subscriptions in this tenant produce no signal from Defender for Cloud, no diagnostic setting and no working alert path. The subscription is the unit of comparison throughout, and every finding names the subscription it belongs to.
+Research which subscriptions in this tenant produce no signal from Defender for Cloud, no diagnostic setting and no working alert path. Take which subscriptions those are from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and every one of them is in scope. The subscription is the unit of comparison throughout, and every finding names the subscription it belongs to.
 
 Enumerate the subscriptions, then per subscription read the Defender plan tier for each of these services: servers, App Service, Azure SQL, SQL servers on machines, open-source relational databases, storage, containers, Key Vault, Resource Manager, DNS and Cosmos DB. Read the enablement state of the `WDATP` security setting, which is where the Defender for Endpoint integration sits rather than in a plan tier, and each IoT security solution the subscription holds with whether it is enabled, which is a resource of its own and carries no plan tier either.
 
@@ -37,3 +37,5 @@ Order findings by risk, most consequential first.
 Call shapes a run has proven:
 
 Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.

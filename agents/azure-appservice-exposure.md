@@ -2,7 +2,7 @@
 description: Determine how code and requests reach Azure App Service and Function apps, and what each app's managed identity holds.
 ---
 
-Research which App Service web apps and Function apps in this subscription accept code or requests from outside, and what each app's managed identity can do with them.
+Research which App Service web apps and Function apps in this subscription accept code or requests from outside, and what each app's managed identity can do with them. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read the `ftp` and `scm` basic publishing credentials policies, `ftpsState`, `httpsOnly`, the public network access and access restriction configuration, and the `authLevel` on every HTTP-triggered function.
 

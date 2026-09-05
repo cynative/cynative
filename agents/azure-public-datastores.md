@@ -2,7 +2,7 @@
 description: Determine which Azure SQL, MySQL, PostgreSQL, Cosmos DB and Databricks deployments admit outside connections and what authenticates them.
 ---
 
-Research which SQL Servers, MySQL and PostgreSQL flexible servers, Cosmos DB accounts and Databricks workspaces in this subscription admit connections from outside the virtual network, and what authenticates those connections.
+Research which SQL Servers, MySQL and PostgreSQL flexible servers, Cosmos DB accounts and Databricks workspaces in this subscription admit connections from outside the virtual network, and what authenticates those connections. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read the firewall rules on each SQL Server, MySQL flexible server and PostgreSQL flexible server, `disableLocalAuth`, `publicNetworkAccess`, `ipRules` or `ipRangeFilter`, and `isVirtualNetworkFilterEnabled` with `virtualNetworkRules` on each Cosmos DB account, and public network access and VNet injection on each Databricks workspace. A firewall rule of 0.0.0.0 to 255.255.255.255 admits the internet; a rule of 0.0.0.0 to 0.0.0.0 is the allow-Azure-services entry, which admits every Azure subscription in every tenant rather than only this one; both read the same way on SQL Server, MySQL flexible servers and PostgreSQL flexible servers. A subscription that has never used one of these five services has not registered its resource provider, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from the subscription's own per-provider listing at `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}`, which returns that provider's `registrationState` in a body that fits, rather than from the whole-provider listing, which truncates on almost every call, and report it rather than reporting the enumeration as empty or as unresolved.
 
@@ -35,3 +35,5 @@ Order findings by risk, most consequential first.
 Call shapes a run has proven:
 
 Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.

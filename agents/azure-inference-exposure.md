@@ -2,7 +2,7 @@
 description: Determine which Azure OpenAI accounts and AI Search services are reachable from outside the subscription and what a caller reaching one obtains.
 ---
 
-Research which Azure OpenAI accounts and AI Search services in this subscription answer a caller from outside, and what reaching one obtains.
+Research which Azure OpenAI accounts and AI Search services in this subscription answer a caller from outside, and what reaching one obtains. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read the Cognitive Services accounts that host OpenAI model deployments for public network access, their network ACL default action and rules and whether local key authentication is disabled, the API Management endpoints that front them for a subscription or product requirement, and the AI Search services for public network access, their network ACL default action and rules, and whether local key authentication is disabled via `disableLocalAuth` or `authOptions`. Such an account carries a kind of `OpenAI` where it was created for that service alone and a kind of `AIServices` where it was created as the multi-service resource, and both serve deployments of OpenAI-format models on the account's own hostname, so an enumeration filtered to the first kind alone reports an account of the second as absent rather than reading it. Azure OpenAI is where an Azure tenant runs inference, so an agent that reads only the gateway in front of it reports on the door and not the room.
 

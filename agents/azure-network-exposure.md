@@ -2,7 +2,7 @@
 description: Resolve the effective inbound NSG rules per interface and report the ones reaching a running machine, with that machine's managed identity.
 ---
 
-Research which network security group rules in this subscription admit inbound traffic from the internet to a running virtual machine, and what that machine's managed identity holds.
+Research which network security group rules in this subscription admit inbound traffic from the internet to a running virtual machine, and what that machine's managed identity holds. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 List inbound allow rules whose source is `Internet`, `*`, `0.0.0.0/0`, `::/0` or a prefix outside RFC 1918, carrier-grade NAT, link-local and unique local space, whatever its length: a /24 of public address space admits an unrelated network just as a /8 does, so prefix length is a ranking input rather than a filter. Take the destination port range with each, list the public IP addresses in the subscription with the resource each is attached to, list the load balancers with their frontend IP configurations, their inbound NAT rules and the interface each reaches, and their load-balancing rules with the backend pool membership behind each, and list the subnets with no network security group associated.
 

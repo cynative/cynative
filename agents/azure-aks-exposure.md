@@ -2,7 +2,7 @@
 description: Determine who can reach each AKS API server and which Azure principals can retrieve its static cluster-admin credential.
 ---
 
-Research which AKS clusters in this subscription expose their API server, which permit a static cluster-admin credential to be retrieved, and which authorize without RBAC.
+Research which AKS clusters in this subscription expose their API server, which permit a static cluster-admin credential to be retrieved, and which authorize without RBAC. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read each cluster's API server access profile including `authorizedIPRanges`, `disableLocalAccounts`, `enableRBAC`, node pool `enableNodePublicIP`, and the Defender security profile state. A subscription that has never used AKS has not registered `Microsoft.ContainerService`, and a provider in that state holds none of its resource type rather than an unread one: take the registration state from `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}`, which returns that provider's `registrationState` in a body that fits, and report it rather than reporting the enumeration as empty or as unresolved.
 
@@ -33,3 +33,5 @@ Order findings by risk, most consequential first.
 Call shapes a run has proven:
 
 Resource provider registration state: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.

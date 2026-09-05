@@ -2,7 +2,7 @@
 description: Determine who can push to each Azure container registry, which workloads pull from it and what the running images carry.
 ---
 
-Research who can push images to the container registries in this subscription, which AKS, Container Apps and App Service workloads pull from them, and what the running images carry.
+Research who can push images to the container registries in this subscription, which AKS, Container Apps and App Service workloads pull from them, and what the running images carry. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read each registry's admin user state, `anonymousPullEnabled`, public network access and private endpoint connections. All of these come from Resource Manager. A subscription that has never used a container registry has not registered `Microsoft.ContainerRegistry`, and one that has never bought a Defender plan has not registered `Microsoft.Security`; a provider in that state holds none of its resource type rather than an unread one: take the registration state from `GET /subscriptions/{id}/providers/{namespace}` for each provider named above, which returns that provider's own `registrationState`, and report it rather than reporting the enumeration as empty or as unresolved. An unregistered `Microsoft.Security` is the enablement state below answered rather than unread: the plan was never bought.
 
@@ -35,3 +35,5 @@ Call shapes a run has proven:
 Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
 
 Defender for Cloud assessments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Security/assessments` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.

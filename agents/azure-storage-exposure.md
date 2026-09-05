@@ -2,7 +2,7 @@
 description: Resolve effective access to each Azure storage account across anonymous blob access, shared keys, the network rule set and Entra roles.
 ---
 
-Research which storage accounts in this subscription hold data readable by an anonymous caller, by anyone holding an account key, or from the internet.
+Research which storage accounts in this subscription hold data readable by an anonymous caller, by anyone holding an account key, or from the internet. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read six settings per account: `allowBlobPublicAccess`, `allowSharedKeyAccess`, the network rule set's `defaultAction`, `publicNetworkAccess`, `supportsHttpsTrafficOnly` and `allowCrossTenantReplication`, together with the customer-managed key configuration. `publicNetworkAccess` set to `Disabled` blocks every request at the public endpoint and takes precedence over the network rule set - a `defaultAction` of `Allow` means the account answers from the internet only when `publicNetworkAccess` is `Enabled` or absent, and the virtual network and IP rules alongside `defaultAction` do not narrow that `Allow` - they are exceptions to a `Deny` default only.
 
@@ -39,3 +39,5 @@ Order findings by risk, most consequential first.
 Call shapes a run has proven:
 
 Blob containers: `GET /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Storage/storageAccounts/{accountName}/blobServices/default/containers` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.

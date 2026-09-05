@@ -2,7 +2,7 @@
 description: Determine the paths to a session on each Azure virtual machine or to the contents of its disks, and what each path requires.
 ---
 
-Research how someone gets a session on the virtual machines in this subscription or reads their disks, and what each path requires.
+Research how someone gets a session on the virtual machines in this subscription or reads their disks, and what each path requires. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read `disablePasswordAuthentication` on every Linux machine, whether each machine uses managed or unmanaged disks, each machine's image reference and publisher, and the Azure Backup, endpoint protection and system update assessment states, taking all three from Defender for Cloud's assessment results, which carry one per machine and cost one call for the three. A Windows machine carries no such field: count the Windows machines, and report their authentication path as not read rather than folding them into a clean result. The per-machine patch route is an assessment this agent must not take: the operation that produces a fresh one runs on the machine. Read which role definitions include `Microsoft.Compute/virtualMachines/runCommand/action` together with their assignments.
 
@@ -41,3 +41,5 @@ Call shapes a run has proven:
 Resource providers: `GET /subscriptions/{subscriptionId}/providers/{resourceProviderNamespace}` on `management.azure.com`.
 
 Defender for Cloud assessments: `GET /subscriptions/{subscriptionId}/providers/Microsoft.Security/assessments` on `management.azure.com`.
+
+Subscriptions: `GET /subscriptions` on `management.azure.com`.

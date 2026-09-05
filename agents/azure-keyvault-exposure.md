@@ -2,7 +2,7 @@
 description: Determine the shortest path to each Azure Key Vault's contents, whether the read would be recorded and whether the vault can be purged.
 ---
 
-Research which Key Vaults in this subscription can be reached and read, whether that read would be recorded and which vaults can be permanently destroyed.
+Research which Key Vaults in this subscription can be reached and read, whether that read would be recorded and which vaults can be permanently destroyed. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
 
 Read each vault's permission model, `publicNetworkAccess`, network ACL default action, IP rules and virtual network rules, private endpoint connections, soft delete state, purge protection state, and whether a diagnostic setting with the `AuditEvent` category has a destination.
 
