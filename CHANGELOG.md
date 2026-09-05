@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.10.3](https://github.com/cynative/cynative/compare/v1.10.2...v1.10.3) (2026-09-05)
+
+
+### Dependencies
+
+* bump aws-actions/configure-aws-credentials from 6.2.3 to 6.2.4 ([2d49847](https://github.com/cynative/cynative/commit/2d4984766844e62146d7f02bc1e29c0cc741092c))
+* bump github.com/4meepo/tagalign from 1.4.3 to 1.4.4 ([7c29883](https://github.com/cynative/cynative/commit/7c298835b4cbb5764d67bb2d2a02da5bf4d281cb))
+* bump github.com/aws/aws-sdk-go-v2/config from 1.33.1 to 1.33.2 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/credentials from 1.20.1 to 1.20.2 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/manager from 1.23.1 to 1.23.2 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager from 0.4.1 to 0.4.2 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/ecr from 1.62.1 to 1.63.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/ecrpublic from 1.43.1 to 1.45.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/eks from 1.95.1 to 1.96.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/iam from 1.61.1 to 1.62.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/kms from 1.57.1 to 1.58.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/s3 from 1.109.1 to 1.110.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/signin from 1.7.1 to 1.8.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/sso from 1.35.1 to 1.36.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/ssooidc from 1.40.1 to 1.41.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/aws/aws-sdk-go-v2/service/sts from 1.47.1 to 1.48.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/go-openapi/spec from 0.22.11 to 1.0.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/godoc-lint/godoc-lint from 0.11.2 to 0.11.4 ([b84c5ca](https://github.com/cynative/cynative/commit/b84c5cade9443d5e1967631734bdd1796c93a6ee))
+* bump github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp from 1.36.0 to 1.37.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric from 0.60.0 to 0.61.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping from 0.60.0 to 0.61.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+* bump github.com/prometheus/client_model from 0.6.2 to 0.6.3 ([2d49847](https://github.com/cynative/cynative/commit/2d4984766844e62146d7f02bc1e29c0cc741092c))
+* bump github.com/prometheus/common from 0.70.1 to 0.71.0 ([2d49847](https://github.com/cynative/cynative/commit/2d4984766844e62146d7f02bc1e29c0cc741092c))
+* bump google.golang.org/api from 0.294.0 to 0.295.0 ([b84c5ca](https://github.com/cynative/cynative/commit/b84c5cade9443d5e1967631734bdd1796c93a6ee))
+* bump google.golang.org/api from 0.295.0 to 0.296.0 ([9cdbfe7](https://github.com/cynative/cynative/commit/9cdbfe7469aebe43ee1aaa511e945198cceaa6c5))
+
 ## [1.10.2](https://github.com/cynative/cynative/compare/v1.10.1...v1.10.2) (2026-09-01)
 
 
