@@ -56,22 +56,29 @@ group_title() {
   esac
 }
 
-# The frontmatter description, rendered for a Markdown table cell. The agent
-# parser accepts a quoted YAML scalar, so the source spelling is not always the
-# value: strip a matched pair of surrounding quotes and undo that style's own
-# escapes. Then escape the pipe, which would otherwise end the cell; the escape
-# is valid Markdown anywhere in the cell, a code span included.
+# The frontmatter description, rendered for a Markdown table cell.
 #
-# A double-quoted scalar can carry escapes this does not decode (\x41, B), and
-# a backslash surviving into the value has no single correct rendering: Markdown
-# consumes it as an escape in prose and keeps it literally inside a code span.
-# Rather than emit a corrupted value the renderer fails and names the file, and
-# the author rewrites that description. The agent parser rejects a control
-# character in the value, so the escapes that produce one are not valid input to
-# begin with.
+# This reads the frontmatter and reproduces the three scalar forms it can render
+# exactly: plain, single-quoted, and double-quoted carrying only the quote and
+# backslash escapes. Every other YAML form is refused by name rather than
+# half-read, because the source spelling is not the value: a block scalar, a tag
+# or an anchor put the value somewhere this does not read; a plain scalar ends
+# at a comment, so `Check issue #5 now.` is the value `Check issue`; and a plain
+# scalar continued on the following lines would otherwise render truncated.
+# Reading the whole frontmatter rather than the description line alone is what
+# makes that last one visible.
+#
+# Only the pipe is escaped on the way out. It ends the cell, and the escape is
+# valid Markdown anywhere in one, a code span included. A backslash surviving
+# into the value is refused instead: Markdown consumes it as an escape in prose
+# and keeps it literally inside a code span, so it has no single rendering.
+#
+# The agent parser (internal/agentcatalog) is the authority on which files are
+# valid; this is the narrower set the catalog can typeset. Each refusal names
+# the file and says what to write instead.
 description() {
-  sed -n '/^description:/{s/^description:[[:space:]]*//;p;q;}' "$1" |
-    awk -v file="$1" -v sq="'" -v dq='"' '
+  awk -v file="$1" -v sq="'" -v dq='"' '
+      BEGIN { bs = "\\"; indicators = "-?:,[]{}#&*!|>%@`" bs sq dq }
       function fail(msg) {
         printf "error: %s: %s\n", file, msg > "/dev/stderr"
         exit 1
@@ -80,27 +87,63 @@ description() {
         len = length(s)
         for (i = 1; i <= len; i++) {
           c = substr(s, i, 1)
-          if (c != "\\") { out = out c; continue }
+          if (c != bs) { out = out c; continue }
           if (i == len) fail("description ends in a backslash")
           i++
           c = substr(s, i, 1)
-          if (c != dq && c != "\\") {
-            fail("description carries the escape \\" c ", which this renderer does not decode; write it plain or single-quoted")
+          if (c != dq && c != bs) {
+            fail("description carries the escape " bs c ", which this renderer does not decode; write it plain or single-quoted")
           }
           out = out c
         }
         return out
       }
+      function check_plain(s,   c) {
+        if (s == "") {
+          fail("the description line carries no value; this renderer reads the value from that line, so a block scalar or a continuation on the following lines is not read")
+        }
+        c = substr(s, 1, 1)
+        if (index(indicators, c) > 0) {
+          fail("description begins with " c ", which starts a YAML form this renderer does not read (a block scalar, tag, anchor, flow collection, or an unclosed quote); write it as a plain, single-quoted or double-quoted scalar")
+        }
+        if (s ~ /[ \t]#/) {
+          fail("description carries a comment, which YAML drops from the value; remove it or quote the description")
+        }
+      }
       function escape_pipe(s,   out, i, c) {
         for (i = 1; i <= length(s); i++) {
           c = substr(s, i, 1)
-          if (c == "|") out = out "\\"
+          if (c == "|") out = out bs
           out = out c
         }
         return out
       }
-      {
-        v = $0
+      # A file written on Windows carries CRLF; the parser tolerates it, so the
+      # fence match and the value must not see the carriage return.
+      { sub(/\r$/, "") }
+      NR == 1 { next }
+      /^---[ \t]*$/ { exit }
+      !found && index($0, "description:") == 1 {
+        raw = substr($0, length("description:") + 1)
+        sub(/^[ \t]+/, "", raw)
+        found = 1
+        next
+      }
+      # Inside the frontmatter, an indented line after the description is that
+      # scalar continuing. Its text is part of the value and is not read here,
+      # so rendering the first line alone would silently truncate it.
+      found && /^[ \t]+[^ \t]/ {
+        fail("description continues on the following line; write it on the description line alone")
+      }
+      END {
+        if (!found) fail("no description line in the frontmatter")
+        v = raw
+        # A bare carriage return is a YAML line break, so the value carries on
+        # past it and the trailing-CR strip above cannot reach it. Refuse rather
+        # than render the source bytes.
+        if (index(v, "\r") > 0) {
+          fail("description carries a carriage return; write it on one line with Unix or Windows line endings")
+        }
         sub(/[ \t]+$/, "", v)
         n = length(v)
         if (n >= 2 && substr(v, 1, 1) == dq && substr(v, n, 1) == dq) {
@@ -108,13 +151,16 @@ description() {
         } else if (n >= 2 && substr(v, 1, 1) == sq && substr(v, n, 1) == sq) {
           v = substr(v, 2, n - 2)
           gsub(sq sq, sq, v)
+        } else {
+          check_plain(v)
         }
-        if (index(v, "\\") > 0) {
+        if (v == "") fail("description is empty")
+        if (index(v, bs) > 0) {
           fail("description carries a backslash, which Markdown renders differently in prose and in a code span; rewrite it without one")
         }
         print escape_pipe(v)
       }
-    '
+    ' "$1"
 }
 
 # Number of arguments; called with a glob so the shell, not ls, does the counting.
