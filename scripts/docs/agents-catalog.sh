@@ -56,9 +56,65 @@ group_title() {
   esac
 }
 
+# The frontmatter description, rendered for a Markdown table cell. The agent
+# parser accepts a quoted YAML scalar, so the source spelling is not always the
+# value: strip a matched pair of surrounding quotes and undo that style's own
+# escapes. Then escape the pipe, which would otherwise end the cell; the escape
+# is valid Markdown anywhere in the cell, a code span included.
+#
+# A double-quoted scalar can carry escapes this does not decode (\x41, B), and
+# a backslash surviving into the value has no single correct rendering: Markdown
+# consumes it as an escape in prose and keeps it literally inside a code span.
+# Rather than emit a corrupted value the renderer fails and names the file, and
+# the author rewrites that description. The agent parser rejects a control
+# character in the value, so the escapes that produce one are not valid input to
+# begin with.
 description() {
-  # First "description:" key in the frontmatter, value only.
-  sed -n '/^description:/{s/^description:[[:space:]]*//;p;q;}' "$1"
+  sed -n '/^description:/{s/^description:[[:space:]]*//;p;q;}' "$1" |
+    awk -v file="$1" -v sq="'" -v dq='"' '
+      function fail(msg) {
+        printf "error: %s: %s\n", file, msg > "/dev/stderr"
+        exit 1
+      }
+      function unquote_double(s,   out, i, c, len) {
+        len = length(s)
+        for (i = 1; i <= len; i++) {
+          c = substr(s, i, 1)
+          if (c != "\\") { out = out c; continue }
+          if (i == len) fail("description ends in a backslash")
+          i++
+          c = substr(s, i, 1)
+          if (c != dq && c != "\\") {
+            fail("description carries the escape \\" c ", which this renderer does not decode; write it plain or single-quoted")
+          }
+          out = out c
+        }
+        return out
+      }
+      function escape_pipe(s,   out, i, c) {
+        for (i = 1; i <= length(s); i++) {
+          c = substr(s, i, 1)
+          if (c == "|") out = out "\\"
+          out = out c
+        }
+        return out
+      }
+      {
+        v = $0
+        sub(/[ \t]+$/, "", v)
+        n = length(v)
+        if (n >= 2 && substr(v, 1, 1) == dq && substr(v, n, 1) == dq) {
+          v = unquote_double(substr(v, 2, n - 2))
+        } else if (n >= 2 && substr(v, 1, 1) == sq && substr(v, n, 1) == sq) {
+          v = substr(v, 2, n - 2)
+          gsub(sq sq, sq, v)
+        }
+        if (index(v, "\\") > 0) {
+          fail("description carries a backslash, which Markdown renders differently in prose and in a code span; rewrite it without one")
+        }
+        print escape_pipe(v)
+      }
+    '
 }
 
 # Number of arguments; called with a glob so the shell, not ls, does the counting.
@@ -92,7 +148,8 @@ total=$(count agents/*.md)
       echo "|---|---|"
       prev=$group
     fi
-    printf '| %s%s%s | %s |\n' "$bt" "$name" "$bt" "$(description "$f")"
+    desc=$(description "$f") || exit 1
+    printf '| %s%s%s | %s |\n' "$bt" "$name" "$bt" "$desc"
   done
 } > "$tmp"
 

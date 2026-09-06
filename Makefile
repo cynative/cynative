@@ -170,6 +170,7 @@ sh-test:
 	@sh test/install.smoke.test.sh
 	@sh test/e2e-guardrails.unit.test.sh
 	@sh test/connector-e2e.unit.test.sh
+	@sh test/agents-catalog.unit.test.sh
 	@sh test/render-scoop.unit.test.sh
 	@sh test/render-formula.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
@@ -261,7 +262,7 @@ sh-test:
 	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
 	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
