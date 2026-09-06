@@ -43,7 +43,7 @@ and see [agents.md](agents.md) for how to write your own.
 | `azure-network-exposure` | Resolve the effective inbound NSG rules per interface and report the ones reaching a running machine, with that machine's managed identity. |
 | `azure-privilege-escalation` | Map the Azure principals that can grant themselves further access, and report the scope each one holds it at. |
 | `azure-public-datastores` | Determine which Azure SQL, MySQL, PostgreSQL, Cosmos DB and Databricks deployments admit outside connections and what authenticates them. |
-| `azure-storage-exposure` | Resolve effective access to each Azure storage account across anonymous blob access, shared keys, the network rule set and Entra roles. |
+| `azure-storage-exposure` | Resolve effective access to each Azure storage account across anonymous blob access, shared keys and the network rule set. |
 | `azure-supply-chain` | Determine who can push to each Azure container registry, which workloads pull from it and what the running images carry. |
 | `azure-vm-hardening` | Determine the paths to a session on each Azure virtual machine or to the contents of its disks, and what each path requires. |
 

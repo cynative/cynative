@@ -1,5 +1,5 @@
 ---
-description: Resolve effective access to each Azure storage account across anonymous blob access, shared keys, the network rule set and Entra roles.
+description: Resolve effective access to each Azure storage account across anonymous blob access, shared keys and the network rule set.
 ---
 
 Research which storage accounts in this subscription hold data readable by an anonymous caller, by anyone holding an account key, or from the internet. Take which subscription that is from the credential's own subscription listing rather than from asking for it or from the identifier reported for the credential, which names the principal and not a subscription: the listing names the subscriptions the credential reaches, and where it names more than one, report each of them.
