@@ -160,7 +160,11 @@ pwsh-test:
 # they are gated here rather than only exercised on a live run. The syntax check runs
 # under PYTHONDONTWRITEBYTECODE=1 with python3 -B so it leaves no __pycache__; it uses
 # ast.parse rather than py_compile for the same reason, and it covers every package
-# file including specs that a single provider --selftest does not exercise. Presence-check
+# file including specs that a single provider --selftest does not exercise, and the
+# agent e2e's read-witness classifier (test/lib/agent-witness.py: the two audit
+# witnesses test/agent.e2e.test.sh judges its read phase by, with its own offline
+# --selftest, since that suite has no other offline entry point and its live run only
+# happens on the release path). Presence-check
 # python3 (the smoke test's loopback fixture server) with an install hint,
 # mirroring the shellcheck/pwsh install-free pattern.
 sh-test:
@@ -182,11 +186,12 @@ sh-test:
 	@sh test/connector-e2e-roster.unit.test.sh
 	@sh test/llm-smoke-secrets.unit.test.sh
 	@sh test/retrigger.unit.test.sh
-	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
+	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/agent-witness.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
 	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
 	 for f in $$files; do echo "  selftest $$f"; sh "$$f" --selftest || exit 1; done
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/connector-audit-parser.py --selftest
+	@PYTHONDONTWRITEBYTECODE=1 python3 -B test/lib/agent-witness.py --selftest
 	@# The trusted-caller pin is the only thing that stops an arbitrary workflow from
 	@# driving a release gate; without it, anything calling the workflow would pass the
 	@# contract check and reach the credentialed jobs. Fail closed if that exact pinned
@@ -262,7 +267,7 @@ sh-test:
 	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
 	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + agent witness selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
