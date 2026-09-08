@@ -292,9 +292,8 @@ func TestAgentsCommands_Failures(t *testing.T) {
 
 // Every committed built-in must be reachable AND parseable. A built-in with an
 // invalid stem would be silently unreachable via --agent, and one with malformed
-// frontmatter would ship and fail at the operator's first use. This passes
-// vacuously while agents/ holds only .keep, and starts guarding the moment a
-// built-in lands.
+// frontmatter would ship and fail at the operator's first use. The built-in tier
+// now ships the 45 agents, so this check bites on every one of them.
 func TestBuiltinAgents_AllValid(t *testing.T) {
 	t.Parallel()
 

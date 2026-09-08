@@ -9,7 +9,7 @@ Open-source framework for security agents with live, read-only access to your in
 [![License: Apache-2.0](https://img.shields.io/github/license/cynative/cynative)](LICENSE)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13851/badge)](https://www.bestpractices.dev/projects/13851)
 
-**[Quickstart](#quickstart) · [Your first agent](#your-first-agent) · [Docs](docs/)**
+**[Quickstart](#quickstart) · [Built-in agents](#built-in-agents) · [Your first agent](#your-first-agent) · [Docs](docs/)**
 
 <!-- BEGIN agent-about -->
 **Ask your infrastructure anything.** Cynative runs frontier models across your code, cloud and runtime - reasoning through GitHub, GitLab, AWS, GCP, Azure and Kubernetes as one system - and comes back with verified answers.
@@ -18,7 +18,9 @@ Open-source framework for security agents with live, read-only access to your in
 cynative "what in my cloud is publicly exposed that shouldn't be?"
 ```
 
-It writes and runs code in an ephemeral sandbox, querying your APIs in parallel, so one question fans out across your whole stack. Every finding is cross-checked and traced back to its origin.
+**45 built-in agents** for AWS, GCP, Azure, GitHub and Kubernetes - privilege escalation, public exposure, supply chain, detection coverage and more - or you write your own in one markdown file.
+
+One question fans out across your whole stack: Cynative writes and runs code in an ephemeral sandbox, querying your APIs in parallel. Every finding is cross-checked and traced back to its origin.
 
 Unlike coding agents and MCP servers, it's **read-only by construction**: every call is gated and authorized *before* a credential is attached - point it at production with confidence.
 <!-- END agent-about -->
@@ -52,7 +54,13 @@ export ANTHROPIC_API_KEY=...
 ```
 <!-- END quickstart-example -->
 
-It picks up the credentials already in your shell. Ask it anything:
+It picks up the credentials already in your shell. Run a built-in agent:
+
+```bash
+cynative -p --agent aws-network-exposure
+```
+
+Or ask it anything:
 
 ```bash
 cynative -p "which IAM roles can escalate to admin?"
@@ -62,32 +70,50 @@ cynative "live cloud resources absent from IaC - drift" # starts an interactive 
 cat findings.json | cynative -p "triage these findings by exploitability"
 ```
 
+## Built-in agents
+
+45 agents are embedded in the binary. Each one is a reviewed prompt for a
+specific question.
+
+| | Agents | For example |
+|---|---|---|
+| AWS | 20 | `aws-privilege-escalation`, `aws-public-storage`, `aws-unpatched-workloads`, `aws-supply-chain` |
+| Azure | 11 | `azure-keyvault-exposure`, `azure-storage-exposure`, `azure-privilege-escalation` |
+| GCP | 5 | `gcp-public-bindings`, `gcp-static-credentials`, `gcp-inference-exposure` |
+| GitHub | 4 | `github-workflow-trust`, `github-unpatched-dependencies`, `github-branch-protection` |
+| Kubernetes | 5 | `k8s-pod-privilege`, `k8s-self-managed-apiserver-access` |
+
+```bash
+cynative agents list            # every agent, with its description
+cynative agents show <name>     # the exact prompt that would run
+```
+
+The full catalog with a one-line description of each agent is in
+[docs/agents-catalog.md](docs/agents-catalog.md).
+
 ## Your first agent
 
-An agent is a markdown file: one line of description, then the prompt. The filename is the name. To add your own, create `~/.cynative/agents/` and write one in it. Cynative does not create this directory for you:
+`cynative agents show <name>` prints the exact file an agent would run. To make your own version, copy it to your agents directory under a new name and edit it:
 
 ```bash
 mkdir -p ~/.cynative/agents
 
-cat > ~/.cynative/agents/aws-public-data-stores.md <<'EOF'
----
-description: Finds publicly accessible data stores in an AWS account.
----
-Check S3, RDS snapshots, EBS snapshots and public AMIs for exposure.
-Report each finding with the resource ARN and how it is reachable.
-EOF
-
-cynative -p --agent aws-public-data-stores
+cynative agents show aws-public-datastores > ~/.cynative/agents/my-aws-public-datastores.md
+# edit ~/.cynative/agents/my-aws-public-datastores.md, then:
+cynative -p --agent my-aws-public-datastores
 ```
 
-See [docs/agents.md](docs/agents.md) for the format.
+An agent is a markdown file: strict YAML frontmatter whose only key is
+`description`, then the prompt body. The filename is the name. A file in
+`~/.cynative/agents/` wins over a built-in of the same name, so give your copy a
+distinct name to keep both. See [docs/agents.md](docs/agents.md) for the format.
 
 ## Running agents
 
 ```bash
-cynative -p --agent aws-public-data-stores "AWS account ID 12814983572854 only"   # with a task
-cynative -p --agent aws-public-data-stores                    # without
-cynative --agent aws-public-data-stores                       # seeds an interactive session
+cynative -p --agent aws-public-datastores "AWS account 128149835728 only"   # with a task
+cynative -p --agent aws-public-datastores                    # without
+cynative --agent aws-public-datastores                       # seeds an interactive session
 ```
 
 `--agent` composes with `-p`, `--auto-approve`, `--config` and piped stdin, so the same file runs interactively while you develop it and non-interactively once it settles.

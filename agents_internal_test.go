@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-// TestBuiltinAgents_Embedded proves the built-in tier is really embedded. The
-// directory ships empty (a .keep only), so this asserts the subtree exists and
-// is walkable rather than asserting any agent is present.
+// TestBuiltinAgents_Embedded proves the built-in tier is really embedded: the
+// agents subtree exists and is walkable. The exact-manifest assertion lives in
+// internal/cli, which can build a catalog over it.
 func TestBuiltinAgents_Embedded(t *testing.T) {
 	t.Parallel()
 
@@ -22,13 +22,11 @@ func TestBuiltinAgents_Embedded(t *testing.T) {
 	}
 }
 
-// TestBuiltinAgents_EveryFileIsValid is the derived-catalog guard. It passes
-// vacuously while the tier is empty and starts biting the moment a built-in
-// lands, matching the connector and provider doc-table convention.
-//
-// It checks only the fence prefix, because the module-root package does not
-// depend on the catalog. Full validation (ValidName on the stem, Parse on the
-// contents) lives in internal/cli, which imports both.
+// TestBuiltinAgents_EveryFileIsValid checks that every embedded built-in begins
+// with a frontmatter fence. It checks only the fence prefix, because the
+// module-root package does not depend on the catalog. Full validation (ValidName
+// on the stem, Parse on the contents, exact roster) lives in internal/cli, which
+// imports both.
 func TestBuiltinAgents_EveryFileIsValid(t *testing.T) {
 	t.Parallel()
 
