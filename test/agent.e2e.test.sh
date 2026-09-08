@@ -4,13 +4,14 @@
 # Runs the real `cynative -p --agent gcp-public-bindings` against a real GCP
 # fixture, proving the EMBEDDED built-in resolved from the binary, drove gated
 # tool calls, produced a report, and stayed inside the read-only boundary. It is
-# NOT a connector suite: an agent run is open-ended, so its reads are not put
-# through the connector audit sweep. The read phase does still bind ONE fixture
-# read to provider-returned evidence through the audit log (an untruncated Cloud
-# Resource Manager 200 for the fixture project whose body carries GCP_E2E_EXPECT,
-# the project number, fed out of band and never in the prompt), so a built-in that
+# NOT a connector suite: the read phase hands the built-in a short project-level
+# task rather than one spelled-out call, so its reads are not put through the
+# connector audit sweep. The read phase does still bind ONE fixture read to
+# provider-returned evidence through the audit log (an untruncated Cloud Resource
+# Manager 200 for the fixture project whose body carries GCP_E2E_EXPECT, the
+# project number, fed out of band and never in the prompt), so a built-in that
 # called an unrelated or failing endpoint and reported the failure cannot pass; the
-# open-ended reads that follow are otherwise not swept. It DOES still run the shared
+# reads that follow are otherwise not swept. It DOES still run the shared
 # credential prepass (the connector_audit engine's load_records + credential_prepass) over
 # its own audit log, so a regression that logged the live LLM/Vertex credential during the
 # built-in's read run fails the phase fatally even though no sanctioned-read sweep runs. The
@@ -141,14 +142,25 @@ assert_gcp_posture() {
 }
 
 read_phase() {
-	# Scope the open-ended agent to this project so it stays inside the guardrail
-	# iteration and token caps against a single-project fixture, and nudge it to open
-	# with the project's own Cloud Resource Manager record. roles/viewer grants that
-	# read, so a working build always produces one successful fixture read the witness
-	# check below can bind to, even though the org-scoped reads the agent goes on to
-	# make are denied by the ceiling. The project NUMBER is never named here: the
-	# model can only surface it by actually reading the resource.
-	_scope="Only project ${GCP_E2E_PROJECT}. Begin by reading that project's own record from Cloud Resource Manager and note its project number, then continue the research and report what you can read."
+	# Hand the built-in a short task confined to this project, and tell it where to
+	# stop. Its own prompt is organization-scoped (Cloud Asset searches, the
+	# organization's project listing), which the fixture cannot serve: the CI service
+	# account holds roles/viewer on this one project and the Cloud Asset API is not
+	# enabled there. Left open-ended, the driver retries the denied organization reads
+	# or repeats the ones that answered until the iteration cap, and every turn replays
+	# a longer transcript into the token budget; the first release-gate run stopped at
+	# 77k of 60k tokens with no answer. So the task names the two reads roles/viewer
+	# serves and ends there: the project's own Cloud Resource Manager record, which the
+	# witness check below binds to, and the project IAM policy. Measured before this
+	# sentence was pinned, at 16 iterations, 200s and a 60k token budget: 10/10
+	# gemini-3.5-flash runs finished in 2 to 6 model calls at 20k to 41k tokens, and a
+	# four-read variant went 0/5, cut by the budget at 62k to 76k. The open-ended task,
+	# run three times at the same cap and timeout with the budget lifted to 400k, never
+	# stayed under 60k: two runs hit the iteration cap with no answer at 308k and 350k,
+	# and one halted on the consecutive-failure summary at 75k. Re-measure the same way
+	# before changing it. The project NUMBER is never named here: the model can only
+	# surface it by actually reading the resource.
+	_scope="Only project ${GCP_E2E_PROJECT}. This run covers that single project and nothing above it: skip the organization listing, Cloud Asset and every organization-scoped read. Read the project's own record from Cloud Resource Manager and note its project number, read the project's IAM policy, then write the report from those two reads and end."
 	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
 		"$bin" "$workdir/config.yaml" "$_scope" --agent "$agent_name"; then _rc=0; else _rc=$?; fi
 
