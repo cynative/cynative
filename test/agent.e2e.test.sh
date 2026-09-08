@@ -8,9 +8,10 @@
 # task rather than one spelled-out call, so its reads are not put through the
 # connector audit sweep. The read phase does still bind ONE fixture read to
 # provider-returned evidence through the audit log (an untruncated Cloud Resource
-# Manager 200 for the fixture project whose body carries GCP_E2E_EXPECT, the
-# project number, fed out of band and never in the prompt), so a built-in that
-# called an unrelated or failing endpoint and reported the failure cannot pass; the
+# Manager 200 for a GET of the fixture project's own record whose body carries
+# GCP_E2E_EXPECT, the project number, fed out of band and never in the prompt), so a
+# built-in that called an unrelated or failing endpoint and reported the failure
+# cannot pass, and it requires the report to name the built-in's own subject; the
 # reads that follow are otherwise not swept. It DOES still run the shared
 # credential prepass (the connector_audit engine's load_records + credential_prepass) over
 # its own audit log, so a regression that logged the live LLM/Vertex credential during the
@@ -231,16 +232,36 @@ PY
 		echo "FAIL: agent produced no report on stdout" >&2
 		return 1
 	fi
+	# The report must be written through the built-in, not just under its name. The
+	# task above supplies the reads, so an unrelated agent file could otherwise pass on
+	# the provenance line plus the witness alone. gcp-public-bindings is about two
+	# principals, and a report that read the project's IAM policy through that prompt
+	# names them whether or not a binding exists (10/10 measured runs did; every report
+	# said no binding named either). The principals sit in the file's description as
+	# well as its body, and the composed prompt carries both, so this proves the
+	# resolved file shaped the report; it cannot tell a rewritten body apart from a
+	# rewritten description, and no body-only phrase appeared in every measured report
+	# (allowedPolicyMemberDomains 4/10, unresolved 0/10), so none is asserted. Tied to
+	# agent_name: swapping the built-in means swapping this pattern.
+	if ! grep -Eq 'allUsers|allAuthenticatedUsers' "$workdir/read.out"; then
+		echo "FAIL: the report names neither allUsers nor allAuthenticatedUsers, the built-in's subject" >&2
+		return 1
+	fi
 	# The report is bound to provider-returned bytes. Everything above is satisfied by
 	# a broken built-in that called an unrelated or failing endpoint and then reported
 	# the failure: the tool-call count is positive and stdout is nonempty either way.
-	# So require, from the write-ahead audit log, one http_request whose Cloud Resource
-	# Manager call for the fixture project came back an untruncated 200 whose BODY
+	# So require, from the write-ahead audit log, one http_request that GETs the fixture
+	# project's own record from Cloud Resource Manager (path /v1/projects/{id} or
+	# /v3/projects/{id}, nothing appended) and came back an untruncated 200 whose BODY
 	# carries GCP_E2E_EXPECT (the project number, fed out of band, never in the prompt).
+	# The method and exact path matter: the task's second read, POST
+	# /v1/projects/{id}:getIamPolicy, is on the same host with the same id in its URL,
+	# and its body carries the project number inside the Google-managed service-agent
+	# principals, so without the pin it would mint the witness on its own.
 	#
 	# The detection mirrors test/lib/connector_audit/specs/gcp.py's is_witness and the
-	# engine helpers it uses (args_of, status_of, body_of); it is inline rather than a
-	# parser call because this suite deliberately runs no sweep over an open-ended
+	# engine helpers it uses (args_of, status_of, body_of, parsed_url); it is inline
+	# rather than a parser call because this suite deliberately runs no sweep over the
 	# agent's reads. It is LENIENT where the engine fails closed - an unreadable,
 	# malformed, duplicate-keyed, fold-colliding or unpaired record is skipped, not
 	# fatal - because this is a positive-evidence assertion and skipping a record can
@@ -251,9 +272,11 @@ PY
 import json
 import re
 import sys
+from urllib.parse import urlparse
 
 project, expect, path = sys.argv[1], sys.argv[2], sys.argv[3]
 CRM = "cloudresourcemanager.googleapis.com"
+RECORD_PATHS = ("/v1/projects/" + project, "/v3/projects/" + project)
 
 
 def _no_dup(pairs):
@@ -373,16 +396,26 @@ for key, rec in results:
     a = args_of(attempt)
     if a is None:
         continue
-    url = text(a.get("url"))
-    if CRM not in url or project not in url:
+    # The project-record GET only: net/http sends an absent method as GET, so an
+    # omitted method counts as one, while the suffixed :getIamPolicy path does not.
+    # A URL urlparse rejects (a stray bracket reads as a bad IPv6 host) is a record
+    # that proves nothing, skipped like any other unusable one, not a crash that
+    # would discard a valid witness elsewhere in the log.
+    if text(a.get("method")).upper() not in ("", "GET"):
+        continue
+    try:
+        u = urlparse(text(a.get("url")))
+        if u.hostname != CRM or u.path not in RECORD_PATHS:
+            continue
+    except ValueError:
         continue
     if status_of(rec) != 200:
         continue
     body, truncated = body_of(rec)
     if truncated or expect not in body:
         continue
-    print("read witness: OK (a Cloud Resource Manager 200 for %s carried the expected "
-          "value)" % project, file=sys.stderr)
+    print("read witness: OK (a Cloud Resource Manager 200 for the %s project record "
+          "carried the expected value)" % project, file=sys.stderr)
     sys.exit(0)
 sys.exit(1)
 PY
