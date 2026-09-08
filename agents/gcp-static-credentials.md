@@ -39,7 +39,9 @@ Cloud Resource Manager: `GET /v3/projects:search`, and `GET /v3/projects?parent=
 
 Project IAM policy: `POST /v1/projects/{project}:getIamPolicy` on `cloudresourcemanager.googleapis.com`.
 
-Service accounts and their keys: `GET /v1/projects/{project}/serviceAccounts` on `iam.googleapis.com`.
+Service accounts: `GET /v1/projects/{project}/serviceAccounts` on `iam.googleapis.com`.
+
+Each account's keys: `GET /v1/projects/{project}/serviceAccounts/{email}/keys?keyTypes=USER_MANAGED` on `iam.googleapis.com`.
 
 Cloud Asset: `GET /v1/organizations/{id}:analyzeOrgPolicies?constraint={constraint}` on `cloudasset.googleapis.com`; it carries an `x-goog-user-project` header naming the project the credential defaults to.
 
