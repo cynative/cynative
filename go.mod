@@ -1,6 +1,6 @@
 module github.com/cynative/cynative
 
-go 1.27.0
+go 1.27.1
 
 require (
 	charm.land/glamour/v2 v2.0.1
@@ -284,7 +284,7 @@ require (
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.22.1 // indirect
-	github.com/google/go-github/v89 v89.0.0 // indirect
+	github.com/google/go-github/v91 v91.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/ko v0.19.1 // indirect
@@ -296,9 +296,9 @@ require (
 	github.com/googleapis/gax-go/v2 v2.24.1 // indirect
 	github.com/gordonklaus/ineffassign v0.2.0 // indirect
 	github.com/goreleaser/chglog v0.7.4 // indirect
-	github.com/goreleaser/fileglob v1.4.0 // indirect
+	github.com/goreleaser/fileglob v1.4.1 // indirect
 	github.com/goreleaser/go-shellwords v1.0.13 // indirect
-	github.com/goreleaser/goreleaser/v2 v2.18.0 // indirect
+	github.com/goreleaser/goreleaser/v2 v2.18.1 // indirect
 	github.com/goreleaser/nfpm/v2 v2.47.0 // indirect
 	github.com/goreleaser/quill v0.0.0-20260630015114-8310f3e9a321 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
