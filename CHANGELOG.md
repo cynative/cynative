@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.11.1](https://github.com/cynative/cynative/compare/v1.11.0...v1.11.1) (2026-09-09)
+
+
+### Dependencies
+
+* bump dev.gaijin.team/go/exhaustruct/v5 from 5.0.3 to 5.2.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2 from 1.45.1 to 1.46.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/config from 1.33.2 to 1.33.3 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/credentials from 1.20.2 to 1.20.3 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/feature/ec2/imds from 1.19.1 to 1.19.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/manager from 1.23.2 to 1.23.3 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager from 0.4.2 to 0.4.3 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/internal/configsources from 1.5.1 to 1.5.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 from 2.8.1 to 2.8.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/internal/v4a from 1.5.1 to 1.5.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/ecr from 1.63.0 to 1.64.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/ecrpublic from 1.45.0 to 1.46.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/eks from 1.97.0 to 1.98.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/iam from 1.62.0 to 1.63.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/internal/checksum from 1.11.1 to 1.11.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/internal/presigned-url from 1.14.1 to 1.14.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/internal/s3shared from 1.20.1 to 1.20.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/kms from 1.58.0 to 1.59.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/s3 from 1.110.0 to 1.111.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/signin from 1.8.0 to 1.9.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/sso from 1.36.0 to 1.37.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/ssooidc from 1.41.0 to 1.42.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/aws/aws-sdk-go-v2/service/sts from 1.48.0 to 1.49.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/dlclark/regexp2/v2 from 2.7.1 to 2.7.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/conv from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/fileutils from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/jsonutils from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/loading from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/mangling from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/pools from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/stringutils from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/typeutils from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump github.com/go-openapi/swag/yamlutils from 0.29.1 to 0.29.2 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump golang.org/x/arch from 0.30.0 to 0.31.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump golang.org/x/mod from 0.40.0 to 0.41.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump golang.org/x/oauth2 from 0.36.0 to 0.37.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump golang.org/x/sync from 0.22.0 to 0.23.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump golang.org/x/sys from 0.47.0 to 0.48.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+* bump golang.org/x/time from 0.15.0 to 0.16.0 ([724e29a](https://github.com/cynative/cynative/commit/724e29abf6e8cee3b4e5ecd4814c4644e711e443))
+
 ## [1.11.0](https://github.com/cynative/cynative/compare/v1.10.2...v1.11.0) (2026-09-08)
 
 
