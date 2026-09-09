@@ -438,6 +438,12 @@ def _cases():
         _record(result="HTTP/1.1 200 OK\r\nX-Num: %s" % N) + _policy(), (False, True)
     yield "a result that is a JSON list is neither a structured result nor a dump", \
         _record(result=json.dumps([200, N])) + _policy(), (False, True)
+    yield "LF-only direct dump record passes (the engine's second separator)", \
+        _record(result="HTTP/1.1 200 OK\nContent-Type: application/json\n\n" + json.dumps({"name": "projects/" + N})) + _policy(), (True, True)
+    yield "LF-only direct dump policy passes", \
+        _record() + _policy(result="HTTP/1.1 200 OK\nContent-Type: application/json\n\n" + json.dumps({"etag": "BwXyz"})), (True, True)
+    yield "LF-only direct dump with the number only in a header fails", \
+        _record(result="HTTP/1.1 200 OK\nX-Num: %s\n\n{}" % N) + _policy(), (False, True)
     yield "direct dump policy 200 with etag passes", \
         _record() + _policy(result=_dump("HTTP/1.1 200 OK", json.dumps({"etag": "BwXyz"}))), (True, True)
     # Chunked HTTP/1.1 dumps: the framing is undone before the body is judged.
