@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.2](https://github.com/cynative/cynative/compare/v1.11.1...v1.11.2) (2026-09-09)
+
+
+### Dependencies
+
+* bump github.com/goreleaser/fileglob from 1.4.0 to 1.4.1 ([a94ecb6](https://github.com/cynative/cynative/commit/a94ecb60853f3461cb12c79f8f81a878f843d2ed))
+* bump github.com/goreleaser/goreleaser/v2 from 2.18.0 to 2.18.1 ([a94ecb6](https://github.com/cynative/cynative/commit/a94ecb60853f3461cb12c79f8f81a878f843d2ed))
+
 ## [1.11.1](https://github.com/cynative/cynative/compare/v1.11.0...v1.11.1) (2026-09-09)
 
 
