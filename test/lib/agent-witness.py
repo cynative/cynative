@@ -197,18 +197,25 @@ def paired_results(raw):
 
 
 def crm_path(args, methods):
-    """The URL path of a Cloud Resource Manager call made with one of methods, or
-    None. net/http sends an absent method as GET, so "" is GET. A URL urlparse rejects
-    (a stray bracket reads as a bad IPv6 host) is a record that proves nothing,
-    skipped like any other unusable one, not a crash that would discard a valid
-    witness elsewhere in the log."""
-    if text(args.get("method")).upper() not in methods:
+    """The URL path of an https Cloud Resource Manager call made with one of
+    methods, or None. net/http sends an absent method as GET, so a missing key is
+    GET, and so is a JSON null, which the transport unmarshals into the empty string
+    before net/http sees it; a method of any other non-string type is an unusable
+    record. The transport dispatches https only, so a record with any
+    other scheme never paired with a 200 and cannot be a witness either way. A URL
+    urlparse rejects (a stray bracket reads as a bad IPv6 host) is a record that
+    proves nothing, skipped like any other unusable one, not a crash that would
+    discard a valid witness elsewhere in the log."""
+    method = args.get("method")
+    if method is None:
+        method = ""
+    if not isinstance(method, str) or method.upper() not in methods:
         return None
     try:
         u = urlparse(text(args.get("url")))
     except ValueError:
         return None
-    if u.hostname != CRM:
+    if u.scheme != "https" or u.hostname != CRM:
         return None
     return u.path
 
@@ -267,8 +274,11 @@ def classify(project, expect, path):
 def main(argv):
     if argv == ["--selftest"]:
         return selftest()
-    if len(argv) != 3:
-        print("usage: agent-witness.py PROJECT EXPECT AUDIT_LOG | --selftest", file=sys.stderr)
+    if len(argv) != 3 or not all(argv):
+        # An empty PROJECT would match the bare /projects/ path and an empty EXPECT is
+        # in every body; the suite guards its env, direct callers get the usage.
+        print("usage: agent-witness.py PROJECT EXPECT AUDIT_LOG | --selftest "
+              "(no argument may be empty)", file=sys.stderr)
         return 2
     project, expect, path = argv
     record, policy = classify(project, expect, path)
@@ -372,6 +382,14 @@ def _cases():
     yield "POST of the record is not the record witness", _record(method="POST") + _policy(), (False, True)
     yield "GET of getIamPolicy is not the policy witness", _record() + _policy(method="GET"), (True, False)
     yield "absent method on the record counts as GET", _record(method=None) + _policy(), (True, True)
+    yield "a JSON null method reads as GET, as the transport unmarshals it", \
+        [_rec("attempt", "c1", arguments=json.dumps({"url": "%s/v3/projects/%s" % (HOST, P), "method": None})),
+         _record()[1]] + _policy(), (True, True)
+    yield "a method of another non-string type is not an omitted method", \
+        [_rec("attempt", "c1", arguments=json.dumps({"url": "%s/v3/projects/%s" % (HOST, P), "method": ["GET"]})),
+         _record()[1]] + _policy(), (False, True)
+    yield "an http scheme is not a witness", \
+        _record(url="http://%s/v3/projects/%s" % (CRM, P)) + _policy(), (False, True)
     yield "absent method on the policy call is not POST", _record() + _policy(method=None), (True, False)
     yield "query string on the record path", _record(url="%s/v3/projects/%s?alt=json" % (HOST, P)) + _policy(), (True, True)
     yield "malformed bracketed host is skipped, later witnesses count", \
@@ -513,6 +531,12 @@ def selftest():
             rc = main([P, N, path])
         if rc != 0 or "policy witness: OK" not in err.getvalue():
             failures.append("cli: both witnesses must exit 0")
+        n += 1
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rcs = (main(["", N, path]), main([P, "", path]), main([P, N, ""]))
+        if rcs != (2, 2, 2):
+            failures.append("cli: an empty argument must exit 2, got %r" % (rcs,))
     for f in failures:
         print("FAIL: " + f, file=sys.stderr)
     if failures:
