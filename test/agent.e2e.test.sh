@@ -4,13 +4,17 @@
 # Runs the real `cynative -p --agent gcp-public-bindings` against a real GCP
 # fixture, proving the EMBEDDED built-in resolved from the binary, drove gated
 # tool calls, produced a report, and stayed inside the read-only boundary. It is
-# NOT a connector suite: an agent run is open-ended, so its reads are not put
-# through the connector audit sweep. The read phase does still bind ONE fixture
-# read to provider-returned evidence through the audit log (an untruncated Cloud
-# Resource Manager 200 for the fixture project whose body carries GCP_E2E_EXPECT,
-# the project number, fed out of band and never in the prompt), so a built-in that
-# called an unrelated or failing endpoint and reported the failure cannot pass; the
-# open-ended reads that follow are otherwise not swept. It DOES still run the shared
+# NOT a connector suite: the read phase hands the built-in a short project-level
+# task rather than one spelled-out call, so its reads are not put through the
+# connector audit sweep. The read phase does still bind BOTH of the task's reads to
+# provider-returned evidence through the audit log, judged by
+# test/lib/agent-witness.py (offline --selftest under `make sh-test`): an untruncated
+# Cloud Resource Manager 200 for a GET of the fixture project's own record whose body
+# carries GCP_E2E_EXPECT, the project number, fed out of band and never in the
+# prompt, and an untruncated 200 for a POST of the project's getIamPolicy carrying
+# a policy object. So a built-in that called an unrelated or failing endpoint and reported
+# the failure cannot pass, and neither can one that skipped the policy read; any
+# other reads are not swept. It DOES still run the shared
 # credential prepass (the connector_audit engine's load_records + credential_prepass) over
 # its own audit log, so a regression that logged the live LLM/Vertex credential during the
 # built-in's read run fails the phase fatally even though no sanctioned-read sweep runs. The
@@ -141,14 +145,25 @@ assert_gcp_posture() {
 }
 
 read_phase() {
-	# Scope the open-ended agent to this project so it stays inside the guardrail
-	# iteration and token caps against a single-project fixture, and nudge it to open
-	# with the project's own Cloud Resource Manager record. roles/viewer grants that
-	# read, so a working build always produces one successful fixture read the witness
-	# check below can bind to, even though the org-scoped reads the agent goes on to
-	# make are denied by the ceiling. The project NUMBER is never named here: the
-	# model can only surface it by actually reading the resource.
-	_scope="Only project ${GCP_E2E_PROJECT}. Begin by reading that project's own record from Cloud Resource Manager and note its project number, then continue the research and report what you can read."
+	# Hand the built-in a short task confined to this project, and tell it where to
+	# stop. Its own prompt is organization-scoped (Cloud Asset searches, the
+	# organization's project listing), which the fixture cannot serve: the CI service
+	# account holds roles/viewer on this one project and the Cloud Asset API is not
+	# enabled there. Left open-ended, the driver retries the denied organization reads
+	# or repeats the ones that answered until the iteration cap, and every turn replays
+	# a longer transcript into the token budget; the first release-gate run stopped at
+	# 77k of 60k tokens with no answer. So the task names the two reads roles/viewer
+	# serves and ends there: the project's own Cloud Resource Manager record, which the
+	# witness check below binds to, and the project IAM policy. Measured before this
+	# sentence was pinned, at 16 iterations, 200s and a 60k token budget: 10/10
+	# gemini-3.5-flash runs finished in 2 to 6 model calls at 20k to 41k tokens, and a
+	# four-read variant went 0/5, cut by the budget at 62k to 76k. The open-ended task,
+	# run three times at the same cap and timeout with the budget lifted to 400k, never
+	# stayed under 60k: two runs hit the iteration cap with no answer at 308k and 350k,
+	# and one halted on the consecutive-failure summary at 75k. Re-measure the same way
+	# before changing it. The project NUMBER is never named here: the model can only
+	# surface it by actually reading the resource.
+	_scope="Only project ${GCP_E2E_PROJECT}. This run covers that single project and nothing above it: skip the organization listing, Cloud Asset and every organization-scoped read. Read the project's own record from Cloud Resource Manager and note its project number, read the project's IAM policy, then write the report from those two reads and end."
 	if e2e_run_bounded "$timeout_s" "$workdir/read.audit.log" "$workdir/read.out" "$workdir/read.err" \
 		"$bin" "$workdir/config.yaml" "$_scope" --agent "$agent_name"; then _rc=0; else _rc=$?; fi
 
@@ -222,160 +237,21 @@ PY
 	# The report is bound to provider-returned bytes. Everything above is satisfied by
 	# a broken built-in that called an unrelated or failing endpoint and then reported
 	# the failure: the tool-call count is positive and stdout is nonempty either way.
-	# So require, from the write-ahead audit log, one http_request whose Cloud Resource
-	# Manager call for the fixture project came back an untruncated 200 whose BODY
-	# carries GCP_E2E_EXPECT (the project number, fed out of band, never in the prompt).
-	#
-	# The detection mirrors test/lib/connector_audit/specs/gcp.py's is_witness and the
-	# engine helpers it uses (args_of, status_of, body_of); it is inline rather than a
-	# parser call because this suite deliberately runs no sweep over an open-ended
-	# agent's reads. It is LENIENT where the engine fails closed - an unreadable,
-	# malformed, duplicate-keyed, fold-colliding or unpaired record is skipped, not
-	# fatal - because this is a positive-evidence assertion and skipping a record can
-	# only make it HARDER to pass. It is strict about the evidence itself: a status
-	# that merely looks like 200, a truncated body, or the value appearing in a
-	# response HEADER rather than the body must never mint a witness.
-	if ! python3 - "$GCP_E2E_PROJECT" "$GCP_E2E_EXPECT" "$workdir/read.audit.log" <<'PY'
-import json
-import re
-import sys
-
-project, expect, path = sys.argv[1], sys.argv[2], sys.argv[3]
-CRM = "cloudresourcemanager.googleapis.com"
-
-
-def _no_dup(pairs):
-    """Reject a duplicate JSON key: which value Go bound is decoder-internal, so the
-    record is ambiguous and must not be read as evidence."""
-    out = {}
-    for k, v in pairs:
-        if k in out:
-            raise ValueError("duplicate key %r" % k)
-        out[k] = v
-    return out
-
-
-def loads(s):
-    return json.loads(s, object_pairs_hook=_no_dup)
-
-
-def text(v):
-    return v if isinstance(v, str) else ""
-
-
-def args_of(rec):
-    """The record's arguments with keys case-folded the way Go's encoding/json binds
-    them (a miscased "URL" is still the url on the wire), or None when unusable."""
-    a = rec.get("arguments")
-    if isinstance(a, str):
-        try:
-            a = loads(a)
-        except ValueError:
-            return None
-    if not isinstance(a, dict):
-        return None
-    out = {}
-    for k, v in a.items():
-        f = k.casefold() if isinstance(k, str) else k
-        if f in out:
-            return None
-        out[f] = v
-    return out
-
-
-def result_json(rec):
-    """The sandbox path records StructuredRun's JSON as a STRING, so result needs a
-    second decode. The direct path records the raw dump, which starts with the status
-    line and so can never be mistaken for the structured wrapper."""
-    try:
-        obj = loads(text(rec.get("result")))
-    except ValueError:
-        return None
-    return obj if isinstance(obj, dict) else None
-
-
-def status_of(rec):
-    obj = result_json(rec)
-    # type(x) is int, not isinstance: isinstance(True, int) is True in Python, so an
-    # isinstance check would let a JSON bool masquerade as a status.
-    if obj is not None and type(obj.get("status")) is int:
-        return obj["status"]
-    # Anchor on the protocol version and require a boundary after the 3-digit status
-    # so "HTTP/1.1 2000" cannot be read as 200.
-    m = re.match(r"HTTP/[0-9.]+\s+([0-9]{3})(?![0-9])", text(rec.get("result")))
-    return int(m.group(1)) if m else None
-
-
-def body_of(rec):
-    """(body, truncated). Fail-closed on the structured path: a missing/non-false
-    truncated flag, a non-string body or a non-int status counts as truncated. On the
-    direct path the dump carries the status line and headers before the body, so cut
-    them off - a marker appearing only in a response HEADER is not the provider's
-    body and must not satisfy the assertion."""
-    obj = result_json(rec)
-    if obj is not None and ("status" in obj or "body" in obj or "truncated" in obj):
-        body = obj.get("body")
-        ok = (obj.get("truncated") is False and isinstance(body, str)
-              and type(obj.get("status")) is int)
-        return (body if isinstance(body, str) else ""), (not ok)
-    dump = text(rec.get("result"))
-    truncated = "[Response truncated at" in dump
-    for sep in ("\r\n\r\n", "\n\n"):
-        if sep in dump:
-            return dump.split(sep, 1)[1], truncated
-    return "", truncated
-
-
-try:
-    raw = open(path, encoding="utf-8").read()
-except (OSError, UnicodeDecodeError):
-    sys.exit(1)
-
-attempts = {}
-results = []
-for line in raw.splitlines():
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        rec = loads(line)
-    except ValueError:
-        continue
-    if not isinstance(rec, dict) or rec.get("tool") != "http_request":
-        continue
-    key = (rec.get("session_id"), rec.get("run_id"), rec.get("call_id"))
-    if not all(isinstance(k, str) and k for k in key):
-        continue
-    if rec.get("phase") == "attempt":
-        attempts[key] = rec
-    elif rec.get("phase") == "result":
-        results.append((key, rec))
-
-# The url comes from the ATTEMPT (write-ahead: it lands before the request runs) and
-# the response from the matching RESULT; an unpaired result proves nothing about what
-# was dispatched, so it is skipped.
-for key, rec in results:
-    attempt = attempts.get(key)
-    if attempt is None:
-        continue
-    a = args_of(attempt)
-    if a is None:
-        continue
-    url = text(a.get("url"))
-    if CRM not in url or project not in url:
-        continue
-    if status_of(rec) != 200:
-        continue
-    body, truncated = body_of(rec)
-    if truncated or expect not in body:
-        continue
-    print("read witness: OK (a Cloud Resource Manager 200 for %s carried the expected "
-          "value)" % project, file=sys.stderr)
-    sys.exit(0)
-sys.exit(1)
-PY
-	then
-		echo "FAIL: no witnessed Cloud Resource Manager 200 for the fixture project carrying the expected value" >&2
+	# So require both of the task's reads from the write-ahead audit log, judged by
+	# test/lib/agent-witness.py from the checkout under test: a GET of the project's
+	# own Cloud Resource Manager record (path /v1/projects/{id} or /v3/projects/{id},
+	# nothing appended) that returned an untruncated 200 whose BODY carries
+	# GCP_E2E_EXPECT, and a POST of the project's getIamPolicy that returned an
+	# untruncated 200 carrying a policy object. The record witness is pinned to its method and
+	# exact path because the policy response is on the same host with the same id in
+	# its URL and carries the project number inside the service-agent principals; the
+	# policy witness is audit evidence that the built-in's own read happened, where a
+	# check on the report's prose would be satisfied by the agent's description alone.
+	# The helper is lenient where the connector audit engine fails closed (an unusable
+	# record is skipped, never fatal, since these are positive-evidence assertions) and
+	# strict about the evidence itself; its --selftest pins every branch offline.
+	if ! python3 -B "$root/test/lib/agent-witness.py" "$GCP_E2E_PROJECT" "$GCP_E2E_EXPECT" "$workdir/read.audit.log"; then
+		echo "FAIL: the audit log does not witness both task reads (see the MISSING line above)" >&2
 		return 1
 	fi
 	return 0
