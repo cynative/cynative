@@ -31,10 +31,9 @@ cannot move any of these lines.
 - **Least privilege** - SecurityAudit, roles/viewer, Reader, live view
   RBAC. For AWS assumed-role identities, credentials are re-vended
   through STS scoped to a managed policy, so IAM enforces the boundary
-  independently. Always provide the least-privileged credentials needed,
-  the action gate is not a substitute for them. A provider's ceiling can
-  be disabled by the operator; the credentials' own policy is then the
-  only boundary.
+  independently. Always provide the least-privileged credentials needed;
+  the action gate is not a substitute for them. A connector's ceiling can
+  be configured by the operator.
 - **Fail closed** - anything unclassified, unresolvable, or not allowed
   by the configured policy is denied.
 - **Complete mediation** - authorization is per request, not per session.
