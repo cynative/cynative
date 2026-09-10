@@ -838,3 +838,48 @@ func mustProviderView(t *testing.T, method, raw string) authreq.View {
 	}
 	return authreq.NewView(req, "")
 }
+
+// TestProvider_AuthorizeAction_encodedSlashRequiresBothReadings pins the case
+// at the layer that decides: a policy granting only the operation the decoded
+// reading names must not let the request through, because the service may run
+// the one the wire reading names.
+func TestProvider_AuthorizeAction_encodedSlashRequiresBothReadings(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		allowed []string
+		wantErr error
+	}{
+		{"only the decoded reading's action allowed", []string{"example:Policy"}, ErrPolicyDenied},
+		{"only the wire reading's action allowed", []string{"example:Function"}, ErrPolicyDenied},
+		{"both allowed", []string{"example:Function", "example:Policy"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			model := &ServiceModel{
+				Dir: "example", ARNNamespace: "example", EndpointPrefix: "example",
+				SigningName: "example", Protocol: ProtocolRestJSON1,
+				Operations: map[string]Operation{
+					"GetFunction": {HTTPMethod: "GET", URITemplate: "/2015-03-31/functions/{FunctionName}"},
+					"GetPolicy":   {HTTPMethod: "GET", URITemplate: "/2015-03-31/functions/{FunctionName}/policy"},
+				},
+			}
+			resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+				"GetFunction": {actions: []string{"example:Function"}, source: SourceServiceRef},
+				"GetPolicy":   {actions: []string{"example:Policy"}, source: SourceServiceRef},
+			}}
+			p, _ := tieProvider([]*ServiceModel{model}, resolver, c.allowed...)
+			v := mustProviderView(t, http.MethodGet,
+				"https://example.us-east-1.amazonaws.com/2015-03-31/functions/my%2Fpolicy")
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"example","region":"us-east-1"}}`),
+			)
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("err = %v, want %v", err, c.wantErr)
+			}
+		})
+	}
+}

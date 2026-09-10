@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -119,7 +120,7 @@ func knownOp(model *ServiceModel, op string) (string, error) {
 func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
 	switch model.Protocol {
 	case ProtocolRestXML, ProtocolRestJSON1:
-		return classifyREST(model, v, classificationSegments(parsed, splitSegments(v.Path)))
+		return classifyRESTReadings(model, v, parsed)
 	case ProtocolAWSJSON10, ProtocolAWSJSON11:
 		return single(classifyJSONRPC(model, v))
 	case ProtocolAWSQuery, ProtocolEC2Query:
@@ -129,6 +130,46 @@ func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) (
 	default:
 		return nil, fmt.Errorf("%w: unsupported protocol %v", ErrClassifierUnknownOp, model.Protocol)
 	}
+}
+
+// classifyRESTReadings classifies every reading of the request path and returns
+// the union of the operations they name, in name order. The readings differ
+// only for a percent-encoded path, and the services disagree about which one is
+// theirs: Lambda binds a %2F inside one segment while S3 decodes the path once
+// and only then splits bucket from key. Authorizing the union is the rule a tie
+// already gets, for the same reason: nothing in the request says which
+// operation runs, so the caller authorizes all of them.
+//
+// A reading that matches no template contributes nothing rather than denying,
+// because a path matching no template in the service's own model names no
+// operation for that service to run. When no reading matches, the first
+// reading's ErrClassifierUnknownOp stands, so the denial names the path as sent.
+func classifyRESTReadings(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
+	var (
+		union    []string
+		firstErr error
+	)
+
+	for _, segs := range v.PathReadings() {
+		ops, err := classifyREST(model, v, classificationSegments(parsed, segs))
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+
+			continue
+		}
+
+		union = append(union, ops...)
+	}
+
+	if union == nil {
+		return nil, firstErr
+	}
+
+	slices.Sort(union)
+
+	return slices.Compact(union), nil
 }
 
 // single lifts a classifier that names exactly one operation into the
