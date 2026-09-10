@@ -219,15 +219,20 @@ func splitTemplateQuery(uri string) (string, []string) {
 
 // matchURITemplate reports whether the path segments conform to the Smithy URI
 // template. pSegs carries no query: the view keeps it in RawQuery, so a "?" here
-// is a decoded %3F and belongs to the segment it sits in. Treating it as a
-// separator would let /automationrulesv2/list%3Fx forge a match against the
-// literal /automationrulesv2/list, while AWS reads the identifier "list?x".
+// belongs to the segment it sits in rather than separating path from query; on
+// the decoded reading it is a decoded %3F, and on the wire reading it is a
+// literal "?" the request sent unescaped. Treating it as a separator would let
+// /automationrulesv2/list%3Fx forge a match against the literal
+// /automationrulesv2/list, while AWS reads the identifier "list?x".
 // Supports:
 //   - literal segments: must match exactly
 //   - {Var}: matches a single non-empty path segment
-//   - {Var+}: matches one or more segments, empty ones included; the template
-//     segments after it must match the tail of the path, so a literal suffix
-//     such as /{Name+}/policy never matches a path that does not end in it.
+//   - {Var+}: matches every segment the template's suffix leaves, empty ones
+//     included, except a span that is a single empty segment, which is an
+//     empty value and matches the parent operation instead (see matchGreedy);
+//     the template segments after it must match the tail of the path, so a
+//     literal suffix such as /{Name+}/policy never matches a path that does
+//     not end in it.
 func matchURITemplate(template string, pSegs []string) bool {
 	tSegs := splitSegments(template)
 
@@ -249,11 +254,15 @@ func matchURITemplate(template string, pSegs []string) bool {
 // template segments in suffix. The label takes every segment the suffix
 // leaves, empty ones included, because it models a resource path such as an
 // S3 object key, where a leading, trailing or doubled slash is part of the
-// name and the service routes it. At least one segment must remain for the
-// label; the suffix then has to match the remaining tail segment by segment.
+// name and the service routes it. The one span it must reject is a single
+// empty segment: that value joins to the empty string, which AWS treats as no
+// value at all and routes to the parent operation rather than the labeled
+// one (an S3 GET on /{Bucket}/ lists the bucket; only GET /{Bucket}// reaches
+// an object, with key "/"). The suffix then has to match the remaining tail
+// segment by segment.
 func matchGreedy(suffix, pSegs []string, i int) bool {
 	end := len(pSegs) - len(suffix)
-	if end <= i {
+	if end <= i || (end == i+1 && pSegs[i] == "") {
 		return false
 	}
 	for j, t := range suffix {

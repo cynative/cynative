@@ -929,3 +929,40 @@ func TestProvider_AuthorizeAction_encodedSlashKeyEmptySegments(t *testing.T) {
 		})
 	}
 }
+
+// TestProvider_AuthorizeAction_bucketTrailingSlashDoesNotGrantObjectRead pins
+// the case the narrowed greedy rule closes: a bucket-listing GET with a
+// trailing slash used to be the only candidate that matched, against
+// /{Bucket}/{Key+}, because its greedy span was one empty segment. A policy
+// granting s3:GetObject alone then authorized it, though S3 runs the bucket
+// listing and never sees an object key. Now that span is rejected, so no
+// operation in this model classifies the request and the call is denied for
+// having no candidate at all, not for lacking s3:ListBucket.
+func TestProvider_AuthorizeAction_bucketTrailingSlashDoesNotGrantObjectRead(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		Dir: "s3fixture", ARNNamespace: "s3", EndpointPrefix: "s3",
+		SigningName: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"ListObjects": {actions: []string{"s3:ListBucket"}, source: SourceServiceRef},
+		"GetObject":   {actions: []string{"s3:GetObject"}, source: SourceServiceRef},
+	}}
+	p, _ := tieProvider([]*ServiceModel{model}, resolver, "s3:GetObject")
+	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/mybucket/")
+	err := p.AuthorizeAction(
+		t.Context(),
+		v,
+		awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`),
+	)
+	if !errors.Is(err, ErrActionUnresolved) {
+		t.Fatalf("err = %v, want ErrActionUnresolved (no operation should classify the request)", err)
+	}
+	if errors.Is(err, ErrPolicyDenied) {
+		t.Errorf("err = %v, must not be ErrPolicyDenied: that would mean GetObject still classified", err)
+	}
+}

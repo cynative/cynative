@@ -25,9 +25,13 @@ func TestMatchURITemplate(t *testing.T) {
 		{"/{Bucket}", "/foo/bar", false},
 		{"/{Bucket}/{Key+}", "/foo/bar/baz", true},
 		{"/{Bucket}/{Key+}", "/foo", false},
-		// A trailing slash leaves a greedy label one empty segment to take; a
-		// greedy label spans empty segments because a key can end in "/".
-		{"/{Bucket}/{Key+}", "/foo/", true},
+		// A trailing slash leaves a greedy label one empty segment to take, and
+		// that value joins to the empty string: S3 treats it as no key at all and
+		// runs the bucket operation, not the object one.
+		{"/{Bucket}/{Key+}", "/foo/", false},
+		// A doubled trailing slash leaves the greedy label two empty segments,
+		// which join to "/": a real key, the one S3 answers with 404 NoSuchKey.
+		{"/{Bucket}/{Key+}", "/foo//", true},
 		// The path arrives without a query (the view carries RawQuery apart), so
 		// a "?" in it is a decoded %3F: part of the segment, not a separator.
 		{"/foo", "/foo?query", false},
