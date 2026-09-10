@@ -558,3 +558,30 @@ func TestClassifyOperation_TrailingSlashNamesBucketListing(t *testing.T) {
 		t.Errorf("ops = %v, want [ListObjects]", ops)
 	}
 }
+
+// TestClassifyOperation_VirtualHostedSeparatorsOnlyIsObjectRead: a
+// virtual-hosted GET whose path is nothing but separators, such as "//", has
+// only its own reading, because a reading left with nothing but empty
+// segments after the trailing one drops is not offered. classificationSegments
+// prepends the synthetic bucket segment ahead of both remaining path segments,
+// which matches the greedy /{Bucket}/{Key+} template and names an object read
+// of the key "/", never the bucket listing.
+func TestClassifyOperation_VirtualHostedSeparatorsOnlyIsObjectRead(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "s3", EndpointPrefix: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	parsed := ParsedHost{Service: "s3", Region: "us-east-1", BucketInHost: true}
+	v := newClassifyView(t, http.MethodGet, "https://my-bucket.s3.us-east-1.amazonaws.com//")
+	ops, err := ClassifyOperation(model, v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"GetObject"}) {
+		t.Errorf("ops = %v, want [GetObject]", ops)
+	}
+}

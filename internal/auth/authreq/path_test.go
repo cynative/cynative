@@ -59,6 +59,16 @@ func TestPathReadings(t *testing.T) {
 			"https://x.example.com/a//",
 			[][]string{{"a", "", ""}, {"a", ""}},
 		},
+		{
+			"a reading of nothing but separators is not trimmed",
+			"https://x.example.com//",
+			[][]string{{"", ""}},
+		},
+		{
+			"an encoded slash composes with a trailing slash",
+			"https://x.example.com/a%2Fb/",
+			[][]string{{"a%2Fb", ""}, {"a", "b", ""}, {"a%2Fb"}, {"a", "b"}},
+		},
 	}
 
 	for _, c := range cases {

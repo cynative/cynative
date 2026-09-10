@@ -22,9 +22,11 @@ import (
 // slash. Only the one trailing empty segment goes: a second one still names a
 // real segment, so /bucket// keeps addressing the object literally named "/".
 // A one-element reading is never trimmed, so the root path "/" stays the
-// single reading {""} and never grows a second; offering a reading that would
-// name nothing costs nothing, since a gate only ever unions or intersects what
-// the readings name.
+// single reading {""} and never grows a second, and a reading left with
+// nothing but empty segments once the drop is applied, such as the two
+// separators "//" reads as, is not offered either, because a segmentation
+// made only of separators names no resource for any server to route
+// differently.
 //
 // A gate that segments a path classifies every reading and authorizes the union
 // of what they name, because the servers disagree about which reading is
@@ -45,7 +47,9 @@ func (v View) PathReadings() [][]string {
 	// loop appends is never itself trimmed again.
 	original := len(readings)
 	for _, r := range readings[:original] {
-		readings = appendReading(readings, dropTrailingEmpty(r))
+		if trimmed, ok := dropTrailingEmpty(r); ok {
+			readings = appendReading(readings, trimmed)
+		}
 	}
 
 	return readings
@@ -63,15 +67,36 @@ func appendReading(readings [][]string, segs []string) [][]string {
 	return append(readings, segs)
 }
 
-// dropTrailingEmpty drops the one empty segment a single trailing '/' leaves.
-// It never trims a reading down to nothing, so a one-element reading such as
-// the root's {""} comes back unchanged.
-func dropTrailingEmpty(segs []string) []string {
-	if len(segs) > 1 && segs[len(segs)-1] == "" {
-		return segs[:len(segs)-1]
+// dropTrailingEmpty reports the reading segs becomes once the one empty
+// segment a single trailing '/' leaves is dropped, and whether that reading
+// should be offered at all. It declines a one-element reading, so the root's
+// {""} is never trimmed, and it declines a reading that would be left with
+// nothing but empty segments, because a segmentation made only of separators
+// names no resource. The slice it returns is an independent copy, never a
+// subslice of segs, so trimming one reading cannot alias another's backing
+// array through a shared capacity.
+func dropTrailingEmpty(segs []string) ([]string, bool) {
+	if len(segs) <= 1 || segs[len(segs)-1] != "" {
+		return nil, false
 	}
 
-	return segs
+	trimmed := segs[:len(segs)-1]
+	if allEmpty(trimmed) {
+		return nil, false
+	}
+
+	return slices.Clone(trimmed), true
+}
+
+// allEmpty reports whether every segment in segs is the empty string.
+func allEmpty(segs []string) bool {
+	for _, s := range segs {
+		if s != "" {
+			return false
+		}
+	}
+
+	return true
 }
 
 // pathSegments splits a request path on '/', dropping the leading one. An empty
