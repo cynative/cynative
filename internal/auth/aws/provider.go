@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -52,11 +53,12 @@ type argsShape struct{}
 
 // AuthorizeAction resolves the prefix to candidate models, classifies the
 // operation against each, and requires the conservative UNION of every matched
-// candidate's IAM actions to be authorized. A permissionless candidate (the
-// operation needs no IAM permission, e.g. sts:GetCallerIdentity) counts as
-// matched but contributes no required action. Multiple matches occur only for
-// prefix collisions (e.g. email→ses/sesv2). Fail closed on any unresolved
-// candidate.
+// candidate's IAM actions to be authorized. Candidates come from two places: a
+// prefix collision (e.g. email→ses/sesv2) yields one per model, and a REST
+// request that ties between operations of one model yields one per tied
+// operation. A permissionless candidate (the operation needs no IAM
+// permission, e.g. sts:GetCallerIdentity) counts as matched but contributes no
+// required action. Fail closed on any unresolved candidate.
 func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
 	awsAuth, err := authreq.Parse[argsShape](args)
 	if err != nil {
@@ -80,7 +82,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 		if !strings.EqualFold(model.EndpointPrefix, parsed.Service) {
 			continue // defensive: index/parse drift.
 		}
-		op, opErr := ClassifyOperation(model, v, parsed)
+		ops, opErr := ClassifyOperation(model, v, parsed)
 		if opErr != nil {
 			// Every classifier error means this candidate does not serve the
 			// operation (ClassifyOperation only ever wraps ErrClassifierUnknownOp),
@@ -88,14 +90,11 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 			continue
 		}
 		matched++
-		actions, src := p.resolver.Resolve(ctx, model, op)
-		if src == SourcePermissionless {
-			continue // operation needs no IAM permission; nothing to authorize.
+		actions, actErr := p.requiredActions(ctx, model, ops)
+		if actErr != nil {
+			return actErr
 		}
-		if src == SourceNone || len(actions) == 0 {
-			return fmt.Errorf("%w: %s:%s", ErrActionUnresolved, model.Dir, op)
-		}
-		required = append(required, actions...)
+		required = appendUnique(required, actions...)
 	}
 	if matched == 0 {
 		return fmt.Errorf("%w: no candidate serves the request for %q", ErrActionUnresolved, parsed.Service)
@@ -143,4 +142,35 @@ func (p *Provider) ResolveSigningName(ctx context.Context, host string) (string,
 		return "", fmt.Errorf("%w: no model serves %q", ErrSigningNameUnresolved, parsed.Service)
 	}
 	return name, nil
+}
+
+// requiredActions resolves every classified candidate of one model to its IAM
+// actions. A permissionless candidate contributes nothing; a candidate no tier
+// can resolve fails closed whatever its siblings resolve to, so a tie can never
+// be authorized on one candidate alone.
+func (p *Provider) requiredActions(ctx context.Context, model *ServiceModel, ops []string) ([]string, error) {
+	var out []string
+	for _, op := range ops {
+		actions, src := p.resolver.Resolve(ctx, model, op)
+		if src == SourcePermissionless {
+			continue // operation needs no IAM permission; nothing to authorize.
+		}
+		if src == SourceNone || len(actions) == 0 {
+			return nil, fmt.Errorf("%w: %s:%s", ErrActionUnresolved, model.Dir, op)
+		}
+		out = append(out, actions...)
+	}
+	return out, nil
+}
+
+// appendUnique appends the actions not already in required, keeping first-seen
+// order so the evaluator and the denial message stay deterministic and name
+// each action once however many candidates share it.
+func appendUnique(required []string, actions ...string) []string {
+	for _, a := range actions {
+		if !slices.Contains(required, a) {
+			required = append(required, a)
+		}
+	}
+	return required
 }

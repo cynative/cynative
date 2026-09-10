@@ -36,11 +36,14 @@ func classificationPath(parsed ParsedHost, rawPath string) string {
 	return "/" + vhostBucketPlaceholder + rawPath
 }
 
-// classifyREST identifies which operation in model matches v. Matching uses
-// (method, URI template); among multiple matches, the one whose query-flag
-// set is the longest subset of the request's query parameters wins. path is the
-// effective classification path (already normalized by classificationPath).
-func classifyREST(model *ServiceModel, v authreq.View, path string) (string, error) {
+// classifyREST identifies which operations in model match v. Matching uses
+// (method, URI template); among multiple matches, those whose discriminator set
+// is the longest subset of the request's parameters rank highest, and every
+// operation at that top score is returned in name order. More than one name is
+// a tie: nothing in the request or the model says which of them AWS runs, so
+// the caller must authorize all of them. path is the effective classification
+// path (already normalized by classificationPath).
+func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, error) {
 	method := strings.ToUpper(v.Method)
 	// Lenient parse, matching what [net/url.URL.Query] did here before the view.
 	reqQuery, _ := url.ParseQuery(v.RawQuery)
@@ -75,15 +78,21 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) (string, err
 	}
 
 	if len(hits) == 0 {
-		return "", fmt.Errorf("%w: no match for %s %s", ErrClassifierUnknownOp, method, path)
+		return nil, fmt.Errorf("%w: no match for %s %s", ErrClassifierUnknownOp, method, path)
 	}
-	best := hits[0]
+	best := hits[0].score
 	for _, h := range hits[1:] {
-		if h.score > best.score {
-			best = h
+		if h.score > best {
+			best = h.score
 		}
 	}
-	return best.name, nil
+	var ops []string
+	for _, h := range hits {
+		if h.score == best {
+			ops = append(ops, h.name)
+		}
+	}
+	return ops, nil
 }
 
 // scoreDiscriminators returns how many of an operation's required
@@ -92,8 +101,8 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) (string, err
 // member-bound @httpQuery params and @httpHeader names (e.g. uploadId,
 // x-amz-copy-source) — the parameters S3 itself uses to route operations that
 // share a (method, URI). A higher count ⇒ a more specific operation, which
-// breaks ties in classifyREST so the precise op (not the alphabetically-first)
-// wins and the action check authorizes the right IAM action.
+// outranks its catch-all sibling in classifyREST so the action check authorizes
+// the right IAM action; operations at the same count are returned together.
 func scoreDiscriminators(
 	op Operation,
 	tplQuery []string,
@@ -150,7 +159,9 @@ func splitTemplateQuery(uri string) (string, []string) {
 // Supports:
 //   - literal segments: must match exactly
 //   - {Var}: matches a single non-empty path segment
-//   - {Var+}: matches one or more remaining segments (greedy), each non-empty.
+//   - {Var+}: matches one or more non-empty segments; the template segments
+//     after it must match the tail of the path, so a literal suffix such as
+//     /{Name+}/policy never matches a path that does not end in it.
 func matchURITemplate(template, path string) bool {
 	// Strip query string from path (URITemplate doesn't include query).
 	if i := strings.IndexByte(path, '?'); i >= 0 {
@@ -161,11 +172,11 @@ func matchURITemplate(template, path string) bool {
 	pSegs := splitSegments(path)
 
 	for i, t := range tSegs {
+		if isGreedyPlaceholder(t) {
+			return matchGreedy(tSegs[i+1:], pSegs, i)
+		}
 		if !matchSegment(t, i, pSegs) {
 			return false
-		}
-		if isGreedyPlaceholder(t) {
-			return true
 		}
 	}
 
@@ -173,17 +184,31 @@ func matchURITemplate(template, path string) bool {
 	return len(pSegs) == len(tSegs)
 }
 
-// matchSegment reports whether the i-th template segment t matches against pSegs.
-// Greedy placeholders consume all remaining segments (caller stops iterating).
-func matchSegment(t string, i int, pSegs []string) bool {
-	switch {
-	case isGreedyPlaceholder(t):
-		return i < len(pSegs) && !slices.Contains(pSegs[i:], "")
-	case isSinglePlaceholder(t):
-		return i < len(pSegs) && pSegs[i] != ""
-	default:
-		return i < len(pSegs) && pSegs[i] == t
+// matchGreedy matches a greedy label starting at path index i, followed by the
+// template segments in suffix. The label takes every segment the suffix leaves,
+// which must be at least one and all non-empty; the suffix then has to match
+// the remaining tail segment by segment.
+func matchGreedy(suffix, pSegs []string, i int) bool {
+	end := len(pSegs) - len(suffix)
+	if end <= i || slices.Contains(pSegs[i:end], "") {
+		return false
 	}
+	for j, t := range suffix {
+		if !matchSegment(t, end+j, pSegs) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchSegment reports whether the non-greedy template segment t matches the
+// i-th path segment: a placeholder needs a non-empty segment, a literal an
+// exact one.
+func matchSegment(t string, i int, pSegs []string) bool {
+	if isSinglePlaceholder(t) {
+		return i < len(pSegs) && pSegs[i] != ""
+	}
+	return i < len(pSegs) && pSegs[i] == t
 }
 
 // splitSegments splits a URI path on "/", dropping the leading empty segment.

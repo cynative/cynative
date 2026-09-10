@@ -109,23 +109,33 @@ func knownOp(model *ServiceModel, op string) (string, error) {
 }
 
 // ClassifyOperation dispatches to the appropriate per-protocol classifier based
-// on model.Protocol and returns the matched operation's short name (e.g.
-// "GetObject", "PutItem", "ListUsers"). For the REST protocols the path is
-// normalized via classificationPath(parsed, …) so virtual-hosted S3 requests
-// (bucket in the host) match the path-style URI templates; the non-REST
-// classifiers do not use parsed (S3 is the only virtual-hosted service and it is
-// REST). Returns ErrClassifierUnknownOp on no match.
-func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) (string, error) {
+// on model.Protocol and returns the matched operations' short names (e.g.
+// "GetObject", "PutItem", "ListUsers"), never empty on success. The non-REST
+// classifiers always name exactly one operation. For the REST protocols the
+// path is normalized via classificationPath(parsed, …) so virtual-hosted S3
+// requests (bucket in the host) match the path-style URI templates, and more
+// than one name means the request ties between those operations, which the
+// caller must authorize as a whole. Returns ErrClassifierUnknownOp on no match.
+func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
 	switch model.Protocol {
 	case ProtocolRestXML, ProtocolRestJSON1:
 		return classifyREST(model, v, classificationPath(parsed, v.Path))
 	case ProtocolAWSJSON10, ProtocolAWSJSON11:
-		return classifyJSONRPC(model, v)
+		return single(classifyJSONRPC(model, v))
 	case ProtocolAWSQuery, ProtocolEC2Query:
-		return classifyQuery(model, v)
+		return single(classifyQuery(model, v))
 	case ProtocolUnknown:
-		return "", fmt.Errorf("%w: unknown service protocol", ErrClassifierUnknownOp)
+		return nil, fmt.Errorf("%w: unknown service protocol", ErrClassifierUnknownOp)
 	default:
-		return "", fmt.Errorf("%w: unsupported protocol %v", ErrClassifierUnknownOp, model.Protocol)
+		return nil, fmt.Errorf("%w: unsupported protocol %v", ErrClassifierUnknownOp, model.Protocol)
 	}
+}
+
+// single lifts a classifier that names exactly one operation into the
+// candidate-set shape ClassifyOperation returns.
+func single(op string, err error) ([]string, error) {
+	if err != nil {
+		return nil, err
+	}
+	return []string{op}, nil
 }

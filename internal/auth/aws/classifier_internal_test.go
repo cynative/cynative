@@ -29,6 +29,19 @@ func TestMatchURITemplate(t *testing.T) {
 		{"/foo", "/foo?query", true},
 		{"/literal", "/literal", true},
 		{"/literal", "/other", false},
+		// Segments after a greedy label must match the tail of the path; the
+		// greedy label takes what is left in between and needs at least one segment.
+		{"/portals/{Arn+}/identityProviders", "/portals/a/b/identityProviders", true},
+		{"/portals/{Arn+}/identityProviders", "/portals/a/identityProviders", true},
+		{"/portals/{Arn+}/identityProviders", "/portals/identityProviders", false},
+		{"/portals/{Arn+}/identityProviders", "/portals/x", false},
+		{"/portals/{Arn+}/identityProviders", "/portals/x/foo", false},
+		{"/portals/{Arn+}/identityProviders", "/portals/x/identityProviders/extra", false},
+		{"/mrap/instances/{Name+}/policy", "/mrap/instances/my-mrap", false},
+		{"/mrap/instances/{Name+}/policy", "/mrap/instances/my-mrap/policy", true},
+		{"/a/{X+}/b/{Y}", "/a/1/2/b/c", true},
+		{"/a/{X+}/b/{Y}", "/a/1/2/b/", false},
+		{"/a/{X+}/b", "/a/1//b", false},
 	}
 	for _, c := range cases {
 		t.Run(c.template+"|"+c.path, func(t *testing.T) {
@@ -41,16 +54,143 @@ func TestMatchURITemplate(t *testing.T) {
 	}
 }
 
-func TestClassifyREST_ListBucketsAtRoot(t *testing.T) {
+// TestClassifyREST_RootTiesListBucketsWithDirectoryBuckets pins the shape of the
+// real S3 model: ListBuckets and ListDirectoryBuckets are both GET / once the
+// SDK-only x-id tag is dropped, so the canonical bucket listing is a tie and the
+// classifier must return both candidates rather than the lexically first.
+func TestClassifyREST_RootTiesListBucketsWithDirectoryBuckets(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
 	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	op, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
-	if op != "ListBuckets" {
-		t.Errorf("op = %q, want ListBuckets", op)
+	if !slices.Equal(ops, []string{"ListBuckets", "ListDirectoryBuckets"}) {
+		t.Errorf("ops = %v, want [ListBuckets ListDirectoryBuckets]", ops)
+	}
+}
+
+// TestClassifyREST_EqualScoreReturnsEveryCandidateSorted: equal-score matches
+// are all returned, in name order, whatever order the map yields them.
+func TestClassifyREST_EqualScoreReturnsEveryCandidateSorted(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "x", EndpointPrefix: "x", Protocol: ProtocolRestJSON1,
+		Operations: map[string]Operation{
+			"ZWrite": {HTTPMethod: "POST", URITemplate: "/resource"},
+			"ARead":  {HTTPMethod: "POST", URITemplate: "/resource"},
+			"MRead":  {HTTPMethod: "POST", URITemplate: "/resource"},
+			"Other":  {HTTPMethod: "GET", URITemplate: "/resource"},
+		},
+	}
+	v := newClassifyView(t, http.MethodPost, "https://x.amazonaws.com/resource")
+	ops, err := classifyREST(model, v, v.Path)
+	if err != nil {
+		t.Fatalf("classifyREST: %v", err)
+	}
+	if !slices.Equal(ops, []string{"ARead", "MRead", "ZWrite"}) {
+		t.Errorf("ops = %v, want [ARead MRead ZWrite]", ops)
+	}
+}
+
+// TestClassifyREST_HigherScoreExcludesTiedLowerCandidates: a tie below the top
+// score is not a tie; only the most specific match is returned.
+func TestClassifyREST_HigherScoreExcludesTiedLowerCandidates(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "x", EndpointPrefix: "x", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"AAA": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"BBB": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"ZZZ": {HTTPMethod: "GET", URITemplate: "/{Bucket}?flag"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/foo?flag")
+	ops, err := classifyREST(model, v, v.Path)
+	if err != nil {
+		t.Fatalf("classifyREST: %v", err)
+	}
+	if !slices.Equal(ops, []string{"ZZZ"}) {
+		t.Errorf("ops = %v, want [ZZZ]", ops)
+	}
+}
+
+// TestClassifyREST_RequestCarryingTwoSubresourcesTies: a request that carries
+// the discriminators of two sibling operations (something no SDK sends) ties
+// them at the top score, and both come back so the gate authorizes both.
+func TestClassifyREST_RequestCarryingTwoSubresourcesTies(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "s3", EndpointPrefix: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"GetBucketTagging": {HTTPMethod: "GET", URITemplate: "/{Bucket}?tagging"},
+			"GetBucketAcl":     {HTTPMethod: "GET", URITemplate: "/{Bucket}?acl"},
+			"ListObjects":      {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet, "https://s3.amazonaws.com/foo?acl&tagging")
+	ops, err := classifyREST(model, v, v.Path)
+	if err != nil {
+		t.Fatalf("classifyREST: %v", err)
+	}
+	if !slices.Equal(ops, []string{"GetBucketAcl", "GetBucketTagging"}) {
+		t.Errorf("ops = %v, want [GetBucketAcl GetBucketTagging]", ops)
+	}
+}
+
+// TestClassifyREST_GreedyLabelSuffixNarrowsTheCandidateSet mirrors the S3
+// Control multi-region access point reads: four GET templates share a greedy
+// prefix and the same required header. A literal after the greedy label must
+// exclude the template from paths that do not end in it, so the plain get is a
+// single candidate and each sub-resource read ties only with the plain get.
+func TestClassifyREST_GreedyLabelSuffixNarrowsTheCandidateSet(t *testing.T) {
+	t.Parallel()
+	model := mrapModel()
+	cases := []struct {
+		path string
+		want []string
+	}{
+		{"/v20180820/mrap/instances/my-mrap", []string{"GetMultiRegionAccessPoint"}},
+		{"/v20180820/mrap/instances/my-mrap/policy", []string{
+			"GetMultiRegionAccessPoint", "GetMultiRegionAccessPointPolicy",
+		}},
+		{"/v20180820/mrap/instances/my-mrap/routes", []string{
+			"GetMultiRegionAccessPoint", "GetMultiRegionAccessPointRoutes",
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			t.Parallel()
+			v := newClassifyView(t, http.MethodGet, "https://123456789012.s3-control.us-east-1.amazonaws.com"+c.path)
+			v.Header.Set("X-Amz-Account-Id", "123456789012")
+			ops, err := classifyREST(model, v, v.Path)
+			if err != nil {
+				t.Fatalf("classifyREST: %v", err)
+			}
+			if !slices.Equal(ops, c.want) {
+				t.Errorf("ops = %v, want %v", ops, c.want)
+			}
+		})
+	}
+}
+
+// mrapModel is the S3 Control multi-region access point read family as the
+// shipped model declares it: a greedy name label, literal sub-resource suffixes,
+// and the account id header every S3 Control call must carry.
+func mrapModel() *ServiceModel {
+	op := func(uri string) Operation {
+		return Operation{HTTPMethod: "GET", URITemplate: uri, RequiredHeader: []string{"x-amz-account-id"}}
+	}
+	return &ServiceModel{
+		Dir: "s3-control", ARNNamespace: "s3", EndpointPrefix: "s3-control", SigningName: "s3",
+		Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"GetMultiRegionAccessPoint":             op("/v20180820/mrap/instances/{Name+}"),
+			"GetMultiRegionAccessPointPolicy":       op("/v20180820/mrap/instances/{Name+}/policy"),
+			"GetMultiRegionAccessPointPolicyStatus": op("/v20180820/mrap/instances/{Name+}/policystatus"),
+			"GetMultiRegionAccessPointRoutes":       op("/v20180820/mrap/instances/{Mrap+}/routes"),
+		},
 	}
 }
 
@@ -58,12 +198,12 @@ func TestClassifyREST_GetObject(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
 	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/my-bucket/path/to/key")
-	op, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
-	if op != "GetObject" {
-		t.Errorf("op = %q, want GetObject", op)
+	if !slices.Equal(ops, []string{"GetObject"}) {
+		t.Errorf("ops = %v, want [GetObject]", ops)
 	}
 }
 
@@ -91,12 +231,12 @@ func TestClassifyREST_QueryDisambiguator(t *testing.T) {
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, c.url)
-			op, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, v.Path)
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
-			if op != c.wantOp {
-				t.Errorf("op = %q, want %q", op, c.wantOp)
+			if !slices.Equal(ops, []string{c.wantOp}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.wantOp)
 			}
 		})
 	}
@@ -125,12 +265,12 @@ func TestClassifyREST_HigherScoreCandidateWinsOverEarlierAlphabetical(t *testing
 		},
 	}
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/foo?flag")
-	op, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
-	if op != "ZZZ" {
-		t.Errorf("op = %q, want ZZZ", op)
+	if !slices.Equal(ops, []string{"ZZZ"}) {
+		t.Errorf("ops = %v, want [ZZZ]", ops)
 	}
 }
 
@@ -144,12 +284,12 @@ func TestClassifyREST_SkipsOperationsWithoutHTTPMethod(t *testing.T) {
 		},
 	}
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/")
-	op, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, v.Path)
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
-	if op != "WithGet" {
-		t.Errorf("op = %q, want WithGet", op)
+	if !slices.Equal(ops, []string{"WithGet"}) {
+		t.Errorf("ops = %v, want [WithGet]", ops)
 	}
 }
 
@@ -243,12 +383,12 @@ func TestClassifyREST_MemberBoundDiscriminators(t *testing.T) {
 			if c.copySource != "" {
 				v.Header.Set("X-Amz-Copy-Source", c.copySource)
 			}
-			op, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, v.Path)
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
-			if op != c.wantOp {
-				t.Errorf("op = %q, want %q", op, c.wantOp)
+			if !slices.Equal(ops, []string{c.wantOp}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.wantOp)
 			}
 		})
 	}
@@ -274,12 +414,12 @@ func TestClassifyREST_XIDOnlyDiscriminatorMatchesCanonicalRequest(t *testing.T) 
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, c.url)
-			op, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, v.Path)
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
-			if op != c.wantOp {
-				t.Errorf("op = %q, want %q", op, c.wantOp)
+			if !slices.Equal(ops, []string{c.wantOp}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.wantOp)
 			}
 		})
 	}
@@ -340,12 +480,12 @@ func TestClassifyOperation_virtualHostedSynthesizesBucket(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, c.url)
-			op, err := ClassifyOperation(model, v, parsed)
+			ops, err := ClassifyOperation(model, v, parsed)
 			if err != nil {
 				t.Fatalf("ClassifyOperation: %v", err)
 			}
-			if op != c.wantOp {
-				t.Errorf("op = %q, want %q", op, c.wantOp)
+			if !slices.Equal(ops, []string{c.wantOp}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.wantOp)
 			}
 		})
 	}
@@ -373,12 +513,12 @@ func TestClassifyOperation_pathStyleUnchanged(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, c.url)
-			op, err := ClassifyOperation(model, v, parsed)
+			ops, err := ClassifyOperation(model, v, parsed)
 			if err != nil {
 				t.Fatalf("ClassifyOperation: %v", err)
 			}
-			if op != c.wantOp {
-				t.Errorf("op = %q, want %q", op, c.wantOp)
+			if !slices.Equal(ops, []string{c.wantOp}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.wantOp)
 			}
 		})
 	}

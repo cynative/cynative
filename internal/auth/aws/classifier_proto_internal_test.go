@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -183,10 +184,10 @@ func TestClassifyOperation_dispatchByProtocol(t *testing.T) {
 	iam.Protocol = ProtocolAWSQuery
 
 	cases := []struct {
-		name   string
-		model  *ServiceModel
-		setup  func(*testing.T) authreq.View
-		wantOp string
+		name  string
+		model *ServiceModel
+		setup func(*testing.T) authreq.View
+		want  []string
 	}{
 		{
 			"rest-xml", s3,
@@ -194,7 +195,7 @@ func TestClassifyOperation_dispatchByProtocol(t *testing.T) {
 				t.Helper()
 				return newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
 			},
-			"ListBuckets",
+			[]string{"ListBuckets", "ListDirectoryBuckets"},
 		},
 		{
 			"json-rpc", dyn,
@@ -204,7 +205,7 @@ func TestClassifyOperation_dispatchByProtocol(t *testing.T) {
 				r.Header.Set("X-Amz-Target", "DynamoDB_20120810.ListTables")
 				return r
 			},
-			"ListTables",
+			[]string{"ListTables"},
 		},
 		{
 			"query", iam,
@@ -212,18 +213,18 @@ func TestClassifyOperation_dispatchByProtocol(t *testing.T) {
 				t.Helper()
 				return newClassifyView(t, http.MethodGet, "https://iam.amazonaws.com/?Action=ListUsers")
 			},
-			"ListUsers",
+			[]string{"ListUsers"},
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			op, err := ClassifyOperation(c.model, c.setup(t), ParsedHost{})
+			ops, err := ClassifyOperation(c.model, c.setup(t), ParsedHost{})
 			if err != nil {
 				t.Fatalf("%s: %v", c.name, err)
 			}
-			if op != c.wantOp {
-				t.Errorf("op = %q, want %q", op, c.wantOp)
+			if !slices.Equal(ops, c.want) {
+				t.Errorf("ops = %v, want %v", ops, c.want)
 			}
 		})
 	}
@@ -234,12 +235,28 @@ func TestClassifyOperation_restJSON1RoutesThroughREST(t *testing.T) {
 	m := s3MinModel(t)
 	m.Protocol = ProtocolRestJSON1
 	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	op, err := ClassifyOperation(m, v, ParsedHost{})
+	ops, err := ClassifyOperation(m, v, ParsedHost{})
 	if err != nil {
 		t.Fatalf("ClassifyOperation: %v", err)
 	}
-	if op != "ListBuckets" {
-		t.Errorf("op = %q, want ListBuckets", op)
+	if !slices.Equal(ops, []string{"ListBuckets", "ListDirectoryBuckets"}) {
+		t.Errorf("ops = %v, want [ListBuckets ListDirectoryBuckets]", ops)
+	}
+}
+
+// TestClassifyOperation_singletonClassifierErrorPropagates: a non-REST
+// classifier's failure comes back unchanged through ClassifyOperation with no
+// candidate set beside it.
+func TestClassifyOperation_singletonClassifierErrorPropagates(t *testing.T) {
+	t.Parallel()
+	m := dynamodbMinModel(t)
+	v := newClassifyView(t, http.MethodPost, "https://dynamodb.us-east-1.amazonaws.com/")
+	ops, err := ClassifyOperation(m, v, ParsedHost{}) // no X-Amz-Target header.
+	if !errors.Is(err, ErrClassifierUnknownOp) {
+		t.Fatalf("err = %v, want ErrClassifierUnknownOp", err)
+	}
+	if ops != nil {
+		t.Errorf("ops = %v, want nil on error", ops)
 	}
 }
 
@@ -249,12 +266,12 @@ func TestClassifyOperation_awsJSON11RoutesThroughJSONRPC(t *testing.T) {
 	m.Protocol = ProtocolAWSJSON11
 	v := newClassifyView(t, http.MethodPost, "https://dynamodb.us-east-1.amazonaws.com/")
 	v.Header.Set("X-Amz-Target", "X.ListTables")
-	op, err := ClassifyOperation(m, v, ParsedHost{})
+	ops, err := ClassifyOperation(m, v, ParsedHost{})
 	if err != nil {
 		t.Fatalf("ClassifyOperation: %v", err)
 	}
-	if op != "ListTables" {
-		t.Errorf("op = %q, want ListTables", op)
+	if !slices.Equal(ops, []string{"ListTables"}) {
+		t.Errorf("ops = %v, want [ListTables]", ops)
 	}
 }
 
@@ -263,12 +280,12 @@ func TestClassifyOperation_ec2QueryRoutesThroughQuery(t *testing.T) {
 	m := iamMinModel()
 	m.Protocol = ProtocolEC2Query
 	v := newClassifyView(t, http.MethodGet, "https://iam.amazonaws.com/?Action=ListUsers")
-	op, err := ClassifyOperation(m, v, ParsedHost{})
+	ops, err := ClassifyOperation(m, v, ParsedHost{})
 	if err != nil {
 		t.Fatalf("ClassifyOperation: %v", err)
 	}
-	if op != "ListUsers" {
-		t.Errorf("op = %q, want ListUsers", op)
+	if !slices.Equal(ops, []string{"ListUsers"}) {
+		t.Errorf("ops = %v, want [ListUsers]", ops)
 	}
 }
 
