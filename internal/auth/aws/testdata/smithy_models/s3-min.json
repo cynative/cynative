@@ -21,6 +21,14 @@
         "smithy.api#http": {"method": "GET", "uri": "/?x-id=ListBuckets", "code": 200}
       }
     },
+    "com.amazonaws.s3#ListDirectoryBuckets": {
+      "type": "operation",
+      "input":  {"target": "smithy.api#Unit"},
+      "output": {"target": "smithy.api#Unit"},
+      "traits": {
+        "smithy.api#http": {"method": "GET", "uri": "/?x-id=ListDirectoryBuckets", "code": 200}
+      }
+    },
     "com.amazonaws.s3#GetObject": {
       "type": "operation",
       "input":  {"target": "smithy.api#Unit"},

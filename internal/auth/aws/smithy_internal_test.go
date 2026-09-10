@@ -30,7 +30,7 @@ func TestParseModel_s3(t *testing.T) {
 	if m.Protocol != ProtocolRestXML {
 		t.Errorf("Protocol = %v, want ProtocolRestXML", m.Protocol)
 	}
-	const wantOps = 5 // ListBuckets, GetObject, DeleteObject, AbortMultipartUpload, CopyObject.
+	const wantOps = 6 // ListBuckets, ListDirectoryBuckets, GetObject, DeleteObject, AbortMultipartUpload, CopyObject.
 	if got := len(m.Operations); got != wantOps {
 		t.Errorf("Operations len = %d, want %d", got, wantOps)
 	}

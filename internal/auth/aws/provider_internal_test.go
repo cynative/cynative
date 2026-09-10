@@ -267,6 +267,346 @@ func TestProvider_AuthorizeAction_virtualHostedClassifiesObjectOps(t *testing.T)
 	}
 }
 
+// tieModel returns a REST model whose two named operations both match
+// POST /resource with no discriminator, so classification ties between them.
+func tieModel(dir string, ops ...string) *ServiceModel {
+	m := &ServiceModel{
+		Dir: dir, ARNNamespace: dir, EndpointPrefix: "example", SigningName: "example",
+		Protocol:   ProtocolRestJSON1,
+		Operations: map[string]Operation{},
+	}
+	for _, op := range ops {
+		m.Operations[op] = Operation{HTTPMethod: "POST", URITemplate: "/resource"}
+	}
+	return m
+}
+
+// tieProvider wires a tied model with a per-operation resolver and an
+// evaluator that allows exactly the given actions.
+func tieProvider(models []*ServiceModel, resolver Resolver, allowed ...string) (*Provider, *capturingEvaluator) {
+	ev := &capturingEvaluator{allow: true, allowed: map[string]bool{}}
+	for _, a := range allowed {
+		ev.allowed[a] = true
+	}
+	p := &Provider{
+		models:    &fakeArchive{models: models, err: nil},
+		resolver:  resolver,
+		evaluator: ev,
+		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
+	}
+	return p, ev
+}
+
+func tieCall(t *testing.T, p *Provider) error {
+	t.Helper()
+	v := mustProviderView(t, http.MethodPost, "https://example.us-east-1.amazonaws.com/resource")
+	return p.AuthorizeAction(t.Context(), v, awsToolCall(`{"aws_auth":{"service":"example","region":"us-east-1"}}`))
+}
+
+// TestProvider_AuthorizeAction_tieRequiresEveryCandidate is the issue #309
+// fixture: two operations tie for POST /resource and resolve to distinct
+// actions. A policy permitting only one of them must deny whichever name sorts
+// first, and only a policy permitting both allows.
+func TestProvider_AuthorizeAction_tieRequiresEveryCandidate(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		read    string // operation name resolving to example:Read
+		write   string // operation name resolving to example:Write
+		allowed []string
+		wantErr error
+		wantGot []string
+	}{
+		{"read sorts first, only read allowed", "ARead", "ZWrite", []string{"example:Read"}, ErrPolicyDenied, nil},
+		{"write sorts first, only read allowed", "ZRead", "AWrite", []string{"example:Read"}, ErrPolicyDenied, nil},
+		{"only write allowed", "ARead", "ZWrite", []string{"example:Write"}, ErrPolicyDenied, nil},
+		{
+			"both allowed", "ARead", "ZWrite",
+			[]string{"example:Read", "example:Write"},
+			nil,
+			[]string{"example:Read", "example:Write"},
+		},
+		{
+			"both allowed, write sorts first", "ZRead", "AWrite",
+			[]string{"example:Read", "example:Write"},
+			nil,
+			[]string{"example:Write", "example:Read"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+				c.read:  {actions: []string{"example:Read"}, source: SourceServiceRef},
+				c.write: {actions: []string{"example:Write"}, source: SourceServiceRef},
+			}}
+			p, ev := tieProvider([]*ServiceModel{tieModel("example", c.read, c.write)}, resolver, c.allowed...)
+			err := tieCall(t, p)
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("err = %v, want %v", err, c.wantErr)
+			}
+			if c.wantErr == nil && !slices.Equal(ev.got, c.wantGot) {
+				t.Errorf("evaluator received %v, want %v", ev.got, c.wantGot)
+			}
+		})
+	}
+}
+
+// TestProvider_AuthorizeAction_threeWayTie: every single-action policy denies
+// and only the complete union allows.
+func TestProvider_AuthorizeAction_threeWayTie(t *testing.T) {
+	t.Parallel()
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"A": {actions: []string{"example:A"}, source: SourceServiceRef},
+		"B": {actions: []string{"example:B"}, source: SourceServiceRef},
+		"C": {actions: []string{"example:C"}, source: SourceServiceRef},
+	}}
+	for _, only := range []string{"example:A", "example:B", "example:C"} {
+		t.Run("only "+only, func(t *testing.T) {
+			t.Parallel()
+			p, _ := tieProvider([]*ServiceModel{tieModel("example", "C", "A", "B")}, resolver, only)
+			if err := tieCall(t, p); !errors.Is(err, ErrPolicyDenied) {
+				t.Errorf("err = %v, want ErrPolicyDenied", err)
+			}
+		})
+	}
+	t.Run("all three", func(t *testing.T) {
+		t.Parallel()
+		p, ev := tieProvider([]*ServiceModel{tieModel("example", "C", "A", "B")}, resolver,
+			"example:A", "example:B", "example:C")
+		if err := tieCall(t, p); err != nil {
+			t.Fatalf("AuthorizeAction: %v", err)
+		}
+		if want := []string{"example:A", "example:B", "example:C"}; !slices.Equal(ev.got, want) {
+			t.Errorf("evaluator received %v, want %v", ev.got, want)
+		}
+	})
+}
+
+// TestProvider_AuthorizeAction_tieUnresolvedCandidateDenies: a tied candidate
+// that resolves to nothing denies before any policy evaluation, even though its
+// sibling is allowed. Each half of the fail-closed predicate is pinned on its
+// own: no source, a source with no actions, and actions with no source.
+func TestProvider_AuthorizeAction_tieUnresolvedCandidateDenies(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		sibling resolverResult
+	}{
+		{"no source and no actions", resolverResult{actions: nil, source: SourceNone}},
+		{"source without actions", resolverResult{actions: nil, source: SourceServiceRef}},
+		{"actions without source", resolverResult{actions: []string{"example:Write"}, source: SourceNone}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+				"ARead":  {actions: []string{"example:Read"}, source: SourceServiceRef},
+				"ZWrite": c.sibling,
+			}}
+			p, ev := tieProvider([]*ServiceModel{tieModel("example", "ARead", "ZWrite")}, resolver,
+				"example:Read", "example:Write")
+			if err := tieCall(t, p); !errors.Is(err, ErrActionUnresolved) {
+				t.Fatalf("err = %v, want ErrActionUnresolved", err)
+			}
+			if ev.got != nil {
+				t.Errorf("evaluator was called with %v; an unresolved candidate must deny first", ev.got)
+			}
+		})
+	}
+}
+
+// TestProvider_AuthorizeAction_tiePermissionlessCandidate: a permissionless
+// candidate contributes no action but does not excuse its tied sibling.
+func TestProvider_AuthorizeAction_tiePermissionlessCandidate(t *testing.T) {
+	t.Parallel()
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"AFree":  {actions: nil, source: SourcePermissionless},
+		"ZWrite": {actions: []string{"example:Write"}, source: SourceServiceRef},
+	}}
+	t.Run("sibling denied", func(t *testing.T) {
+		t.Parallel()
+		p, _ := tieProvider([]*ServiceModel{tieModel("example", "AFree", "ZWrite")}, resolver)
+		if err := tieCall(t, p); !errors.Is(err, ErrPolicyDenied) {
+			t.Errorf("err = %v, want ErrPolicyDenied", err)
+		}
+	})
+	t.Run("sibling allowed", func(t *testing.T) {
+		t.Parallel()
+		p, ev := tieProvider([]*ServiceModel{tieModel("example", "AFree", "ZWrite")}, resolver, "example:Write")
+		if err := tieCall(t, p); err != nil {
+			t.Fatalf("AuthorizeAction: %v", err)
+		}
+		if want := []string{"example:Write"}; !slices.Equal(ev.got, want) {
+			t.Errorf("evaluator received %v, want %v", ev.got, want)
+		}
+	})
+}
+
+// TestProvider_AuthorizeAction_tieDedupesSharedActions: tied candidates that
+// share an action put it in the required set once, while each candidate's own
+// actions still all arrive, so the evaluator and the denial message name every
+// action a single time.
+func TestProvider_AuthorizeAction_tieDedupesSharedActions(t *testing.T) {
+	t.Parallel()
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"ListThings":   {actions: []string{"example:Shared", "example:Read"}, source: SourceServiceRef},
+		"ListThingsV2": {actions: []string{"example:Shared", "example:Write"}, source: SourceServiceRef},
+	}}
+	p, ev := tieProvider([]*ServiceModel{tieModel("example", "ListThings", "ListThingsV2")}, resolver,
+		"example:Shared", "example:Read", "example:Write")
+	if err := tieCall(t, p); err != nil {
+		t.Fatalf("AuthorizeAction: %v", err)
+	}
+	if want := []string{"example:Shared", "example:Read", "example:Write"}; !slices.Equal(ev.got, want) {
+		t.Errorf("evaluator received %v, want %v", ev.got, want)
+	}
+}
+
+// TestProvider_AuthorizeAction_s3RootUnion pins the canonical S3 bucket listing
+// on the fixture's real shape: GET / ties ListBuckets with ListDirectoryBuckets,
+// so the gate requires s3:ListAllMyBuckets and s3express:ListAllMyDirectoryBuckets
+// together (both granted by SecurityAudit) and denies a policy holding only one.
+func TestProvider_AuthorizeAction_s3RootUnion(t *testing.T) {
+	t.Parallel()
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"ListBuckets":          {actions: []string{"s3:ListAllMyBuckets"}, source: SourceServiceRef},
+		"ListDirectoryBuckets": {actions: []string{"s3express:ListAllMyDirectoryBuckets"}, source: SourceIAMDataset},
+	}}
+	call := func(t *testing.T, p *Provider) error {
+		t.Helper()
+		v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
+		return p.AuthorizeAction(t.Context(), v, awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`))
+	}
+	t.Run("both granted", func(t *testing.T) {
+		t.Parallel()
+		p, ev := tieProvider([]*ServiceModel{s3MinModel(t)}, resolver,
+			"s3:ListAllMyBuckets", "s3express:ListAllMyDirectoryBuckets")
+		if err := call(t, p); err != nil {
+			t.Fatalf("AuthorizeAction: %v", err)
+		}
+		want := []string{"s3:ListAllMyBuckets", "s3express:ListAllMyDirectoryBuckets"}
+		if !slices.Equal(ev.got, want) {
+			t.Errorf("evaluator received %v, want %v", ev.got, want)
+		}
+	})
+	t.Run("only ListAllMyBuckets granted", func(t *testing.T) {
+		t.Parallel()
+		p, _ := tieProvider([]*ServiceModel{s3MinModel(t)}, resolver, "s3:ListAllMyBuckets")
+		if err := call(t, p); !errors.Is(err, ErrPolicyDenied) {
+			t.Errorf("err = %v, want ErrPolicyDenied", err)
+		}
+	})
+}
+
+// TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy pins the regression
+// the union would otherwise introduce on S3 Control: the default policy grants
+// the plain multi-region access point get and its policy reads but not the
+// routes read. The plain get must stay allowed, a sub-resource read ties only
+// with the plain get, and the routes read is denied because that is the
+// operation AWS runs for it.
+func TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy(t *testing.T) {
+	t.Parallel()
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"GetMultiRegionAccessPoint": {
+			actions: []string{"s3:GetMultiRegionAccessPoint"},
+			source:  SourceIAMDataset,
+		},
+		"GetMultiRegionAccessPointPolicy": {
+			actions: []string{"s3:GetMultiRegionAccessPointPolicy"},
+			source:  SourceIAMDataset,
+		},
+		"GetMultiRegionAccessPointPolicyStatus": {
+			actions: []string{"s3:GetMultiRegionAccessPointPolicyStatus"},
+			source:  SourceIAMDataset,
+		},
+		"GetMultiRegionAccessPointRoutes": {
+			actions: []string{"s3:GetMultiRegionAccessPointRoutes"},
+			source:  SourceIAMDataset,
+		},
+	}}
+	granted := []string{
+		"s3:GetMultiRegionAccessPoint",
+		"s3:GetMultiRegionAccessPointPolicy",
+		"s3:GetMultiRegionAccessPointPolicyStatus",
+	}
+	cases := []struct {
+		path    string
+		wantErr error
+		wantGot []string
+	}{
+		{"/v20180820/mrap/instances/my-mrap", nil, []string{"s3:GetMultiRegionAccessPoint"}},
+		{"/v20180820/mrap/instances/my-mrap/policy", nil, []string{
+			"s3:GetMultiRegionAccessPoint", "s3:GetMultiRegionAccessPointPolicy",
+		}},
+		{"/v20180820/mrap/instances/my-mrap/routes", ErrPolicyDenied, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			t.Parallel()
+			p, ev := tieProvider([]*ServiceModel{mrapModel()}, resolver, granted...)
+			v := mustProviderView(t, http.MethodGet, "https://123456789012.s3-control.us-east-1.amazonaws.com"+c.path)
+			v.Header.Set("X-Amz-Account-Id", "123456789012")
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"s3-control","region":"us-east-1"}}`),
+			)
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("err = %v, want %v", err, c.wantErr)
+			}
+			if c.wantErr == nil && !slices.Equal(ev.got, c.wantGot) {
+				t.Errorf("evaluator received %v, want %v", ev.got, c.wantGot)
+			}
+		})
+	}
+}
+
+// dirOpResolver keys results by "<model dir>/<op>" so a collision test can tie
+// operations inside one model while another model on the same prefix resolves
+// its own.
+type dirOpResolver struct {
+	by map[string]resolverResult
+}
+
+func (r *dirOpResolver) Resolve(_ context.Context, model *ServiceModel, op string) ([]string, ActionSource) {
+	res := r.by[model.Dir+"/"+op]
+	return res.actions, res.source
+}
+
+// TestProvider_AuthorizeAction_tieNotMaskedByCollidingModel: a tie inside one
+// model still contributes every candidate when another model shares the
+// endpoint prefix; the colliding model's own action cannot stand in for the
+// tied sibling.
+func TestProvider_AuthorizeAction_tieNotMaskedByCollidingModel(t *testing.T) {
+	t.Parallel()
+	models := func() []*ServiceModel {
+		return []*ServiceModel{tieModel("example", "ARead", "ZWrite"), tieModel("example2", "Only")}
+	}
+	resolver := &dirOpResolver{by: map[string]resolverResult{
+		"example/ARead":  {actions: []string{"example:Read"}, source: SourceServiceRef},
+		"example/ZWrite": {actions: []string{"example:Write"}, source: SourceServiceRef},
+		"example2/Only":  {actions: []string{"example2:Only"}, source: SourceServiceRef},
+	}}
+	t.Run("tied sibling missing from policy", func(t *testing.T) {
+		t.Parallel()
+		p, _ := tieProvider(models(), resolver, "example:Read", "example2:Only")
+		if err := tieCall(t, p); !errors.Is(err, ErrPolicyDenied) {
+			t.Errorf("err = %v, want ErrPolicyDenied", err)
+		}
+	})
+	t.Run("full union", func(t *testing.T) {
+		t.Parallel()
+		p, ev := tieProvider(models(), resolver, "example:Read", "example:Write", "example2:Only")
+		if err := tieCall(t, p); err != nil {
+			t.Fatalf("AuthorizeAction: %v", err)
+		}
+		if want := []string{"example:Read", "example:Write", "example2:Only"}; !slices.Equal(ev.got, want) {
+			t.Errorf("evaluator received %v, want %v", ev.got, want)
+		}
+	})
+}
+
 func TestNewProvider_constructs(t *testing.T) {
 	t.Parallel()
 	p := NewProvider(
@@ -471,15 +811,25 @@ func (e *fakeEvaluator) AllowedAll(_ context.Context, actions []string) (bool, e
 	return true, nil
 }
 
-// capturingEvaluator records the action set it received and always allows.
+// capturingEvaluator records the action set it received. With a nil allowed
+// map it answers allow; otherwise every action must be in the map.
 type capturingEvaluator struct {
-	allow bool
-	got   []string
+	allow   bool
+	allowed map[string]bool
+	got     []string
 }
 
 func (e *capturingEvaluator) AllowedAll(_ context.Context, actions []string) (bool, error) {
 	e.got = actions
-	return e.allow, nil
+	if e.allowed == nil {
+		return e.allow, nil
+	}
+	for _, a := range actions {
+		if !e.allowed[a] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func mustProviderView(t *testing.T, method, raw string) authreq.View {

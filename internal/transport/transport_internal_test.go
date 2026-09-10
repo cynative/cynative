@@ -34,6 +34,7 @@ import (
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
+	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	"github.com/cynative/cynative/internal/redact"
 )
 
@@ -1805,6 +1806,147 @@ func (p *denyingActionProvider) CACertData(_ context.Context, _ authreq.Provider
 func (p *denyingActionProvider) AuthorizesAddr(
 	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
+	return true, nil
+}
+
+// TestExecute_AWSTieDenialStopsBeforeInject runs the real AWS hardening gate
+// through Execute: a request that classifies to two tied operations is denied
+// with the gate's own sentinel unless the policy allows every candidate, and
+// the denial lands before InjectAuth and before transport setup, so nothing is
+// signed and nothing leaves the process.
+func TestExecute_AWSTieDenialStopsBeforeInject(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		resolver map[string]awsTieResult
+		allowed  []string
+		want     error
+	}{
+		{
+			"policy allows only the first candidate",
+			map[string]awsTieResult{
+				"ARead":  {actions: []string{"example:Read"}, src: awshardening.SourceServiceRef},
+				"ZWrite": {actions: []string{"example:Write"}, src: awshardening.SourceServiceRef},
+			},
+			[]string{"example:Read"},
+			awshardening.ErrPolicyDenied,
+		},
+		{
+			"second candidate unresolved",
+			map[string]awsTieResult{
+				"ARead":  {actions: []string{"example:Read"}, src: awshardening.SourceServiceRef},
+				"ZWrite": {actions: nil, src: awshardening.SourceNone},
+			},
+			[]string{"example:Read", "example:Write"},
+			awshardening.ErrActionUnresolved,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls []string
+			p := &awsTieProvider{
+				calls: &calls,
+				gate: awshardening.NewProvider(
+					awsTieModels{}, awsTieResolver{by: c.resolver}, awsTieEvaluator{allowed: c.allowed},
+					"arn:aws:iam::aws:policy/SecurityAudit",
+				),
+			}
+			args := `{"method":"POST","url":"https://example.us-east-1.amazonaws.com/resource",` +
+				`"auth_provider":"aws","headers":[],"body":"","aws_auth":{"service":"example","region":"us-east-1"}}`
+
+			// Transport setup (and so dispatch) comes after InjectAuth in Execute;
+			// the certificate-pool seam is its first step, so reaching it is a failure.
+			client := NewClient(WithSystemCertPool(func() (*x509.CertPool, error) {
+				t.Error("transport setup reached after a tie denial")
+
+				return nil, errors.New("unreachable")
+			}))
+			_, _, err := client.Execute(t.Context(), args, []auth.Provider{p})
+			if !errors.Is(err, c.want) {
+				t.Fatalf("Execute error = %v, want %v", err, c.want)
+			}
+			if want := []string{"host", "action"}; !slices.Equal(calls, want) {
+				t.Errorf("calls = %v, want %v (inject must not run after a tie denial)", calls, want)
+			}
+		})
+	}
+}
+
+// awsTieProvider is an auth.Provider named "aws" whose AuthorizeAction is the
+// real awshardening.Provider, so the tie test exercises the shipped gate rather
+// than a fake. It records the gate calls it receives.
+type awsTieProvider struct {
+	calls *[]string
+	gate  *awshardening.Provider
+}
+
+func (p *awsTieProvider) Name() string        { return "aws" }
+func (p *awsTieProvider) Description() string { return "aws hardening gate under test" }
+
+func (p *awsTieProvider) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
+	*p.calls = append(*p.calls, "host")
+
+	return true, nil
+}
+
+func (p *awsTieProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	*p.calls = append(*p.calls, "action")
+
+	return p.gate.AuthorizeAction(ctx, v, args)
+}
+
+func (p *awsTieProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
+	*p.calls = append(*p.calls, "inject")
+
+	return nil
+}
+
+// awsTieModels serves one REST model on the "example" prefix whose two
+// operations both match POST /resource with no discriminator.
+type awsTieModels struct{}
+
+func (awsTieModels) Resolve(_ context.Context, _ string) ([]*awshardening.ServiceModel, error) {
+	return []*awshardening.ServiceModel{{
+		Dir: "example", ARNNamespace: "example", EndpointPrefix: "example", SigningName: "example",
+		Protocol: awshardening.ProtocolRestJSON1,
+		Operations: map[string]awshardening.Operation{
+			"ARead":  {HTTPMethod: http.MethodPost, URITemplate: "/resource"},
+			"ZWrite": {HTTPMethod: http.MethodPost, URITemplate: "/resource"},
+		},
+	}}, nil
+}
+
+type awsTieResult struct {
+	actions []string
+	src     awshardening.ActionSource
+}
+
+type awsTieResolver struct {
+	by map[string]awsTieResult
+}
+
+func (r awsTieResolver) Resolve(
+	_ context.Context, _ *awshardening.ServiceModel, op string,
+) ([]string, awshardening.ActionSource) {
+	res := r.by[op]
+
+	return res.actions, res.src
+}
+
+type awsTieEvaluator struct {
+	allowed []string
+}
+
+func (e awsTieEvaluator) AllowedAll(_ context.Context, actions []string) (bool, error) {
+	for _, a := range actions {
+		if !slices.Contains(e.allowed, a) {
+			return false, nil
+		}
+	}
+
 	return true, nil
 }
 
