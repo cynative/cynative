@@ -246,12 +246,14 @@ func matchURITemplate(template string, pSegs []string) bool {
 }
 
 // matchGreedy matches a greedy label starting at path index i, followed by the
-// template segments in suffix. The label takes every segment the suffix leaves,
-// which must be at least one and all non-empty; the suffix then has to match
-// the remaining tail segment by segment.
+// template segments in suffix. The label takes every segment the suffix
+// leaves, empty ones included, because it models a resource path such as an
+// S3 object key, where a leading, trailing or doubled slash is part of the
+// name and the service routes it. At least one segment must remain for the
+// label; the suffix then has to match the remaining tail segment by segment.
 func matchGreedy(suffix, pSegs []string, i int) bool {
 	end := len(pSegs) - len(suffix)
-	if end <= i || slices.Contains(pSegs[i:end], "") {
+	if end <= i {
 		return false
 	}
 	for j, t := range suffix {

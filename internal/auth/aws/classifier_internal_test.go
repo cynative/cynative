@@ -25,7 +25,9 @@ func TestMatchURITemplate(t *testing.T) {
 		{"/{Bucket}", "/foo/bar", false},
 		{"/{Bucket}/{Key+}", "/foo/bar/baz", true},
 		{"/{Bucket}/{Key+}", "/foo", false},
-		{"/{Bucket}/{Key+}", "/foo/", false},
+		// A trailing slash leaves a greedy label one empty segment to take; a
+		// greedy label spans empty segments because a key can end in "/".
+		{"/{Bucket}/{Key+}", "/foo/", true},
 		// The path arrives without a query (the view carries RawQuery apart), so
 		// a "?" in it is a decoded %3F: part of the segment, not a separator.
 		{"/foo", "/foo?query", false},
@@ -44,7 +46,9 @@ func TestMatchURITemplate(t *testing.T) {
 		{"/mrap/instances/{Name+}/policy", "/mrap/instances/my-mrap/policy", true},
 		{"/a/{X+}/b/{Y}", "/a/1/2/b/c", true},
 		{"/a/{X+}/b/{Y}", "/a/1/2/b/", false},
-		{"/a/{X+}/b", "/a/1//b", false},
+		// The doubled slash puts an empty segment inside the greedy span, not in
+		// the trailing single label, so the greedy label absorbs it and matches.
+		{"/a/{X+}/b", "/a/1//b", true},
 	}
 	for _, c := range cases {
 		t.Run(c.template+"|"+c.path, func(t *testing.T) {

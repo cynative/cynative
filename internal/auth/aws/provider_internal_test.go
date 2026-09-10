@@ -883,3 +883,49 @@ func TestProvider_AuthorizeAction_encodedSlashRequiresBothReadings(t *testing.T)
 		})
 	}
 }
+
+// TestProvider_AuthorizeAction_encodedSlashKeyEmptySegments is the fixture for
+// a decoded S3 key that contains an empty path segment: a doubled or trailing
+// slash inside an object key is part of the key, not a path separator, so the
+// decoded reading must still classify as a read of that key. A policy that
+// permits only the bucket-listing action must deny every case here, the plain
+// encoded-slash control included.
+func TestProvider_AuthorizeAction_encodedSlashKeyEmptySegments(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		Dir: "s3fixture", ARNNamespace: "s3", EndpointPrefix: "s3",
+		SigningName: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"ListObjects": {actions: []string{"s3:ListBucket"}, source: SourceServiceRef},
+		"GetObject":   {actions: []string{"s3:GetObject"}, source: SourceServiceRef},
+	}}
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"doubled slash inside the key", "/probe%2Flogs%2F%2Fa.log"},
+		{"trailing slash in the key", "/probe%2Fsecret.txt%2F"},
+		{"leading empty segment in the key", "/probe%2F%2Fsecret.txt"},
+		{"control: ordinary encoded slash", "/probe%2Fsecret.txt"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			p, _ := tieProvider([]*ServiceModel{model}, resolver, "s3:ListBucket")
+			v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com"+c.path)
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`),
+			)
+			if !errors.Is(err, ErrPolicyDenied) {
+				t.Errorf("err = %v, want ErrPolicyDenied", err)
+			}
+		})
+	}
+}

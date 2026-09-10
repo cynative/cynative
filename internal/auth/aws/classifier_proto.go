@@ -115,8 +115,9 @@ func knownOp(model *ServiceModel, op string) (string, error) {
 // classifiers always name exactly one operation. For the REST protocols the
 // path is normalized via classificationSegments(parsed, …) so virtual-hosted S3
 // requests (bucket in the host) match the path-style URI templates, and more
-// than one name means the request ties between those operations, which the
-// caller must authorize as a whole. Returns ErrClassifierUnknownOp on no match.
+// than one name means the request ties between those operations, or that the
+// path's two readings named different operations; either way the caller must
+// authorize every name. Returns ErrClassifierUnknownOp on no match.
 func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
 	switch model.Protocol {
 	case ProtocolRestXML, ProtocolRestJSON1:
@@ -143,7 +144,7 @@ func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) (
 // A reading that matches no template contributes nothing rather than denying,
 // because a path matching no template in the service's own model names no
 // operation for that service to run. When no reading matches, the first
-// reading's ErrClassifierUnknownOp stands, so the denial names the path as sent.
+// reading's ErrClassifierUnknownOp stands.
 func classifyRESTReadings(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
 	var (
 		union    []string
