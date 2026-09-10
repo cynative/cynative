@@ -8,7 +8,7 @@ Single static Go binary, no server, no external state.
 - **Agent loop** - drives the model, bounded by iteration and token limits.
 - **Tools** - `http_request`, `code_execution`, `verify_findings`.
 - **Action gate** - resolves each call to its required IAM actions and
-  authorizes against a read-only policy before credentials are attached.
+  authorizes against the configured policy before credentials are attached.
   Fails closed.
 - **Network layer** - pins each request host to its mapped service and
   region, verifies the resolved IP before connect.
