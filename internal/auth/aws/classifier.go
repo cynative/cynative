@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,21 +38,18 @@ func classificationPath(parsed ParsedHost, rawPath string) string {
 }
 
 // classifyREST identifies which operations in model match v. Matching uses
-// (method, URI template); among multiple matches, those whose discriminator set
-// is the longest subset of the request's parameters rank highest, and every
-// operation at that top score is returned in name order. More than one name is
-// a tie: nothing in the request or the model says which of them AWS runs, so
-// the caller must authorize all of them. path is the effective classification
-// path (already normalized by classificationPath).
+// (method, URI template); among multiple matches the most specific template
+// ranks highest, by the Smithy specificity of its path first and by how many
+// of the request's discriminators it requires second (see compareCandidates),
+// and every operation at that top rank is returned in name order. More than
+// one name is a tie: nothing in the request or the model says which of them
+// AWS runs, so the caller must authorize all of them. path is the effective
+// classification path (already normalized by classificationPath).
 func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, error) {
 	method := strings.ToUpper(v.Method)
 	// Lenient parse, matching what [net/url.URL.Query] did here before the view.
 	reqQuery, _ := url.ParseQuery(v.RawQuery)
 
-	type candidate struct {
-		name  string
-		score int
-	}
 	var hits []candidate
 
 	// Iterate operations in deterministic (lexicographic) order so the
@@ -74,25 +72,85 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, e
 		if !ok {
 			continue
 		}
-		hits = append(hits, candidate{name: name, score: score})
+		hits = append(hits, candidate{name: name, shape: templateShape(tplPath), score: score})
 	}
 
 	if len(hits) == 0 {
 		return nil, fmt.Errorf("%w: no match for %s %s", ErrClassifierUnknownOp, method, path)
 	}
-	best := hits[0].score
-	for _, h := range hits[1:] {
-		if h.score > best {
-			best = h.score
+	return topCandidates(hits), nil
+}
+
+// candidate is an operation whose template fully matches the request: its
+// name, the shape of its template path and its discriminator count.
+type candidate struct {
+	name  string
+	shape []segmentKind
+	score int
+}
+
+// segmentKind classifies a URI template path segment for specificity routing.
+// The declaration order is the specificity order: a literal segment is more
+// specific than a label, and a label more specific than a greedy label.
+type segmentKind int
+
+const (
+	greedyLabel segmentKind = iota
+	singleLabel
+	literalSegment
+)
+
+// templateShape maps a template path to the kinds of its segments.
+func templateShape(tplPath string) []segmentKind {
+	segs := splitSegments(tplPath)
+	shape := make([]segmentKind, len(segs))
+	for i, seg := range segs {
+		switch {
+		case isGreedyPlaceholder(seg):
+			shape[i] = greedyLabel
+		case isSinglePlaceholder(seg):
+			shape[i] = singleLabel
+		default:
+			shape[i] = literalSegment
 		}
 	}
-	var ops []string
-	for _, h := range hits {
-		if h.score == best {
+	return shape
+}
+
+// compareCandidates orders two full matches by path first, then by
+// discriminator count. The path order is the Smithy 2.0 http-bindings
+// "Specificity Routing" comparison: shapes are compared segment by segment, at
+// the first index whose kinds differ the more specific kind wins, and a
+// template that runs out of segments loses to the longer one. Literal values
+// take no part, as the specification continues past a pair of literals.
+//
+// The count that breaks a remaining tie is cynative's own, not the
+// specification's: the specification counts URI query literals alone, while
+// this count adds the required member-bound @httpQuery and @httpHeader
+// discriminators S3 routes on (see scoreDiscriminators). A request carrying
+// one operation's query literal and another's required member therefore still
+// ties, and the caller authorizes both.
+func compareCandidates(a, b candidate) int {
+	if c := slices.Compare(a.shape, b.shape); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.score, b.score)
+}
+
+// topCandidates returns the names of every candidate at the top rank. hits
+// come in name order, so the result is in name order too.
+func topCandidates(hits []candidate) []string {
+	best := hits[0]
+	ops := []string{best.name}
+	for _, h := range hits[1:] {
+		switch c := compareCandidates(h, best); {
+		case c > 0:
+			best, ops = h, []string{h.name}
+		case c == 0:
 			ops = append(ops, h.name)
 		}
 	}
-	return ops, nil
+	return ops
 }
 
 // scoreDiscriminators returns how many of an operation's required
@@ -100,9 +158,10 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, e
 // discriminators are the @http URI-literal query flags plus the required
 // member-bound @httpQuery params and @httpHeader names (e.g. uploadId,
 // x-amz-copy-source) — the parameters S3 itself uses to route operations that
-// share a (method, URI). A higher count ⇒ a more specific operation, which
-// outranks its catch-all sibling in classifyREST so the action check authorizes
-// the right IAM action; operations at the same count are returned together.
+// share a (method, URI). Among templates of the same path shape a higher count
+// ⇒ a more specific operation, which outranks its catch-all sibling in
+// classifyREST so the action check authorizes the right IAM action; operations
+// at the same count are returned together.
 func scoreDiscriminators(
 	op Operation,
 	tplQuery []string,
@@ -156,6 +215,10 @@ func splitTemplateQuery(uri string) (string, []string) {
 }
 
 // matchURITemplate reports whether path conforms to the Smithy URI template.
+// path carries no query: the view keeps it in RawQuery, so a "?" here is a
+// decoded %3F and belongs to the segment it sits in. Treating it as a
+// separator would let /automationrulesv2/list%3Fx forge a match against the
+// literal /automationrulesv2/list, while AWS reads the identifier "list?x".
 // Supports:
 //   - literal segments: must match exactly
 //   - {Var}: matches a single non-empty path segment
@@ -163,11 +226,6 @@ func splitTemplateQuery(uri string) (string, []string) {
 //     after it must match the tail of the path, so a literal suffix such as
 //     /{Name+}/policy never matches a path that does not end in it.
 func matchURITemplate(template, path string) bool {
-	// Strip query string from path (URITemplate doesn't include query).
-	if i := strings.IndexByte(path, '?'); i >= 0 {
-		path = path[:i]
-	}
-
 	tSegs := splitSegments(template)
 	pSegs := splitSegments(path)
 

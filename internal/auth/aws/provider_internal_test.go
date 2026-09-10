@@ -499,12 +499,12 @@ func TestProvider_AuthorizeAction_s3RootUnion(t *testing.T) {
 	})
 }
 
-// TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy pins the regression
-// the union would otherwise introduce on S3 Control: the default policy grants
-// the plain multi-region access point get and its policy reads but not the
-// routes read. The plain get must stay allowed, a sub-resource read ties only
-// with the plain get, and the routes read is denied because that is the
-// operation AWS runs for it.
+// TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy pins the S3 Control
+// multi-region access point reads under the default policy, which grants the
+// plain get and its policy reads but not the routes read. Each sub-resource
+// read outranks the plain get it extends, so the gate requires that read's
+// action alone: the policy read is allowed on its own action, and the routes
+// read is denied naming only the operation AWS runs for it.
 func TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy(t *testing.T) {
 	t.Parallel()
 	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
@@ -536,10 +536,8 @@ func TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy(t *testing.T) {
 		wantGot []string
 	}{
 		{"/v20180820/mrap/instances/my-mrap", nil, []string{"s3:GetMultiRegionAccessPoint"}},
-		{"/v20180820/mrap/instances/my-mrap/policy", nil, []string{
-			"s3:GetMultiRegionAccessPoint", "s3:GetMultiRegionAccessPointPolicy",
-		}},
-		{"/v20180820/mrap/instances/my-mrap/routes", ErrPolicyDenied, nil},
+		{"/v20180820/mrap/instances/my-mrap/policy", nil, []string{"s3:GetMultiRegionAccessPointPolicy"}},
+		{"/v20180820/mrap/instances/my-mrap/routes", ErrPolicyDenied, []string{"s3:GetMultiRegionAccessPointRoutes"}},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
@@ -555,7 +553,7 @@ func TestProvider_AuthorizeAction_mrapReadsUnderDefaultPolicy(t *testing.T) {
 			if !errors.Is(err, c.wantErr) {
 				t.Fatalf("err = %v, want %v", err, c.wantErr)
 			}
-			if c.wantErr == nil && !slices.Equal(ev.got, c.wantGot) {
+			if !slices.Equal(ev.got, c.wantGot) {
 				t.Errorf("evaluator received %v, want %v", ev.got, c.wantGot)
 			}
 		})
