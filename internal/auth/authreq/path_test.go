@@ -27,19 +27,24 @@ func TestPathReadings(t *testing.T) {
 		{
 			"encoded slash splits only in the decoded reading",
 			"https://x.example.com/a/b%2Fc",
-			[][]string{{"a", "b/c"}, {"a", "b", "c"}},
+			[][]string{{"a", "b%2Fc"}, {"a", "b", "c"}},
 		},
 		{
-			"encoded literal decodes in both readings",
+			"encoded literal decodes only in the decoded reading",
 			"https://x.example.com/a/%70olicy",
-			[][]string{{"a", "policy"}},
+			[][]string{{"a", "%70olicy"}, {"a", "policy"}},
 		},
 		{
-			"over-encoded slash stays inside one segment",
+			"over-encoded slash decodes one level only in the decoded reading",
 			"https://x.example.com/a/b%252Fc",
-			[][]string{{"a", "b%2Fc"}},
+			[][]string{{"a", "b%252Fc"}, {"a", "b%2Fc"}},
 		},
 		{"interior and trailing empties survive", "https://x.example.com/a//b/", [][]string{{"a", "", "b", ""}}},
+		{
+			"a doubled leading slash keeps its empty segment",
+			"https://x.example.com//a/b",
+			[][]string{{"", "a", "b"}},
+		},
 	}
 
 	for _, c := range cases {
@@ -55,19 +60,5 @@ func TestPathReadings(t *testing.T) {
 				t.Errorf("PathReadings() = %v, want %v", got, c.want)
 			}
 		})
-	}
-}
-
-// TestPathReadingsKeepsAnUndecodableSegment pins the fallback. [url.Parse] rejects
-// a malformed escape upstream, so only a hand-built view reaches this branch,
-// and it must keep the segment rather than drop its contents.
-func TestPathReadingsKeepsAnUndecodableSegment(t *testing.T) {
-	t.Parallel()
-
-	v := authreq.View{Path: "/a/b%zz", EscapedPath: "/a/b%zz"}
-	want := [][]string{{"a", "b%zz"}}
-
-	if got := v.PathReadings(); !equalReadings(got, want) {
-		t.Errorf("PathReadings() = %v, want %v", got, want)
 	}
 }

@@ -144,7 +144,7 @@ func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) (
 // A reading that matches no template contributes nothing rather than denying,
 // because a path matching no template in the service's own model names no
 // operation for that service to run. When no reading matches, the first
-// reading's ErrClassifierUnknownOp stands.
+// reading's ErrClassifierUnknownOp stands, so the denial names the path as sent.
 func classifyRESTReadings(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
 	var (
 		union    []string

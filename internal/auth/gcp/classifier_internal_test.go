@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -368,6 +369,13 @@ func TestClassify_EncodedSlashTiesTheTwoReadings(t *testing.T) {
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("Classify = %q, %v, want ErrClassifierUnknownOp", id, err)
 	}
+
+	// Assert the ambiguous-match message specifically, not just
+	// ErrClassifierUnknownOp: that sentinel also covers zero survivors, so this
+	// alone would still pass if the fix regressed to matching nothing.
+	if !strings.Contains(err.Error(), "2 methods match") {
+		t.Fatalf("Classify err = %q, want it to report 2 methods match", err)
+	}
 }
 
 // objectIndex is a storage v1 index carrying an object read. storageIndex (used
@@ -405,5 +413,63 @@ func TestClassify_SlashNamedObjectMatchesOnTheWireReading(t *testing.T) {
 	}
 	if id != "storage.objects.get" {
 		t.Errorf("id = %q, want storage.objects.get", id)
+	}
+}
+
+// apigeeIndex is the shape the encoded-colon case turns on: a bare write at the
+// environment resource and its testIamPermissions custom verb, both POST.
+// testIamPermissions needs no IAM permission, so a request that misclassifies
+// onto it skips the write's permission check entirely.
+func apigeeIndex() MethodIndex {
+	return MethodIndex{
+		"apigee.organizations.environments.updateEnvironment": {
+			ID:         "apigee.organizations.environments.updateEnvironment",
+			HTTPMethod: "POST",
+			Path:       "v1/organizations/{organizationsId}/environments/{environmentsId}",
+		},
+		"apigee.organizations.environments.testIamPermissions": {
+			ID:         "apigee.organizations.environments.testIamPermissions",
+			HTTPMethod: "POST",
+			Path:       "v1/organizations/{organizationsId}/environments/{environmentsId}:testIamPermissions",
+		},
+	}
+}
+
+// TestClassify_EncodedColonDoesNotForgeACustomVerb: Google's frontend routes
+// the path as sent, so a percent-encoded colon inside the resource id never
+// reads as the custom-verb separator there. The wire reading names the plain
+// write; the decoded reading's extra segment (the %2F splits it) matches
+// neither template and contributes nothing. Classify must resolve to the write
+// it will actually run, not the permissionless probe a decoded colon would
+// forge.
+func TestClassify_EncodedColonDoesNotForgeACustomVerb(t *testing.T) {
+	t.Parallel()
+
+	v := classifyView(t, http.MethodPost,
+		"https://apigee.googleapis.com/v1/organizations/o/environments/e%2Fx%3AtestIamPermissions")
+
+	id, err := Classify(apigeeIndex(), v)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if id != "apigee.organizations.environments.updateEnvironment" {
+		t.Errorf("id = %q, want apigee.organizations.environments.updateEnvironment (not the permissionless verb)", id)
+	}
+}
+
+// TestClassify_PlainCustomVerbStillClassifies pins that the fix does not break
+// a real custom verb: an unencoded colon still routes to testIamPermissions.
+func TestClassify_PlainCustomVerbStillClassifies(t *testing.T) {
+	t.Parallel()
+
+	v := classifyView(t, http.MethodPost,
+		"https://apigee.googleapis.com/v1/organizations/o/environments/e:testIamPermissions")
+
+	id, err := Classify(apigeeIndex(), v)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if id != "apigee.organizations.environments.testIamPermissions" {
+		t.Errorf("id = %q, want apigee.organizations.environments.testIamPermissions", id)
 	}
 }

@@ -225,9 +225,9 @@ func splitTemplateQuery(uri string) (string, []string) {
 // Supports:
 //   - literal segments: must match exactly
 //   - {Var}: matches a single non-empty path segment
-//   - {Var+}: matches one or more non-empty segments; the template segments
-//     after it must match the tail of the path, so a literal suffix such as
-//     /{Name+}/policy never matches a path that does not end in it.
+//   - {Var+}: matches one or more segments, empty ones included; the template
+//     segments after it must match the tail of the path, so a literal suffix
+//     such as /{Name+}/policy never matches a path that does not end in it.
 func matchURITemplate(template string, pSegs []string) bool {
 	tSegs := splitSegments(template)
 

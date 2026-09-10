@@ -526,7 +526,7 @@ func TestClassifyOperation_NoReadingMatchesDenies(t *testing.T) {
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("err = %v, want ErrClassifierUnknownOp", err)
 	}
-	if !strings.Contains(err.Error(), "/other/a/b") {
-		t.Errorf("err = %v, want it to name the wire reading /other/a/b", err)
+	if !strings.Contains(err.Error(), "/other/a%2Fb") {
+		t.Errorf("err = %v, want it to name the wire reading /other/a%%2Fb", err)
 	}
 }
