@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.11.3](https://github.com/cynative/cynative/compare/v1.11.2...v1.11.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* **auth:** classify every reading of an encoded request path ([#320](https://github.com/cynative/cynative/issues/320)) ([665e594](https://github.com/cynative/cynative/commit/665e594a8fae1c4a727173c690122f464ba2de08))
+* **aws:** authorize a tied REST classification on the union of its candidates ([#317](https://github.com/cynative/cynative/issues/317)) ([25582fb](https://github.com/cynative/cynative/commit/25582fb95d2c4b0564890978eef4a5f108fd92e5))
+* **aws:** rank REST classifier candidates by Smithy path specificity ([#319](https://github.com/cynative/cynative/issues/319)) ([f09f807](https://github.com/cynative/cynative/commit/f09f8074c9ada1b7deaf72f7fd4fdbabcc310839))
+
+
+### Dependencies
+
+* bump github.com/valyala/fasthttp from 1.73.0 to 1.74.0 ([a653e70](https://github.com/cynative/cynative/commit/a653e70cb55e5d0ee9ffc2f2a28b3c9b60d2996c))
+
 ## [1.11.2](https://github.com/cynative/cynative/compare/v1.11.1...v1.11.2) (2026-09-09)
 
 
