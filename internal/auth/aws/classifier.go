@@ -219,20 +219,24 @@ func splitTemplateQuery(uri string) (string, []string) {
 
 // matchURITemplate reports whether the path segments conform to the Smithy URI
 // template. pSegs carries no query: the view keeps it in RawQuery, so a "?" here
-// belongs to the segment it sits in rather than separating path from query; on
-// the decoded reading it is a decoded %3F, and on the wire reading it is a
-// literal "?" the request sent unescaped. Treating it as a separator would let
-// /automationrulesv2/list%3Fx forge a match against the literal
-// /automationrulesv2/list, while AWS reads the identifier "list?x".
+// belongs to the segment it sits in rather than separating path from query. A
+// "?" reaches these segments only through the decoded reading of a %3F: an
+// unescaped "?" on the wire never gets this far, because authreq.NewView
+// already routes everything after it into RawQuery, so /list%3Fx yields the
+// wire segment "list%3Fx" and the decoded segment "list?x". Treating "?" as a
+// separator would let /automationrulesv2/list%3Fx forge a match against the
+// literal /automationrulesv2/list, while AWS reads the identifier "list?x".
 // Supports:
 //   - literal segments: must match exactly
 //   - {Var}: matches a single non-empty path segment
-//   - {Var+}: matches every segment the template's suffix leaves, empty ones
-//     included, except a span that is a single empty segment, which is an
-//     empty value and matches the parent operation instead (see matchGreedy);
-//     the template segments after it must match the tail of the path, so a
-//     literal suffix such as /{Name+}/policy never matches a path that does
-//     not end in it.
+//   - {Var+}: takes every segment the suffix leaves, empty ones included,
+//     except a span that is exactly one empty segment, because that value
+//     joins to the empty string; such a request (for example a path-style S3
+//     GET /bucket/) does not match this template and is left to whatever else
+//     the model offers, failing closed when nothing does (see matchGreedy).
+//     The template segments after the label must match the tail of the path,
+//     so a literal suffix such as /{Name+}/policy never matches a path that
+//     does not end in it.
 func matchURITemplate(template string, pSegs []string) bool {
 	tSegs := splitSegments(template)
 

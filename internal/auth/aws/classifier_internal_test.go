@@ -53,6 +53,9 @@ func TestMatchURITemplate(t *testing.T) {
 		// The doubled slash puts an empty segment inside the greedy span, not in
 		// the trailing single label, so the greedy label absorbs it and matches.
 		{"/a/{X+}/b", "/a/1//b", true},
+		// No segment before the doubled slash leaves the greedy span exactly one
+		// empty segment, the join-to-empty-string case the guard rejects.
+		{"/a/{X+}/b", "/a//b", false},
 	}
 	for _, c := range cases {
 		t.Run(c.template+"|"+c.path, func(t *testing.T) {
