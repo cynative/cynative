@@ -117,6 +117,8 @@ In request order:
 - **Permissionless reads.** A small fixed set of methods need no IAM permission and are allowed without a role check: `oauth2.tokeninfo`, `discovery.apis.getRest`, `discovery.apis.list`, and any `*.testIamPermissions` probe. These are pinned by an explicit allow-list rather than matched by prefix.
 - **Response redaction.** Secret-shaped content and credential-named fields are redacted from responses before the model sees them. Redaction is a defense-in-depth layer, not a reason to treat returned GCP data as public — see the limitations below.
 
+Classification reads the path both as it was sent and as it decodes. Google's frontend routes the path as sent, so a percent-encoded slash stays inside the segment it was written in, while the decoded form would split there. Cynative classifies both readings, and a request whose readings name two different methods is ambiguous and denied. This is also what makes a resource whose name contains a slash, such as a Cloud Storage object, classify at all: the reading that keeps the name whole is the one that matches its method.
+
 The default role is `roles/viewer`. The configured role is **validated at startup** — a role that cannot be fetched, is disabled, or is soft-deleted causes the `gcp` and `gke` connectors to be skipped with a clear reason. The resolved role is shown in the startup connector inventory, for example:
 
 ```text

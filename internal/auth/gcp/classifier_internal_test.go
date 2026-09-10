@@ -141,6 +141,16 @@ func TestClassify(t *testing.T) {
 			v:       classifyView(t, "GET", "https://compute.googleapis.com/compute/v1/nope"),
 			wantErr: true,
 		},
+		{
+			name: "trailing slash trims like the whole-path trim it replaced",
+			idx:  computeIndex(),
+			v: classifyView(
+				t,
+				"GET",
+				"https://compute.googleapis.com/compute/v1/projects/p/zones/z/instances/",
+			),
+			want: "compute.instances.list",
+		},
 	}
 
 	for _, tc := range tests {
@@ -323,5 +333,77 @@ func TestClassifyBarePlaceholderRejectsCustomVerb(t *testing.T) {
 	)
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Fatalf("custom-verb request must not match a bare-placeholder template, got %v", err)
+	}
+}
+
+// slotIndex is the shape the encoded-slash case turns on: a write at the
+// resource and a read one segment below it, both POST.
+func slotIndex() MethodIndex {
+	return MethodIndex{
+		"compute.reservationSlots.update": {
+			ID:          "compute.reservationSlots.update",
+			HTTPMethod:  "POST",
+			FlatPath:    "projects/{project}/reservationSlots/{slot}",
+			ServicePath: "compute/v1/",
+		},
+		"compute.reservationSlots.getHealth": {
+			ID:          "compute.reservationSlots.getHealth",
+			HTTPMethod:  "POST",
+			FlatPath:    "projects/{project}/reservationSlots/{slot}/getHealth",
+			ServicePath: "compute/v1/",
+		},
+	}
+}
+
+// TestClassify_EncodedSlashTiesTheTwoReadings: the wire reading names the write
+// at the resource, the decoded reading names the read below it. Two survivors
+// is an ambiguity, and the gate denies rather than picking the read.
+func TestClassify_EncodedSlashTiesTheTwoReadings(t *testing.T) {
+	t.Parallel()
+
+	v := classifyView(t, http.MethodPost,
+		"https://compute.googleapis.com/compute/v1/projects/p/reservationSlots/x%2FgetHealth")
+
+	id, err := Classify(slotIndex(), v)
+	if !errors.Is(err, ErrClassifierUnknownOp) {
+		t.Fatalf("Classify = %q, %v, want ErrClassifierUnknownOp", id, err)
+	}
+}
+
+// objectIndex is a storage v1 index carrying an object read. storageIndex (used
+// by other tests in this file) carries no object-read method, so this fixture is
+// its own index rather than an addition to storageIndex.
+func objectIndex() MethodIndex {
+	return MethodIndex{
+		"storage.objects.get": {
+			ID:          "storage.objects.get",
+			HTTPMethod:  "GET",
+			ServicePath: "storage/v1/",
+			Path:        "b/{bucket}/o/{object}",
+		},
+		"storage.buckets.list": {
+			ID:          "storage.buckets.list",
+			HTTPMethod:  "GET",
+			ServicePath: "storage/v1/",
+			Path:        "b",
+		},
+	}
+}
+
+// TestClassify_SlashNamedObjectMatchesOnTheWireReading: a GCS object name
+// carries its slashes percent-encoded, so only the reading that keeps them
+// inside the segment matches the template. The decoded reading names nothing.
+func TestClassify_SlashNamedObjectMatchesOnTheWireReading(t *testing.T) {
+	t.Parallel()
+
+	v := classifyView(t, http.MethodGet,
+		"https://storage.googleapis.com/storage/v1/b/bk/o/dir%2Ffile.txt")
+
+	id, err := Classify(objectIndex(), v)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if id != "storage.objects.get" {
+		t.Errorf("id = %q, want storage.objects.get", id)
 	}
 }
