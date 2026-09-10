@@ -39,11 +39,25 @@ func TestPathReadings(t *testing.T) {
 			"https://x.example.com/a/b%252Fc",
 			[][]string{{"a", "b%252Fc"}, {"a", "b%2Fc"}},
 		},
-		{"interior and trailing empties survive", "https://x.example.com/a//b/", [][]string{{"a", "", "b", ""}}},
+		{
+			"interior and trailing empties survive, and the trailing one also drops",
+			"https://x.example.com/a//b/",
+			[][]string{{"a", "", "b", ""}, {"a", "", "b"}},
+		},
 		{
 			"a doubled leading slash keeps its empty segment",
 			"https://x.example.com//a/b",
 			[][]string{{"", "a", "b"}},
+		},
+		{
+			"a trailing slash also reads with the empty segment dropped",
+			"https://x.example.com/bucket/",
+			[][]string{{"bucket", ""}, {"bucket"}},
+		},
+		{
+			"a doubled trailing slash drops only the one segment",
+			"https://x.example.com/a//",
+			[][]string{{"a", "", ""}, {"a", ""}},
 		},
 	}
 

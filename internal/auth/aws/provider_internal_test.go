@@ -930,15 +930,15 @@ func TestProvider_AuthorizeAction_encodedSlashKeyEmptySegments(t *testing.T) {
 	}
 }
 
-// TestProvider_AuthorizeAction_bucketTrailingSlashDoesNotGrantObjectRead pins
-// the case the narrowed greedy rule closes: a bucket-listing GET with a
-// trailing slash used to be the only candidate that matched, against
-// /{Bucket}/{Key+}, because its greedy span was one empty segment. A policy
-// granting s3:GetObject alone then authorized it, though S3 runs the bucket
-// listing and never sees an object key. Now that span is rejected, so no
-// operation in this model classifies the request and the call is denied for
-// having no candidate at all, not for lacking s3:ListBucket.
-func TestProvider_AuthorizeAction_bucketTrailingSlashDoesNotGrantObjectRead(t *testing.T) {
+// TestProvider_AuthorizeAction_bucketTrailingSlashListsTheBucket pins the case
+// the third path reading closes: a path-style bucket-listing GET with a
+// trailing slash, such as GET /mybucket/, now classifies as the bucket listing
+// too, because the trailing-empty-dropped reading matches /{Bucket} even
+// though the greedy /{Bucket}/{Key+} span still rejects a single empty
+// segment. A policy that grants the bucket-listing action authorizes it, and
+// a policy that grants only the object read still denies it, because S3 runs
+// the bucket listing here and never sees an object key.
+func TestProvider_AuthorizeAction_bucketTrailingSlashListsTheBucket(t *testing.T) {
 	t.Parallel()
 	model := &ServiceModel{
 		Dir: "s3fixture", ARNNamespace: "s3", EndpointPrefix: "s3",
@@ -952,17 +952,33 @@ func TestProvider_AuthorizeAction_bucketTrailingSlashDoesNotGrantObjectRead(t *t
 		"ListObjects": {actions: []string{"s3:ListBucket"}, source: SourceServiceRef},
 		"GetObject":   {actions: []string{"s3:GetObject"}, source: SourceServiceRef},
 	}}
-	p, _ := tieProvider([]*ServiceModel{model}, resolver, "s3:GetObject")
-	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/mybucket/")
-	err := p.AuthorizeAction(
-		t.Context(),
-		v,
-		awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`),
-	)
-	if !errors.Is(err, ErrActionUnresolved) {
-		t.Fatalf("err = %v, want ErrActionUnresolved (no operation should classify the request)", err)
+	cases := []struct {
+		name    string
+		allowed string
+		wantErr error
+	}{
+		{"policy grants the bucket listing", "s3:ListBucket", nil},
+		{"policy grants only the object read", "s3:GetObject", ErrPolicyDenied},
 	}
-	if errors.Is(err, ErrPolicyDenied) {
-		t.Errorf("err = %v, must not be ErrPolicyDenied: that would mean GetObject still classified", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			p, _ := tieProvider([]*ServiceModel{model}, resolver, c.allowed)
+			v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/mybucket/")
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`),
+			)
+			if c.wantErr == nil {
+				if err != nil {
+					t.Errorf("err = %v, want nil: the bucket listing should be authorized", err)
+				}
+				return
+			}
+			if !errors.Is(err, c.wantErr) {
+				t.Errorf("err = %v, want %v", err, c.wantErr)
+			}
+		})
 	}
 }

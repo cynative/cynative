@@ -530,3 +530,31 @@ func TestClassifyOperation_NoReadingMatchesDenies(t *testing.T) {
 		t.Errorf("err = %v, want it to name the wire reading /other/a%%2Fb", err)
 	}
 }
+
+// TestClassifyOperation_TrailingSlashNamesBucketListing: a path-style GET on
+// /mybucket/ has no reading that matches the greedy /{Bucket}/{Key+} template,
+// because its span is one empty segment, but the trailing-empty-dropped
+// reading matches /{Bucket} and names the bucket-listing operation. S3 answers
+// this exact request with a bucket listing, not an object read.
+func TestClassifyOperation_TrailingSlashNamesBucketListing(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "s3", EndpointPrefix: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/mybucket/")
+	parsed, err := ParseHost(v.Hostname)
+	if err != nil {
+		t.Fatalf("ParseHost: %v", err)
+	}
+	ops, err := ClassifyOperation(model, v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"ListObjects"}) {
+		t.Errorf("ops = %v, want [ListObjects]", ops)
+	}
+}
