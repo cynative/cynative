@@ -26,7 +26,10 @@ func TestMatchURITemplate(t *testing.T) {
 		{"/{Bucket}/{Key+}", "/foo/bar/baz", true},
 		{"/{Bucket}/{Key+}", "/foo", false},
 		{"/{Bucket}/{Key+}", "/foo/", false},
-		{"/foo", "/foo?query", true},
+		// The path arrives without a query (the view carries RawQuery apart), so
+		// a "?" in it is a decoded %3F: part of the segment, not a separator.
+		{"/foo", "/foo?query", false},
+		{"/{Bar}", "/foo?query", true},
 		{"/literal", "/literal", true},
 		{"/literal", "/other", false},
 		// Segments after a greedy label must match the tail of the path; the
@@ -139,12 +142,13 @@ func TestClassifyREST_RequestCarryingTwoSubresourcesTies(t *testing.T) {
 	}
 }
 
-// TestClassifyREST_GreedyLabelSuffixNarrowsTheCandidateSet mirrors the S3
+// TestClassifyREST_LongerGreedyTemplateOutranksItsPrefix mirrors the S3
 // Control multi-region access point reads: four GET templates share a greedy
-// prefix and the same required header. A literal after the greedy label must
-// exclude the template from paths that do not end in it, so the plain get is a
-// single candidate and each sub-resource read ties only with the plain get.
-func TestClassifyREST_GreedyLabelSuffixNarrowsTheCandidateSet(t *testing.T) {
+// prefix and the same required header. The literal after the greedy label
+// excludes a sub-resource template from paths that do not end in it, and where
+// both the plain template and a sub-resource template match, the longer one is
+// the more specific and wins alone.
+func TestClassifyREST_LongerGreedyTemplateOutranksItsPrefix(t *testing.T) {
 	t.Parallel()
 	model := mrapModel()
 	cases := []struct {
@@ -152,12 +156,9 @@ func TestClassifyREST_GreedyLabelSuffixNarrowsTheCandidateSet(t *testing.T) {
 		want []string
 	}{
 		{"/v20180820/mrap/instances/my-mrap", []string{"GetMultiRegionAccessPoint"}},
-		{"/v20180820/mrap/instances/my-mrap/policy", []string{
-			"GetMultiRegionAccessPoint", "GetMultiRegionAccessPointPolicy",
-		}},
-		{"/v20180820/mrap/instances/my-mrap/routes", []string{
-			"GetMultiRegionAccessPoint", "GetMultiRegionAccessPointRoutes",
-		}},
+		{"/v20180820/mrap/instances/my-mrap/policy", []string{"GetMultiRegionAccessPointPolicy"}},
+		{"/v20180820/mrap/instances/my-mrap/policystatus", []string{"GetMultiRegionAccessPointPolicyStatus"}},
+		{"/v20180820/mrap/instances/my-mrap/routes", []string{"GetMultiRegionAccessPointRoutes"}},
 	}
 	for _, c := range cases {
 		t.Run(c.path, func(t *testing.T) {
@@ -173,6 +174,258 @@ func TestClassifyREST_GreedyLabelSuffixNarrowsTheCandidateSet(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestClassifyREST_EncodedQuestionMarkIsPathData: the view's Path is decoded,
+// so a %3F in a path segment arrives as a literal "?". It is data inside that
+// segment, and matching it as a query separator would let an escaped suffix
+// forge a match against a literal template: AWS routes
+// /automationrulesv2/list%3Fx to the read of the identifier "list?x", never to
+// the list operation.
+func TestClassifyREST_EncodedQuestionMarkIsPathData(t *testing.T) {
+	t.Parallel()
+	model := restModel(http.MethodGet, map[string]string{
+		"GetAutomationRuleV2":   "/automationrulesv2/{Identifier}",
+		"ListAutomationRulesV2": "/automationrulesv2/list",
+	})
+	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/automationrulesv2/list%3Fx")
+	ops, err := classifyREST(model, v, v.Path)
+	if err != nil {
+		t.Fatalf("classifyREST: %v", err)
+	}
+	if !slices.Equal(ops, []string{"GetAutomationRuleV2"}) {
+		t.Errorf("ops = %v, want [GetAutomationRuleV2]", ops)
+	}
+}
+
+// TestClassifyREST_SpecificityRoutingSpecExamples runs the three routing
+// examples of the Smithy 2.0 http-bindings specification ("Specificity
+// Routing") as written there: a literal outranks a label at the same index,
+// path specificity outranks a query literal, and a longer template outranks
+// the greedy template it extends.
+func TestClassifyREST_SpecificityRoutingSpecExamples(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		uris map[string]string
+		path string
+		want string
+	}{
+		{"example 1: literal bcd beats label", example1, "/abc/bcd/cde", "Pattern1"},
+		{"example 1: literal abc beats label", example1, "/abc/foo/cde", "Pattern2"},
+		{"example 1: non-ambiguous", example1, "/foo/bcd/cde", "Pattern3"},
+		{"example 2: path specificity wins over query literal", example2, "/abc/bcd/cde?def=efg", "Pattern1"},
+		{"example 2: literal abc beats label", example2, "/abc/foo/cde?def=efg", "Pattern2"},
+		{"example 2: non-ambiguous", example2, "/foo/bcd/cde?def=efg", "Pattern3"},
+		{"example 3: literal after greedy beats bare greedy", example3, "/abc/foo/bar/bcd", "Pattern1"},
+		{"example 3: non-ambiguous", example3, "/abc/foo/bar/baz", "Pattern2"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			model := restModel(http.MethodGet, c.uris)
+			v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com"+c.path)
+			ops, err := classifyREST(model, v, v.Path)
+			if err != nil {
+				t.Fatalf("classifyREST: %v", err)
+			}
+			if !slices.Equal(ops, []string{c.want}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.want)
+			}
+		})
+	}
+}
+
+// The URI patterns of the specification's routing examples, keyed by the
+// pattern number the specification uses.
+var (
+	example1 = map[string]string{ //nolint:gochecknoglobals // immutable fixture
+		"Pattern1": "/abc/bcd/{xyz}",
+		"Pattern2": "/abc/{xyz}/cde",
+		"Pattern3": "/{xyz}/bcd/cde",
+	}
+	example2 = map[string]string{ //nolint:gochecknoglobals // immutable fixture
+		"Pattern1": "/abc/bcd/{xyz}",
+		"Pattern2": "/abc/{xyz}/cde",
+		"Pattern3": "/{xyz}/bcd/cde?def=efg",
+	}
+	example3 = map[string]string{ //nolint:gochecknoglobals // immutable fixture
+		"Pattern1": "/abc/{xyz+}/bcd",
+		"Pattern2": "/abc/{xyz+}",
+	}
+)
+
+// TestClassifyREST_SpecificityRoutingShippedModels pins, per service, the
+// template pairs in the shipped aws/api-models-aws models that tie on
+// discriminator count and that specificity routing resolves: a literal
+// segment against a label at the same index, and a bare greedy template
+// against the longer templates that extend it. Each request is one the model
+// could send, and the expected operation is the one AWS routes it to.
+func TestClassifyREST_SpecificityRoutingShippedModels(t *testing.T) {
+	t.Parallel()
+	iotsitewise := restModel(http.MethodPost, map[string]string{
+		"ListComputationModelDataBindingUsages": "/computation-models/data-binding-usages",
+		"UpdateComputationModel":                "/computation-models/{computationModelId}",
+	})
+	securityhub := restModel(http.MethodGet, map[string]string{
+		"GetAutomationRuleV2":   "/automationrulesv2/{Identifier}",
+		"ListAutomationRulesV2": "/automationrulesv2/list",
+	})
+	wickr := restModel(http.MethodGet, map[string]string{
+		"GetBot":        "/networks/{networkId}/bots/{botId}",
+		"GetBotsCount":  "/networks/{networkId}/bots/count",
+		"GetUser":       "/networks/{networkId}/users/{userId}",
+		"GetUsersCount": "/networks/{networkId}/users/count",
+	})
+	quicksight := restModel(http.MethodPost, map[string]string{
+		"BatchDeleteKnowledgeBase": "/v1/accounts/{AwsAccountId}/knowledge-bases/batch-delete",
+		"UpdateKnowledgeBase":      "/v1/accounts/{AwsAccountId}/knowledge-bases/{KnowledgeBaseId}",
+	})
+	mediaconnect := restModel(http.MethodPost, map[string]string{
+		"AddFlowMediaStreams":   "/v1/flows/{FlowArn}/mediaStreams",
+		"AddFlowOutputs":        "/v1/flows/{FlowArn}/outputs",
+		"AddFlowSources":        "/v1/flows/{FlowArn}/source",
+		"AddFlowVpcInterfaces":  "/v1/flows/{FlowArn}/vpcInterfaces",
+		"GrantFlowEntitlements": "/v1/flows/{FlowArn}/entitlements",
+		"StartFlow":             "/v1/flows/start/{FlowArn}",
+		"StopFlow":              "/v1/flows/stop/{FlowArn}",
+	})
+	workspacesWeb := restModel(http.MethodGet, map[string]string{
+		"GetPortal":                  "/portals/{portalArn+}",
+		"GetSession":                 "/portals/{portalId}/sessions/{sessionId}",
+		"GetTrustStore":              "/trustStores/{trustStoreArn+}",
+		"ListIdentityProviders":      "/portals/{portalArn+}/identityProviders",
+		"ListSessions":               "/portals/{portalId}/sessions",
+		"ListTrustStoreCertificates": "/trustStores/{trustStoreArn+}/certificates",
+	})
+	cases := []struct {
+		name   string
+		model  *ServiceModel
+		method string
+		path   string
+		want   string
+	}{
+		{
+			"iotsitewise literal usages",
+			iotsitewise,
+			http.MethodPost,
+			"/computation-models/data-binding-usages",
+			"ListComputationModelDataBindingUsages",
+		},
+		{"iotsitewise label id", iotsitewise, http.MethodPost, "/computation-models/cm-1", "UpdateComputationModel"},
+		{"securityhub literal list", securityhub, http.MethodGet, "/automationrulesv2/list", "ListAutomationRulesV2"},
+		{"securityhub label id", securityhub, http.MethodGet, "/automationrulesv2/x", "GetAutomationRuleV2"},
+		{"wickr literal bots count", wickr, http.MethodGet, "/networks/n/bots/count", "GetBotsCount"},
+		{"wickr label bot id", wickr, http.MethodGet, "/networks/n/bots/b", "GetBot"},
+		{"wickr literal users count", wickr, http.MethodGet, "/networks/n/users/count", "GetUsersCount"},
+		{"wickr label user id", wickr, http.MethodGet, "/networks/n/users/u", "GetUser"},
+		{
+			"quicksight literal batch-delete",
+			quicksight,
+			http.MethodPost,
+			"/v1/accounts/1/knowledge-bases/batch-delete",
+			"BatchDeleteKnowledgeBase",
+		},
+		{
+			"quicksight label id",
+			quicksight,
+			http.MethodPost,
+			"/v1/accounts/1/knowledge-bases/kb",
+			"UpdateKnowledgeBase",
+		},
+		{
+			"mediaconnect literal start beats label",
+			mediaconnect,
+			http.MethodPost,
+			"/v1/flows/start/outputs",
+			"StartFlow",
+		},
+		{
+			"mediaconnect literal stop beats label",
+			mediaconnect,
+			http.MethodPost,
+			"/v1/flows/stop/entitlements",
+			"StopFlow",
+		},
+		{"mediaconnect label flow arn", mediaconnect, http.MethodPost, "/v1/flows/f/outputs", "AddFlowOutputs"},
+		{"workspaces-web bare greedy portal", workspacesWeb, http.MethodGet, "/portals/a/b", "GetPortal"},
+		{
+			"workspaces-web greedy plus literal",
+			workspacesWeb,
+			http.MethodGet,
+			"/portals/a/b/identityProviders",
+			"ListIdentityProviders",
+		},
+		{
+			"workspaces-web single label beats greedy",
+			workspacesWeb,
+			http.MethodGet,
+			"/portals/p/sessions",
+			"ListSessions",
+		},
+		{
+			"workspaces-web longer single-label template",
+			workspacesWeb,
+			http.MethodGet,
+			"/portals/p/sessions/s",
+			"GetSession",
+		},
+		{"workspaces-web bare greedy trust store", workspacesWeb, http.MethodGet, "/trustStores/a/b", "GetTrustStore"},
+		{
+			"workspaces-web greedy plus certificates",
+			workspacesWeb,
+			http.MethodGet,
+			"/trustStores/a/b/certificates",
+			"ListTrustStoreCertificates",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			v := newClassifyView(t, c.method, "https://x.amazonaws.com"+c.path)
+			ops, err := classifyREST(c.model, v, v.Path)
+			if err != nil {
+				t.Fatalf("classifyREST: %v", err)
+			}
+			if !slices.Equal(ops, []string{c.want}) {
+				t.Errorf("ops = %v, want [%s]", ops, c.want)
+			}
+		})
+	}
+}
+
+// TestClassifyREST_PathShapeOutranksDiscriminatorCount: the template with the
+// more specific path wins even when its rival carries more discriminators the
+// request satisfies. The specification ranks query literals only after the
+// path, and the member-bound discriminators count with them.
+func TestClassifyREST_PathShapeOutranksDiscriminatorCount(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "x", EndpointPrefix: "x", Protocol: ProtocolRestJSON1,
+		Operations: map[string]Operation{
+			"ALabel":   {HTTPMethod: "GET", URITemplate: "/{y}/{b}?flag", RequiredHeader: []string{"x-hint"}},
+			"BLiteral": {HTTPMethod: "GET", URITemplate: "/x/{a}"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/x/z?flag")
+	v.Header.Set("X-Hint", "1")
+	ops, err := classifyREST(model, v, v.Path)
+	if err != nil {
+		t.Fatalf("classifyREST: %v", err)
+	}
+	if !slices.Equal(ops, []string{"BLiteral"}) {
+		t.Errorf("ops = %v, want [BLiteral]", ops)
+	}
+}
+
+// restModel builds a REST model whose operations all use method, one per
+// name → URI template pair.
+func restModel(method string, uris map[string]string) *ServiceModel {
+	ops := make(map[string]Operation, len(uris))
+	for name, uri := range uris {
+		ops[name] = Operation{HTTPMethod: method, URITemplate: uri}
+	}
+	return &ServiceModel{ARNNamespace: "x", EndpointPrefix: "x", Protocol: ProtocolRestJSON1, Operations: ops}
 }
 
 // mrapModel is the S3 Control multi-region access point read family as the
