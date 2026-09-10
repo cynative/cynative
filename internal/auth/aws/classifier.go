@@ -23,18 +23,20 @@ import (
 // operation path literal, so it cannot collide; an invariant test pins this.
 const vhostBucketPlaceholder = "_cynative_vhost_bucket_"
 
-// classificationPath returns the path classifyREST should match. For
-// virtual-hosted S3 requests (parsed.BucketInHost) it prepends the synthetic
+// classificationSegments returns the path segments classifyREST should match.
+// For virtual-hosted S3 requests (parsed.BucketInHost) it prepends the synthetic
 // {Bucket} segment the host carries but the path omits; otherwise it returns the
-// path unchanged (path-style and every non-S3 request are untouched).
-func classificationPath(parsed ParsedHost, rawPath string) string {
+// segments unchanged (path-style and every non-S3 request are untouched).
+func classificationSegments(parsed ParsedHost, segs []string) []string {
 	if !parsed.BucketInHost {
-		return rawPath
+		return segs
 	}
-	if rawPath == "" || rawPath == "/" {
-		return "/" + vhostBucketPlaceholder
+
+	if len(segs) == 1 && segs[0] == "" {
+		return []string{vhostBucketPlaceholder}
 	}
-	return "/" + vhostBucketPlaceholder + rawPath
+
+	return append([]string{vhostBucketPlaceholder}, segs...)
 }
 
 // classifyREST identifies which operations in model match v. Matching uses
@@ -44,8 +46,8 @@ func classificationPath(parsed ParsedHost, rawPath string) string {
 // and every operation at that top rank is returned in name order. More than
 // one name is a tie: nothing in the request or the model says which of them
 // AWS runs, so the caller must authorize all of them. path is the effective
-// classification path (already normalized by classificationPath).
-func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, error) {
+// classification path, already normalized by classificationSegments.
+func classifyREST(model *ServiceModel, v authreq.View, pSegs []string) ([]string, error) {
 	method := strings.ToUpper(v.Method)
 	// Lenient parse, matching what [net/url.URL.Query] did here before the view.
 	reqQuery, _ := url.ParseQuery(v.RawQuery)
@@ -65,7 +67,7 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, e
 			continue
 		}
 		tplPath, tplQuery := splitTemplateQuery(op.URITemplate)
-		if !matchURITemplate(tplPath, path) {
+		if !matchURITemplate(tplPath, pSegs) {
 			continue
 		}
 		score, ok := scoreDiscriminators(op, tplQuery, reqQuery, v.Header)
@@ -76,7 +78,8 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, e
 	}
 
 	if len(hits) == 0 {
-		return nil, fmt.Errorf("%w: no match for %s %s", ErrClassifierUnknownOp, method, path)
+		return nil, fmt.Errorf("%w: no match for %s /%s",
+			ErrClassifierUnknownOp, method, strings.Join(pSegs, "/"))
 	}
 	return topCandidates(hits), nil
 }
@@ -214,25 +217,34 @@ func splitTemplateQuery(uri string) (string, []string) {
 	return path, flags
 }
 
-// matchURITemplate reports whether path conforms to the Smithy URI template.
-// path carries no query: the view keeps it in RawQuery, so a "?" here is a
-// decoded %3F and belongs to the segment it sits in. Treating it as a
+// matchURITemplate reports whether the path segments conform to the Smithy URI
+// template. pSegs carries no query: the view keeps it in RawQuery, so a "?" here
+// belongs to the segment it sits in rather than separating path from query. A
+// "?" reaches these segments only through the decoded reading of a %3F: an
+// unescaped "?" on the wire never gets this far, because authreq.NewView
+// already routes everything after it into RawQuery, so /list%3Fx yields the
+// wire segment "list%3Fx" and the decoded segment "list?x". Treating "?" as a
 // separator would let /automationrulesv2/list%3Fx forge a match against the
 // literal /automationrulesv2/list, while AWS reads the identifier "list?x".
 // Supports:
 //   - literal segments: must match exactly
 //   - {Var}: matches a single non-empty path segment
-//   - {Var+}: matches one or more non-empty segments; the template segments
-//     after it must match the tail of the path, so a literal suffix such as
-//     /{Name+}/policy never matches a path that does not end in it.
-func matchURITemplate(template, path string) bool {
+//   - {Var+}: takes every segment the suffix leaves, empty ones included,
+//     except a span that is exactly one empty segment, because that value
+//     joins to the empty string; such a request (for example a path-style S3
+//     GET /bucket/) does not match this template and is left to whatever else
+//     the model offers, failing closed when nothing does (see matchGreedy).
+//     The template segments after the label must match the tail of the path,
+//     so a literal suffix such as /{Name+}/policy never matches a path that
+//     does not end in it.
+func matchURITemplate(template string, pSegs []string) bool {
 	tSegs := splitSegments(template)
-	pSegs := splitSegments(path)
 
 	for i, t := range tSegs {
 		if isGreedyPlaceholder(t) {
 			return matchGreedy(tSegs[i+1:], pSegs, i)
 		}
+
 		if !matchSegment(t, i, pSegs) {
 			return false
 		}
@@ -243,12 +255,18 @@ func matchURITemplate(template, path string) bool {
 }
 
 // matchGreedy matches a greedy label starting at path index i, followed by the
-// template segments in suffix. The label takes every segment the suffix leaves,
-// which must be at least one and all non-empty; the suffix then has to match
-// the remaining tail segment by segment.
+// template segments in suffix. The label takes every segment the suffix
+// leaves, empty ones included, because it models a resource path such as an
+// S3 object key, where a leading, trailing or doubled slash is part of the
+// name and the service routes it. The one span it must reject is a single
+// empty segment: that value joins to the empty string, which AWS treats as no
+// value at all and routes to the parent operation rather than the labeled
+// one (an S3 GET on /{Bucket}/ lists the bucket; only GET /{Bucket}// reaches
+// an object, with key "/"). The suffix then has to match the remaining tail
+// segment by segment.
 func matchGreedy(suffix, pSegs []string, i int) bool {
 	end := len(pSegs) - len(suffix)
-	if end <= i || slices.Contains(pSegs[i:end], "") {
+	if end <= i || (end == i+1 && pSegs[i] == "") {
 		return false
 	}
 	for j, t := range suffix {

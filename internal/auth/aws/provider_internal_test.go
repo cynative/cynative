@@ -838,3 +838,147 @@ func mustProviderView(t *testing.T, method, raw string) authreq.View {
 	}
 	return authreq.NewView(req, "")
 }
+
+// TestProvider_AuthorizeAction_encodedSlashRequiresBothReadings pins the case
+// at the layer that decides: a policy granting only the operation the decoded
+// reading names must not let the request through, because the service may run
+// the one the wire reading names.
+func TestProvider_AuthorizeAction_encodedSlashRequiresBothReadings(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		allowed []string
+		wantErr error
+	}{
+		{"only the decoded reading's action allowed", []string{"example:Policy"}, ErrPolicyDenied},
+		{"only the wire reading's action allowed", []string{"example:Function"}, ErrPolicyDenied},
+		{"both allowed", []string{"example:Function", "example:Policy"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			model := &ServiceModel{
+				Dir: "example", ARNNamespace: "example", EndpointPrefix: "example",
+				SigningName: "example", Protocol: ProtocolRestJSON1,
+				Operations: map[string]Operation{
+					"GetFunction": {HTTPMethod: "GET", URITemplate: "/2015-03-31/functions/{FunctionName}"},
+					"GetPolicy":   {HTTPMethod: "GET", URITemplate: "/2015-03-31/functions/{FunctionName}/policy"},
+				},
+			}
+			resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+				"GetFunction": {actions: []string{"example:Function"}, source: SourceServiceRef},
+				"GetPolicy":   {actions: []string{"example:Policy"}, source: SourceServiceRef},
+			}}
+			p, _ := tieProvider([]*ServiceModel{model}, resolver, c.allowed...)
+			v := mustProviderView(t, http.MethodGet,
+				"https://example.us-east-1.amazonaws.com/2015-03-31/functions/my%2Fpolicy")
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"example","region":"us-east-1"}}`),
+			)
+			if !errors.Is(err, c.wantErr) {
+				t.Fatalf("err = %v, want %v", err, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestProvider_AuthorizeAction_encodedSlashKeyEmptySegments is the fixture for
+// a decoded S3 key that contains an empty path segment: a doubled or trailing
+// slash inside an object key is part of the key, not a path separator, so the
+// decoded reading must still classify as a read of that key. A policy that
+// permits only the bucket-listing action must deny every case here, the plain
+// encoded-slash control included.
+func TestProvider_AuthorizeAction_encodedSlashKeyEmptySegments(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		Dir: "s3fixture", ARNNamespace: "s3", EndpointPrefix: "s3",
+		SigningName: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"ListObjects": {actions: []string{"s3:ListBucket"}, source: SourceServiceRef},
+		"GetObject":   {actions: []string{"s3:GetObject"}, source: SourceServiceRef},
+	}}
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"doubled slash inside the key", "/probe%2Flogs%2F%2Fa.log"},
+		{"trailing slash in the key", "/probe%2Fsecret.txt%2F"},
+		{"leading empty segment in the key", "/probe%2F%2Fsecret.txt"},
+		{"control: ordinary encoded slash", "/probe%2Fsecret.txt"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			p, _ := tieProvider([]*ServiceModel{model}, resolver, "s3:ListBucket")
+			v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com"+c.path)
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`),
+			)
+			if !errors.Is(err, ErrPolicyDenied) {
+				t.Errorf("err = %v, want ErrPolicyDenied", err)
+			}
+		})
+	}
+}
+
+// TestProvider_AuthorizeAction_bucketTrailingSlashListsTheBucket pins the case
+// the third path reading closes: a path-style bucket-listing GET with a
+// trailing slash, such as GET /mybucket/, now classifies as the bucket listing
+// too, because the trailing-empty-dropped reading matches /{Bucket} even
+// though the greedy /{Bucket}/{Key+} span still rejects a single empty
+// segment. A policy that grants the bucket-listing action authorizes it, and
+// a policy that grants only the object read still denies it, because S3 runs
+// the bucket listing here and never sees an object key.
+func TestProvider_AuthorizeAction_bucketTrailingSlashListsTheBucket(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		Dir: "s3fixture", ARNNamespace: "s3", EndpointPrefix: "s3",
+		SigningName: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	resolver := &opKeyedResolver{byOp: map[string]resolverResult{
+		"ListObjects": {actions: []string{"s3:ListBucket"}, source: SourceServiceRef},
+		"GetObject":   {actions: []string{"s3:GetObject"}, source: SourceServiceRef},
+	}}
+	cases := []struct {
+		name    string
+		allowed string
+		wantErr error
+	}{
+		{"policy grants the bucket listing", "s3:ListBucket", nil},
+		{"policy grants only the object read", "s3:GetObject", ErrPolicyDenied},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			p, _ := tieProvider([]*ServiceModel{model}, resolver, c.allowed)
+			v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/mybucket/")
+			err := p.AuthorizeAction(
+				t.Context(),
+				v,
+				awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`),
+			)
+			if c.wantErr == nil {
+				if err != nil {
+					t.Errorf("err = %v, want nil: the bucket listing should be authorized", err)
+				}
+				return
+			}
+			if !errors.Is(err, c.wantErr) {
+				t.Errorf("err = %v, want %v", err, c.wantErr)
+			}
+		})
+	}
+}

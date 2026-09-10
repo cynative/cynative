@@ -10,10 +10,13 @@ import (
 )
 
 // Classify resolves v to exactly one Discovery method id from idx, or returns
-// ErrClassifierUnknownOp on zero or multiple survivors. Deterministic. Pure.
+// ErrClassifierUnknownOp on zero or multiple survivors. Every reading of the
+// path is classified and the survivors are pooled: Google's frontend routes the
+// path as sent, so a percent-encoded slash stays inside its segment there while
+// the decoded path splits on it, and a request whose readings name different
+// methods is an ambiguity the gate denies. Deterministic. Pure.
 func Classify(idx MethodIndex, v authreq.View) (string, error) {
 	method := strings.ToUpper(v.Method)
-	path := strings.Trim(v.Path, "/")
 
 	keys := slices.Sorted(maps.Keys(idx)) // deterministic iteration.
 
@@ -21,37 +24,68 @@ func Classify(idx MethodIndex, v authreq.View) (string, error) {
 
 	var survivors []string
 
-	for _, key := range keys {
-		md := idx[key]
-		if !strings.EqualFold(md.HTTPMethod, method) {
-			continue
-		}
-
-		// Return the authoritative Discovery id (md.ID), never the map key: the
-		// multi-version merge may store a method under a disambiguated key when its
-		// id collides with a sibling version (see mergeServiceDocs). Dedup by id so
-		// two index entries that resolve to the same operation are one survivor, not
-		// a false ambiguity.
-		if matchTemplate(effectiveTemplate(md), path) && !seen[md.ID] {
-			seen[md.ID] = true
-			survivors = append(survivors, md.ID)
-		}
+	for _, segs := range v.PathReadings() {
+		survivors = appendSurvivors(survivors, seen, idx, keys, method, trimEmptyEdges(segs))
 	}
 
 	switch len(survivors) {
 	case 1:
 		return survivors[0], nil
 	case 0:
-		return "", fmt.Errorf("%w: no method matches %s %s", ErrClassifierUnknownOp, method, v.Path)
+		return "", fmt.Errorf("%w: no method matches %s %s", ErrClassifierUnknownOp, method, v.EscapedPath)
 	default:
 		return "", fmt.Errorf(
 			"%w: %d methods match %s %s (ambiguous)",
 			ErrClassifierUnknownOp,
 			len(survivors),
 			method,
-			v.Path,
+			v.EscapedPath,
 		)
 	}
+}
+
+// appendSurvivors appends every method in idx whose template matches reqSegs and
+// that no earlier reading already named. The authoritative Discovery id (md.ID)
+// is used, never the map key: the multi-version merge may store a method under a
+// disambiguated key when its id collides with a sibling version (see
+// mergeServiceDocs). Deduping by id keeps two index entries that resolve to the
+// same operation one survivor rather than a false ambiguity.
+func appendSurvivors(
+	survivors []string,
+	seen map[string]bool,
+	idx MethodIndex,
+	keys []string,
+	method string,
+	reqSegs []string,
+) []string {
+	for _, key := range keys {
+		md := idx[key]
+		if !strings.EqualFold(md.HTTPMethod, method) {
+			continue
+		}
+
+		if matchTemplate(effectiveTemplate(md), reqSegs) && !seen[md.ID] {
+			seen[md.ID] = true
+			survivors = append(survivors, md.ID)
+		}
+	}
+
+	return survivors
+}
+
+// trimEmptyEdges drops the empty segments a leading or trailing '/' leaves, so a
+// reading lines up with the templates, which carry neither. It is the segment
+// form of the [strings.Trim] the classifier used to apply to the whole path.
+func trimEmptyEdges(segs []string) []string {
+	for len(segs) > 0 && segs[0] == "" {
+		segs = segs[1:]
+	}
+
+	for len(segs) > 0 && segs[len(segs)-1] == "" {
+		segs = segs[:len(segs)-1]
+	}
+
+	return segs
 }
 
 // effectiveTemplate returns the full request-path template: the servicePath
@@ -68,14 +102,13 @@ func effectiveTemplate(md MethodDescriptor) string {
 	return strings.Trim(strings.TrimSuffix(md.ServicePath, "/")+"/"+strings.TrimPrefix(rel, "/"), "/")
 }
 
-// matchTemplate reports whether reqPath matches template anchored, full-segment,
+// matchTemplate reports whether rSegs matches template anchored, full-segment,
 // treating {placeholder} segments as single-segment wildcards. The custom-verb
 // (:verb) and literal-verb (/start) discriminators fall out of exact segment
 // matching: a template with a trailing /start or :encrypt only matches a request
 // carrying that exact suffix.
-func matchTemplate(template, reqPath string) bool {
+func matchTemplate(template string, rSegs []string) bool {
 	tSegs := splitSegments(template)
-	rSegs := splitSegments(reqPath)
 
 	if len(tSegs) != len(rSegs) {
 		return false

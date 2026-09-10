@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -424,5 +425,163 @@ func TestClassifyQuery_unsupportedMethod(t *testing.T) {
 	v := newClassifyView(t, http.MethodDelete, "https://iam.amazonaws.com/?Action=ListUsers")
 	if _, err := classifyQuery(model, v); !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Errorf("err = %v, want deny (method not used by query protocol)", err)
+	}
+}
+
+// lambdaShapedModel is the pair the encoded-slash case turns on: two GET
+// operations whose templates differ only in a trailing literal segment.
+func lambdaShapedModel() *ServiceModel {
+	return &ServiceModel{
+		ARNNamespace: "lambda", EndpointPrefix: "lambda", Protocol: ProtocolRestJSON1,
+		Operations: map[string]Operation{
+			"GetFunction": {HTTPMethod: "GET", URITemplate: "/2015-03-31/functions/{FunctionName}"},
+			"GetPolicy":   {HTTPMethod: "GET", URITemplate: "/2015-03-31/functions/{FunctionName}/policy"},
+		},
+	}
+}
+
+// TestClassifyOperation_EncodedSlashNamesBothReadings: the wire reading keeps
+// the encoded slash inside the name segment and names GetFunction, the decoded
+// reading splits it and names GetPolicy. Nothing in the request says which one
+// the service runs, so both are returned and the caller authorizes both.
+func TestClassifyOperation_EncodedSlashNamesBothReadings(t *testing.T) {
+	t.Parallel()
+	v := newClassifyView(t, http.MethodGet,
+		"https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/my%2Fpolicy")
+	parsed, err := ParseHost(v.Hostname)
+	if err != nil {
+		t.Fatalf("ParseHost: %v", err)
+	}
+	ops, err := ClassifyOperation(lambdaShapedModel(), v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"GetFunction", "GetPolicy"}) {
+		t.Errorf("ops = %v, want [GetFunction GetPolicy]", ops)
+	}
+}
+
+// TestClassifyOperation_PlainPathReadsOnce: an ordinary path has one reading,
+// so the union changes nothing for the traffic that carries no encoding.
+func TestClassifyOperation_PlainPathReadsOnce(t *testing.T) {
+	t.Parallel()
+	v := newClassifyView(t, http.MethodGet,
+		"https://lambda.us-east-1.amazonaws.com/2015-03-31/functions/myfunc")
+	parsed, err := ParseHost(v.Hostname)
+	if err != nil {
+		t.Fatalf("ParseHost: %v", err)
+	}
+	ops, err := ClassifyOperation(lambdaShapedModel(), v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"GetFunction"}) {
+		t.Errorf("ops = %v, want [GetFunction]", ops)
+	}
+}
+
+// TestClassifyOperation_WireOnlyMatchStandsAlone: an ARN label carries an
+// encoded slash on the wire, so only the wire reading matches a template. The
+// decoded reading names nothing and contributes nothing, and the request
+// classifies instead of failing closed.
+func TestClassifyOperation_WireOnlyMatchStandsAlone(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "eks", EndpointPrefix: "eks", Protocol: ProtocolRestJSON1,
+		Operations: map[string]Operation{
+			"ListTagsForResource": {HTTPMethod: "GET", URITemplate: "/tags/{resourceArn}"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet,
+		"https://eks.us-east-1.amazonaws.com/tags/arn%3Aaws%3Aeks%3Aus-east-1%3A1%3Acluster%2Fmine")
+	parsed, err := ParseHost(v.Hostname)
+	if err != nil {
+		t.Fatalf("ParseHost: %v", err)
+	}
+	ops, err := ClassifyOperation(model, v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"ListTagsForResource"}) {
+		t.Errorf("ops = %v, want [ListTagsForResource]", ops)
+	}
+}
+
+// TestClassifyOperation_NoReadingMatchesDenies: when no reading names an
+// operation the request still fails closed, and the message names the path.
+func TestClassifyOperation_NoReadingMatchesDenies(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "eks", EndpointPrefix: "eks", Protocol: ProtocolRestJSON1,
+		Operations: map[string]Operation{
+			"ListTagsForResource": {HTTPMethod: "GET", URITemplate: "/tags/{resourceArn}"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet, "https://eks.us-east-1.amazonaws.com/other/a%2Fb")
+	parsed, err := ParseHost(v.Hostname)
+	if err != nil {
+		t.Fatalf("ParseHost: %v", err)
+	}
+	_, err = ClassifyOperation(model, v, parsed)
+	if !errors.Is(err, ErrClassifierUnknownOp) {
+		t.Fatalf("err = %v, want ErrClassifierUnknownOp", err)
+	}
+	if !strings.Contains(err.Error(), "/other/a%2Fb") {
+		t.Errorf("err = %v, want it to name the wire reading /other/a%%2Fb", err)
+	}
+}
+
+// TestClassifyOperation_TrailingSlashNamesBucketListing: a path-style GET on
+// /mybucket/ has no reading that matches the greedy /{Bucket}/{Key+} template,
+// because its span is one empty segment, but the trailing-empty-dropped
+// reading matches /{Bucket} and names the bucket-listing operation. S3 answers
+// this exact request with a bucket listing, not an object read.
+func TestClassifyOperation_TrailingSlashNamesBucketListing(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "s3", EndpointPrefix: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/mybucket/")
+	parsed, err := ParseHost(v.Hostname)
+	if err != nil {
+		t.Fatalf("ParseHost: %v", err)
+	}
+	ops, err := ClassifyOperation(model, v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"ListObjects"}) {
+		t.Errorf("ops = %v, want [ListObjects]", ops)
+	}
+}
+
+// TestClassifyOperation_VirtualHostedSeparatorsOnlyIsObjectRead: a
+// virtual-hosted GET whose path is nothing but separators, such as "//", has
+// only its own reading, because a reading left with nothing but empty
+// segments after the trailing one drops is not offered. classificationSegments
+// prepends the synthetic bucket segment ahead of both remaining path segments,
+// which matches the greedy /{Bucket}/{Key+} template and names an object read
+// of the key "/", never the bucket listing.
+func TestClassifyOperation_VirtualHostedSeparatorsOnlyIsObjectRead(t *testing.T) {
+	t.Parallel()
+	model := &ServiceModel{
+		ARNNamespace: "s3", EndpointPrefix: "s3", Protocol: ProtocolRestXML,
+		Operations: map[string]Operation{
+			"ListObjects": {HTTPMethod: "GET", URITemplate: "/{Bucket}"},
+			"GetObject":   {HTTPMethod: "GET", URITemplate: "/{Bucket}/{Key+}"},
+		},
+	}
+	parsed := ParsedHost{Service: "s3", Region: "us-east-1", BucketInHost: true}
+	v := newClassifyView(t, http.MethodGet, "https://my-bucket.s3.us-east-1.amazonaws.com//")
+	ops, err := ClassifyOperation(model, v, parsed)
+	if err != nil {
+		t.Fatalf("ClassifyOperation: %v", err)
+	}
+	if !slices.Equal(ops, []string{"GetObject"}) {
+		t.Errorf("ops = %v, want [GetObject]", ops)
 	}
 }
