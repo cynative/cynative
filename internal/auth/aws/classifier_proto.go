@@ -112,14 +112,14 @@ func knownOp(model *ServiceModel, op string) (string, error) {
 // on model.Protocol and returns the matched operations' short names (e.g.
 // "GetObject", "PutItem", "ListUsers"), never empty on success. The non-REST
 // classifiers always name exactly one operation. For the REST protocols the
-// path is normalized via classificationPath(parsed, …) so virtual-hosted S3
+// path is normalized via classificationSegments(parsed, …) so virtual-hosted S3
 // requests (bucket in the host) match the path-style URI templates, and more
 // than one name means the request ties between those operations, which the
 // caller must authorize as a whole. Returns ErrClassifierUnknownOp on no match.
 func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) ([]string, error) {
 	switch model.Protocol {
 	case ProtocolRestXML, ProtocolRestJSON1:
-		return classifyREST(model, v, classificationPath(parsed, v.Path))
+		return classifyREST(model, v, classificationSegments(parsed, splitSegments(v.Path)))
 	case ProtocolAWSJSON10, ProtocolAWSJSON11:
 		return single(classifyJSONRPC(model, v))
 	case ProtocolAWSQuery, ProtocolEC2Query:

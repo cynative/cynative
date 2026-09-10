@@ -23,18 +23,20 @@ import (
 // operation path literal, so it cannot collide; an invariant test pins this.
 const vhostBucketPlaceholder = "_cynative_vhost_bucket_"
 
-// classificationPath returns the path classifyREST should match. For
-// virtual-hosted S3 requests (parsed.BucketInHost) it prepends the synthetic
+// classificationSegments returns the path segments classifyREST should match.
+// For virtual-hosted S3 requests (parsed.BucketInHost) it prepends the synthetic
 // {Bucket} segment the host carries but the path omits; otherwise it returns the
-// path unchanged (path-style and every non-S3 request are untouched).
-func classificationPath(parsed ParsedHost, rawPath string) string {
+// segments unchanged (path-style and every non-S3 request are untouched).
+func classificationSegments(parsed ParsedHost, segs []string) []string {
 	if !parsed.BucketInHost {
-		return rawPath
+		return segs
 	}
-	if rawPath == "" || rawPath == "/" {
-		return "/" + vhostBucketPlaceholder
+
+	if len(segs) == 1 && segs[0] == "" {
+		return []string{vhostBucketPlaceholder}
 	}
-	return "/" + vhostBucketPlaceholder + rawPath
+
+	return append([]string{vhostBucketPlaceholder}, segs...)
 }
 
 // classifyREST identifies which operations in model match v. Matching uses
@@ -44,8 +46,8 @@ func classificationPath(parsed ParsedHost, rawPath string) string {
 // and every operation at that top rank is returned in name order. More than
 // one name is a tie: nothing in the request or the model says which of them
 // AWS runs, so the caller must authorize all of them. path is the effective
-// classification path (already normalized by classificationPath).
-func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, error) {
+// classification path, already normalized by classificationSegments.
+func classifyREST(model *ServiceModel, v authreq.View, pSegs []string) ([]string, error) {
 	method := strings.ToUpper(v.Method)
 	// Lenient parse, matching what [net/url.URL.Query] did here before the view.
 	reqQuery, _ := url.ParseQuery(v.RawQuery)
@@ -65,7 +67,7 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, e
 			continue
 		}
 		tplPath, tplQuery := splitTemplateQuery(op.URITemplate)
-		if !matchURITemplate(tplPath, path) {
+		if !matchURITemplate(tplPath, pSegs) {
 			continue
 		}
 		score, ok := scoreDiscriminators(op, tplQuery, reqQuery, v.Header)
@@ -76,7 +78,8 @@ func classifyREST(model *ServiceModel, v authreq.View, path string) ([]string, e
 	}
 
 	if len(hits) == 0 {
-		return nil, fmt.Errorf("%w: no match for %s %s", ErrClassifierUnknownOp, method, path)
+		return nil, fmt.Errorf("%w: no match for %s /%s",
+			ErrClassifierUnknownOp, method, strings.Join(pSegs, "/"))
 	}
 	return topCandidates(hits), nil
 }
@@ -214,9 +217,9 @@ func splitTemplateQuery(uri string) (string, []string) {
 	return path, flags
 }
 
-// matchURITemplate reports whether path conforms to the Smithy URI template.
-// path carries no query: the view keeps it in RawQuery, so a "?" here is a
-// decoded %3F and belongs to the segment it sits in. Treating it as a
+// matchURITemplate reports whether the path segments conform to the Smithy URI
+// template. pSegs carries no query: the view keeps it in RawQuery, so a "?" here
+// is a decoded %3F and belongs to the segment it sits in. Treating it as a
 // separator would let /automationrulesv2/list%3Fx forge a match against the
 // literal /automationrulesv2/list, while AWS reads the identifier "list?x".
 // Supports:
@@ -225,14 +228,14 @@ func splitTemplateQuery(uri string) (string, []string) {
 //   - {Var+}: matches one or more non-empty segments; the template segments
 //     after it must match the tail of the path, so a literal suffix such as
 //     /{Name+}/policy never matches a path that does not end in it.
-func matchURITemplate(template, path string) bool {
+func matchURITemplate(template string, pSegs []string) bool {
 	tSegs := splitSegments(template)
-	pSegs := splitSegments(path)
 
 	for i, t := range tSegs {
 		if isGreedyPlaceholder(t) {
 			return matchGreedy(tSegs[i+1:], pSegs, i)
 		}
+
 		if !matchSegment(t, i, pSegs) {
 			return false
 		}

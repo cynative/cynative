@@ -49,7 +49,7 @@ func TestMatchURITemplate(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.template+"|"+c.path, func(t *testing.T) {
 			t.Parallel()
-			got := matchURITemplate(c.template, c.path)
+			got := matchURITemplate(c.template, splitSegments(c.path))
 			if got != c.want {
 				t.Errorf("matchURITemplate(%q, %q) = %v, want %v", c.template, c.path, got, c.want)
 			}
@@ -65,7 +65,7 @@ func TestClassifyREST_RootTiesListBucketsWithDirectoryBuckets(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
 	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestClassifyREST_EqualScoreReturnsEveryCandidateSorted(t *testing.T) {
 		},
 	}
 	v := newClassifyView(t, http.MethodPost, "https://x.amazonaws.com/resource")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestClassifyREST_HigherScoreExcludesTiedLowerCandidates(t *testing.T) {
 		},
 	}
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/foo?flag")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestClassifyREST_RequestCarryingTwoSubresourcesTies(t *testing.T) {
 		},
 	}
 	v := newClassifyView(t, http.MethodGet, "https://s3.amazonaws.com/foo?acl&tagging")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestClassifyREST_LongerGreedyTemplateOutranksItsPrefix(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, "https://123456789012.s3-control.us-east-1.amazonaws.com"+c.path)
 			v.Header.Set("X-Amz-Account-Id", "123456789012")
-			ops, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, splitSegments(v.Path))
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -189,7 +189,7 @@ func TestClassifyREST_EncodedQuestionMarkIsPathData(t *testing.T) {
 		"ListAutomationRulesV2": "/automationrulesv2/list",
 	})
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/automationrulesv2/list%3Fx")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestClassifyREST_SpecificityRoutingSpecExamples(t *testing.T) {
 			t.Parallel()
 			model := restModel(http.MethodGet, c.uris)
 			v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com"+c.path)
-			ops, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, splitSegments(v.Path))
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -383,7 +383,7 @@ func TestClassifyREST_SpecificityRoutingShippedModels(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, c.method, "https://x.amazonaws.com"+c.path)
-			ops, err := classifyREST(c.model, v, v.Path)
+			ops, err := classifyREST(c.model, v, splitSegments(v.Path))
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -409,7 +409,7 @@ func TestClassifyREST_PathShapeOutranksDiscriminatorCount(t *testing.T) {
 	}
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/x/z?flag")
 	v.Header.Set("X-Hint", "1")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestClassifyREST_GetObject(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
 	v := newClassifyView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/my-bucket/path/to/key")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestClassifyREST_QueryDisambiguator(t *testing.T) {
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, c.url)
-			ops, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, splitSegments(v.Path))
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -499,7 +499,7 @@ func TestClassifyREST_NoMatchReturnsUnknown(t *testing.T) {
 	t.Parallel()
 	model := s3MinModel(t)
 	v := newClassifyView(t, http.MethodPost, "https://s3.us-east-1.amazonaws.com/foo")
-	_, err := classifyREST(model, v, v.Path)
+	_, err := classifyREST(model, v, splitSegments(v.Path))
 	if !errors.Is(err, ErrClassifierUnknownOp) {
 		t.Errorf("err = %v, want ErrClassifierUnknownOp", err)
 	}
@@ -518,7 +518,7 @@ func TestClassifyREST_HigherScoreCandidateWinsOverEarlierAlphabetical(t *testing
 		},
 	}
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/foo?flag")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -537,7 +537,7 @@ func TestClassifyREST_SkipsOperationsWithoutHTTPMethod(t *testing.T) {
 		},
 	}
 	v := newClassifyView(t, http.MethodGet, "https://x.amazonaws.com/")
-	ops, err := classifyREST(model, v, v.Path)
+	ops, err := classifyREST(model, v, splitSegments(v.Path))
 	if err != nil {
 		t.Fatalf("classifyREST: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestClassifyREST_MemberBoundDiscriminators(t *testing.T) {
 			if c.copySource != "" {
 				v.Header.Set("X-Amz-Copy-Source", c.copySource)
 			}
-			ops, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, splitSegments(v.Path))
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -667,7 +667,7 @@ func TestClassifyREST_XIDOnlyDiscriminatorMatchesCanonicalRequest(t *testing.T) 
 		t.Run(c.url, func(t *testing.T) {
 			t.Parallel()
 			v := newClassifyView(t, http.MethodGet, c.url)
-			ops, err := classifyREST(model, v, v.Path)
+			ops, err := classifyREST(model, v, splitSegments(v.Path))
 			if err != nil {
 				t.Fatalf("classifyREST: %v", err)
 			}
@@ -678,29 +678,32 @@ func TestClassifyREST_XIDOnlyDiscriminatorMatchesCanonicalRequest(t *testing.T) 
 	}
 }
 
-func TestClassificationPath(t *testing.T) {
+func TestClassificationSegments(t *testing.T) {
 	t.Parallel()
-	const ph = "/" + vhostBucketPlaceholder
+	const ph = vhostBucketPlaceholder
 	cases := []struct {
 		name         string
 		bucketInHost bool
 		rawPath      string
-		want         string
+		want         []string
 	}{
-		{"path-style identity root", false, "/", "/"},
-		{"path-style identity key", false, "/bucket/key.txt", "/bucket/key.txt"},
-		{"path-style identity empty", false, "", ""},
-		{"vhost root slash", true, "/", ph},
-		{"vhost empty path", true, "", ph},
-		{"vhost single segment", true, "/key.txt", ph + "/key.txt"},
-		{"vhost multi segment", true, "/a/b.txt", ph + "/a/b.txt"},
+		{"path-style identity root", false, "/", []string{""}},
+		{"path-style identity key", false, "/bucket/key.txt", []string{"bucket", "key.txt"}},
+		{"path-style identity empty", false, "", []string{""}},
+		{"vhost root slash", true, "/", []string{ph}},
+		{"vhost empty path", true, "", []string{ph}},
+		{"vhost single segment", true, "/key.txt", []string{ph, "key.txt"}},
+		{"vhost multi segment", true, "/a/b.txt", []string{ph, "a", "b.txt"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			got := classificationPath(ParsedHost{Service: "s3", BucketInHost: c.bucketInHost}, c.rawPath)
-			if got != c.want {
-				t.Errorf("classificationPath(BucketInHost=%v, %q) = %q, want %q",
+			got := classificationSegments(
+				ParsedHost{Service: "s3", BucketInHost: c.bucketInHost},
+				splitSegments(c.rawPath),
+			)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("classificationSegments(BucketInHost=%v, %q) = %v, want %v",
 					c.bucketInHost, c.rawPath, got, c.want)
 			}
 		})
@@ -746,7 +749,7 @@ func TestClassifyOperation_virtualHostedSynthesizesBucket(t *testing.T) {
 
 func TestClassifyOperation_pathStyleUnchanged(t *testing.T) {
 	t.Parallel()
-	// BucketInHost=false ⇒ classificationPath is identity ⇒ path-style classifies
+	// BucketInHost=false ⇒ classificationSegments is identity ⇒ path-style classifies
 	// exactly as before (no regression).
 	model := &ServiceModel{
 		ARNNamespace: "s3", EndpointPrefix: "s3", Protocol: ProtocolRestXML,
@@ -786,7 +789,7 @@ func TestVhostPlaceholder_NoLiteralFirstSegmentCollision(t *testing.T) {
 	// spuriously classify to it.
 
 	// (a) Template-level invariant: the placeholder segment never matches the literal.
-	if matchURITemplate("/WriteGetObjectResponse", "/"+vhostBucketPlaceholder) {
+	if matchURITemplate("/WriteGetObjectResponse", []string{vhostBucketPlaceholder}) {
 		t.Fatalf("vhostBucketPlaceholder %q collides with the WriteGetObjectResponse literal segment",
 			vhostBucketPlaceholder)
 	}
