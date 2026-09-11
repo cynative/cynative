@@ -59,14 +59,18 @@ func TestDoGithubUser(t *testing.T) {
 		}
 	})
 
-	t.Run("transport error on closed server", func(t *testing.T) {
+	// The client is faked rather than pointed at a closed server: a freed
+	// ephemeral port can be rebound by another parallel listener, and any non-200
+	// reply would then satisfy a bare err != nil check through doGithubUser's
+	// status-error branch, leaving the transport branch uncovered on a green
+	// suite. errors.Is on the sentinel pins the branch that is under test.
+	t.Run("transport error", func(t *testing.T) {
 		t.Parallel()
-		srv := githubTestServer(t, http.StatusOK, `{}`)
-		url := srv.URL
-		srv.Close()
-		_, err := doGithubUser(context.Background(), http.DefaultClient, url, "tok")
-		if err == nil {
-			t.Fatal("want transport error")
+		dialErr := errors.New("dial failed")
+		client := specClient(func(*http.Request) (*http.Response, error) { return nil, dialErr })
+		_, err := doGithubUser(context.Background(), client, "https://api.github.com/user", "tok")
+		if !errors.Is(err, dialErr) {
+			t.Fatalf("err = %v, want %v", err, dialErr)
 		}
 	})
 }
@@ -109,11 +113,11 @@ func TestDoGithubRateLimit(t *testing.T) {
 
 	t.Run("transport error", func(t *testing.T) {
 		t.Parallel()
-		srv := githubTestServer(t, http.StatusOK, ``)
-		url := srv.URL
-		srv.Close()
-		if err := doGithubRateLimit(context.Background(), http.DefaultClient, url, "t"); err == nil {
-			t.Fatal("want transport error")
+		dialErr := errors.New("dial failed")
+		client := specClient(func(*http.Request) (*http.Response, error) { return nil, dialErr })
+		err := doGithubRateLimit(context.Background(), client, "https://api.github.com/rate_limit", "t")
+		if !errors.Is(err, dialErr) {
+			t.Fatalf("err = %v, want %v", err, dialErr)
 		}
 	})
 }
