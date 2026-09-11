@@ -42,11 +42,13 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `deepseek`     | `DEEPSEEK_API_KEY`                 | [deepseek.md](deepseek.md) |
 | `sarvam`       | `SARVAM_API_KEY`                   | [sarvam.md](sarvam.md) |
 | `wafer`        | `WAFER_API_KEY`                    | [wafer.md](wafer.md) |
+| `databricks`   | `DATABRICKS_TOKEN`                 | [databricks.md](databricks.md) |
 | `opencode-go`  | `OPENCODE_API_KEY`                 | [opencode-go.md](opencode-go.md) |
 | `opencode-zen` | `OPENCODE_API_KEY`                 | [opencode-zen.md](opencode-zen.md) |
 | `ollama`       | (none — local endpoint)            | [ollama.md](ollama.md) |
 | `vllm`         | (none — local endpoint)            | [vllm.md](vllm.md) |
 | `sgl`          | (none — local endpoint)            | [sgl.md](sgl.md) |
+| `github-copilot` | (none, needs api_key + base_url)  | [github-copilot.md](github-copilot.md) |
 
 ## Shared YAML reference
 
@@ -67,7 +69,7 @@ llm:
       x-custom: value
     insecure_skip_verify: false                    # optional
   openai_config: {...}             # top-level squashed provider config
-  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/vllm/ollama/sgl/replicate)
+  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/vllm/ollama/sgl/replicate/databricks/github_copilot)
   keys: [...]                      # advanced: multi-key load balancing
 ```
 
@@ -91,6 +93,8 @@ Provider-specific (nested) identity fields:
 - **Bedrock:** `CYNATIVE_LLM_BEDROCK_REGION`
 - **Bedrock Mantle:** `CYNATIVE_LLM_BEDROCK_MANTLE_REGION`
 - **vLLM / SGL:** `CYNATIVE_LLM_VLLM_URL`, `CYNATIVE_LLM_VLLM_MODEL_NAME`, `CYNATIVE_LLM_SGL_URL`
+- **Databricks:** `CYNATIVE_LLM_DATABRICKS_WORKSPACE_URL`, `CYNATIVE_LLM_DATABRICKS_API_FORMAT`, `CYNATIVE_LLM_DATABRICKS_CLIENT_ID`, `CYNATIVE_LLM_DATABRICKS_CLIENT_SECRET`
+- **GitHub Copilot:** `CYNATIVE_LLM_GITHUB_COPILOT_APP_ID`, `CYNATIVE_LLM_GITHUB_COPILOT_INSTALLATION_ID`, `CYNATIVE_LLM_GITHUB_COPILOT_REPOSITORY_ID`, `CYNATIVE_LLM_GITHUB_COPILOT_PRIVATE_KEY` (see [github-copilot.md](github-copilot.md): these are inert on the pinned Bifrost)
 
 Any nested Bifrost field is reachable by upper-snake-casing its JSON path: `CYNATIVE_LLM_<PATH>` (e.g. `CYNATIVE_LLM_NETWORK_CONFIG_MAX_CONNS_PER_HOST`, `CYNATIVE_LLM_OPENAI_CONFIG_DISABLE_STORE`).
 
@@ -101,8 +105,14 @@ breakpoints — the tool schemas, the system prompt, and the last two conversati
 turns. **Anthropic-family providers** (anthropic, bedrock, vertex) cache that
 prefix and bill cached reads at a large discount. Every other provider's Bifrost
 converter strips or ignores the markers, and the ones that auto-cache server-side
-(OpenAI, Gemini) keep doing so regardless. There is **no
-configuration** — it is on for all providers and inert where unsupported.
+(OpenAI, Gemini) keep doing so regardless. There is **nothing to configure**: it
+is on for all providers and inert where unsupported.
+
+Bifrost exposes two knobs of its own here, `CYNATIVE_LLM_PROMPT_CACHE_AUTO_INJECT`
+and `CYNATIVE_LLM_PROMPT_CACHE_TTL`, which synthesize breakpoints for clients
+that emit none. Both are off by default and do nothing for cynative, because
+Bifrost skips injection entirely once the caller has already marked the request,
+which cynative always does.
 
 The cache window is Anthropic's default five-minute ephemeral TTL, so back-to-back
 calls (e.g. `--auto-approve` runs) benefit most; long human-approval pauses

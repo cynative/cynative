@@ -69,7 +69,8 @@ func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.Secr
 func anyHoistedKeyConfig(entry *llm.ProviderEntry) bool {
 	return entry.Azure != nil || entry.Vertex != nil || entry.Bedrock != nil ||
 		entry.BedrockMantle != nil || entry.VLLM != nil || entry.Ollama != nil ||
-		entry.SGL != nil || entry.Replicate != nil
+		entry.SGL != nil || entry.Replicate != nil || entry.Databricks != nil ||
+		entry.GithubCopilot != nil
 }
 
 // applyHoistedKeyConfigs copies the hoisted key configs onto key. Absent ones
@@ -83,6 +84,8 @@ func applyHoistedKeyConfigs(entry *llm.ProviderEntry, key *schemas.Key) {
 	key.OllamaKeyConfig = entry.Ollama
 	key.SGLKeyConfig = entry.SGL
 	key.ReplicateKeyConfig = entry.Replicate
+	key.DatabricksKeyConfig = entry.Databricks
+	key.GithubCopilotKeyConfig = entry.GithubCopilot
 }
 
 // clearHoistedKeyConfigs zeroes the hoisted aliases after they have been folded.
@@ -95,6 +98,8 @@ func clearHoistedKeyConfigs(entry *llm.ProviderEntry) {
 	entry.Ollama = nil
 	entry.SGL = nil
 	entry.Replicate = nil
+	entry.Databricks = nil
+	entry.GithubCopilot = nil
 }
 
 // detectAliasConflicts returns ErrAliasConflict if any alias on entry is set

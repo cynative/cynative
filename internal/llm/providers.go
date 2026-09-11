@@ -63,7 +63,10 @@ func ChatProviders() []schemas.ModelProvider {
 // credential chain, Mantle alternatively an explicit API key via llm.api_key;
 // Vertex needs structured project/region config in llm.vertex.* and gets
 // credentials via the Google ADC chain; Ollama/VLLM/SGL authenticate via the
-// local endpoint URL). The "ok bool" returned by CanonicalEnvKey distinguishes
+// local endpoint URL; GitHub Copilot's only reachable credential is a Copilot
+// API token that expires in about 30 minutes, which is not something an
+// operator parks in a shell profile, so it is passed explicitly via
+// llm.api_key). The "ok bool" returned by CanonicalEnvKey distinguishes
 // "provider not configured here" from "configured, but no env fallback".
 //
 // The key set MUST stay set-equal to ChatProviders(); the
@@ -94,11 +97,13 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.DeepSeek:      "DEEPSEEK_API_KEY",
 	schemas.Sarvam:        "SARVAM_API_KEY",
 	schemas.Wafer:         "WAFER_API_KEY",
+	schemas.Databricks:    "DATABRICKS_TOKEN",
 	schemas.Bedrock:       "",
 	schemas.BedrockMantle: "",
 	schemas.Ollama:        "",
 	schemas.VLLM:          "",
 	schemas.SGL:           "",
+	schemas.GithubCopilot: "",
 }
 
 // CanonicalEnvKey reports the conventional environment variable for the given
