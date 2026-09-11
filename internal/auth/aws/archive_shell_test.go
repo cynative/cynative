@@ -1,6 +1,7 @@
 package aws_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,10 +35,18 @@ func TestNewModelArchiveFetcher_nonOKStatusFails(t *testing.T) {
 	}
 }
 
+// errRoundTripper fails every request, so the transport-error branch is reached
+// without a real dial. Closing a server to free its port and dialing it back is
+// not hermetic: another listener can rebind the port and answer.
+type errRoundTripper struct{ err error }
+
+func (rt errRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return nil, rt.err }
+
 func TestNewModelArchiveFetcher_networkFailureFails(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	srv.Close() // Close immediately so Do fails.
-	if _, err := awsh.NewModelArchiveFetcher(srv.Client(), srv.URL)(t.Context()); err == nil {
-		t.Error("expected network error")
+	dialErr := errors.New("dial failed")
+	client := &http.Client{Transport: errRoundTripper{err: dialErr}}
+	_, err := awsh.NewModelArchiveFetcher(client, "https://example.invalid/archive")(t.Context())
+	if !errors.Is(err, dialErr) {
+		t.Errorf("err = %v, want %v", err, dialErr)
 	}
 }
