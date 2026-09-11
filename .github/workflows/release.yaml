@@ -215,7 +215,13 @@ jobs:
           # Version and digest come from the Makefile (single source of truth).
           ver="$(make -s print-COSIGN_VERSION)"
           sha="$(make -s print-COSIGN_SHA256)"
-          curl -sSfL --max-time 240 \
+          # curl's own timers do not enforce a hard overall deadline: --retry-max-time
+          # does not stop an attempt that already started, and a 429/503 Retry-After
+          # overrides --retry-delay with a server-chosen sleep. `timeout` supplies
+          # one, and reserves 30s of headroom for the verify and install below
+          # inside this step's timeout-minutes: 5. --max-time stays at 240 so a
+          # slow but healthy download of this 134 MiB asset still wins.
+          timeout 270 curl -sSfL --max-time 240 --retry 3 --retry-all-errors --retry-delay 2 \
             "https://github.com/sigstore/cosign/releases/download/v${ver}/cosign-linux-amd64" \
             -o /tmp/cosign
           echo "${sha}  /tmp/cosign" | sha256sum -c -

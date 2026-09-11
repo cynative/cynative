@@ -19,6 +19,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Bootstrap pinned script-check tools
+        # Bounds the whole bootstrap, so the download's own deadline has a declared
+        # budget to sit inside rather than an invented constant.
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           # Versions come from the Makefile (single source of truth).
@@ -27,7 +30,14 @@ jobs:
           pester_ver="$(make -s print-PESTER_VERSION)"
           pssa_ver="$(make -s print-PSSCRIPTANALYZER_VERSION)"
           # Pinned shellcheck: download + verify SHA-256, no Docker; prepend to PATH.
-          curl -sSfL "https://github.com/koalaman/shellcheck/releases/download/v${sc_ver}/shellcheck-v${sc_ver}.linux.x86_64.tar.xz" -o /tmp/sc.tar.xz
+          # --retry-all-errors because a reset while the TLS connection is being
+          # established can surface as exit 35, which plain --retry does not treat
+          # as retryable. --max-time bounds each attempt; the asset is about
+          # 2.4 MiB. The shell reaches the sha256sum below only after curl exits
+          # clean, so retrying never weakens the pin. The outer timeout covers what
+          # --max-time cannot: a 429/503 Retry-After replaces --retry-delay with a
+          # server-chosen sleep, which no curl flag caps.
+          timeout 300 curl -sSfL --max-time 60 --retry 3 --retry-all-errors --retry-delay 2 "https://github.com/koalaman/shellcheck/releases/download/v${sc_ver}/shellcheck-v${sc_ver}.linux.x86_64.tar.xz" -o /tmp/sc.tar.xz
           echo "${sc_sha}  /tmp/sc.tar.xz" | sha256sum -c -
           tar -xJf /tmp/sc.tar.xz -C /tmp
           mkdir -p "$HOME/.local/bin"
