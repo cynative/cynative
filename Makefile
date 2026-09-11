@@ -145,7 +145,10 @@ pwsh-test:
 # (test/release-signing.unit.test.sh: the .goreleaser.yaml signs stanza, the asset gate's
 # admitted type set, the snapshot sign skip, and the release workflow's OIDC permission,
 # guarded steps and pinned verification identity, none of which any other gate checks and
-# all of which would first fail during a live release), an AST
+# all of which would first fail during a live release), the two pinned tool downloads'
+# contract (test/tool-downloads.unit.test.sh: the outer deadline, retry-all-errors,
+# positive retry count and per-attempt bound on the shellcheck and cosign bootstraps,
+# every one of which leaves both workflows green when it is deleted), an AST
 # syntax check of every file in the shared connector audit-parser package
 # (test/lib/connector-audit-parser.py,
 # test/lib/connector_audit/*.py, and its specs/), the connector gate's roster golden
@@ -180,6 +183,7 @@ sh-test:
 	@sh test/dependabot-override.unit.test.sh
 	@sh test/assert-assets.unit.test.sh
 	@sh test/release-signing.unit.test.sh
+	@sh test/tool-downloads.unit.test.sh
 	@sh test/ci-gate-contract.unit.test.sh
 	@sh test/ci-gate-assert.unit.test.sh
 	@sh test/llm-smoke-roster.unit.test.sh
