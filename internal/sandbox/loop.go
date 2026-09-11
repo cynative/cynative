@@ -87,6 +87,8 @@ func (s *Sandbox) runWorker(
 	case s.sem <- struct{}{}:
 		defer func() { <-s.sem }()
 	case <-s.done:
+		// The run ended before this call got a slot: abandon it rather than
+		// start a call on a run that is already over.
 		return
 	}
 
