@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -72,10 +73,12 @@ func TestLoop_BoundedConcurrency(t *testing.T) {
 	}
 }
 
-// TestLoop_TimeoutMidFlight covers both worker <-s.done escapes: with capacity 1
-// one worker reaches fn and parks trying to post its settle after the loop has
-// already exited on the timeout, while the second worker parks acquiring the
-// semaphore. Both must unblock via <-s.done.
+// TestLoop_TimeoutMidFlight is the end-to-end witness that a run tears down
+// under real contention: with capacity 1 one worker is inside fn when the
+// timeout fires while a second is queued for the only slot, and Run must return
+// once both have unblocked. Which escape each worker takes is up to the
+// scheduler here, so this test pins neither of them; the acquire-side escape is
+// pinned deterministically by TestRunWorker_QueuedCallIsAbandoned.
 func TestLoop_TimeoutMidFlight(t *testing.T) {
 	t.Parallel()
 
@@ -106,8 +109,9 @@ func TestLoop_TimeoutMidFlight(t *testing.T) {
 		t.Errorf("out = %q, want timeout suffix", out)
 	}
 
-	// Only the worker that acquired the semaphore reaches fn and records an
-	// escape; the other parks on the semaphore and returns via <-s.done.
+	// The worker that took the slot always reaches fn; whether the queued one
+	// also reaches it depends on the schedule, so one escape is all this test
+	// can rely on. Run returning at all is what proves both workers unblocked.
 	select {
 	case <-escaped:
 	case <-time.After(2 * time.Second):
@@ -294,5 +298,102 @@ func TestToJSResult_NonJSONStaysString(t *testing.T) {
 
 	if got := toJSResult(vm, "{not json"); got != "{not json" {
 		t.Errorf("got %v, want invalid-JSON passthrough", got)
+	}
+}
+
+// queuedCallLine is the verbose line the sandbox writes when the script calls
+// the queued tool, ahead of spawning that call's worker.
+const queuedCallLine = "\u2192 queued "
+
+// callSignal reports the queued call's verbose line. The sandbox writes that
+// line on the loop goroutine inside toolFunc, immediately before that same
+// function spawns the call's worker, so a line seen here means the worker is
+// spawned before the loop goroutine can act on the test's cancel.
+type callSignal chan struct{}
+
+// Write reports the queued call's line and drops every other line.
+func (c callSignal) Write(p []byte) (int, error) {
+	if bytes.HasPrefix(p, []byte(queuedCallLine)) {
+		select {
+		case c <- struct{}{}:
+		default:
+		}
+	}
+
+	return len(p), nil
+}
+
+// TestRunWorker_QueuedCallIsAbandoned pins the acquire-side <-s.done escape: a
+// tool call still queued for a concurrency slot when its run ends is abandoned
+// rather than started. The test holds the sandbox's only slot for the whole run
+// and never releases it, so the acquire select's semaphore arm can never become
+// ready and <-s.done is the worker's only way out, whatever order the goroutines
+// happen to be scheduled in. The abandoned call must not reach the tool, must
+// not take a slot, and must return, because Run waits for it before returning.
+func TestRunWorker_QueuedCallIsAbandoned(t *testing.T) {
+	t.Parallel()
+
+	const (
+		capacity   = 1
+		escapeWait = 10 * time.Second
+	)
+
+	var started atomic.Int32
+
+	funcs := map[string]ToolFunc{
+		"queued": func(context.Context, string) (string, error) {
+			started.Add(1)
+
+			return "", nil
+		},
+	}
+
+	calling := make(callSignal, 1)
+
+	s, err := New(funcs, calling, testMaxOutput, capacity, identityRedact)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	s.sem <- struct{}{} // Hold the only slot; nothing ever releases it.
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var (
+		runErr   error
+		returned = make(chan struct{})
+	)
+
+	go func() {
+		defer close(returned)
+
+		_, runErr = s.Run(ctx, `await queued({});`, time.Minute)
+	}()
+
+	select {
+	case <-calling:
+	case <-time.After(escapeWait):
+		t.Fatal("the sandbox never logged the call, so no worker ever queued for a slot")
+	}
+
+	cancel() // End the run with that call still queued.
+
+	select {
+	case <-returned:
+	case <-time.After(escapeWait):
+		t.Fatal("Run never returned: the call queued for a slot never escaped through <-s.done")
+	}
+
+	if !errors.Is(runErr, ErrScript) {
+		t.Fatalf("Run: want ErrScript, got %v", runErr)
+	}
+
+	if n := started.Load(); n != 0 {
+		t.Errorf("the tool ran %d time(s) on a run that had already ended, want 0", n)
+	}
+
+	if len(s.sem) != capacity {
+		t.Errorf("semaphore holds %d slots, want %d: the abandoned call took one", len(s.sem), capacity)
 	}
 }
