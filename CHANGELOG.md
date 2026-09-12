@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.11.4](https://github.com/cynative/cynative/compare/v1.11.3...v1.11.4) (2026-09-12)
+
+
+### Bug Fixes
+
+* stop a sandbox call from starting after its run has ended ([#330](https://github.com/cynative/cynative/issues/330)) ([fa6b690](https://github.com/cynative/cynative/commit/fa6b690fd6d1bc447a1eecd88b203b6fd12429d5))
+
+
+### Dependencies
+
+* bump cloud.google.com/go/storage from 1.67.0 to 1.67.1 ([c6c6a96](https://github.com/cynative/cynative/commit/c6c6a9631c174d7058ff3c95ad5b435ac6a682d5))
+* bump github.com/dlclark/regexp2/v2 from 2.7.2 to 2.8.0 ([c6c6a96](https://github.com/cynative/cynative/commit/c6c6a9631c174d7058ff3c95ad5b435ac6a682d5))
+* bump github.com/maximhq/bifrost/core from 1.8.4 to 1.8.5 ([c6c6a96](https://github.com/cynative/cynative/commit/c6c6a9631c174d7058ff3c95ad5b435ac6a682d5))
+* bump mvdan.cc/gofumpt from 0.11.0 to 0.12.0 ([c6c6a96](https://github.com/cynative/cynative/commit/c6c6a9631c174d7058ff3c95ad5b435ac6a682d5))
+
 ## [1.11.3](https://github.com/cynative/cynative/compare/v1.11.2...v1.11.3) (2026-09-10)
 
 
