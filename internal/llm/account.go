@@ -46,6 +46,13 @@ type ProviderEntry struct {
 	// json tags (so env names drop the "_key_config" noise, e.g.
 	// CYNATIVE_LLM_AZURE_ENDPOINT). materializeLLM folds whichever is set into
 	// the synthesized keys[0]; after materialize these are nil.
+	//
+	// The json tag is the env-var stem, not the Bifrost provider id: applyEnv
+	// upper-snake-cases the json path and replaces only dots, so a hyphenated
+	// tag would derive CYNATIVE_LLM_GITHUB-COPILOT_APP_ID, which no POSIX shell
+	// can export. github-copilot therefore spells itself three ways on purpose:
+	// the provider id and its doc filename keep the hyphen, this alias and its
+	// env vars use an underscore.
 	Azure         *schemas.AzureKeyConfig         `json:"azure,omitempty"`
 	Vertex        *schemas.VertexKeyConfig        `json:"vertex,omitempty"`
 	Bedrock       *schemas.BedrockKeyConfig       `json:"bedrock,omitempty"`
@@ -54,6 +61,8 @@ type ProviderEntry struct {
 	Ollama        *schemas.OllamaKeyConfig        `json:"ollama,omitempty"`
 	SGL           *schemas.SGLKeyConfig           `json:"sgl,omitempty"`
 	Replicate     *schemas.ReplicateKeyConfig     `json:"replicate,omitempty"`
+	Databricks    *schemas.DatabricksKeyConfig    `json:"databricks,omitempty"`
+	GithubCopilot *schemas.GithubCopilotKeyConfig `json:"github_copilot,omitempty"`
 }
 
 // FileAccount implements schemas.Account by exposing a single configured

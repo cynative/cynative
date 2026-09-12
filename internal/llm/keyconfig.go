@@ -9,21 +9,36 @@ import (
 // ValidateKeyConfigs returns ErrKeyConfigRequired when entry's provider needs a
 // per-key config but a configured key lacks it. It runs on the materialized
 // entry.Keys, so it covers both the synthesized key (api_key / canonical env /
-// hoisted config) and an explicit keys[]. Presence is sufficient: a nil config
-// panics inside Bifrost, while a present-but-empty config yields Bifrost's own
-// ConfigurationError.
+// hoisted config) and an explicit keys[]. Only presence is checked here, and
+// Bifrost's later check is uneven: it rejects an empty azure endpoint but its
+// vertex branch tests only for nil. So this catches the common
+// misconfiguration, not every one.
 //
-// Exactly two providers form the closed required set — their Bifrost
-// implementation dereferences key.<X>KeyConfig WITHOUT a nil guard. Verified
-// against github.com/maximhq/bifrost/core@v1.5.10:
-//   - azure:  providers/azure/azure.go:249   key.AzureKeyConfig.Endpoint.GetValue()
-//   - vertex: providers/vertex/vertex.go:519  key.VertexKeyConfig.ProjectID.GetValue()
+// Two providers form the closed required set. Re-verified against
+// github.com/maximhq/bifrost/core@v1.8.5, where the failure mode is not a panic:
+// validateKey (utils.go:174) rejects the key, key selection logs a warning and
+// skips it (bifrost.go:9012-9014), and the request then fails at bifrost.go:9033
+// with "no keys found that support model: X", naming neither the provider nor
+// the field that was missing. Mirroring the check here turns that into a
+// load-time error that says what to set.
+//   - azure:  validateKey requires azure_key_config and a non-empty endpoint
+//     (utils.go:177-183).
+//   - vertex: validateKey requires vertex_key_config (utils.go:194-197). The
+//     unguarded dereference earlier versions of this comment cited still exists
+//     (getAuthTokenSource, providers/vertex/vertex.go:209), but nothing reaches
+//     it with a nil config because validateKey rejects the key first.
 //
-// The other KeyConfig-bearing providers are intentionally absent: Replicate
-// nil-checks (replicate.go:96); Bedrock's config is optional (AWS credential
-// chain / bare API-key Value); Ollama/VLLM/SGL accept the endpoint URL via
-// NetworkConfig.BaseURL. The fields are checked directly (no reflection), so
-// an upstream rename of AzureKeyConfig/VertexKeyConfig fails at compile time.
+// Bifrost hard-requires a config for ollama, vllm and sgl too (utils.go:198-218),
+// and for github-copilot whenever the key value is empty (utils.go:219-247).
+// Cynative does not mirror those, so they still surface as the opaque runtime
+// error above; extending the set is a separate decision, not a bump.
+//
+// The remaining KeyConfig-bearing providers need no check at all: Replicate
+// nil-checks (replicate.go:107); Databricks nil-checks each of its four reads
+// (databricks.go:122, 164, 310, 341) and runs from a token plus a base_url with
+// no config whatsoever; Bedrock's config is optional (AWS credential chain /
+// bare API-key Value). The fields are checked directly (no reflection), so an
+// upstream rename of AzureKeyConfig/VertexKeyConfig fails at compile time.
 func ValidateKeyConfigs(entry *ProviderEntry) error {
 	if entry == nil {
 		return nil
