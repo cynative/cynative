@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -539,19 +540,32 @@ func TestRunWorker_AcquiredCallIsAbandonedWhenRunEnded(t *testing.T) {
 // for every worker before it returns, and the tools here return only when the
 // run's context is done. The error the script threw must survive that teardown,
 // because Run captures why the run ended before it cancels.
+//
+// The script waits for a call to be inside the tool before it throws, so the
+// shape is a fact rather than a matter of scheduling. It waits through a
+// synchronous host function rather than an await, because the wrapper it closed
+// to reach a top-level throw is the thing that made top-level await legal, and
+// an await inside the wrapper would turn the throw into a rejection and take the
+// ordinary loop path instead.
 func TestRun_TopLevelThrowEndsCallsInFlight(t *testing.T) {
 	t.Parallel()
 
 	const (
-		// Enough calls that some are inside the tool when the throw lands.
+		// More than one, so teardown meets a fan-out rather than a single call.
 		calls = 64
 		// Far enough apart that a run ended by its deadline is unmistakable.
 		runTimeout   = time.Minute
 		teardownWait = 10 * time.Second
 	)
 
+	var entered sync.Once
+
+	inside := make(chan struct{})
+
 	funcs := map[string]ToolFunc{
 		"slow": func(ctx context.Context, _ string) (string, error) {
+			entered.Do(func() { close(inside) })
+
 			<-ctx.Done() // Returns only once the run ends this call.
 
 			return "", ctx.Err()
@@ -561,6 +575,21 @@ func TestRun_TopLevelThrowEndsCallsInFlight(t *testing.T) {
 	s, err := New(funcs, nil, testMaxOutput, calls, identityRedact)
 	if err != nil {
 		t.Fatalf("New: %v", err)
+	}
+
+	// Runs on the loop goroutine, so it holds the script at the line below until
+	// a call is inside the tool. The wait is bounded only so a regression that
+	// keeps every call out of the tool fails loudly instead of hanging.
+	handshook := make(chan struct{}, 1)
+
+	if serr := s.vm.Set("waitForEntry", func() {
+		select {
+		case <-inside:
+			handshook <- struct{}{}
+		case <-time.After(teardownWait):
+		}
+	}); serr != nil {
+		t.Fatalf("register waitForEntry: %v", serr)
 	}
 
 	type result struct {
@@ -573,6 +602,7 @@ func TestRun_TopLevelThrowEndsCallsInFlight(t *testing.T) {
 	go func() {
 		out, rerr := s.Run(context.Background(), fmt.Sprintf(`});
 			for (let i = 0; i < %d; i++) slow({});
+			waitForEntry();
 			throw new Error("boom");
 			void (async () => {`, calls), runTimeout)
 
@@ -585,6 +615,10 @@ func TestRun_TopLevelThrowEndsCallsInFlight(t *testing.T) {
 	case got = <-returned:
 	case <-time.After(teardownWait):
 		t.Fatal("Run never returned: the script ended with calls in flight and nothing ended them")
+	}
+
+	if len(handshook) != 1 {
+		t.Fatal("no call was inside the tool when the script threw, so the run never tore down over one")
 	}
 
 	if !errors.Is(got.err, ErrScript) {
