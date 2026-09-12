@@ -29,9 +29,9 @@ var ErrScript = errors.New("sandbox: script execution failed")
 // ToolFunc is a host capability exposed to scripts as a JS function. It receives
 // the call's argument object encoded as a JSON string and returns a result
 // string. A returned error is surfaced to the script as a thrown JS exception.
-// It runs on a worker goroutine and MUST honor ctx: when ctx is done it should
-// return promptly, because Run waits for all in-flight tool calls to finish
-// before it returns.
+// It runs on a worker goroutine and MUST honor ctx: a Run cancels ctx as it
+// ends and then waits for every in-flight tool call to finish before it returns,
+// so a call that ignores ctx keeps Run waiting after its run is over.
 type ToolFunc func(ctx context.Context, argsJSON string) (string, error)
 
 const (
@@ -69,8 +69,9 @@ type Sandbox struct {
 
 	// Per-run state, owned by the loop goroutine (set under mu at the start of
 	// each Run). runCtx is the in-flight Run's timeout context; pending carries
-	// worker postbacks to the loop; done is closed when the Run finishes so
-	// parked workers can escape; inFlight counts outstanding tool calls; workers
+	// worker postbacks to the loop; done is closed when the Run finishes, always
+	// after runCtx is cancelled, so a worker reading a cancelled context knows
+	// the run is over; inFlight counts outstanding tool calls; workers
 	// tracks spawned worker goroutines so Run can wait for them all to escape
 	// before it returns (and before the next Run rewrites these fields).
 	runCtx   context.Context
@@ -136,16 +137,15 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 	s.inFlight = 0
 	s.workers = sync.WaitGroup{}
 
-	watchDone := make(chan struct{})
-
 	var watch sync.WaitGroup
 
+	// Interrupts a script still running when the run context ends. Run cancels
+	// that context as it tears down, so this retires on every run, including the
+	// ones where the interrupt lands on a runtime that has already stopped and is
+	// cleared again below before anything reads the value it produced.
 	watch.Go(func() {
-		select {
-		case <-runCtx.Done():
-			s.vm.Interrupt(interruptReason)
-		case <-watchDone:
-		}
+		<-runCtx.Done()
+		s.vm.Interrupt(interruptReason)
 	})
 
 	var (
@@ -163,19 +163,29 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 		runErr = execErr
 	}
 
-	// Release any parked workers, then wait for every worker and the watchdog to
-	// exit before returning, so the next Run can safely rewrite the per-run
-	// fields these goroutines read.
+	// Why the run ended. Read before the cancel below, which would otherwise make
+	// every run look cancelled; assemble reports from this, not from runCtx.
+	runEnd := runCtx.Err()
+
+	// Cancel first and with nothing between, because the run is over the moment
+	// the script is: a script can end its run with the context still live by
+	// throwing out of the async IIFE wrapper, and every statement spent before
+	// this one is a chance for a call queued behind a slot to be handed that slot
+	// and start on a live context. Closing done then releases the calls still
+	// parked for a slot, and the wait lets every worker leave before the next Run
+	// rewrites the per-run fields they read.
+	cancel()
 	close(s.done)
 	s.workers.Wait()
 
-	close(watchDone)
+	// The cancel retires the watchdog. Wait for it before clearing, so no
+	// interrupt can land on the runtime after the clear and strand the next Run.
 	watch.Wait()
 	s.vm.ClearInterrupt()
 
 	// Pass the parent ctx (not runCtx) so assemble/ctxSuffix can distinguish
 	// caller cancellation from an expiring internal timeout.
-	out, failed, suspendedScript := s.assemble(ctx, value, runErr, timeout)
+	out, failed, suspendedScript := s.assemble(ctx, value, runErr, runEnd, timeout)
 
 	// Rebuild unless the script actually finished. Two distinct things strand a
 	// runtime and both are caught here. An error out of RunProgram or the loop
@@ -219,20 +229,21 @@ func (s *Sandbox) refresh() error {
 
 // assemble builds the result string from the output buffer plus a trailing
 // diagnostic, reports whether the run failed, and reports whether the runtime is
-// left holding a suspended script. It reports a timeout/cancellation
-// first (the runCtx fired), then an uncatchable run error, then an IIFE promise
-// that did not fulfil: either rejected (an uncaught script or tool error) or
-// still pending (the script awaited something that can never settle). A
+// left holding a suspended script. It reports a timeout/cancellation first
+// (runEnd, the run context's error as Run read it before ending the run's
+// calls), then an uncatchable run error, then an IIFE promise that did not
+// fulfil: either rejected (an uncaught script or tool error) or still pending
+// (the script awaited something that can never settle). A
 // fulfilled promise contributes nothing and is not a failure: only console
 // output returns.
 func (s *Sandbox) assemble(
-	ctx context.Context, value sobek.Value, runErr error, timeout time.Duration,
+	ctx context.Context, value sobek.Value, runErr, runEnd error, timeout time.Duration,
 ) (string, bool, bool) {
 	out := s.out.String()
 	failed := false
 
 	switch {
-	case s.runCtx.Err() != nil:
+	case runEnd != nil:
 		out += ctxSuffix(ctx, timeout)
 		failed = true
 	case runErr != nil:

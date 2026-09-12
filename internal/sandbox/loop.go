@@ -40,7 +40,7 @@ func (s *Sandbox) loop() error {
 	for s.inFlight > 0 {
 		select {
 		case <-s.runCtx.Done():
-			return nil // Timeout/cancel; assemble reports it from runCtx.Err().
+			return nil // Timeout/cancel; Run captures runCtx.Err() for assemble.
 		case pb := <-s.pending:
 			if err := pb(); err != nil {
 				return err
@@ -86,6 +86,23 @@ func (s *Sandbox) runWorker(
 	select {
 	case s.sem <- struct{}{}:
 		defer func() { <-s.sem }()
+
+		// Winning this arm does not prove the run is still going. The slot this
+		// call waited for is released by a worker the teardown just woke, and the
+		// loop can drain a postback and free one even earlier, so both arms are
+		// ready together often enough to matter and Go picks between them
+		// uniformly. Run cancels the run context ahead of closing done, so a
+		// cancelled context is the reliable signal. It is read here, inside the
+		// arm that won the slot, because a call that reads it before parking
+		// cannot see a run that ends while it waits. Starting fn on an ended run
+		// means a credentialed call (host gate, credential injection, audit
+		// records) that nobody is listening for. What is left is a check then an
+		// act: a call that reads a live context here can be descheduled and reach
+		// fn as the run ends, which leaves it where a call that started a moment
+		// before the deadline already is, and is what ctx on ToolFunc covers.
+		if ctx.Err() != nil {
+			return
+		}
 	case <-s.done:
 		// The run ended before this call got a slot: abandon it rather than
 		// start a call on a run that is already over.
