@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,30 +18,48 @@ const testMaxOutput = 32 * 1024
 var errTest = errors.New("tool failed")
 
 // TestLoop_BoundedConcurrency proves that no more than the configured number of
-// inner tool calls run simultaneously, while still running them in parallel.
+// inner tool calls run simultaneously, while still running them in parallel. The
+// gate opens on a signal rather than after a wait: the releaser opens it once
+// capacity calls have reported themselves inside the tool, and no call can leave
+// before it opens, so the peak asserted below is a fact about calls that really
+// did overlap rather than a guess about how fast the runner is.
 func TestLoop_BoundedConcurrency(t *testing.T) {
 	t.Parallel()
 
-	const capacity = 2
-
-	var (
-		cur, peak int32
-		gate      = make(chan struct{})
+	const (
+		capacity = 2
+		calls    = 5
 	)
 
+	var cur, peak atomic.Int32
+
+	var (
+		entered = make(chan struct{}, calls)
+		gate    = make(chan struct{})
+		stop    = make(chan struct{})
+	)
+
+	t.Cleanup(func() { close(stop) })
+
 	funcs := map[string]ToolFunc{
-		"work": func(_ context.Context, _ string) (string, error) {
-			n := atomic.AddInt32(&cur, 1)
+		"work": func(ctx context.Context, _ string) (string, error) {
+			n := cur.Add(1)
 
 			for {
-				m := atomic.LoadInt32(&peak)
-				if n <= m || atomic.CompareAndSwapInt32(&peak, m, n) {
+				m := peak.Load()
+				if n <= m || peak.CompareAndSwap(m, n) {
 					break
 				}
 			}
 
-			<-gate // Hold the slot until released.
-			atomic.AddInt32(&cur, -1)
+			entered <- struct{}{}
+
+			select {
+			case <-gate: // Hold the slot until the cap has been reached.
+			case <-ctx.Done(): // The run gave up: report the shortfall, do not hang it.
+			}
+
+			cur.Add(-1)
 
 			return "1", nil
 		},
@@ -52,14 +71,27 @@ func TestLoop_BoundedConcurrency(t *testing.T) {
 	}
 
 	go func() {
-		// Release slots after concurrency has plateaued at the cap.
-		time.Sleep(50 * time.Millisecond)
+		for range capacity {
+			select {
+			case <-entered:
+			case <-stop: // The test ended without filling the cap; it says so below.
+				return
+			}
+		}
+
 		close(gate)
 	}()
 
-	out, err := s.Run(context.Background(), `
-		await Promise.all([1,2,3,4,5].map(() => work({})));
-		console.log("done");`, 5*time.Second)
+	out, err := s.Run(context.Background(), fmt.Sprintf(`
+		await Promise.all(Array.from({length: %d}, () => work({})));
+		console.log("done");`, calls), 5*time.Second)
+
+	// Asserted before the error, because a cap that never filled leaves the run
+	// to time out and would otherwise be reported as a bare execution failure.
+	if got := peak.Load(); got != capacity {
+		t.Errorf("peak concurrency = %d, want %d: the calls never overlapped at the cap", got, capacity)
+	}
+
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -67,55 +99,101 @@ func TestLoop_BoundedConcurrency(t *testing.T) {
 	if out != "done\n" {
 		t.Errorf("out = %q", out)
 	}
-
-	if got := atomic.LoadInt32(&peak); got != capacity {
-		t.Errorf("peak concurrency = %d, want %d", got, capacity)
-	}
 }
 
-// TestLoop_TimeoutMidFlight is the end-to-end witness that a run tears down
-// under real contention: with capacity 1 one worker is inside fn when the
-// timeout fires while a second is queued for the only slot, and Run must return
-// once both have unblocked. Which escape each worker takes is up to the
-// scheduler here, so this test pins neither of them; the acquire-side escape is
-// pinned deterministically by TestRunWorker_QueuedCallIsAbandoned.
-func TestLoop_TimeoutMidFlight(t *testing.T) {
+// TestLoop_TeardownUnderContention is the end-to-end witness that a run tears
+// down under real contention, and that the call queued behind the busy slot
+// never starts. Capacity is 1, so the second call cannot reach the tool while
+// the first holds the slot, and the first returns only once the run ends. The
+// test waits for both halves of that shape before it ends the run: the tool
+// reports that a call is inside it, and the verbose writer reports both call
+// lines, which the sandbox writes on the loop goroutine just ahead of spawning
+// each call's worker. Nothing here is timed, so the shape is a fact rather than
+// an assumption about the runner. The run ends by cancellation; the timeout
+// suffix is covered by TestLoop_TimeoutThenReuse and TestLoop_InterruptDuringDrain.
+func TestLoop_TeardownUnderContention(t *testing.T) {
 	t.Parallel()
 
-	escaped := make(chan struct{}, 2)
+	const (
+		capacity   = 1
+		calls      = 2
+		escapeWait = 10 * time.Second
+	)
+
+	var started atomic.Int32
+
+	inside := make(chan struct{}, calls)
 
 	funcs := map[string]ToolFunc{
-		"slow": func(ctx context.Context, _ string) (string, error) {
-			<-ctx.Done() // Block until the run times out.
-			defer func() { escaped <- struct{}{} }()
+		"queued": func(ctx context.Context, _ string) (string, error) {
+			started.Add(1)
+			inside <- struct{}{}
+
+			<-ctx.Done() // Holds the only slot until the run ends.
 
 			return "", ctx.Err()
 		},
 	}
 
-	s, err := New(funcs, nil, testMaxOutput, 1, identityRedact)
+	calling := make(callSignal, calls)
+
+	s, err := New(funcs, calling, testMaxOutput, capacity, identityRedact)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
-	out, err := s.Run(context.Background(), `
-		await Promise.all([slow({}), slow({})]);
-		console.log("unreachable");`, 30*time.Millisecond)
-	if !errors.Is(err, ErrScript) {
-		t.Fatalf("Run: want ErrScript, got %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type outcome struct {
+		out string
+		err error
 	}
 
-	if !strings.Contains(out, "timed out") {
-		t.Errorf("out = %q, want timeout suffix", out)
+	returned := make(chan outcome, 1)
+
+	go func() {
+		out, rerr := s.Run(ctx, `
+			await Promise.all([queued({}), queued({})]);
+			console.log("unreachable");`, time.Minute)
+
+		returned <- outcome{out: out, err: rerr}
+	}()
+
+	for range calls {
+		select {
+		case <-calling:
+		case <-time.After(escapeWait):
+			t.Fatal("the sandbox never logged both calls, so none was ever queued for the slot")
+		}
 	}
 
-	// The worker that took the slot always reaches fn; whether the queued one
-	// also reaches it depends on the schedule, so one escape is all this test
-	// can rely on. Run returning at all is what proves both workers unblocked.
 	select {
-	case <-escaped:
-	case <-time.After(2 * time.Second):
-		t.Fatal("worker did not unblock after timeout")
+	case <-inside:
+	case <-time.After(escapeWait):
+		t.Fatal("no call ever reached the tool, so the slot was never held")
+	}
+
+	cancel() // End the run with one call holding the slot and one queued for it.
+
+	var got outcome
+
+	select {
+	case got = <-returned:
+	case <-time.After(escapeWait):
+		t.Fatal("Run never returned: a call holding or waiting for the slot never escaped")
+	}
+
+	if !errors.Is(got.err, ErrScript) {
+		t.Fatalf("Run: want ErrScript, got %v", got.err)
+	}
+
+	if !strings.Contains(got.out, "cancelled") {
+		t.Errorf("out = %q, want cancelled suffix", got.out)
+	}
+
+	if n := started.Load(); n != 1 {
+		t.Errorf("%d call(s) reached the tool, want 1: the queued call started on a run that had ended", n)
 	}
 }
 
@@ -191,8 +269,11 @@ func TestLoop_TimeoutThenReuse(t *testing.T) {
 func TestLoop_ParentCancel(t *testing.T) {
 	t.Parallel()
 
+	entered := make(chan struct{}, 1)
+
 	funcs := map[string]ToolFunc{
 		"slow": func(ctx context.Context, _ string) (string, error) {
+			entered <- struct{}{}
 			<-ctx.Done()
 
 			return "", ctx.Err()
@@ -206,7 +287,7 @@ func TestLoop_ParentCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		<-entered // Cancel once the call is under way, rather than after a wait.
 		cancel()
 	}()
 
@@ -311,7 +392,8 @@ const queuedCallLine = "\u2192 queued "
 // spawned before the loop goroutine can act on the test's cancel.
 type callSignal chan struct{}
 
-// Write reports the queued call's line and drops every other line.
+// Write reports each queued-call line, up to the channel's capacity, and drops
+// every other line.
 func (c callSignal) Write(p []byte) (int, error) {
 	if bytes.HasPrefix(p, []byte(queuedCallLine)) {
 		select {
@@ -395,5 +477,125 @@ func TestRunWorker_QueuedCallIsAbandoned(t *testing.T) {
 
 	if len(s.sem) != capacity {
 		t.Errorf("semaphore holds %d slots, want %d: the abandoned call took one", len(s.sem), capacity)
+	}
+}
+
+// TestRunWorker_AcquiredCallIsAbandonedWhenRunEnded pins the re-check inside the
+// acquire select's semaphore arm: a call that wins a concurrency slot on a run
+// that has already ended must not reach the tool. Winning that arm proves nothing on
+// its own, because the slot a call is queued behind is released by a worker the
+// run's teardown just woke, so both arms can be ready at once and Go picks
+// between them uniformly. Here s.done stays open and the semaphore starts
+// empty, which leaves the acquire select exactly one ready arm, so the slot is
+// taken on every schedule and the run's cancelled context is the only thing
+// that can still stop the call.
+func TestRunWorker_AcquiredCallIsAbandonedWhenRunEnded(t *testing.T) {
+	t.Parallel()
+
+	const capacity = 1
+
+	var started atomic.Int32
+
+	fn := func(context.Context, string) (string, error) {
+		started.Add(1)
+
+		return "", nil
+	}
+
+	s, err := New(map[string]ToolFunc{"queued": fn}, nil, testMaxOutput, capacity, identityRedact)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Open for the whole test, so the semaphore is the acquire select's only
+	// ready arm; buffered, so a call that wrongly reaches the tool posts its
+	// result here instead of parking on an unread channel.
+	s.done = make(chan struct{})
+	s.pending = make(chan func() error, 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // The run is over before this call gets its slot.
+
+	s.runWorker(ctx, "queued", fn, emptyObject, nil, nil)
+
+	if n := started.Load(); n != 0 {
+		t.Errorf("the tool ran %d time(s) on a run that had already ended, want 0", n)
+	}
+
+	if n := len(s.pending); n != 0 {
+		t.Errorf("the abandoned call posted %d result(s), want 0", n)
+	}
+
+	if n := len(s.sem); n != 0 {
+		t.Errorf("the abandoned call held on to %d slot(s), want 0", n)
+	}
+}
+
+// TestRun_TopLevelThrowEndsCallsInFlight covers the run that ends with its
+// context still live. The script closes the async IIFE the sandbox wraps it in
+// and throws at top level, so RunProgram returns an error, the worker loop is
+// skipped and the run tears down while its calls are still in flight, with the
+// run's own deadline minutes away. Run has to end those calls itself: it waits
+// for every worker before it returns, and the tools here return only when the
+// run's context is done. The error the script threw must survive that teardown,
+// because Run captures why the run ended before it cancels.
+func TestRun_TopLevelThrowEndsCallsInFlight(t *testing.T) {
+	t.Parallel()
+
+	const (
+		// Enough calls that some are inside the tool when the throw lands.
+		calls = 64
+		// Far enough apart that a run ended by its deadline is unmistakable.
+		runTimeout   = time.Minute
+		teardownWait = 10 * time.Second
+	)
+
+	funcs := map[string]ToolFunc{
+		"slow": func(ctx context.Context, _ string) (string, error) {
+			<-ctx.Done() // Returns only once the run ends this call.
+
+			return "", ctx.Err()
+		},
+	}
+
+	s, err := New(funcs, nil, testMaxOutput, calls, identityRedact)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	type result struct {
+		out string
+		err error
+	}
+
+	returned := make(chan result, 1)
+
+	go func() {
+		out, rerr := s.Run(context.Background(), fmt.Sprintf(`});
+			for (let i = 0; i < %d; i++) slow({});
+			throw new Error("boom");
+			void (async () => {`, calls), runTimeout)
+
+		returned <- result{out: out, err: rerr}
+	}()
+
+	var got result
+
+	select {
+	case got = <-returned:
+	case <-time.After(teardownWait):
+		t.Fatal("Run never returned: the script ended with calls in flight and nothing ended them")
+	}
+
+	if !errors.Is(got.err, ErrScript) {
+		t.Fatalf("Run: want ErrScript, got %v", got.err)
+	}
+
+	if !strings.Contains(got.out, "boom") {
+		t.Errorf("out = %q, want the thrown error", got.out)
+	}
+
+	if strings.Contains(got.out, "timed out") || strings.Contains(got.out, "cancelled") {
+		t.Errorf("out = %q, want the thrown error rather than an ended-context suffix", got.out)
 	}
 }
