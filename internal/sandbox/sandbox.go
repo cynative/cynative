@@ -137,16 +137,15 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 	s.inFlight = 0
 	s.workers = sync.WaitGroup{}
 
-	watchDone := make(chan struct{})
-
 	var watch sync.WaitGroup
 
+	// Interrupts a script still running when the run context ends. Run cancels
+	// that context as it tears down, so this retires on every run, including the
+	// ones where the interrupt lands on a runtime that has already stopped and is
+	// cleared again below before anything reads the value it produced.
 	watch.Go(func() {
-		select {
-		case <-runCtx.Done():
-			s.vm.Interrupt(interruptReason)
-		case <-watchDone:
-		}
+		<-runCtx.Done()
+		s.vm.Interrupt(interruptReason)
 	})
 
 	var (
@@ -164,27 +163,25 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 		runErr = execErr
 	}
 
-	// Nothing runs on the VM from here on, so the watchdog goes first. Retiring
-	// it before the cancel below also keeps that cancel from interrupting a
-	// runtime that has already finished.
-	close(watchDone)
-	watch.Wait()
-	s.vm.ClearInterrupt()
-
 	// Why the run ended. Read before the cancel below, which would otherwise make
 	// every run look cancelled; assemble reports from this, not from runCtx.
 	runEnd := runCtx.Err()
 
-	// End the run's calls, then release any parked workers, then wait for every
-	// worker to exit before returning, so the next Run can safely rewrite the
-	// per-run fields they read. Cancelling ahead of the close is what lets a
-	// worker read a cancelled context as "the run is over": a script can end its
-	// run with the context still live by throwing out of the async IIFE wrapper,
-	// and a call left in flight there would otherwise run on until the run's own
-	// deadline, with Run waiting here for it.
+	// Cancel first and with nothing between, because the run is over the moment
+	// the script is: a script can end its run with the context still live by
+	// throwing out of the async IIFE wrapper, and every statement spent before
+	// this one is a chance for a call queued behind a slot to be handed that slot
+	// and start on a live context. Closing done then releases the calls still
+	// parked for a slot, and the wait lets every worker leave before the next Run
+	// rewrites the per-run fields they read.
 	cancel()
 	close(s.done)
 	s.workers.Wait()
+
+	// The cancel retires the watchdog. Wait for it before clearing, so no
+	// interrupt can land on the runtime after the clear and strand the next Run.
+	watch.Wait()
+	s.vm.ClearInterrupt()
 
 	// Pass the parent ctx (not runCtx) so assemble/ctxSuffix can distinguish
 	// caller cancellation from an expiring internal timeout.
