@@ -115,6 +115,13 @@ func effectiveDownloadHost(hostname string) string {
 // and allowed iff the configured ceiling permits the required level. A missing
 // table fails closed (category table not ready). Runs before InjectAuth.
 func (p *githubProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ authreq.ProviderArgs) error {
+	// Bind the port: the host gate sees a port-stripped hostname and the dial
+	// guard sees only an IP, so without this the pinned host is reachable on a
+	// model-chosen port with the credential attached.
+	if err := authorizeRequestPort(v, httpsPort); err != nil {
+		return err
+	}
+
 	if githubhardening.IsGraphQLEndpoint(v.EscapedPath) {
 		return fmt.Errorf("%w: %s %s", githubhardening.ErrGraphQLUnsupported, v.Method, v.EscapedPath)
 	}

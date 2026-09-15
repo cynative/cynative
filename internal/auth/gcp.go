@@ -110,6 +110,10 @@ func (p *gcpProvider) AuthorizesHost(ctx context.Context, host string, args auth
 // AuthorizeAction implements auth.ActionAuthorizer, delegating to the composed
 // Layer 2 provider after lazy init.
 func (p *gcpProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	if err := authorizeRequestPort(v, httpsPort); err != nil {
+		return err
+	}
+
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}

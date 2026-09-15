@@ -165,6 +165,10 @@ func signingRegion(awsArgs *AWSAuthArgs, req *http.Request, sdkRegion string) st
 // AuthorizeAction implements the auth.ActionAuthorizer optional interface,
 // delegating to the composed awshardening.Provider.
 func (p *awsProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	if err := authorizeRequestPort(v, httpsPort); err != nil {
+		return err
+	}
+
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}

@@ -30,6 +30,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
+	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
 )
@@ -4573,4 +4574,38 @@ func TestAKSProvider_AuthorizesAddr(t *testing.T) {
 			t.Fatal("cluster config error must deny (fail closed)")
 		}
 	})
+}
+
+func TestAuthorizeAction_BindsThePortOnTheCloudConnectors(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		provider ActionAuthorizer
+	}{
+		{"github", newGithubProvider("t", exposure.Exposure{}, nil)},
+		{"aws", &awsProvider{}},
+		{"gcp", &gcpProvider{}},
+		{"azure", &azureProvider{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			v := authreq.View{
+				Method:      http.MethodGet,
+				Hostname:    "api.github.com",
+				Port:        "8443",
+				Path:        "/user",
+				EscapedPath: "/user",
+				Header:      http.Header{},
+			}
+
+			err := tc.provider.AuthorizeAction(context.Background(), v, authreq.ProviderArgs{})
+			if !errors.Is(err, ErrHostNotAuthorized) {
+				t.Fatalf("AuthorizeAction on port 8443 = %v, want ErrHostNotAuthorized", err)
+			}
+		})
+	}
 }

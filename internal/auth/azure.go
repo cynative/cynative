@@ -104,6 +104,10 @@ func (p *azureProvider) AuthorizesHost(ctx context.Context, host string, args au
 // AuthorizeAction implements auth.ActionAuthorizer, delegating to the composed
 // Layer 1 + Layer 2 provider after lazy init.
 func (p *azureProvider) AuthorizeAction(ctx context.Context, v authreq.View, args authreq.ProviderArgs) error {
+	if err := authorizeRequestPort(v, httpsPort); err != nil {
+		return err
+	}
+
 	if err := p.ensureReady(ctx); err != nil {
 		return err
 	}
