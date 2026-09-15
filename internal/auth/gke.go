@@ -65,6 +65,7 @@ func newGKEProvider(tokenSource oauth2.TokenSource) *gkeProvider {
 	}
 	p.validate = (*GKEAuthArgs).validate
 	p.clusterRole = defaultClusterRole
+	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 
 	return p
 }

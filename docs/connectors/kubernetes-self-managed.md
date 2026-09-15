@@ -11,7 +11,7 @@
 | Enforcement model | the cluster's live configured ClusterRole (default `view`; allow-only RBAC), via kube-apiserver-style request classification — see [kubernetes.md](kubernetes.md) |
 | Configurable exposure | ✓ · `connectors.kubernetes.cluster_role` selects the authorization ClusterRole (default `view`); see [kubernetes.md](kubernetes.md#configuration) |
 | Credential downscoping | — · Kubernetes decouples authn from authz; no client-side downscoping primitive |
-| Host pinning | ✓ (kubeconfig cluster `server`) |
+| Host pinning | ✓ host and port (kubeconfig cluster `server`) |
 | Dial-time IP authorization | ✓ (exact IP for an IP-literal server, resolved set for an FQDN; RFC1918 private ranges allowed) |
 | Model-supplied-credential rejection | ✓ |
 | Response redaction | ✓ |
@@ -67,7 +67,9 @@ It selects the `current-context` and supports exactly two credential modes:
 - **Static bearer token** — `users[].user.token`, or `users[].user.tokenFile` (re-read per request, so a rotated ServiceAccount token is picked up).
 - **Client certificate (mTLS)** — `users[].user.client-certificate[-data]` plus `users[].user.client-key[-data]`.
 
-The connector **fails closed and is not registered** when the selected context uses any of: an `exec` credential plugin, an `auth-provider` plugin, impersonation, basic-auth username/password, `insecure-skip-tls-verify: true`, a `proxy-url`, a non-`https` server, a server URL with embedded credentials, or supplies no usable bearer/client-cert credential. The skip reason is logged only when the kubeconfig is explicitly selected (`$KUBECONFIG` set) or under `--verbose`; an ambient `~/.kube/config` context is skipped quietly. This means a typical **cloud** kubeconfig context (GKE/EKS/AKS use `exec` plugins such as `gke-gcloud-auth-plugin`) is intentionally rejected — use the dedicated `eks`, `gke`, or `aks` connectors for those clusters.
+The connector **fails closed and is not registered** when the selected context uses an `exec` credential plugin, an `auth-provider` plugin, impersonation, basic-auth username/password, `insecure-skip-tls-verify: true`, or a `proxy-url`. Those skips are logged only when the kubeconfig is explicitly selected (`$KUBECONFIG` set) or under `--verbose`; an ambient `~/.kube/config` context is skipped quietly.
+
+It also fails closed on a malformed `server` URL or a missing credential: a non-`https` scheme, no host, embedded credentials, a non-ASCII host (write an internationalized name in punycode, so the name Cynative pins is the name it dials), a port that is not a number between 1 and 65535 written without leading zeros, or no usable bearer/client-cert credential. Those are operator errors rather than "this context is not for us", so they are reported whether or not the kubeconfig was explicitly selected. A credential that is present but unusable at request time (a `tokenFile` that cannot be read, for example) is not one of them: it surfaces as a cluster-validation failure, under the same quiet-when-ambient rule as the skips above. This means a typical **cloud** kubeconfig context (GKE/EKS/AKS use `exec` plugins such as `gke-gcloud-auth-plugin`) is intentionally rejected — use the dedicated `eks`, `gke`, or `aks` connectors for those clusters.
 
 ### Registration and validation
 
@@ -94,7 +96,7 @@ To target a different file, set `$KUBECONFIG`; to select a different context, ru
 
 ### Targeting inputs
 
-`auth_provider: "kubernetes"` with an empty `kubernetes_auth` object — there is no per-request cluster selector, and the request host must match the kubeconfig cluster `server`. See [Request usage](#request-usage) for the call shape.
+`auth_provider: "kubernetes"` with an empty `kubernetes_auth` object — there is no per-request cluster selector, and the request authority, host and port both, must match the kubeconfig cluster `server`, where an omitted port means 443. A self-managed API server usually listens on 6443, so against such a cluster a request that omits the port is rejected rather than sent to 443. See [Request usage](#request-usage) for the call shape.
 
 ### TLS server name (IP endpoints with DNS-only certificates)
 
@@ -129,7 +131,7 @@ console.log(resp.body);
 ## Hardening
 
 - Cynative reads the cluster endpoint, CA, and credential from the local kubeconfig — never from a cloud API and never by executing an exec plugin.
-- The request host must equal the configured cluster endpoint host.
+- The request host and port must both equal the configured cluster endpoint's. The port is checked separately from the host, because the host check receives a port-stripped hostname and the dial guard sees only an IP, so nothing else would stop a request to another TLS listener on the same address.
 - The dialed IP must pass the shared forbidden-address floor (loopback, link-local, cloud metadata, IPv6 ULA are always rejected) and then match the endpoint pin: an IP-literal endpoint pins to that exact address; an FQDN endpoint is re-resolved per dial and the dialed IP must be in the resolved set. RFC1918 private addresses are allowed (on-prem clusters legitimately use them); the configured endpoint is the per-cluster allow.
 - Model-supplied credentials are rejected before injection: requests carrying an `Authorization`, `Proxy-Authorization`, or `X-Ms-Authorization-Auxiliary` header, or URL userinfo (`user:pass@`), fail closed.
 - Cynative attaches the bearer token (or presents the client certificate for mTLS) only after host and Kubernetes action authorization pass; the dial guard still authorizes the resolved IP before the request is sent.
@@ -154,12 +156,13 @@ verbs — see the [shared model](kubernetes.md#configuration).
 The configured ClusterRole is shown in the startup connector inventory, for example:
 
 ```text
-✓ k8s    access=default(read-only) · enforced=client · cluster role=view · cluster-host
+✓ kubernetes  access=default(read-only) · enforced=client · cluster role=view · cluster-host:6443
 ```
 
 - `access=default(read-only)` when `connectors.kubernetes.cluster_role` is `view`; `access=custom` for any other ClusterRole.
 - `enforced=client` — Kubernetes decouples authn from authz; the in-process ClusterRole-based authorization check is the sole client-side control.
 - `cluster role=<name>` — the configured ClusterRole verbatim.
+- the trailing value is the API-server authority from the kubeconfig `server`, port included; `https://` plus that value is the base URL requests must use.
 
 Operators can confirm the authorization policy in force at a glance.
 
@@ -177,6 +180,7 @@ Operators can confirm the authorization policy in force at a glance.
 - Cynative's gate enforces exactly what the configured ClusterRole grants. The default upstream `view` role intentionally does **not** grant reading Secrets — per the [Kubernetes RBAC documentation](https://kubernetes.io/docs/reference/access-authn-authz/rbac/), reading Secret contents "enables access to ServiceAccount credentials in the namespace, which would allow API access as any ServiceAccount in the namespace (a form of privilege escalation)" — and grants no write verbs, though it does permit a broad set of reads (including some cluster-scoped reads such as listing namespaces). Selecting a wider role widens the enforced surface — see [Configuration](kubernetes.md#configuration).
 - Only static bearer-token and client-certificate (mTLS) credentials are supported. Exec credential plugins and auth-provider plugins are deliberately not honored (arbitrary local code execution risk); `insecure-skip-tls-verify` and `proxy-url` are rejected.
 - One cluster per run (the selected context). Multi-cluster selection is not supported in this version.
+- Only the authority of the kubeconfig `server` is used. A `server` URL carrying a path prefix (as some managed-cluster proxies emit) has that prefix dropped, so such a cluster is not supported.
 - Credential rotation: a bearer `tokenFile` is re-read per request, but a rotated literal `token` or rotated client certificate requires re-running Cynative (the kubeconfig is read once at startup).
 - For an HA control plane behind a rotating DNS endpoint, the dial guard re-resolves per dial and pins to the resolved set; if backend IPs rotate between resolution and connect, a dial may be rejected (fail-closed). Prefer an IP-literal endpoint or a stable DNS name.
 - File-referenced CA/token/certificate paths in the kubeconfig are read with the operator's own privileges and sent only to the pinned cluster endpoint — the same posture as `kubectl`.

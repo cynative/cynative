@@ -12,7 +12,7 @@ The model is built for read-oriented Kubernetes API research. Every model-author
 | Enforcement model | the cluster's live configured ClusterRole (default `view`; allow-only RBAC), applied per request via kube-apiserver-style request classification |
 | Configurable exposure | ✓ · the authorization ClusterRole is operator-selectable per connector (default `view`); see [Configuration](#configuration) |
 | Credential downscoping | — · Kubernetes decouples authentication from authorization, so there is no client-side credential-downscoping primitive — the in-process ClusterRole RBAC gate is the sole client-side control |
-| Host pinning | ✓ (cloud-API endpoint, or kubeconfig server for self-managed) |
+| Host pinning | ✓ host and port (cloud-API endpoint, or kubeconfig server for self-managed) |
 | Dial-time IP authorization | ✓ (EKS/AKS pin to the resolved endpoint IP set; GKE requires an IP-literal endpoint and fails closed on DNS-based endpoints; self-managed pins exact IP / resolved set and allows RFC1918) |
 | Model-supplied-credential rejection | ✓ |
 | Response redaction | ✓ |
@@ -41,7 +41,9 @@ The net effect is that Cynative applies the cluster's own RBAC policy (read-only
 
 Two complementary controls bind a request to a known cluster endpoint: the request host is pinned to the authoritative endpoint, and the IP that host resolves to is authorized at dial time, before the TCP connection is established.
 
-**Host pinning.** The managed connectors pin the request host to the authoritative cluster endpoint returned by the cloud-provider API (EKS, GKE, and AKS each report their own control-plane endpoint). The self-managed `kubernetes` connector pins the host to the kubeconfig cluster `server`, with no cloud-provider API dependency. A request whose host is not the pinned endpoint is rejected.
+**Host and port pinning.** The managed connectors pin the request host to the authoritative cluster endpoint returned by the cloud-provider API (EKS, GKE, and AKS each report their own control-plane endpoint). The self-managed `kubernetes` connector pins the host to the kubeconfig cluster `server`, with no cloud-provider API dependency. A request whose host is not the pinned endpoint is rejected.
+
+The port is pinned alongside the host, and separately from it, because the host check is given a port-stripped hostname and the dial guard sees only an IP: without a port check a request could reach a different TLS listener on the pinned host or IP with the cluster credential attached. The managed connectors reach their control planes on the https default, so they accept 443, written or omitted, and nothing else. The self-managed connector accepts the port its kubeconfig `server` names, which for k3s and kubeadm clusters is 6443, so a request that omits the port is rejected rather than sent to 443. The rejection names the port the cluster is on.
 
 **Dial-time IP authorization.** The transport's dial guard authorizes the DNS-resolved IP before connecting, on every dial — including IP-literal targets — which closes DNS-rebinding and TOCTOU windows. The always-rejected floor set is:
 

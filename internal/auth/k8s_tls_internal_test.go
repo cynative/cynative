@@ -170,7 +170,7 @@ func TestKubernetesClusterConn(t *testing.T) {
 
 	rc := resolvedCluster{
 		host:       "10.0.0.1",
-		endpoint:   "https://10.0.0.1:6443",
+		authority:  "10.0.0.1:6443",
 		serverName: "kubernetes",
 		caData:     "Y2E=",
 		clientCert: "Y2VydA==",
@@ -178,7 +178,7 @@ func TestKubernetesClusterConn(t *testing.T) {
 	}
 	conn := kubernetesClusterConn(rc)
 	if conn.endpoint != "https://10.0.0.1:6443" {
-		t.Errorf("endpoint = %q (must pass through unchanged)", conn.endpoint)
+		t.Errorf("endpoint = %q (must carry the kubeconfig authority, port included)", conn.endpoint)
 	}
 	if conn.caData != "Y2E=" || conn.clientCert != "Y2VydA==" || conn.clientKey != "a2V5" {
 		t.Errorf("TLS material mismatch: %+v", conn)

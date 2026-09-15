@@ -52,7 +52,7 @@ Each connector page distributes the details across three sections: **Credential 
 | Enforcement model | IAM action simulation | role permission eval | RBAC role-definition | read/write classifier | read/write classifier | live `view` RBAC | live `view` RBAC | live `view` RBAC | live `view` RBAC |
 | Configurable exposure | ✓ any policy ARN | ✓ predefined roles | ✓ role name/GUID | ✓ (`connectors.github.permissions`: category[/subcategory] → read\|write\|none ceiling) | ✓ (`connectors.gitlab.permissions`: category → read\|write\|none ceiling; default read-only, `ci-variables` blocked) | ✓ (`cluster_role`) | ✓ (`cluster_role`) | ✓ (`cluster_role`) | ✓ (`cluster_role`) |
 | Credential downscoping | ✓ STS-scoped, AWS-side — assumed-role identities only | — · CAB is GCS-only | — · no Entra primitive | — · user tokens | — · token scopes fixed at issue | — · authn/authz decoupled | — · authn/authz decoupled | — · authn/authz decoupled | — · authn/authz decoupled |
-| Host pinning | ✓ | ✓ | ✓ (cloud) | ✓ | ✓ (+ port) | ✓ (endpoint) | ✓ (endpoint) | ✓ (endpoint) | ✓ (kubeconfig) |
+| Host pinning | ✓ | ✓ | ✓ (cloud) | ✓ | ✓ (+ port) | ✓ (endpoint + port) | ✓ (endpoint + port) | ✓ (endpoint + port) | ✓ (kubeconfig host + port) |
 | Dial-time IP authorization | ✓ internal-range deny | ✓ internal-range deny | ✓ internal-range deny | ✓ internal-range deny | ✓ internal-range deny (`allow_private_network` opt-in) | ✓ IP pin | ✓ IP pin (IP-literal only) | ✓ IP pin | ✓ IP pin (RFC1918 ok) |
 | Model-supplied-credential rejection | ✓ | ✓ | ✓ (+SAS) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Response redaction | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |

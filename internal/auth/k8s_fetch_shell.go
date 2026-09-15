@@ -21,7 +21,9 @@ const maxViewRoleBytes = 1 << 20 // 1 MiB.
 // request path uses). control, when non-nil, is installed as the [net.Dialer]
 // ControlContext hook so the bootstrap fetch runs through the dial guard. The
 // client carries the production phase timeouts so a stalled cluster endpoint is
-// bounded even when the caller supplies no context deadline.
+// bounded even when the caller supplies no context deadline, and refuses
+// redirects so a 30x cannot carry the credential to a destination the request
+// gates never saw.
 func pinnedHTTPClient(
 	caData, clientCert, clientKey, serverName string,
 	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
@@ -52,7 +54,19 @@ func pinnedHTTPClientWithTimeouts(
 		}).DialContext,
 	}
 
-	return &http.Client{Transport: tr, Timeout: to.overall}, nil //nolint:exhaustruct // Transport + Timeout set.
+	// Never follow a redirect, matching the request transport: Go's default policy
+	// keeps the Authorization header when a hop changes only the port (it compares
+	// hostnames), so a followed 30x would hand the cluster credential to another
+	// listener on the pinned address. The dial guard still authorizes that hop's
+	// IP, which is exactly what makes a port-only redirect the gap: nothing below
+	// this client checks the port.
+	return &http.Client{ //nolint:exhaustruct // Transport, Timeout and CheckRedirect set.
+		Transport: tr,
+		Timeout:   to.overall,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}, nil
 }
 
 // fetchClusterRoleRaw GETs the named cluster-scoped ClusterRole and returns the

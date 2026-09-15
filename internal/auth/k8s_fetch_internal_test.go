@@ -68,6 +68,63 @@ func TestFetchViewPolicyIntegration(t *testing.T) {
 	}
 }
 
+// TestPinnedHTTPClient_DoesNotFollowRedirects pins the bootstrap fetch to the
+// same fail-closed redirect policy the request transport uses. Go's default
+// client follows up to ten hops and keeps Authorization when only the port
+// changes (shouldCopyHeaderOnRedirect compares hostnames), so a followed 302
+// would hand the cluster credential to a second listener on the pinned host.
+// The redirect target here is a working server the client trusts and would
+// happily parse, so the test fails if the hop is taken, not because the hop
+// could not have worked.
+func TestPinnedHTTPClient_DoesNotFollowRedirects(t *testing.T) {
+	t.Parallel()
+
+	var (
+		targetHits   int
+		targetBearer string
+	)
+
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHits++
+		targetBearer = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(
+			`{"kind":"ClusterRole","rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list","watch"]}]}`,
+		))
+	}))
+	defer target.Close()
+
+	cluster := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer cluster.Close()
+
+	// Trust both leaves, so a followed hop would succeed on its own terms: what
+	// the assertions below catch is the hop, not a TLS failure at the target.
+	bundle := base64.StdEncoding.EncodeToString(append(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cluster.Certificate().Raw}),
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: target.Certificate().Raw})...,
+	))
+
+	hc, err := pinnedHTTPClient(bundle, "", "", "", nil)
+	if err != nil {
+		t.Fatalf("pinnedHTTPClient: %v", err)
+	}
+
+	inject := func(req *http.Request) error {
+		req.Header.Set("Authorization", "Bearer test-token")
+
+		return nil
+	}
+
+	if _, err = fetchViewPolicy(context.Background(), hc, cluster.URL, "view", inject); err == nil {
+		t.Fatal("a redirected clusterrole fetch must fail closed")
+	}
+	if targetHits != 0 {
+		t.Fatalf("the redirect target was called %d times; the bearer %q went with it", targetHits, targetBearer)
+	}
+}
+
 func TestFetchViewPolicyAccessDenied(t *testing.T) {
 	t.Parallel()
 

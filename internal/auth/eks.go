@@ -65,6 +65,7 @@ func newEKSProvider(cfg aws.Config) *eksProvider {
 	}
 	p.validate = (*EKSAuthArgs).validate
 	p.clusterRole = defaultClusterRole
+	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.resolver = defaultResolveAddrs
 
 	return p

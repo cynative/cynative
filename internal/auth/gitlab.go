@@ -178,7 +178,8 @@ func portOfAuthority(authority string) string {
 	if _, port, err := net.SplitHostPort(authority); err == nil {
 		return port
 	}
-	return "443"
+
+	return httpsPort
 }
 
 // servedHostname returns servedHost with any :port suffix stripped. The
@@ -192,32 +193,6 @@ func (p *gitlabProvider) servedHostname() string {
 // explicit :port from servedHost, or "443" (the https default) when none is set.
 func (p *gitlabProvider) expectedPort() string {
 	return portOfAuthority(p.servedHost())
-}
-
-// authorizeRequestPort rejects a request whose port differs from the connector's
-// configured (or default-443) port. AuthorizesHost only sees the port-stripped
-// hostname, so without this gate a model could target a different TLS port on the
-// pinned host or IP and have the injected Bearer token attached under an unpinned
-// port.
-func (p *gitlabProvider) authorizeRequestPort(v authreq.View) error {
-	want := p.expectedPort()
-	if got := defaultedPort(v.Port); got != want {
-		return fmt.Errorf("%w: request port %s does not match configured GitLab port %s (provider gitlab)",
-			ErrHostNotAuthorized, got, want)
-	}
-	return nil
-}
-
-// defaultedPort returns port, or "443" (the https default) when empty. The view
-// reports an absent port as "", and [net/http] normalizes an explicit-but-empty
-// port to the same thing before any gate runs, so "" here means "no port given"
-// exactly as portOfAuthority's error branch did.
-func defaultedPort(port string) string {
-	if port == "" {
-		return "443"
-	}
-
-	return port
 }
 
 // Description returns a human-readable description of the provider's posture. It
@@ -435,7 +410,7 @@ func (p *gitlabProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ 
 	if err := rejectGitLabSmuggledControls(v); err != nil {
 		return err
 	}
-	if err := p.authorizeRequestPort(v); err != nil {
+	if err := authorizeRequestPort(v, p.expectedPort()); err != nil {
 		return err
 	}
 	if gitlabclass.IsGraphQLEndpoint(v.EscapedPath) {

@@ -27,6 +27,15 @@ type k8sGate[A any] struct {
 	cacheKey   func(*A) string
 	validate   func(*A) error
 
+	// expectedPort is the port the cluster's API server is reached on, set by each
+	// provider constructor: the managed connectors resolve endpoints that are
+	// always reached on 443 (their bootstrap fetch builds "https://" + host, with
+	// no port), while the self-managed connector takes it from the kubeconfig
+	// server. It is required: an empty value denies every request rather than
+	// falling back to 443, so a new connector cannot inherit an unpinned port by
+	// forgetting to set it.
+	expectedPort string
+
 	// clusterRole is the configured ClusterRole the policy is derived from
 	// (default "view"). It is interpolated into the fetch path (via the provider's
 	// defaultFetchView) and surfaced in denial messages. Set post-construction by
@@ -35,11 +44,18 @@ type k8sGate[A any] struct {
 }
 
 // authorizeAction enforces the configured read-only ClusterRole posture for a
-// Kubernetes API request: it validates the args, resolves (and caches) the
-// cluster's configured ClusterRole policy, classifies the request, and authorizes
-// it — failing closed on any resolution error and naming the cluster_role on denial.
+// Kubernetes API request: it validates the args, binds the request to the
+// cluster's API-server port, resolves (and caches) the cluster's configured
+// ClusterRole policy, classifies the request, and authorizes it — failing closed
+// on any resolution error and naming the cluster_role on denial.
 func (g *k8sGate[A]) authorizeAction(ctx context.Context, v authreq.View, args *A) error {
 	if err := g.validate(args); err != nil {
+		return err
+	}
+
+	// Before the ClusterRole fetch: a request on the wrong port is refused without
+	// spending a credentialed round trip on the cluster.
+	if err := authorizeRequestPort(v, g.expectedPort); err != nil {
 		return err
 	}
 

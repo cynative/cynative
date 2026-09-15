@@ -324,7 +324,9 @@ func (d *registrationDeps) registerAzure(ctx context.Context, verbose bool) conn
 // unsupported-feature are loud only when the kubeconfig was explicitly selected.
 // After a successful load it eagerly validates the cluster via a dial-guarded
 // ClusterRole fetch (probeKube): a probe failure is explicit-gated, escalated to
-// loud when transient. The display identity is the resolved API-server host.
+// loud when transient. The display identity is the API-server authority, port
+// included, because "https://" plus that value is the base URL the model has to
+// call (cynative#308).
 func (d *registrationDeps) registerKube(verbose bool) connectorOutcome {
 	rc, loadErr, postErr := d.loadKube()
 
@@ -351,7 +353,7 @@ func (d *registrationDeps) registerKube(verbose bool) connectorOutcome {
 
 	return connectorOutcome{
 		providers: []Provider{p},
-		statuses:  []ConnectorStatus{availStatus(kubernetesProviderName, posture, rc.host, false)},
+		statuses:  []ConnectorStatus{availStatus(kubernetesProviderName, posture, rc.authority, false)},
 		visible:   []bool{true},
 	}
 }

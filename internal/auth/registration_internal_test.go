@@ -466,17 +466,27 @@ func TestRegisterKube_Outcome(t *testing.T) {
 		}
 	})
 
-	t.Run("success registers with host identity", func(t *testing.T) {
-		t.Parallel()
-		d := stubDeps()
-		d.loadKube = func() (resolvedCluster, error, error) { //nolint:exhaustruct // host only.
-			return resolvedCluster{host: "k8s.example"}, nil, nil
-		}
-		out := d.registerKube(false)
-		if len(out.providers) != 1 || !out.statuses[0].Available || out.statuses[0].Identity != "k8s.example" {
-			t.Fatalf("out=%+v, want 1 provider + host identity", out)
-		}
-	})
+	// The identity is published verbatim, because it is what the operator reads in
+	// the inventory and one of the two places the model learns the cluster's base
+	// URL: rebuilding it from the host and port would drop the brackets an IPv6
+	// cluster needs (cynative#308).
+	for _, tc := range []struct{ name, host, authority, port string }{
+		{"dns cluster on 6443", "k8s.example", "k8s.example:6443", "6443"},
+		{"ipv6 cluster on 6443", "2001:db8::1", "[2001:db8::1]:6443", "6443"},
+		{"cluster on the https default", "k8s.example", "k8s.example", ""},
+	} {
+		t.Run("success publishes the authority as the identity: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := stubDeps()
+			d.loadKube = func() (resolvedCluster, error, error) { //nolint:exhaustruct // endpoint facts only.
+				return resolvedCluster{host: tc.host, authority: tc.authority, port: tc.port}, nil, nil
+			}
+			out := d.registerKube(false)
+			if len(out.providers) != 1 || !out.statuses[0].Available || out.statuses[0].Identity != tc.authority {
+				t.Fatalf("out=%+v, want 1 provider with identity %q", out, tc.authority)
+			}
+		})
+	}
 }
 
 func TestRegisterKube_Eager(t *testing.T) {

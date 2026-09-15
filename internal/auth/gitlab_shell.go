@@ -65,13 +65,6 @@ func buildProbeClient(p *gitlabProvider) (*http.Client, error) {
 		return nil, fmt.Errorf("%w: build client: %w", errGitLabProbe, err)
 	}
 
-	// Match the main transport's fail-closed redirect policy: never follow a 30x,
-	// so the Bearer token cannot be forwarded to a redirect target that bypasses
-	// the connector's host/action gates.
-	hc.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-
 	return hc, nil
 }
 

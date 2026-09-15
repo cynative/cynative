@@ -8,6 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"golang.org/x/oauth2"
+
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
 )
 
@@ -26,8 +31,9 @@ func newGateTest() *k8sGate[gateTestArgs] {
 		fetchView: func(_ context.Context, a *gateTestArgs) (*k8sauthz.ViewPolicy, error) {
 			return a.fetch()
 		},
-		cacheKey:    func(a *gateTestArgs) string { return a.key },
-		clusterRole: "view",
+		cacheKey:     func(a *gateTestArgs) string { return a.key },
+		clusterRole:  "view",
+		expectedPort: "443",
 		validate: func(a *gateTestArgs) error {
 			if a.bad {
 				return errors.New("args invalid")
@@ -41,6 +47,161 @@ func newGateTest() *k8sGate[gateTestArgs] {
 func viewPolicyAllowingPods() *k8sauthz.ViewPolicy {
 	return k8sauthz.BuildViewPolicy([]k8sauthz.PolicyRule{
 		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
+	})
+}
+
+// TestK8sProviders_expectedPort pins the port every Kubernetes connector binds
+// its requests to. The managed three build their bootstrap fetch as
+// "https://" + a port-stripped host, so 443 is the port they already validate
+// against and the port the gate has to admit; the self-managed connector takes
+// whatever the kubeconfig names.
+func TestK8sProviders_expectedPort(t *testing.T) {
+	t.Parallel()
+
+	t.Run("managed connectors pin the https default", func(t *testing.T) {
+		t.Parallel()
+
+		eks := newEKSProvider(aws.Config{}) //nolint:exhaustruct // zero config: only the gate field is read.
+		gke := newGKEProvider(mockTokenSource(&oauth2.Token{}, nil))
+		aks := newAKSProvider(mockCredential(azcore.AccessToken{}, nil), cloud.Configuration{})
+
+		for name, got := range map[string]string{
+			"eks": eks.expectedPort, "gke": gke.expectedPort, "aks": aks.expectedPort,
+		} {
+			if got != "443" {
+				t.Errorf("%s expectedPort = %q, want 443", name, got)
+			}
+		}
+	})
+
+	t.Run("self-managed takes the kubeconfig port", func(t *testing.T) {
+		t.Parallel()
+
+		//nolint:exhaustruct // only the fields the gate reads.
+		p := newKubernetesProvider(resolvedCluster{host: "k3s", authority: "k3s:6443", port: "6443"})
+		if p.expectedPort != "6443" {
+			t.Errorf("expectedPort = %q, want 6443", p.expectedPort)
+		}
+	})
+
+	t.Run("a kubeconfig without a port means the https default", func(t *testing.T) {
+		t.Parallel()
+
+		//nolint:exhaustruct // only the fields the gate reads.
+		p := newKubernetesProvider(resolvedCluster{host: "k8s.example", authority: "k8s.example"})
+		if p.expectedPort != "443" {
+			t.Errorf("expectedPort = %q, want 443", p.expectedPort)
+		}
+	})
+}
+
+func TestK8sGate_authorizeAction_port(t *testing.T) {
+	t.Parallel()
+
+	okArgs := func(t *testing.T) *gateTestArgs {
+		t.Helper()
+
+		return &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
+			return viewPolicyAllowingPods(), nil
+		}}
+	}
+
+	tests := []struct {
+		name, expected, url string
+		wantAllowed         bool
+	}{
+		{"cluster on 6443 accepts its own port", "6443", "https://example:6443/api/v1/pods", true},
+		{"cluster on 6443 rejects an omitted port", "6443", "https://example/api/v1/pods", false},
+		{"cluster on 6443 rejects the default port", "6443", "https://example:443/api/v1/pods", false},
+		{"cluster on 443 accepts an omitted port", "443", "https://example/api/v1/pods", true},
+		{"cluster on 443 accepts its own port", "443", "https://example:443/api/v1/pods", true},
+		{"cluster on 443 rejects another port", "443", "https://example:8443/api/v1/pods", false},
+		{"a leading-zero request port is not the same port", "6443", "https://example:06443/api/v1/pods", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			g := newGateTest()
+			g.expectedPort = tc.expected
+			err := g.authorizeAction(context.Background(), actionView(t, http.MethodGet, tc.url), okArgs(t))
+			if tc.wantAllowed {
+				if err != nil {
+					t.Fatalf("authorizeAction(%q) = %v, want allowed", tc.url, err)
+				}
+
+				return
+			}
+			if !errors.Is(err, ErrHostNotAuthorized) {
+				t.Fatalf("authorizeAction(%q) = %v, want ErrHostNotAuthorized", tc.url, err)
+			}
+		})
+	}
+}
+
+// TestK8sGate_authorizeAction_portOrdering covers where the port check sits: it
+// runs before the credentialed ClusterRole fetch, it runs again once that policy
+// is cached, and an unconfigured port denies instead of defaulting.
+func TestK8sGate_authorizeAction_portOrdering(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the port is checked again once the policy is cached", func(t *testing.T) {
+		t.Parallel()
+
+		var fetches int
+
+		g := newGateTest()
+		g.expectedPort = "6443"
+		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
+			fetches++
+
+			return viewPolicyAllowingPods(), nil
+		}}
+
+		good := actionView(t, http.MethodGet, "https://example:6443/api/v1/pods")
+		if err := g.authorizeAction(context.Background(), good, args); err != nil {
+			t.Fatalf("the configured port should be allowed: %v", err)
+		}
+
+		bad := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := g.authorizeAction(context.Background(), bad, args); !errors.Is(err, ErrHostNotAuthorized) {
+			t.Fatalf("a warm policy cache must not skip the port check, got %v", err)
+		}
+		if fetches != 1 {
+			t.Fatalf("fetches = %d, want the cached policy reused rather than re-fetched", fetches)
+		}
+	})
+
+	t.Run("an unconfigured port denies rather than defaulting", func(t *testing.T) {
+		t.Parallel()
+
+		g := newGateTest()
+		g.expectedPort = ""
+		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
+			t.Fatal("fetchView must not run when the port is unconfigured")
+
+			return nil, nil //nolint:nilnil // unreachable after t.Fatal; stub never runs.
+		}}
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := g.authorizeAction(context.Background(), v, args); !errors.Is(err, ErrHostNotAuthorized) {
+			t.Fatalf("authorizeAction with no configured port = %v, want ErrHostNotAuthorized", err)
+		}
+	})
+
+	t.Run("a port mismatch is refused before the clusterrole is fetched", func(t *testing.T) {
+		t.Parallel()
+
+		g := newGateTest()
+		g.expectedPort = "6443"
+		args := &gateTestArgs{key: "k", fetch: func() (*k8sauthz.ViewPolicy, error) {
+			t.Fatal("fetchView must not run for a request on the wrong port")
+
+			return nil, nil //nolint:nilnil // unreachable after t.Fatal; stub never runs.
+		}}
+		v := actionView(t, http.MethodGet, "https://example/api/v1/pods")
+		if err := g.authorizeAction(context.Background(), v, args); !errors.Is(err, ErrHostNotAuthorized) {
+			t.Fatalf("authorizeAction on the wrong port = %v, want ErrHostNotAuthorized", err)
+		}
 	})
 }
 

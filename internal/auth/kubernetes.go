@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
+	"unicode"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
@@ -17,6 +19,9 @@ import (
 
 // kubernetesProviderName is the connector id the model selects via auth_provider.
 const kubernetesProviderName = "kubernetes"
+
+// maxTCPPort is the highest port number a server URL can name.
+const maxTCPPort = 65535
 
 // ErrNoCurrentContext marks the ambient "nothing selected" skip: no
 // current-context is set. Routed via kubeSkipPolicy to an explicit-gated
@@ -46,7 +51,10 @@ const (
 // addition.
 type KubernetesAuthArgs struct{}
 
-// rejectUnsafe fails closed when the selected kubeconfig context carries a
+// rejectUnsafe validates the selected kubeconfig context and returns the parsed
+// server URL every later step derives from, so the URL the connector publishes
+// and pins is the exact one these checks passed. It fails closed when the
+// context carries a
 // field this connector deliberately refuses to honor: an exec credential
 // plugin (arbitrary local code execution — CVE-2022-24817), a legacy
 // auth-provider plugin, impersonation (act-as escalation), basic-auth
@@ -55,54 +63,104 @@ type KubernetesAuthArgs struct{}
 // egress redirect), or a non-https / empty-host API server. The connector reads
 // only static bearer-token or client-cert credentials; a context needing any
 // rejected field is skipped at registration.
-func rejectUnsafe(cl *clientcmdapi.Cluster, ai *clientcmdapi.AuthInfo) error {
+func rejectUnsafe(cl *clientcmdapi.Cluster, ai *clientcmdapi.AuthInfo) (*url.URL, error) {
 	if ai.Exec != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"kubernetes: exec credential plugins are not supported (security): %w", ErrUnsupportedFeature,
 		)
 	}
 
 	if ai.AuthProvider != nil {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"kubernetes: auth-provider plugins are not supported (security): %w", ErrUnsupportedFeature,
 		)
 	}
 
 	if ai.Impersonate != "" || ai.ImpersonateUID != "" ||
 		len(ai.ImpersonateGroups) > 0 || len(ai.ImpersonateUserExtra) > 0 {
-		return fmt.Errorf("kubernetes: impersonation (act-as) is not supported: %w", ErrUnsupportedFeature)
+		return nil, fmt.Errorf("kubernetes: impersonation (act-as) is not supported: %w", ErrUnsupportedFeature)
 	}
 
 	if ai.Username != "" || ai.Password != "" {
-		return fmt.Errorf("kubernetes: basic-auth username/password is not supported: %w", ErrUnsupportedFeature)
+		return nil, fmt.Errorf("kubernetes: basic-auth username/password is not supported: %w", ErrUnsupportedFeature)
 	}
 
 	if cl.InsecureSkipTLSVerify {
-		return fmt.Errorf(
+		return nil, fmt.Errorf(
 			"kubernetes: insecure-skip-tls-verify is not supported (the CA is the trust anchor): %w",
 			ErrUnsupportedFeature,
 		)
 	}
 
 	if cl.ProxyURL != "" {
-		return fmt.Errorf("kubernetes: proxy-url is not supported (SSRF risk): %w", ErrUnsupportedFeature)
+		return nil, fmt.Errorf("kubernetes: proxy-url is not supported (SSRF risk): %w", ErrUnsupportedFeature)
 	}
 
+	// The raw server URL is never interpolated into these diagnostics: it can
+	// carry userinfo credentials, and a connector's skip reason is host-authored
+	// output that no redactor runs over. The parsed pieces below are safe to name.
 	u, err := url.Parse(cl.Server)
 	if err != nil {
-		return fmt.Errorf("kubernetes: parse server URL %q: %w", cl.Server, err)
+		return nil, errors.New("kubernetes: server URL does not parse")
 	}
 
 	if u.Scheme != "https" {
-		return fmt.Errorf("kubernetes: server URL must be https, got scheme %q", u.Scheme)
+		return nil, fmt.Errorf("kubernetes: server URL must be https, got scheme %q", u.Scheme)
 	}
 
 	if u.Hostname() == "" {
-		return fmt.Errorf("kubernetes: server URL %q has no host", cl.Server)
+		return nil, errors.New("kubernetes: server URL has no host")
 	}
 
 	if u.User != nil {
-		return fmt.Errorf("kubernetes: server URL %q must not embed credentials", cl.Server)
+		return nil, errors.New("kubernetes: server URL must not embed credentials")
+	}
+
+	if err = asciiHost(u.Hostname()); err != nil {
+		return nil, err
+	}
+
+	if err = validClusterPort(u.Port()); err != nil {
+		return nil, err
+	}
+
+	return u, nil
+}
+
+// asciiHost rejects an internationalized server hostname, because such a name
+// has several spellings that do not agree and the connector needs one. Go's
+// lower-casing maps U+0130 to a plain "i", while the HTTP client's IDNA
+// conversion maps it to "xn--i-9bb": the authority the connector would publish
+// and dial names a different DNS host than the one the operator wrote, and the
+// credential would follow it there. A name already written in punycode is
+// ASCII and passes.
+func asciiHost(host string) error {
+	for _, r := range host {
+		if r > unicode.MaxASCII {
+			return fmt.Errorf(
+				"kubernetes: server URL host %q is not ASCII; write an internationalized name in punycode", host,
+			)
+		}
+	}
+
+	return nil
+}
+
+// validClusterPort rejects a server port that [url.Parse] accepts but the rest
+// of the stack does not agree on: it only requires digits. A cluster written
+// ":06443" is dialed on 6443 while the gate compares spellings and admits only
+// ":06443", so the obvious request would be refused and the operator would be
+// left holding two spellings of one port; "0" and "65536" name no dialable port
+// at all. One canonical spelling at load is what keeps the published authority
+// the working one.
+func validClusterPort(port string) error {
+	if port == "" {
+		return nil
+	}
+
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > maxTCPPort || strconv.Itoa(n) != port {
+		return fmt.Errorf("kubernetes: server URL port %q is not a port number between 1 and %d", port, maxTCPPort)
 	}
 
 	return nil
@@ -135,7 +193,8 @@ func classifyCredential(ai *clientcmdapi.AuthInfo) (credMode, error) {
 // any paths. tokenFile is left as a path and re-read per request.
 type selected struct {
 	host       string // host of cluster.server (lower-cased, https-validated, port-stripped).
-	endpoint   string // full https://host:port of cluster.server (port preserved, for the bootstrap fetch).
+	authority  string // authority of cluster.server (lower-cased, port and IPv6 brackets preserved).
+	port       string // port of cluster.server ("" when the server URL names none).
 	serverName string // cluster.tls-server-name ("" if unset).
 	caData     []byte // cluster.certificate-authority-data (inline).
 	caFile     string // cluster.certificate-authority (path).
@@ -184,7 +243,8 @@ func extractSelected(cfg *clientcmdapi.Config) (selected, error) {
 		return selected{}, err
 	}
 
-	if err = rejectUnsafe(cl, ai); err != nil {
+	server, err := rejectUnsafe(cl, ai)
+	if err != nil {
 		return selected{}, err
 	}
 
@@ -193,9 +253,12 @@ func extractSelected(cfg *clientcmdapi.Config) (selected, error) {
 		return selected{}, err
 	}
 
+	target := clusterTargetOf(server)
+
 	return selected{
-		host:       hostFromEndpoint(cl.Server),
-		endpoint:   endpointURL(cl.Server),
+		host:       target.host,
+		authority:  target.authority,
+		port:       target.port,
 		serverName: cl.TLSServerName,
 		caData:     cl.CertificateAuthorityData,
 		caFile:     cl.CertificateAuthority,
@@ -209,17 +272,39 @@ func extractSelected(cfg *clientcmdapi.Config) (selected, error) {
 	}, nil
 }
 
-// endpointURL normalizes a kubeconfig cluster.server to the https URL used for
-// the view-role bootstrap fetch, preserving the host AND port (unlike
-// hostFromEndpoint, which is port-stripped for host pinning). rejectUnsafe has
-// already validated that server parses as https with a non-empty host.
-func endpointURL(server string) string {
-	u, err := url.Parse(server)
-	if err != nil {
-		return ""
+// clusterTarget is a kubeconfig cluster.server parsed into the three spellings
+// the connector needs, all taken from one [url.Parse] so they can never disagree:
+// host pins the request host and the dialed IP, authority is what the operator
+// and the model are shown and what the bootstrap fetch dials, and port is what
+// the request-port gate compares. Carrying the port separately is what this type
+// exists for: an IPv6 host and port cannot be written without brackets, so any
+// path that rebuilds the authority from an unbracketed host loses the port and
+// silently falls back to 443.
+type clusterTarget struct {
+	host      string // u.Hostname(): lower-cased, unbracketed, port stripped.
+	authority string // u.Host: lower-cased, port and IPv6 brackets preserved.
+	port      string // u.Port(): empty when the server URL names no port.
+}
+
+// clusterTargetOf derives the three spellings from the server URL rejectUnsafe
+// validated and returned. It takes the parsed URL rather than the raw string so
+// there is one parse and no second error path: what the gate pins and the
+// inventory publishes cannot come from a different reading than what was checked.
+func clusterTargetOf(u *url.URL) clusterTarget {
+	// A server written "https://host:" carries an empty port that url.Parse keeps
+	// in u.Host and every consumer then ignores; trimming it keeps the published
+	// authority one the model can use verbatim. An IPv6 host without a port ends
+	// in "]", so the trim cannot touch it.
+	authority := strings.ToLower(u.Host)
+	if u.Port() == "" {
+		authority = strings.TrimSuffix(authority, ":")
 	}
 
-	return "https://" + u.Host // u.Host preserves host:port.
+	return clusterTarget{
+		host:      strings.ToLower(u.Hostname()),
+		authority: authority,
+		port:      u.Port(),
+	}
 }
 
 // resolvedCluster is the captured-at-construction view of the target cluster:
@@ -228,7 +313,8 @@ func endpointURL(server string) string {
 // tokenFile is a path re-read per request (so a rotated SA token is picked up).
 type resolvedCluster struct {
 	host       string
-	endpoint   string
+	authority  string
+	port       string
 	serverName string
 	caData     string
 	mode       credMode
@@ -239,11 +325,12 @@ type resolvedCluster struct {
 }
 
 // kubernetesClusterConn assembles the cluster connection for the self-managed
-// view fetch from the resolvedCluster captured at registration. The endpoint is
-// already a full https URL (port preserved).
+// view fetch from the resolvedCluster captured at registration. The bootstrap
+// fetch dials the same authority the gate pins and the inventory publishes, so
+// a cluster on 6443 is validated on 6443.
 func kubernetesClusterConn(c resolvedCluster) clusterConn {
 	return clusterConn{
-		endpoint:   c.endpoint,
+		endpoint:   "https://" + c.authority,
 		caData:     c.caData,
 		clientCert: c.clientCert,
 		clientKey:  c.clientKey,
@@ -262,7 +349,8 @@ func resolveSelected(sel selected, readFile func(string) ([]byte, error)) (resol
 
 	rc := resolvedCluster{
 		host:       sel.host,
-		endpoint:   sel.endpoint,
+		authority:  sel.authority,
+		port:       sel.port,
 		serverName: sel.serverName,
 		caData:     caData,
 		mode:       sel.mode,
@@ -346,6 +434,7 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 	p.cacheKey = func(*KubernetesAuthArgs) string { return "self" }
 	p.validate = func(*KubernetesAuthArgs) error { return nil }
 	p.clusterRole = defaultClusterRole
+	p.expectedPort = defaultedPort(cluster.port)
 
 	return p
 }
@@ -354,10 +443,17 @@ func (p *kubernetesProvider) Name() string {
 	return kubernetesProviderName
 }
 
+// Description names the cluster's base URL, port included, so the model sends
+// requests to the authority the gate pins rather than assuming the https
+// default. A self-managed API server usually listens on 6443 (cynative#308).
 func (p *kubernetesProvider) Description() string {
-	return "Self-managed Kubernetes bearer-token or client-certificate auth, sourced from the local kubeconfig " +
-		"(KUBECONFIG / ~/.kube/config, current-context). Targets the single configured cluster; pass auth_provider=" +
-		"\"kubernetes\". The CA and credentials are resolved from the kubeconfig; do NOT provide them."
+	return fmt.Sprintf(
+		"Self-managed Kubernetes bearer-token or client-certificate auth, sourced from the local kubeconfig "+
+			"(KUBECONFIG / ~/.kube/config, current-context). Targets the single configured cluster at "+
+			"https://%s, which is the only authority accepted: send every request to that host AND port. "+
+			"Pass auth_provider=\"kubernetes\". The CA and credentials are resolved from the kubeconfig; "+
+			"do NOT provide them.", p.cluster.authority,
+	)
 }
 
 // bearerToken returns the bearer credential to present: the literal token, or

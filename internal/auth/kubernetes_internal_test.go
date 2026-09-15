@@ -3,14 +3,18 @@ package auth
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
+	"strings"
 	"testing"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
 )
 
@@ -26,7 +30,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 		t.Parallel()
 
 		cl, ai := clean()
-		if err := rejectUnsafe(cl, ai); err != nil {
+		if _, err := rejectUnsafe(cl, ai); err != nil {
 			t.Fatalf("clean context rejected: %v", err)
 		}
 	})
@@ -36,7 +40,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.Exec = &clientcmdapi.ExecConfig{Command: "/bin/sh"}
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("exec plugin must be rejected")
 		}
 	})
@@ -46,7 +50,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.AuthProvider = &clientcmdapi.AuthProviderConfig{Name: "gcp"}
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("auth-provider must be rejected")
 		}
 	})
@@ -56,7 +60,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		cl.InsecureSkipTLSVerify = true
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("insecure-skip-tls-verify must be rejected")
 		}
 	})
@@ -66,7 +70,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		cl.ProxyURL = "http://proxy:8080"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("proxy-url must be rejected")
 		}
 	})
@@ -76,7 +80,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		cl.Server = "http://10.0.0.1:6443"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("non-https server must be rejected")
 		}
 	})
@@ -86,7 +90,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		cl.Server = "://bad"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("unparseable server must be rejected")
 		}
 	})
@@ -96,7 +100,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		cl.Server = "https:///api"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("https server with empty host must be rejected")
 		}
 	})
@@ -106,7 +110,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.Impersonate = "system:admin"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("impersonation must be rejected")
 		}
 	})
@@ -116,7 +120,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.Username = "admin"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("basic-auth username must be rejected")
 		}
 	})
@@ -126,7 +130,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.Password = "hunter2"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("basic-auth password must be rejected")
 		}
 	})
@@ -136,7 +140,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.ImpersonateUID = "1234"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("impersonate-uid must be rejected")
 		}
 	})
@@ -146,7 +150,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		ai.ImpersonateUserExtra = map[string][]string{"scopes": {"x"}}
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("impersonate-user-extra must be rejected")
 		}
 	})
@@ -156,7 +160,7 @@ func TestRejectUnsafe(t *testing.T) { //nolint:gocognit // test function with ma
 
 		cl, ai := clean()
 		cl.Server = "https://user:pass@10.0.0.1:6443"
-		if err := rejectUnsafe(cl, ai); err == nil {
+		if _, err := rejectUnsafe(cl, ai); err == nil {
 			t.Fatal("server URL with embedded userinfo must be rejected")
 		}
 	})
@@ -278,8 +282,8 @@ func TestExtractSelected(t *testing.T) { //nolint:gocognit // test function with
 		if sel.host != "10.0.0.1" {
 			t.Fatalf("host = %q, want 10.0.0.1", sel.host)
 		}
-		if sel.endpoint != "https://10.0.0.1:6443" {
-			t.Fatalf("endpoint = %q, want https://10.0.0.1:6443", sel.endpoint)
+		if sel.authority != "10.0.0.1:6443" || sel.port != "6443" {
+			t.Fatalf("authority = %q port = %q, want 10.0.0.1:6443 / 6443", sel.authority, sel.port)
 		}
 		if sel.mode != credBearer || sel.token != "t" {
 			t.Fatalf("got mode=%v token=%q", sel.mode, sel.token)
@@ -364,22 +368,139 @@ func TestExtractSelected(t *testing.T) { //nolint:gocognit // test function with
 	})
 }
 
-func TestEndpointURL(t *testing.T) {
+// TestRejectUnsafe_diagnosticsCarryNoCredential pins the rule that a connector's
+// skip reason is host-authored output no redactor runs over: a kubeconfig server
+// with userinfo must not put that userinfo in the error the operator sees. Each
+// row lands in a different branch, named by wantMsg, so a branch that starts
+// interpolating the raw URL again cannot hide behind another row.
+func TestRejectUnsafe_diagnosticsCarryNoCredential(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct{ name, server, want string }{
-		{"ip with port", "https://10.0.0.1:6443", "https://10.0.0.1:6443"},
-		{"fqdn with port", "https://api.example.com:6443", "https://api.example.com:6443"},
-		{"no explicit port", "https://api.example.com", "https://api.example.com"},
-		{"ipv6 with port", "https://[2001:db8::1]:6443", "https://[2001:db8::1]:6443"},
-		{"unparseable returns empty", "://bad", ""},
+	const secret = "hunter2"
+
+	tests := []struct{ name, server, wantMsg string }{
+		{"userinfo", "https://admin:" + secret + "@api.example:6443", "must not embed credentials"},
+		{"non-https scheme", "http://admin:" + secret + "@api.example:6443", "must be https"},
+		{"no host", "https://admin:" + secret + "@:6443", "has no host"},
+		{"unparseable", "https://admin:" + secret + "@api.example:not a url", "does not parse"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := endpointURL(tc.server); got != tc.want {
-				t.Fatalf("endpointURL(%q) = %q, want %q", tc.server, got, tc.want)
+			_, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
+			if err == nil {
+				t.Fatalf("rejectUnsafe(%q) = nil, want a rejection", tc.server)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("rejectUnsafe(%q) = %q, want the %q branch", tc.server, err, tc.wantMsg)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("diagnostic %q carries the userinfo password", err)
+			}
+		})
+	}
+}
+
+// TestRejectUnsafe_nonASCIIHost pins the fail-closed rule for internationalized
+// hostnames: a name outside ASCII has more than one spelling, and the ones that
+// matter here disagree. Go maps U+0130 to a plain "i" when lower-casing, while
+// the HTTP client's IDNA conversion maps it to "xn--i-9bb", so a lower-cased
+// authority would name a different DNS host than the one the operator wrote and
+// the credential would be sent there.
+func TestRejectUnsafe_nonASCIIHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name, server string }{
+		{"unicode host", "https://\u0130.example:6443"},
+		{"percent-encoded unicode host", "https://%C4%B0.example:6443"},
+		{"eszett", "https://stra\u00dfe.example:6443"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
+			if err == nil {
+				t.Fatalf("rejectUnsafe(%q) = nil, want a non-ASCII host rejection", tc.server)
+			}
+		})
+	}
+
+	t.Run("an already-punycoded host is accepted", func(t *testing.T) {
+		t.Parallel()
+
+		const server = "https://xn--i-9bb.example:6443"
+
+		u, err := rejectUnsafe(&clientcmdapi.Cluster{Server: server}, &clientcmdapi.AuthInfo{Token: "t"})
+		if err != nil {
+			t.Fatalf("rejectUnsafe(%q) = %v, want accepted", server, err)
+		}
+		if got := clusterTargetOf(u).authority; got != "xn--i-9bb.example:6443" {
+			t.Fatalf("authority = %q, want the punycode spelling unchanged", got)
+		}
+	})
+}
+
+func TestRejectUnsafe_serverPort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, server string
+		wantErr      bool
+	}{
+		{"canonical port", "https://10.0.0.1:6443", false},
+		{"ascii host", "https://k8s.example:6443", false},
+		{"no port", "https://10.0.0.1", false},
+		{"empty port", "https://10.0.0.1:", false},
+		{"leading zero", "https://10.0.0.1:06443", true},
+		{"zero", "https://10.0.0.1:0", true},
+		{"above the range", "https://10.0.0.1:65536", true},
+		{"wider than an int", "https://10.0.0.1:99999999999999999999", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("rejectUnsafe(%q) = %v, wantErr %v", tc.server, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestClusterTargetOf(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ name, server, host, authority, port string }{
+		{"ip with port", "https://10.0.0.1:6443", "10.0.0.1", "10.0.0.1:6443", "6443"},
+		{"fqdn with port", "https://api.example.com:6443", "api.example.com", "api.example.com:6443", "6443"},
+		{"no explicit port", "https://api.example.com", "api.example.com", "api.example.com", ""},
+		{"ipv6 with port", "https://[2001:db8::1]:6443", "2001:db8::1", "[2001:db8::1]:6443", "6443"},
+		{"ipv6 without port", "https://[2001:db8::1]", "2001:db8::1", "[2001:db8::1]", ""},
+		{"empty port drops the colon", "https://api.example.com:", "api.example.com", "api.example.com", ""},
+		{
+			"upper-cased host is normalized",
+			"https://API.Example.COM:6443",
+			"api.example.com",
+			"api.example.com:6443",
+			"6443",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			u, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
+			if err != nil {
+				t.Fatalf("rejectUnsafe(%q) errored: %v", tc.server, err)
+			}
+
+			if got := clusterTargetOf(u); got.host != tc.host ||
+				got.authority != tc.authority || got.port != tc.port {
+				t.Fatalf("clusterTargetOf(%q) = %+v, want host=%q authority=%q port=%q",
+					tc.server, got, tc.host, tc.authority, tc.port)
 			}
 		})
 	}
@@ -391,7 +512,14 @@ func TestResolveSelected(t *testing.T) { //nolint:gocognit // test function with
 	t.Run("bearer with inline CA", func(t *testing.T) {
 		t.Parallel()
 
-		sel := selected{host: "h", endpoint: "https://h:6443", caData: []byte("ca"), mode: credBearer, token: "t"}
+		sel := selected{
+			host:      "h",
+			authority: "h:6443",
+			port:      "6443",
+			caData:    []byte("ca"),
+			mode:      credBearer,
+			token:     "t",
+		}
 		rc, err := resolveSelected(sel, func(string) ([]byte, error) {
 			t.Fatal("readFile must not be called for inline data")
 			return nil, nil
@@ -402,8 +530,8 @@ func TestResolveSelected(t *testing.T) { //nolint:gocognit // test function with
 		if rc.caData != base64.StdEncoding.EncodeToString([]byte("ca")) {
 			t.Fatalf("caData = %q", rc.caData)
 		}
-		if rc.endpoint != "https://h:6443" {
-			t.Fatalf("endpoint = %q, want https://h:6443", rc.endpoint)
+		if rc.authority != "h:6443" || rc.port != "6443" {
+			t.Fatalf("authority = %q port = %q, want h:6443 / 6443", rc.authority, rc.port)
 		}
 		if rc.mode != credBearer || rc.token != "t" {
 			t.Fatalf("got mode=%v token=%q", rc.mode, rc.token)
@@ -745,13 +873,206 @@ func TestKubernetesProvider_AuthorizesAddr(t *testing.T) {
 	})
 }
 
+// TestKubernetesProvider_WrongPortNeverAttachesTheCredential walks the gate
+// sequence the transport runs (host, then action, then inject) for the
+// cynative#308 request and asserts the bearer never reaches the request: the
+// host gate passes because it only ever sees a port-stripped hostname, so the
+// action gate is what has to stop this one.
+func TestKubernetesProvider_WrongPortNeverAttachesTheCredential(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	//nolint:exhaustruct // only the cluster facts the gates read.
+	p := newKubernetesProvider(resolvedCluster{
+		host: "k3s.example", authority: "k3s.example:6443", port: "6443", mode: credBearer, token: "secret",
+	})
+	p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
+		t.Fatal("the clusterrole fetch must not run for a request on the wrong port")
+
+		return nil, nil //nolint:nilnil // unreachable after t.Fatal; stub never runs.
+	}
+
+	providers := []Provider{p}
+	const rawURL = "https://k3s.example/api/v1/pods" // the port the model omitted.
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+
+	rawArgs := json.RawMessage(`{"kubernetes_auth":{}}`)
+
+	if hostErr := AuthorizeHost(ctx, kubernetesProviderName, req.URL.Hostname(), providers, rawArgs); hostErr != nil {
+		t.Fatalf("the host gate is port-blind and should pass here: %v", hostErr)
+	}
+
+	actionErr := AuthorizeAction(ctx, kubernetesProviderName, authreq.NewView(req, ""), providers, rawArgs)
+	if !errors.Is(actionErr, ErrHostNotAuthorized) {
+		t.Fatalf("action gate = %v, want ErrHostNotAuthorized", actionErr)
+	}
+
+	// The transport returns at that error, so Inject never runs. Proving the
+	// header is absent is what the gate is for.
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("Authorization = %q, want the credential never attached", got)
+	}
+}
+
+// TestKubernetesProvider_PublishedAuthorityIsAccepted is the property the
+// derived spellings of the kubeconfig server exist to keep: whatever authority
+// the connector publishes to the operator and the model, used verbatim as a URL
+// authority, has to pass both the host gate and the port gate. Each case runs
+// the real extract-resolve-construct path, so a normalization applied on one
+// side and not the other (case, an IPv6 bracket, an empty port) fails here
+// rather than in the field, which is how cynative#308 shipped.
+func TestKubernetesProvider_PublishedAuthorityIsAccepted(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	servers := []string{
+		"https://10.0.0.1:6443",
+		"https://10.0.0.1",
+		"https://api.example.com:6443",
+		"https://API.Example.COM:6443",
+		"https://[2001:db8::1]:6443",
+		"https://[2001:db8::1]",
+		"https://api.example.com:",
+	}
+	for _, server := range servers {
+		t.Run(server, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := newKubeconfig()
+			cfg.Clusters["c"].Server = server
+
+			sel, err := extractSelected(cfg)
+			if err != nil {
+				t.Fatalf("extractSelected(%q) = %v", server, err)
+			}
+			rc, err := resolveSelected(sel, func(string) ([]byte, error) { return nil, nil })
+			if err != nil {
+				t.Fatalf("resolveSelected(%q) = %v", server, err)
+			}
+
+			p := newKubernetesProvider(rc)
+			p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
+				return k8sauthz.BuildViewPolicy([]k8sauthz.PolicyRule{
+					{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
+				}), nil
+			}
+
+			// The authority as the model would read it out of the system prompt.
+			rawURL := "https://" + rc.authority + "/api/v1/pods"
+
+			u, err := url.Parse(rawURL)
+			if err != nil {
+				t.Fatalf("published authority %q does not parse as a URL: %v", rc.authority, err)
+			}
+
+			// AuthorizeHost lower-cases and passes the port-stripped hostname.
+			ok, err := p.AuthorizesHost(ctx, strings.ToLower(u.Hostname()), noArgs())
+			if err != nil || !ok {
+				t.Fatalf("host gate refused the published authority %q: ok=%v err=%v", rc.authority, ok, err)
+			}
+
+			if err = p.AuthorizeAction(ctx, actionView(t, http.MethodGet, rawURL), noArgs()); err != nil {
+				t.Fatalf("action gate refused the published authority %q: %v", rc.authority, err)
+			}
+		})
+	}
+}
+
+func TestKubernetesProvider_DescriptionNamesTheEndpoint(t *testing.T) {
+	t.Parallel()
+
+	//nolint:exhaustruct // only the endpoint facts the description reads.
+	p := newKubernetesProvider(resolvedCluster{host: "k3s.example", authority: "k3s.example:6443", port: "6443"})
+	if !strings.Contains(p.Description(), "https://k3s.example:6443") {
+		t.Fatalf("description %q must name the cluster base URL", p.Description())
+	}
+}
+
+// TestKubernetesProvider_AuthorizeAction_port is cynative#308: a cluster whose
+// kubeconfig names :6443 used to accept a request that omitted the port, which
+// was then dialed on 443 and timed out with the credential already attached.
+func TestKubernetesProvider_AuthorizeAction_port(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	newProv := func(t *testing.T, authority, port string) *kubernetesProvider {
+		t.Helper()
+
+		//nolint:exhaustruct // only the cluster facts the action gate reads.
+		p := newKubernetesProvider(resolvedCluster{
+			host: "k3s.example", authority: authority, port: port, mode: credBearer, token: "t",
+		})
+		p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
+			return k8sauthz.BuildViewPolicy([]k8sauthz.PolicyRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
+			}), nil
+		}
+
+		return p
+	}
+
+	tests := []struct {
+		name, authority, port, url string
+		wantAllowed                bool
+	}{
+		{
+			"a request that omits the port is refused", "k3s.example:6443", "6443",
+			"https://k3s.example/api/v1/pods", false,
+		},
+		{
+			"the configured port is allowed", "k3s.example:6443", "6443",
+			"https://k3s.example:6443/api/v1/pods", true,
+		},
+		{
+			"a cluster on the https default allows an omitted port", "k3s.example", "",
+			"https://k3s.example/api/v1/pods", true,
+		},
+		{
+			"a cluster on the https default refuses another port", "k3s.example", "",
+			"https://k3s.example:6443/api/v1/pods", false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := newProv(t, tc.authority, tc.port)
+			err := p.AuthorizeAction(ctx, actionView(t, http.MethodGet, tc.url), noArgs())
+			if tc.wantAllowed {
+				if err != nil {
+					t.Fatalf("AuthorizeAction(%q) = %v, want allowed", tc.url, err)
+				}
+
+				return
+			}
+			if !errors.Is(err, ErrHostNotAuthorized) {
+				t.Fatalf("AuthorizeAction(%q) = %v, want ErrHostNotAuthorized", tc.url, err)
+			}
+			if !strings.Contains(err.Error(), "k3s.example") ||
+				!strings.Contains(err.Error(), defaultedPort(tc.port)) {
+				t.Fatalf("denial %q must name the expected authority", err)
+			}
+		})
+	}
+}
+
 func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 
 	newProv := func() *kubernetesProvider {
-		p := newKubernetesProvider(resolvedCluster{host: "h", mode: credBearer, token: "t"})
+		//nolint:exhaustruct // only the cluster facts the action gate reads.
+		p := newKubernetesProvider(resolvedCluster{
+			host: "h", authority: "h:6443", port: "6443", mode: credBearer, token: "t",
+		})
 		p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
 			return k8sauthz.BuildViewPolicy([]k8sauthz.PolicyRule{
 				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
@@ -764,7 +1085,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		v := actionView(t, http.MethodGet, "https://h/api/v1/namespaces/d/pods")
+		v := actionView(t, http.MethodGet, "https://h:6443/api/v1/namespaces/d/pods")
 		if err := p.AuthorizeAction(ctx, v, noArgs()); err != nil {
 			t.Fatalf("list pods should be allowed: %v", err)
 		}
@@ -774,7 +1095,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		v := actionView(t, http.MethodGet, "https://h/api/v1/nodes")
+		v := actionView(t, http.MethodGet, "https://h:6443/api/v1/nodes")
 		if err := p.AuthorizeAction(ctx, v, noArgs()); !errors.Is(err, k8sauthz.ErrForbidden) {
 			t.Fatalf("get nodes should be ErrForbidden, got %v", err)
 		}
@@ -787,7 +1108,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		p.fetchView = func(context.Context, *KubernetesAuthArgs) (*k8sauthz.ViewPolicy, error) {
 			return nil, errors.New("boom")
 		}
-		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
+		v := actionView(t, http.MethodGet, "https://h:6443/api/v1/pods")
 		if err := p.AuthorizeAction(ctx, v, noArgs()); err == nil {
 			t.Fatal("fetch error must deny (fail closed)")
 		}
@@ -797,7 +1118,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
+		v := actionView(t, http.MethodGet, "https://h:6443/api/v1/pods")
 		args := providerArgs(kubernetesProviderName, `{"kubernetes_auth":{}}`)
 		if err := p.AuthorizeAction(ctx, v, args); err != nil {
 			t.Fatalf("present kubernetes_auth = %v, want nil", err)
@@ -808,7 +1129,7 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 		t.Parallel()
 
 		p := newProv()
-		v := actionView(t, http.MethodGet, "https://h/api/v1/pods")
+		v := actionView(t, http.MethodGet, "https://h:6443/api/v1/pods")
 		if err := p.AuthorizeAction(ctx, v, providerArgs(kubernetesProviderName, `{`)); err == nil {
 			t.Fatal("malformed args must error")
 		}
