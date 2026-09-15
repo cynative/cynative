@@ -883,7 +883,6 @@ func TestKubernetesProvider_WrongPortNeverAttachesTheCredential(t *testing.T) {
 
 	ctx := context.Background()
 
-	//nolint:exhaustruct // only the cluster facts the gates read.
 	p := newKubernetesProvider(resolvedCluster{
 		host: "k3s.example", authority: "k3s.example:6443", port: "6443", mode: credBearer, token: "secret",
 	})
@@ -987,7 +986,6 @@ func TestKubernetesProvider_PublishedAuthorityIsAccepted(t *testing.T) {
 func TestKubernetesProvider_DescriptionNamesTheEndpoint(t *testing.T) {
 	t.Parallel()
 
-	//nolint:exhaustruct // only the endpoint facts the description reads.
 	p := newKubernetesProvider(resolvedCluster{host: "k3s.example", authority: "k3s.example:6443", port: "6443"})
 	if !strings.Contains(p.Description(), "https://k3s.example:6443") {
 		t.Fatalf("description %q must name the cluster base URL", p.Description())
@@ -1005,7 +1003,6 @@ func TestKubernetesProvider_AuthorizeAction_port(t *testing.T) {
 	newProv := func(t *testing.T, authority, port string) *kubernetesProvider {
 		t.Helper()
 
-		//nolint:exhaustruct // only the cluster facts the action gate reads.
 		p := newKubernetesProvider(resolvedCluster{
 			host: "k3s.example", authority: authority, port: port, mode: credBearer, token: "t",
 		})
@@ -1069,7 +1066,6 @@ func TestKubernetesProvider_AuthorizeAction(t *testing.T) {
 	ctx := context.Background()
 
 	newProv := func() *kubernetesProvider {
-		//nolint:exhaustruct // only the cluster facts the action gate reads.
 		p := newKubernetesProvider(resolvedCluster{
 			host: "h", authority: "h:6443", port: "6443", mode: credBearer, token: "t",
 		})

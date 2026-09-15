@@ -60,7 +60,7 @@ func pinnedHTTPClientWithTimeouts(
 	// listener on the pinned address. The dial guard still authorizes that hop's
 	// IP, which is exactly what makes a port-only redirect the gap: nothing below
 	// this client checks the port.
-	return &http.Client{ //nolint:exhaustruct // Transport, Timeout and CheckRedirect set.
+	return &http.Client{
 		Transport: tr,
 		Timeout:   to.overall,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

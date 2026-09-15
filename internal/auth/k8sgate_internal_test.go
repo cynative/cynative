@@ -61,7 +61,7 @@ func TestK8sProviders_expectedPort(t *testing.T) {
 	t.Run("managed connectors pin the https default", func(t *testing.T) {
 		t.Parallel()
 
-		eks := newEKSProvider(aws.Config{}) //nolint:exhaustruct // zero config: only the gate field is read.
+		eks := newEKSProvider(aws.Config{})
 		gke := newGKEProvider(mockTokenSource(&oauth2.Token{}, nil))
 		aks := newAKSProvider(mockCredential(azcore.AccessToken{}, nil), cloud.Configuration{})
 
@@ -77,7 +77,6 @@ func TestK8sProviders_expectedPort(t *testing.T) {
 	t.Run("self-managed takes the kubeconfig port", func(t *testing.T) {
 		t.Parallel()
 
-		//nolint:exhaustruct // only the fields the gate reads.
 		p := newKubernetesProvider(resolvedCluster{host: "k3s", authority: "k3s:6443", port: "6443"})
 		if p.expectedPort != "6443" {
 			t.Errorf("expectedPort = %q, want 6443", p.expectedPort)
@@ -87,7 +86,6 @@ func TestK8sProviders_expectedPort(t *testing.T) {
 	t.Run("a kubeconfig without a port means the https default", func(t *testing.T) {
 		t.Parallel()
 
-		//nolint:exhaustruct // only the fields the gate reads.
 		p := newKubernetesProvider(resolvedCluster{host: "k8s.example", authority: "k8s.example"})
 		if p.expectedPort != "443" {
 			t.Errorf("expectedPort = %q, want 443", p.expectedPort)

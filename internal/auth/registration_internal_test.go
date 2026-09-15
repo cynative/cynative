@@ -478,7 +478,7 @@ func TestRegisterKube_Outcome(t *testing.T) {
 		t.Run("success publishes the authority as the identity: "+tc.name, func(t *testing.T) {
 			t.Parallel()
 			d := stubDeps()
-			d.loadKube = func() (resolvedCluster, error, error) { //nolint:exhaustruct // endpoint facts only.
+			d.loadKube = func() (resolvedCluster, error, error) {
 				return resolvedCluster{host: tc.host, authority: tc.authority, port: tc.port}, nil, nil
 			}
 			out := d.registerKube(false)
