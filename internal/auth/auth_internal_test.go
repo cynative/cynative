@@ -4579,14 +4579,23 @@ func TestAKSProvider_AuthorizesAddr(t *testing.T) {
 func TestAuthorizeAction_BindsThePortOnTheCloudConnectors(t *testing.T) {
 	t.Parallel()
 
+	// github builds its provider from a real, populated table (via
+	// testGithubProvider/okFetch) rather than a bare newGithubProvider with a
+	// nil table source. A nil table source only reaches p.tables.Get on a
+	// mutant with the port guard deleted, and that call panics rather than
+	// returning an error, which would make the row's failure mode a crash
+	// instead of the assertion below.
 	cases := []struct {
-		name     string
-		provider ActionAuthorizer
+		name        string
+		newProvider func(t *testing.T) ActionAuthorizer
 	}{
-		{"github", newGithubProvider("t", exposure.Exposure{}, nil)},
-		{"aws", &awsProvider{}},
-		{"gcp", &gcpProvider{}},
-		{"azure", &azureProvider{}},
+		{"github", func(t *testing.T) ActionAuthorizer {
+			p, _ := testGithubProvider(t, exposure.Exposure{}, okFetch)
+			return p
+		}},
+		{"aws", func(*testing.T) ActionAuthorizer { return &awsProvider{} }},
+		{"gcp", func(*testing.T) ActionAuthorizer { return &gcpProvider{} }},
+		{"azure", func(*testing.T) ActionAuthorizer { return &azureProvider{} }},
 	}
 
 	for _, tc := range cases {
@@ -4602,7 +4611,8 @@ func TestAuthorizeAction_BindsThePortOnTheCloudConnectors(t *testing.T) {
 				Header:      http.Header{},
 			}
 
-			err := tc.provider.AuthorizeAction(context.Background(), v, authreq.ProviderArgs{})
+			provider := tc.newProvider(t)
+			err := provider.AuthorizeAction(context.Background(), v, authreq.ProviderArgs{})
 			if !errors.Is(err, ErrHostNotAuthorized) {
 				t.Fatalf("AuthorizeAction on port 8443 = %v, want ErrHostNotAuthorized", err)
 			}
