@@ -69,8 +69,8 @@ func pathEndsWith(path string, want []string) bool {
 // stripFormatSuffix removes a trailing Rails ".:format" suffix (the part after the
 // last '.') from a path segment, so "graphql.json" matches the "graphql" endpoint.
 func stripFormatSuffix(seg string) string {
-	if i := strings.LastIndexByte(seg, '.'); i >= 0 {
-		return seg[:i]
+	if before, _, ok := strings.CutLast(seg, "."); ok {
+		return before
 	}
 
 	return seg

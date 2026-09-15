@@ -161,7 +161,9 @@ type Config struct {
 func DefaultConfig() Config {
 	var cfg Config
 
-	// defaults.Set cannot fail on simple string fields.
+	// defaults.Set errors only on an argument that is not a struct pointer or on
+	// a default tag it cannot parse. Config is a struct pointer and every tag on
+	// it is a literal that parses, so neither error is reachable here.
 	_ = defaults.Set(&cfg)
 
 	return cfg

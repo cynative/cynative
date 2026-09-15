@@ -15,7 +15,7 @@ import (
 // misconfiguration, not every one.
 //
 // Two providers form the closed required set. Re-verified against
-// github.com/maximhq/bifrost/core@v1.8.5, where the failure mode is not a panic:
+// github.com/maximhq/bifrost/core@v1.8.6, where the failure mode is not a panic:
 // validateKey (utils.go:174) rejects the key, key selection logs a warning and
 // skips it (bifrost.go:9012-9014), and the request then fails at bifrost.go:9033
 // with "no keys found that support model: X", naming neither the provider nor

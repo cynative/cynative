@@ -232,8 +232,8 @@ func has(m map[string]json.RawMessage, k string) bool {
 
 // shortName converts "com.amazonaws.s3#ListBuckets" → "ListBuckets".
 func shortName(fqName string) string {
-	if i := strings.LastIndex(fqName, "#"); i >= 0 {
-		return fqName[i+1:]
+	if _, after, ok := strings.CutLast(fqName, "#"); ok {
+		return after
 	}
 	return fqName
 }
