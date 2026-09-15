@@ -229,10 +229,12 @@ func (c *Client) do(
 
 	// Checked on the raw hostname, before anything lower-cases it: Go's case
 	// mapping and the IDNA conversion the client applies before it dials do not
-	// agree on every host, so a host normalized here could be classified under
-	// a name the wire never reaches. Same class as #243 and #247.
-	if asciiErr := auth.ASCIIHost(req.URL.Hostname()); asciiErr != nil {
-		return nil, 0, noop, fmt.Errorf("http_request: %w", asciiErr)
+	// agree on every host, and an IP zone identifier is matched exactly rather
+	// than case-insensitively, so a host normalized here could be classified as
+	// a name, or an interface, that the wire never reaches. Same class as #243
+	// and #247.
+	if admitErr := auth.AdmitHost(req.URL.Hostname()); admitErr != nil {
+		return nil, 0, noop, fmt.Errorf("http_request: %w", admitErr)
 	}
 
 	// rawArgs is needed by AuthorizeHost, auth.Inject, and configureTransport,

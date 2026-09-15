@@ -679,21 +679,26 @@ func TestValidateGitLabHosts(t *testing.T) {
 		name    string
 		host    string
 		apiHost string
-		wantErr bool
+		want    error // nil when the authority is admitted.
 	}{
-		{"plain host", "gitlab.com", "", false},
-		{"host with port", "gitlab.internal:8443", "", false},
-		{"punycode host", "xn--i-9bb.example", "", false},
-		{"empty api host is allowed", "gitlab.com", "", false},
-		{"ASCII host and api host both set", "gitlab.internal", "api.gitlab.internal", false},
-		{"non-ASCII served host", "g\u0130tlab.internal.example", "", true},
-		{"non-ASCII served api host", "gitlab.com", "api.g\u0130tlab.example", true},
+		{"plain host", "gitlab.com", "", nil},
+		{"host with port", "gitlab.internal:8443", "", nil},
+		{"punycode host", "xn--i-9bb.example", "", nil},
+		{"empty api host is allowed", "gitlab.com", "", nil},
+		{"ASCII host and api host both set", "gitlab.internal", "api.gitlab.internal", nil},
+		{"bracketed ipv6 host with no zone", "[2001:db8::1]:8443", "", nil},
+		{"non-ASCII served host", "g\u0130tlab.internal.example", "", ErrNonASCIIHost},
+		{"non-ASCII served api host", "gitlab.com", "api.g\u0130tlab.example", ErrNonASCIIHost},
+		// A zone is stripped of its brackets and its port like any other host,
+		// so the served authority reaching AdmitHost still carries it.
+		{"zoned served host", "[fe80::1%eth0]:8443", "", ErrZonedHost},
+		{"zoned served api host", "gitlab.com", "[fe80::1%eth0]:8443", ErrZonedHost},
 		// api_host is what gets pinned, advertised, probed and dialed, so an
 		// ASCII api_host leaves nothing non-ASCII on the request path even when
 		// host is an internationalized name.
 		{
 			"non-ASCII host behind an ASCII api host",
-			"gitlab.b\u00fccher.example", "gitlab.xn--bcher-kva.example", false,
+			"gitlab.b\u00fccher.example", "gitlab.xn--bcher-kva.example", nil,
 		},
 	}
 
@@ -702,13 +707,9 @@ func TestValidateGitLabHosts(t *testing.T) {
 			t.Parallel()
 
 			err := validateGitLabHosts(tc.host, tc.apiHost)
-			if gotErr := err != nil; gotErr != tc.wantErr {
-				t.Fatalf("validateGitLabHosts(%q, %q) = %v, want error %v",
-					tc.host, tc.apiHost, err, tc.wantErr)
-			}
-			if tc.wantErr && !errors.Is(err, ErrNonASCIIHost) {
-				t.Fatalf("validateGitLabHosts(%q, %q) = %v, want ErrNonASCIIHost",
-					tc.host, tc.apiHost, err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("validateGitLabHosts(%q, %q) = %v, want %v",
+					tc.host, tc.apiHost, err, tc.want)
 			}
 		})
 	}

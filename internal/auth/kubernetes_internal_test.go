@@ -402,27 +402,33 @@ func TestRejectUnsafe_diagnosticsCarryNoCredential(t *testing.T) {
 	}
 }
 
-// TestRejectUnsafe_nonASCIIHost pins the fail-closed rule for internationalized
-// hostnames: a name outside ASCII has more than one spelling, and the ones that
-// matter here disagree. Go maps U+0130 to a plain "i" when lower-casing, while
-// the HTTP client's IDNA conversion maps it to "xn--i-9bb", so a lower-cased
-// authority would name a different DNS host than the one the operator wrote and
-// the credential would be sent there.
-func TestRejectUnsafe_nonASCIIHost(t *testing.T) {
+// TestRejectUnsafe_hostAdmission pins the fail-closed rule for a server host
+// that has more than one spelling, and the ones that matter here disagree. Go
+// maps U+0130 to a plain "i" when lower-casing, while the HTTP client's IDNA
+// conversion maps it to "xn--i-9bb", so a lower-cased authority would name a
+// different DNS host than the one the operator wrote and the credential would
+// be sent there. A zone identifier disagrees for a different reason: the
+// authority the gate admits is lower-cased and the interface the kernel picks
+// is matched exactly.
+func TestRejectUnsafe_hostAdmission(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct{ name, server string }{
-		{"unicode host", "https://\u0130.example:6443"},
-		{"percent-encoded unicode host", "https://%C4%B0.example:6443"},
-		{"eszett", "https://stra\u00dfe.example:6443"},
+	tests := []struct {
+		name, server string
+		want         error
+	}{
+		{"unicode host", "https://\u0130.example:6443", ErrNonASCIIHost},
+		{"percent-encoded unicode host", "https://%C4%B0.example:6443", ErrNonASCIIHost},
+		{"eszett", "https://stra\u00dfe.example:6443", ErrNonASCIIHost},
+		{"zoned link-local server", "https://[fe80::1%25eth0]:6443", ErrZonedHost},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			_, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
-			if !errors.Is(err, ErrNonASCIIHost) {
-				t.Fatalf("rejectUnsafe(%q) = %v, want ErrNonASCIIHost", tc.server, err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("rejectUnsafe(%q) = %v, want %v", tc.server, err, tc.want)
 			}
 			// The connector wraps the shared rule so the operator is told which
 			// setting to fix; a bare delegation would lose that.
@@ -432,19 +438,23 @@ func TestRejectUnsafe_nonASCIIHost(t *testing.T) {
 		})
 	}
 
-	t.Run("an already-punycoded host is accepted", func(t *testing.T) {
-		t.Parallel()
+	accepted := []struct{ name, server, wantAuthority string }{
+		{"an already-punycoded host", "https://xn--i-9bb.example:6443", "xn--i-9bb.example:6443"},
+		{"an ipv6 literal with no zone", "https://[2001:db8::1]:6443", "[2001:db8::1]:6443"},
+	}
+	for _, tc := range accepted {
+		t.Run(tc.name+" is accepted", func(t *testing.T) {
+			t.Parallel()
 
-		const server = "https://xn--i-9bb.example:6443"
-
-		u, err := rejectUnsafe(&clientcmdapi.Cluster{Server: server}, &clientcmdapi.AuthInfo{Token: "t"})
-		if err != nil {
-			t.Fatalf("rejectUnsafe(%q) = %v, want accepted", server, err)
-		}
-		if got := clusterTargetOf(u).authority; got != "xn--i-9bb.example:6443" {
-			t.Fatalf("authority = %q, want the punycode spelling unchanged", got)
-		}
-	})
+			u, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
+			if err != nil {
+				t.Fatalf("rejectUnsafe(%q) = %v, want accepted", tc.server, err)
+			}
+			if got := clusterTargetOf(u).authority; got != tc.wantAuthority {
+				t.Fatalf("authority = %q, want %q unchanged", got, tc.wantAuthority)
+			}
+		})
+	}
 }
 
 func TestRejectUnsafe_serverPort(t *testing.T) {

@@ -31,12 +31,14 @@ func readCACertBase64(path string) (string, error) {
 }
 
 // buildGitLabProvider constructs the gitlabProvider for an already-discovered
-// (non-empty) credential. It returns (nil, error) when the served host is not
-// ASCII (validateGitLabHosts) or a configured ca_cert is unreadable, both of
-// which gitlabOutcome surfaces as a visible unavailable status, and
-// (provider, nil) otherwise. The token source is static for an env/PAT
-// credential and a caching glab-helper source for a glab OAuth credential
-// (newTokenSource).
+// (non-empty) credential. It returns (nil, error) when the served host is one
+// [AdmitHost] refuses (validateGitLabHosts) or a configured ca_cert is
+// unreadable, both of which gitlabOutcome surfaces as a visible unavailable
+// status, and (provider, nil) otherwise. gitlabOutcome admits the same
+// authority before it discovers the credential, so on that path this is the
+// second of two checks; it sits here so the rule does not rest on the caller.
+// The token source is static for an env/PAT credential and a caching
+// glab-helper source for a glab OAuth credential (newTokenSource).
 func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
 	if err := validateGitLabHosts(host, cfg.APIHost); err != nil {
 		return nil, err

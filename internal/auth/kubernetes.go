@@ -115,7 +115,7 @@ func rejectUnsafe(cl *clientcmdapi.Cluster, ai *clientcmdapi.AuthInfo) (*url.URL
 		return nil, errors.New("kubernetes: server URL must not embed credentials")
 	}
 
-	if err = asciiHost(u.Hostname()); err != nil {
+	if err = admitHost(u.Hostname()); err != nil {
 		return nil, err
 	}
 
@@ -126,12 +126,13 @@ func rejectUnsafe(cl *clientcmdapi.Cluster, ai *clientcmdapi.AuthInfo) (*url.URL
 	return u, nil
 }
 
-// asciiHost rejects an internationalized server hostname for the reason
-// [ASCIIHost] documents: the authority the connector publishes and dials would
-// name a different DNS host than the one the operator wrote, and the credential
-// would follow it there. A name already written in punycode is ASCII and passes.
-func asciiHost(host string) error {
-	if err := ASCIIHost(host); err != nil {
+// admitHost rejects a server hostname that [AdmitHost] does not admit, for the
+// reason it documents: the authority the connector publishes and dials would
+// name a different host, or a different local interface, than the one the
+// operator wrote, and the credential would follow it there. A name already
+// written in punycode is ASCII and passes, as does an IP literal with no zone.
+func admitHost(host string) error {
+	if err := AdmitHost(host); err != nil {
 		return fmt.Errorf("kubernetes: server URL: %w", err)
 	}
 

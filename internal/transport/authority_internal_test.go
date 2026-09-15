@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"unicode"
+	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -90,32 +90,39 @@ func (p *authoritySpyProvider) InjectAuth(req *http.Request, args authreq.Provid
 // The Unicode hosts are written as \u escapes so a row stays readable in a
 // diff and no editor can silently rewrite one; the percent-encoded row is ASCII
 // as written and only becomes a non-ASCII host once [url.Parse] decodes it. Every
-// host is under .example, which RFC 6761 reserves from registration, so no row
+// name here is under .example, which RFC 6761 reserves from registration, so no row
 // can resolve to a domain someone else has registered; that reservation binds
 // registries, not resolvers, so a hijacking or wildcard resolver could still
-// answer for one of these hosts. Under a mutation that admits these hosts, the
-// suite dials whatever answers, with a credential attached.
+// answer for one of these hosts. The one address literal is under 2001:db8::/32,
+// which RFC 3849 reserves for documentation. Under a mutation that admits these
+// hosts, the suite dials whatever answers, with a credential attached.
 func TestAuthorityInvariant(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		host string // substituted for the test server's host; "" keeps the server's own.
-		want string // "refused", "admitted" or "sent".
+		name     string
+		host     string // substituted for the test server's host; "" keeps the server's own.
+		want     string // "refused", "admitted" or "sent".
+		sentinel error  // the admission sentinel a "refused" row must report.
 	}{
-		{"plain ascii reaches the server", "", "sent"},
-		{"U+0130 folds to ascii", "\u0130.example", "refused"},
-		{"U+212A folds to ascii", "g\u212athub.example", "refused"},
-		{"non-folding unicode", "stra\u00dfe.example", "refused"},
-		{"non-breaking space", "space.example\u00a0", "refused"},
-		{"ideographic space", "space.example\u3000", "refused"},
+		{"plain ascii reaches the server", "", "sent", nil},
+		{"U+0130 folds to ascii", "\u0130.example", "refused", auth.ErrNonASCIIHost},
+		{"U+212A folds to ascii", "g\u212athub.example", "refused", auth.ErrNonASCIIHost},
+		{"non-folding unicode", "stra\u00dfe.example", "refused", auth.ErrNonASCIIHost},
+		{"non-breaking space", "space.example\u00a0", "refused", auth.ErrNonASCIIHost},
+		{"ideographic space", "space.example\u3000", "refused", auth.ErrNonASCIIHost},
 		// A raw invalid byte cannot survive the arguments: they are JSON, and
 		// both the marshal in makeArgs and the unmarshal in do replace a bad
 		// byte with U+FFFD. Percent-encoding is how one actually arrives, and
 		// it is pure ASCII until [url.Parse] decodes the host.
-		{"replacement rune in the host", "exa\ufffdmple.example", "refused"},
-		{"percent-encoded invalid byte", "exa%FFmple.example", "refused"},
-		{"punycode is admitted", "xn--i-9bb.example", "admitted"},
+		{"replacement rune in the host", "exa\ufffdmple.example", "refused", auth.ErrNonASCIIHost},
+		{"percent-encoded invalid byte", "exa%FFmple.example", "refused", auth.ErrNonASCIIHost},
+		// The zone survives every ASCII rule intact and is still not one
+		// spelling: the gates are handed "%eth0" and the dial keeps "%ETH0".
+		// "%25" is how a zone is written in a URL, so this row is ASCII as
+		// typed and carries the zone only once [url.Parse] has decoded it.
+		{"mixed-case ipv6 zone", "[2001:db8::1%25ETH0]", "refused", auth.ErrZonedHost},
+		{"punycode is admitted", "xn--i-9bb.example", "admitted", nil},
 	}
 
 	for _, tc := range cases {
@@ -150,7 +157,7 @@ func TestAuthorityInvariant(t *testing.T) {
 			// asserting nothing: it runs the strictest of the three instead.
 			switch tc.want {
 			case "refused":
-				assertRefused(t, tc.host, err, p)
+				assertRefused(t, tc.host, tc.sentinel, err, p)
 			case "admitted":
 				assertAdmitted(t, tc.host, err, p)
 			default:
@@ -160,21 +167,23 @@ func TestAuthorityInvariant(t *testing.T) {
 	}
 }
 
-// assertRefused checks that the host was turned away by the admission rule,
-// that the credential never went out, and that no gate ever classified the
-// host. The last two are what make the position of the rule observable rather
-// than only its presence: move the rule down and the gate has already been
-// handed a folded spelling of a name the wire would never carry.
+// assertRefused checks that the host was turned away by the admission rule
+// under the sentinel its row named, that the credential never went out, and
+// that no gate ever classified the host. The last two are what make the
+// position of the rule observable rather than only its presence: move the rule
+// down and the gate has already been handed a folded spelling of a name the
+// wire would never carry.
 //
 // The order of the three is deliberate, so that each one is the first to fire
 // for some way of getting this wrong: deleting the rule leaves the sentinel
 // check, moving it below Inject leaks the credential, and moving it anywhere
-// between the gates leaks the classification.
-func assertRefused(t *testing.T, host string, err error, p *authoritySpyProvider) {
+// between the gates leaks the classification. A row that names no sentinel
+// fails the first check, since no error is [errors.Is] a nil target.
+func assertRefused(t *testing.T, host string, sentinel, err error, p *authoritySpyProvider) {
 	t.Helper()
 
-	if !errors.Is(err, auth.ErrNonASCIIHost) {
-		t.Fatalf("host %q: Execute = %v, want auth.ErrNonASCIIHost", host, err)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("host %q: Execute = %v, want %v", host, err, sentinel)
 	}
 	if p.injected {
 		t.Fatalf("host %q was refused, but the credential was attached first", host)
@@ -186,14 +195,14 @@ func assertRefused(t *testing.T, host string, err error, p *authoritySpyProvider
 }
 
 // assertAdmitted checks that the host cleared the admission rule. Punycode is
-// ASCII, so it is admitted and then fails at DNS or the dial, which is expected.
-// The credential check keeps the row honest: without it a rule that rejected
-// punycode under some other error would pass silently.
+// ASCII and names no interface, so it is admitted and then fails at DNS or the
+// dial, which is expected. The credential check keeps the row honest: without
+// it a rule that rejected punycode under some other error would pass silently.
 func assertAdmitted(t *testing.T, host string, err error, p *authoritySpyProvider) {
 	t.Helper()
 
-	if errors.Is(err, auth.ErrNonASCIIHost) {
-		t.Fatalf("host %q was refused as non-ASCII", host)
+	if errors.Is(err, auth.ErrNonASCIIHost) || errors.Is(err, auth.ErrZonedHost) {
+		t.Fatalf("host %q was refused by the admission rule: %v", host, err)
 	}
 	if !p.injected {
 		t.Fatalf("host %q never reached the credential: Execute = %v", host, err)
@@ -261,12 +270,16 @@ func equalAuthority(authorized, wire string) bool {
 	return strings.ToLower(ah) == strings.ToLower(wh) && ap == wp
 }
 
-// asciiOnly reports whether s is all ASCII. Ranging over the string decodes
-// invalid UTF-8 to U+FFFD, which is above U+007F, so malformed bytes are
-// rejected too. It mirrors [auth.ASCIIHost], the rule under test.
+// asciiOnly reports whether s is all ASCII. It mirrors the ASCII half of
+// [auth.AdmitHost], the rule under test, and scans bytes the same way: a byte
+// of 0x80 or above belongs either to a rune above U+007F or to a malformed
+// sequence, and neither is admitted, so no decoding step is involved on either
+// side. The zone half of the rule is not mirrored here, because a zoned host
+// never reaches this oracle: the rule refuses it and the row asserts the
+// refusal instead.
 func asciiOnly(s string) bool {
-	for _, r := range s {
-		if r > unicode.MaxASCII {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
 			return false
 		}
 	}

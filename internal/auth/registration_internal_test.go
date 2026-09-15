@@ -772,6 +772,73 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 	})
 }
 
+// TestGitlabOutcome_HostAdmissionPrecedesDiscovery pins where the served
+// authority is admitted, not only that it is. discoverGitLab hands that
+// authority to glab as GITLAB_API_HOST, and glabLoginHost passes it as
+// GITLAB_HOST too whenever the config host is the default, so a check that ran
+// only inside buildGitLab would let the operator's credential store be queried
+// for a host this system will not talk to.
+//
+// The discovery stub records the call rather than failing inside itself, so
+// each way of getting this wrong fails on its own assertion: move the check
+// back below discovery and discovered goes true; delete it and the default
+// stubs carry the run through to an Available status.
+func TestGitlabOutcome_HostAdmissionPrecedesDiscovery(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"non-ASCII host": "g\u0130tlab.example",
+		"zoned host":     "[fe80::1%eth0]:8443",
+	}
+
+	for name, host := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := stubDeps()
+
+			discovered := false
+			d.discoverGitLab = func(string, string) (glabCredential, error) {
+				discovered = true
+
+				return glabCredential{AccessToken: "glpat-x"}, nil //nolint:exhaustruct // env PAT.
+			}
+
+			got := d.gitlabOutcome(
+				context.Background(),
+				GitLabHardeningConfig{Host: host}, //nolint:exhaustruct // host is the whole point.
+				false,
+			)
+
+			wantLoudSkip(t, got)
+			if discovered {
+				t.Fatalf("host %q reached the credential store before it was admitted", host)
+			}
+			if reason := got.statuses[0].Reason; !strings.Contains(reason, "host admission failed") {
+				t.Fatalf("reason %q must name the admission failure", reason)
+			}
+		})
+	}
+}
+
+// TestGitlabOutcome_AdmittedHostStillDiscovers is the false-denial half: the
+// admission call added above must not turn an ordinary configuration away. A
+// self-managed instance on a non-default port is the case with the most moving
+// parts, since the served authority carries a port that the host itself does
+// not.
+func TestGitlabOutcome_AdmittedHostStillDiscovers(t *testing.T) {
+	t.Parallel()
+
+	d := stubDeps()
+	//nolint:exhaustruct // the two hosts are the whole configuration under test.
+	cfg := GitLabHardeningConfig{Host: "gitlab.internal:8443", APIHost: "api.gitlab.internal:8443"}
+	got := d.gitlabOutcome(context.Background(), cfg, false)
+
+	if len(got.providers) != 1 || !got.statuses[0].Available {
+		t.Fatalf("want an available gitlab provider, got %+v", got)
+	}
+}
+
 func TestRegisterAWS_ScopeDegraded_rendersDisabledStillAvailable(t *testing.T) {
 	t.Parallel()
 	d := stubDeps()

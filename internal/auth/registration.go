@@ -411,17 +411,31 @@ func (d *registrationDeps) githubOutcome(
 	}
 }
 
-// gitlabOutcome discovers the gitlab token (env or glab config) and, when present,
-// builds the provider and eagerly validates the token with a dial-guarded GET
-// /api/v4/user before registering — so Available means validated-live this startup
-// and the identity is the @username. A genuinely absent token is a quiet ambient
-// skip; an unreadable ca_cert is a LOUD config skip; a present-but-invalid token is
-// a LOUD skip (a transient probe error is retried, then escalated loud).
+// gitlabOutcome admits the served authority, discovers the gitlab token (env or
+// glab config) and, when present, builds the provider and eagerly validates the
+// token with a dial-guarded GET /api/v4/user before registering — so Available
+// means validated-live this startup and the identity is the @username. A
+// genuinely absent token is a quiet ambient skip; a served authority this system
+// does not admit and an unreadable ca_cert are LOUD config skips; a
+// present-but-invalid token is a LOUD skip (a transient probe error is retried,
+// then escalated loud).
 func (d *registrationDeps) gitlabOutcome(
 	ctx context.Context, glCfg GitLabHardeningConfig, verbose bool,
 ) connectorOutcome {
 	host := resolveGitLabHost(glCfg.Host)
 	served := servedHostOf(host, glCfg.APIHost)
+
+	// Admission runs before discovery, not only inside buildGitLab: discoverGitLab
+	// hands the served authority straight to glab as GITLAB_API_HOST, and
+	// glabLoginHost passes the same value as GITLAB_HOST whenever the config host
+	// is the default, so a rejection that waited for the build would arrive after
+	// the operator's credential store had already been queried for that host. The
+	// constructor checks again, so the rule does not rest on this call site
+	// alone.
+	if err := validateGitLabHosts(host, glCfg.APIHost); err != nil {
+		return skipOutcome(gitlabProviderName, true, verbose, emitAlways,
+			fmt.Sprintf("gitlab_hardening: skipped (host admission failed): %v", err))
+	}
 
 	loginHost := glabLoginHost(glCfg.Host, glCfg.APIHost)
 	// Pass the served authority (api_host when set, else host, including any :port) as the

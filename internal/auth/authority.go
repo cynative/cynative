@@ -3,7 +3,8 @@ package auth
 import (
 	"errors"
 	"fmt"
-	"unicode"
+	"net/netip"
+	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 )
@@ -48,7 +49,7 @@ func authorizeRequestPort(v authreq.View, want string) error {
 	return nil
 }
 
-// ErrNonASCIIHost is returned for a host carrying a rune above U+007F. Such a
+// ErrNonASCIIHost is returned for a host carrying a byte outside ASCII. Such a
 // name has more than one spelling and the spellings do not agree: Go's case
 // mapping, the IDNA conversion the HTTP client applies before it dials, and the
 // conversion it applies to the Host header are three different transforms. A
@@ -56,20 +57,51 @@ func authorizeRequestPort(v authreq.View, want string) error {
 // Punycode is ASCII and is unaffected. Same class as #243 and #247.
 var ErrNonASCIIHost = errors.New("host is not ASCII")
 
-// ASCIIHost rejects a host containing a rune above U+007F. It is the one
-// admission rule behind the authority invariant, and its guarantee is narrow:
-// it removes the Unicode case-folding and the IDNA ambiguity, so lower-casing
-// an admitted host cannot produce a name other than the one the client
-// resolves and sends, up to ASCII case. It does not make every wire transform
-// an identity. A bracketed IPv6 literal carrying a zone is ASCII and is
-// admitted, and Go's HTTP/1 writer still drops the zone from the Host header.
-// Ranging over the string decodes invalid UTF-8 to U+FFFD, which is above
-// U+007F, so malformed bytes are rejected too. Pure: no I/O.
-func ASCIIHost(host string) error {
-	for _, r := range host {
-		if r > unicode.MaxASCII {
+// ErrZonedHost is returned for a host that is an IP literal carrying a zone
+// identifier, as in "fe80::1%eth0". A zone names a local interface and the
+// kernel matches that name exactly, so it is the one part of an ASCII
+// authority that is case-sensitive. The gates classify a lower-cased hostname
+// while the dial keeps the spelling the caller wrote, so "%ETH0" would be
+// authorized as "%eth0" and dialed on whatever "%ETH0" names. Admitting ASCII
+// case as a difference that changes nothing is what the rest of this rule
+// rests on, and the zone is where that stops being true.
+var ErrZonedHost = errors.New("host carries an IP zone identifier")
+
+// AdmitHost is the one admission rule behind the authority invariant: it
+// admits a host only when that host has a single spelling this system can both
+// authorize and send. It turns away two shapes, each under its own sentinel,
+// and its guarantee is narrow. An admitted host survives lower-casing as the
+// same name the client resolves and sends, which does not make every wire
+// transform an identity.
+//
+// ErrNonASCIIHost covers a byte of 0x80 or above. That removes the Unicode
+// case-folding and the IDNA ambiguity, the transforms that can turn one
+// written name into two different resolved ones. The scan is over bytes rather
+// than runes and the two reject the same strings, in both directions: a rune
+// above U+007F encodes as bytes that are each 0x80 or above, so every string a
+// rune scan rejects has such a byte; and no byte of 0x80 or above belongs to a
+// rune at or below U+007F, so every string a byte scan rejects holds either a
+// rune above U+007F or a malformed sequence. The byte scan needs no U+FFFD
+// substitution to reject the malformed case, which a range loop would rely on.
+//
+// ErrZonedHost covers an IP literal with a zone. Go's resolver treats a host
+// as a zoned literal exactly when [netip.ParseAddr] parses it with a non-empty
+// zone (net.Resolver.lookupIPAddr), so that is the test here and not a search
+// for "%". The two differ: a percent also reaches a hostname as an escape that
+// survived parsing, as in the host of "https://api.%25.com/x", which names no
+// interface and has no case-sensitive part for this rule to turn away.
+//
+// The order of the two only decides the diagnostic: a zone holding a non-ASCII
+// byte is reported as non-ASCII, which it also is. Pure: no I/O.
+func AdmitHost(host string) error {
+	for i := range len(host) {
+		if host[i] >= utf8.RuneSelf {
 			return fmt.Errorf("%w: %q; write an internationalized name in punycode", ErrNonASCIIHost, host)
 		}
+	}
+
+	if addr, err := netip.ParseAddr(host); err == nil && addr.Zone() != "" {
+		return fmt.Errorf("%w: %q; address the host without a zone suffix", ErrZonedHost, host)
 	}
 
 	return nil
