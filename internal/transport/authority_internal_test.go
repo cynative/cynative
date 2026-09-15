@@ -27,8 +27,9 @@ var (
 // undecodableCA is a CA value that is not base64, so [auth.BuildTLSConfig]
 // fails to decode it and configureTransport returns the failure. [Client.do]
 // reaches configureTransport after Inject and before it hands the request to
-// the client, so a row carrying this one ends there: every gate and the
-// credential have run, and no name was ever resolved.
+// the client, so a row that CLEARS admission ends there with every gate and the
+// credential already run and no name resolved. A row that admission refuses
+// never gets that far, which is what its own assertion checks.
 const undecodableCA = "!"
 
 // authoritySpyProvider records the authority each gate was handed and whether
@@ -118,16 +119,19 @@ func (p *authoritySpyProvider) ServerNameData(_ context.Context, _ authreq.Provi
 //
 // The Unicode hosts are written as \u escapes so a row stays readable in a
 // diff and no editor can silently rewrite one; the percent-encoded row is ASCII
-// as written and only becomes a non-ASCII host once [url.Parse] decodes it. Every
-// name here is under .example, which RFC 6761 reserves from registration, so no row
-// can resolve to a domain someone else has registered; that reservation binds
-// registries, not resolvers, so a hijacking or wildcard resolver could still
-// answer for one of these hosts. The one address literal is under 2001:db8::/32,
-// which RFC 3849 reserves for documentation. None of them can reach a resolver
-// even so: only a row that means to reach the test server is handed a CA that
-// decodes, so a mutation that admitted one of these hosts ends the run in
-// configureTransport rather than dialing whatever answers with a credential
-// attached.
+// as written and only becomes a non-ASCII host once [url.Parse] decodes it.
+//
+// Every name a row expects to be turned away is under .example, which RFC 6761
+// reserves from registration, so none can name a domain someone else has
+// registered; that reservation binds registries rather than resolvers, so a
+// hijacking or wildcard resolver could still answer for one. The one address
+// literal is under 2001:db8::/32, which RFC 3849 reserves for documentation.
+// None of them reaches a resolver even so, because only a row that means to
+// reach the test server is handed a CA that decodes: a mutation that admitted
+// one of these hosts ends the run in configureTransport rather than dialing
+// whatever answers, with a credential attached. The rows that do reach the
+// server name the loopback interface, so they resolve from the hosts file and
+// never leave the machine.
 func TestAuthorityInvariant(t *testing.T) {
 	t.Parallel()
 
