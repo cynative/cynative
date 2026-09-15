@@ -421,8 +421,13 @@ func TestRejectUnsafe_nonASCIIHost(t *testing.T) {
 			t.Parallel()
 
 			_, err := rejectUnsafe(&clientcmdapi.Cluster{Server: tc.server}, &clientcmdapi.AuthInfo{Token: "t"})
-			if err == nil {
-				t.Fatalf("rejectUnsafe(%q) = nil, want a non-ASCII host rejection", tc.server)
+			if !errors.Is(err, ErrNonASCIIHost) {
+				t.Fatalf("rejectUnsafe(%q) = %v, want ErrNonASCIIHost", tc.server, err)
+			}
+			// The connector wraps the shared rule so the operator is told which
+			// setting to fix; a bare delegation would lose that.
+			if !strings.HasPrefix(err.Error(), "kubernetes: server URL: ") {
+				t.Fatalf("rejectUnsafe(%q) = %v, want the kubernetes: server URL: prefix", tc.server, err)
 			}
 		})
 	}

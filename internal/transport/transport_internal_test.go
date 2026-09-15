@@ -2545,23 +2545,23 @@ func TestRequestConstructionRejectsMalformedPort(t *testing.T) {
 	}
 }
 
+// TestExecute_RejectsNonASCIIHost pins the rejection and its position at once.
+// denyProvider refuses every host, so ErrNonASCIIHost can only come back while
+// the ASCII admission check still runs ahead of AuthorizeHost; move it below and
+// the error is ErrHostNotAuthorized, raised for a host the gate had already
+// folded to a name the request never carried.
 func TestExecute_RejectsNonASCIIHost(t *testing.T) {
 	t.Parallel()
-
-	srv, providers := newTLSTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
-		t.Error("server must never be hit when the host is not ASCII")
-	})
-	t.Cleanup(srv.Close)
 
 	// U+0130 lower-cases to a plain ASCII "i", so the gate would classify this
 	// as "i.example" while net/http dials "xn--i-9bb.example".
 	args := makeArgs(t, map[string]any{
 		"url":           "https://İ.example/p",
-		"auth_provider": "loopback",
+		"auth_provider": "deny",
 	})
 
-	_, _, err := NewClient().Execute(context.Background(), args, providers)
+	_, _, err := NewClient().Execute(context.Background(), args, []auth.Provider{&denyProvider{}})
 	if !errors.Is(err, auth.ErrNonASCIIHost) {
-		t.Fatalf("Execute = %v, want auth.ErrNonASCIIHost", err)
+		t.Fatalf("Execute = %v, want auth.ErrNonASCIIHost before any provider gate runs", err)
 	}
 }
