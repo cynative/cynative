@@ -57,9 +57,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 		return errors.New("gcp_hardening: gcp_auth.service is required")
 	}
 
-	isWWW := v.Hostname == wwwGoogleapisHost
-
-	service, err := p.resolveService(ctx, v)
+	service, isWWW, err := p.resolveService(ctx, v)
 	if err != nil {
 		return err
 	}
@@ -97,21 +95,26 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 }
 
 // resolveService derives the service from the request HOST only, handling the
-// www.googleapis.com compound case by falling back to path-based resolution.
-func (p *Provider) resolveService(ctx context.Context, v authreq.View) (string, error) {
+// www.googleapis.com compound by resolving from the path. It also reports
+// whether the host was that compound, because the caller's claim check keys on
+// the same decision: computing it from the raw hostname instead let a trailing
+// dot, which ParseHost normalizes away, skip the check entirely.
+func (p *Provider) resolveService(ctx context.Context, v authreq.View) (string, bool, error) {
 	parsed, err := ParseHost(v.Hostname)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	if parsed.Service == wwwCompoundSentinel {
 		svc, ok := p.catalog.ResolveWWWService(ctx, v.Path)
 		if !ok {
-			return "", fmt.Errorf("%w: %q (www path service not in catalog)", ErrHostPattern, v.Path)
+			return "", true, fmt.Errorf("%w: %q (www path service not in catalog)", ErrHostPattern, v.Path)
 		}
 
-		return svc, nil
+		return svc, true, nil
 	}
 
-	return p.catalog.ResolveService(ctx, parsed, v.Hostname)
+	svc, err := p.catalog.ResolveService(ctx, parsed, v.Hostname)
+
+	return svc, false, err
 }

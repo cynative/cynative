@@ -733,3 +733,33 @@ func TestProviderAuthorizeActionContainerReadDenied(t *testing.T) {
 		t.Fatalf("clusters.get under an empty role should be ErrPermissionDenied, got %v", err)
 	}
 }
+
+// TestAuthorizeAction_TrailingDotStillChecksTheServiceClaim proves resolveService
+// reports isWWW from the same parse that resolves the service, so a trailing dot
+// (which ParseHost trims) cannot make AuthorizeAction skip the gcp_auth.service
+// claim check. www.googleapis.com resolves its service from the path, so the
+// claim check is the only thing tying gcp_auth.service to the request.
+func TestAuthorizeAction_TrailingDotStillChecksTheServiceClaim(t *testing.T) {
+	t.Parallel()
+
+	// buildProvider's catalog resolves oauth2 from its servicePath "oauth2/v2/",
+	// so a path under it exercises ResolveWWWService without widening the helper.
+	v := authreq.View{
+		Method:      http.MethodGet,
+		Hostname:    "www.googleapis.com.",
+		Path:        "/oauth2/v2/tokeninfo",
+		EscapedPath: "/oauth2/v2/tokeninfo",
+		RawQuery:    "",
+		Header:      http.Header{},
+	}
+
+	_, isWWW, err := buildProvider(t).resolveService(context.Background(), v)
+	if err != nil {
+		t.Fatalf("resolveService: %v", err)
+	}
+
+	if !isWWW {
+		t.Fatal("resolveService reported isWWW=false for a dotted www.googleapis.com, " +
+			"so AuthorizeAction would skip the gcp_auth.service claim check")
+	}
+}
