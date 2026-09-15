@@ -2544,3 +2544,24 @@ func TestRequestConstructionRejectsMalformedPort(t *testing.T) {
 		t.Fatal("new request error = nil, want a parse failure on a malformed port")
 	}
 }
+
+func TestExecute_RejectsNonASCIIHost(t *testing.T) {
+	t.Parallel()
+
+	srv, providers := newTLSTestServer(t, func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("server must never be hit when the host is not ASCII")
+	})
+	t.Cleanup(srv.Close)
+
+	// U+0130 lower-cases to a plain ASCII "i", so the gate would classify this
+	// as "i.example" while net/http dials "xn--i-9bb.example".
+	args := makeArgs(t, map[string]any{
+		"url":           "https://İ.example/p",
+		"auth_provider": "loopback",
+	})
+
+	_, _, err := NewClient().Execute(context.Background(), args, providers)
+	if !errors.Is(err, auth.ErrNonASCIIHost) {
+		t.Fatalf("Execute = %v, want auth.ErrNonASCIIHost", err)
+	}
+}

@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
+	"unicode"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 )
@@ -41,6 +43,29 @@ func authorizeRequestPort(v authreq.View, want string) error {
 			want,
 			got,
 		)
+	}
+
+	return nil
+}
+
+// ErrNonASCIIHost is returned for a host carrying a rune above U+007F. Such a
+// name has more than one spelling and the spellings do not agree: Go's case
+// mapping, the IDNA conversion the HTTP client applies before it dials, and the
+// conversion it applies to the Host header are three different transforms. A
+// gate would authorize one of those spellings and the wire would reach another.
+// Punycode is ASCII and is unaffected. Same class as #243 and #247.
+var ErrNonASCIIHost = errors.New("host is not ASCII")
+
+// ASCIIHost rejects a host containing a rune above U+007F. It is the one
+// admission rule behind the authority invariant: once every admitted host is
+// ASCII, the normalizations downstream cannot produce a string the wire does
+// not carry. Ranging over the string decodes invalid UTF-8 to U+FFFD, which is
+// above U+007F, so malformed bytes are rejected too. Pure: no I/O.
+func ASCIIHost(host string) error {
+	for _, r := range host {
+		if r > unicode.MaxASCII {
+			return fmt.Errorf("%w: %q; write an internationalized name in punycode", ErrNonASCIIHost, host)
+		}
 	}
 
 	return nil

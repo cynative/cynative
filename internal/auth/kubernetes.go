@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
@@ -127,20 +126,13 @@ func rejectUnsafe(cl *clientcmdapi.Cluster, ai *clientcmdapi.AuthInfo) (*url.URL
 	return u, nil
 }
 
-// asciiHost rejects an internationalized server hostname, because such a name
-// has several spellings that do not agree and the connector needs one. Go's
-// lower-casing maps U+0130 to a plain "i", while the HTTP client's IDNA
-// conversion maps it to "xn--i-9bb": the authority the connector would publish
-// and dial names a different DNS host than the one the operator wrote, and the
-// credential would follow it there. A name already written in punycode is
-// ASCII and passes.
+// asciiHost rejects an internationalized server hostname for the reason
+// [ASCIIHost] documents: the authority the connector publishes and dials would
+// name a different DNS host than the one the operator wrote, and the credential
+// would follow it there. A name already written in punycode is ASCII and passes.
 func asciiHost(host string) error {
-	for _, r := range host {
-		if r > unicode.MaxASCII {
-			return fmt.Errorf(
-				"kubernetes: server URL host %q is not ASCII; write an internationalized name in punycode", host,
-			)
-		}
+	if err := ASCIIHost(host); err != nil {
+		return fmt.Errorf("kubernetes: server URL: %w", err)
 	}
 
 	return nil
