@@ -548,9 +548,10 @@ func TestExecute_HeaderKeyNearMissFailsClosed(t *testing.T) {
 }
 
 // TestExecute_WireAuthorityFollowsURL asserts the authority actually sent equals
-// the URL authority. This is the positive form of the invariant the whole change
-// exists to establish, and its r.Host read becomes the liveness canary for the
-// forbidigo pin once Task 6 adds that rule.
+// the URL authority: the host a gate authorizes is the host the client dials.
+// Its //nolint:forbidigo r.Host read is one of the canaries that keep the
+// http.Request.Host forbidigo pin live; if the pattern ever stopped matching,
+// nolintlint would flag the directive as unused.
 func TestExecute_WireAuthorityFollowsURL(t *testing.T) {
 	t.Parallel()
 

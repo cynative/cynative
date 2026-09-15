@@ -114,7 +114,7 @@ type KeyValue struct {
 type RequestArgs struct {
 	Method string `json:"method" jsonschema:"enum=GET,enum=POST,enum=PUT,enum=DELETE,enum=PATCH,enum=HEAD,enum=OPTIONS" jsonschema_description:"The HTTP method to use."` //nolint:lll // struct tags are indivisible
 
-	URL string `json:"url" jsonschema_description:"The full URL to request (e.g. \"https://api.example.com:8080/v1/users?q=hello\"). Must not embed userinfo (user:pass@): credentials are injected automatically by the auth_provider and model-supplied ones are rejected."` //nolint:lll // struct tags are indivisible
+	URL string `json:"url" jsonschema_description:"The full URL to request (e.g. \"https://api.example.com/v1/users?q=hello\"). Must not embed userinfo (user:pass@): credentials are injected automatically by the auth_provider and model-supplied ones are rejected. The host must be ASCII; write an internationalized host in its punycode (xn--) form. github, aws, gcp and azure require the default https port 443; gitlab and the Kubernetes connectors accept the port their connector is configured with."` //nolint:lll // struct tags are indivisible
 
 	Headers []KeyValue `json:"headers,omitempty" jsonschema_description:"List of HTTP headers. Omit if none. Never include Host: the request authority is derived from url, and a model-supplied Host header is rejected. Never include credential headers (Authorization, Proxy-Authorization, X-Ms-Authorization-Auxiliary, Private-Token, Job-Token): credentials are injected automatically by the auth_provider and model-supplied ones are rejected."` //nolint:lll // struct tags are indivisible
 	Body    string     `json:"body,omitempty"    jsonschema_description:"The request body as a string. Omit if none."`

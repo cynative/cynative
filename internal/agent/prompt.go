@@ -37,7 +37,8 @@ WORKFLOW:
 		"is enough — by setting the `auth_provider` field in the tool arguments. The credentials are " +
 		"securely injected behind the scenes. Never supply credential headers (Authorization, " +
 		"Proxy-Authorization, X-Ms-Authorization-Auxiliary) or URL userinfo (user:pass@) yourself — requests " +
-		"carrying credentials you supplied are rejected. Available providers:"
+		"carrying credentials you supplied are rejected. Request hosts must be ASCII: write an " +
+		"internationalized host in its punycode (xn--) form. Available providers:"
 
 	// orchestrationClosing names the orchestration tools the model must know about.
 	orchestrationClosing = "\n\nUse the write_todos tool to record and update your investigation plan when a task needs one. Use the task tool to delegate a focused sub-investigation to a sub-agent that starts with a clean context and returns only a concise result."

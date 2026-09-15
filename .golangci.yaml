@@ -167,11 +167,13 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        # The selector pattern below is proven live by two
+        # The selector pattern below is proven live by three
         # //nolint:forbidigo directives, since nolintlint reports an unused
-        # directive if either pattern stops matching:
+        # directive if any of them stops matching:
         #   - internal/transport/transport_internal_test.go reads r.Host on
         #     the inbound (server) side.
+        #   - internal/transport/authority_internal_test.go reads r.Host the
+        #     same way.
         #   - internal/auth/authreq/export_test.go writes req.Host to a
         #     value that disagrees with the URL, proving the request view
         #     ignores the field rather than trusting it.

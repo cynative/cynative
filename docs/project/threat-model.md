@@ -43,8 +43,10 @@ cannot move any of these lines.
 
 - **Command injection** - model output never reaches a shell or the host
   process; scripts run in the JS sandbox.
-- **Request redirection** - hosts pinned, resolved IP verified before
-  connect.
+- **Request redirection** - hosts pinned, ports bound, and the resolved IP
+  verified before connect. Only one spelling of a host is admitted: a
+  non-ASCII request host is refused, so the name the gate authorizes is the
+  name the client dials.
 - **Repository-supplied prompts** - agents are read only from
   `~/.cynative/agents/` and the binary, never from the working directory.
   Selection is always explicit by name and the model never chooses an

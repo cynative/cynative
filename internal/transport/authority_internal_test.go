@@ -207,11 +207,13 @@ func assertSent(t *testing.T, err error, p *authoritySpyProvider, received <-cha
 // reaches the server carries an explicit port, so there is no default to apply
 // and an absent port on either side is a mismatch.
 //
-// Neither [strings.EqualFold] nor [strings.ToLower] alone can decide this.
-// Both apply Unicode case mapping, which turns U+212A into "k" and U+017F into
-// "s", so either one would call two different DNS names equal and would accept
-// exactly the confusion this test exists to catch. A host carrying any rune
-// above U+007F is therefore rejected before the comparison, not folded into it.
+// Neither [strings.EqualFold] nor a bare [strings.ToLower] can safely decide
+// this alone. [strings.EqualFold] case-folds both U+212A and U+017F to their
+// ASCII look-alikes ("k" and "s"), so it would call two different DNS names
+// equal. [strings.ToLower] folds U+212A to "k" the same way, so it is not a
+// safe substitute either, even though it happens to leave U+017F unchanged. A
+// host carrying any rune above U+007F is therefore rejected before either
+// comparison runs, not folded into it.
 func equalAuthority(authorized, wire string) bool {
 	ah, ap, aerr := net.SplitHostPort(authorized)
 	wh, wp, werr := net.SplitHostPort(wire)
@@ -243,9 +245,12 @@ func asciiOnly(s string) bool {
 }
 
 // TestEqualAuthority pins the oracle itself. The two folding rows are the
-// regression guard: U+212A and U+017F are the runes that make Unicode case
-// folding unsafe for a DNS name, and a switch back to [strings.EqualFold] or a
-// bare [strings.ToLower] turns both of them green.
+// regression guard, and each targets a different unsafe substitute for the
+// current asciiOnly-then-ToLower check: the U+212A row catches a switch to a
+// bare [strings.ToLower] with the ASCII guard removed, since ToLower folds
+// U+212A to "k" the same way [strings.EqualFold] does; the U+017F row catches
+// only a switch to [strings.EqualFold], since a bare ToLower leaves U+017F
+// unchanged and would still reject that row correctly.
 func TestEqualAuthority(t *testing.T) {
 	t.Parallel()
 
