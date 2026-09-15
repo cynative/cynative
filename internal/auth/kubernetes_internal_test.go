@@ -408,8 +408,8 @@ func TestRejectUnsafe_diagnosticsCarryNoCredential(t *testing.T) {
 // conversion maps it to "xn--i-9bb", so a lower-cased authority would name a
 // different DNS host than the one the operator wrote and the credential would
 // be sent there. A zone identifier disagrees for a different reason: the
-// authority the gate admits is lower-cased and the interface the kernel picks
-// is matched exactly.
+// authority the gate admits is lower-cased, while Go resolves the zone to an
+// interface index with a case-sensitive name lookup.
 func TestRejectUnsafe_hostAdmission(t *testing.T) {
 	t.Parallel()
 

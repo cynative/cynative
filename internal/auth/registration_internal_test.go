@@ -779,6 +779,14 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 // only inside buildGitLab would let the operator's credential store be queried
 // for a host this system will not talk to.
 //
+// The rejected shape is paired with an api_host as well as with a host,
+// because api_host is the served authority whenever it is set and
+// glabLoginHost forwards that same api_host as the login host whenever the
+// configured host is empty or the gitlab.com default. Rows that populate only
+// host cannot tell validateGitLabHosts(host, glCfg.APIHost) apart from
+// validateGitLabHosts(host, ""), and the second restores the bug this call
+// site exists to fix.
+//
 // The discovery stub records the call rather than failing inside itself, so
 // each way of getting this wrong fails on its own assertion: move the check
 // back below discovery and discovered goes true; delete it and the default
@@ -786,13 +794,24 @@ func TestGitlabOutcome_Skips(t *testing.T) {
 func TestGitlabOutcome_HostAdmissionPrecedesDiscovery(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
-		"non-ASCII host": "g\u0130tlab.example",
-		"zoned host":     "[fe80::1%eth0]:8443",
+	cases := []struct {
+		name, host, apiHost, wantKey string
+	}{
+		{"non-ASCII host", "g\u0130tlab.example", "", "connectors.gitlab.host"},
+		{"zoned host", "[fe80::1%eth0]:8443", "", "connectors.gitlab.host"},
+		// host unset: resolveGitLabHost defaults it to gitlab.com and
+		// glabLoginHost hands glab the api_host instead.
+		{"non-ASCII api host, no host", "", "api.g\u0130tlab.example", "connectors.gitlab.api_host"},
+		{"zoned api host, no host", "", "[fe80::1%eth0]:8443", "connectors.gitlab.api_host"},
+		// host written out as the default it would have defaulted to.
+		{"non-ASCII api host, default host", "gitlab.com", "api.g\u0130tlab.example", "connectors.gitlab.api_host"},
+		// No port on the literal: [net.SplitHostPort] fails on it, so only
+		// unbracketing reaches the address underneath.
+		{"zoned api host with no port", "gitlab.com", "[fe80::1%25eth0]", "connectors.gitlab.api_host"},
 	}
 
-	for name, host := range cases {
-		t.Run(name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			d := stubDeps()
@@ -804,18 +823,21 @@ func TestGitlabOutcome_HostAdmissionPrecedesDiscovery(t *testing.T) {
 				return glabCredential{AccessToken: "glpat-x"}, nil //nolint:exhaustruct // env PAT.
 			}
 
-			got := d.gitlabOutcome(
-				context.Background(),
-				GitLabHardeningConfig{Host: host}, //nolint:exhaustruct // host is the whole point.
-				false,
-			)
+			//nolint:exhaustruct // the two hosts are the whole configuration under test.
+			cfg := GitLabHardeningConfig{Host: tc.host, APIHost: tc.apiHost}
+			got := d.gitlabOutcome(context.Background(), cfg, false)
 
 			wantLoudSkip(t, got)
 			if discovered {
-				t.Fatalf("host %q reached the credential store before it was admitted", host)
+				t.Fatalf("host %q / api_host %q reached the credential store before it was admitted",
+					tc.host, tc.apiHost)
 			}
-			if reason := got.statuses[0].Reason; !strings.Contains(reason, "host admission failed") {
+			reason := got.statuses[0].Reason
+			if !strings.Contains(reason, "host admission failed") {
 				t.Fatalf("reason %q must name the admission failure", reason)
+			}
+			if !strings.Contains(reason, tc.wantKey) {
+				t.Fatalf("reason %q must name the rejected key %q", reason, tc.wantKey)
 			}
 		})
 	}

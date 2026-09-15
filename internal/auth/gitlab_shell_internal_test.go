@@ -20,16 +20,21 @@ func TestBuildGitLabProvider_ServedHostAdmission(t *testing.T) {
 		name    string
 		host    string
 		apiHost string
-		wantErr bool
+		want    error // nil when the provider is built.
 	}{
-		{"ASCII host is built", "gitlab.example", "", false},
-		{"non-ASCII served host is refused", "g\u0130tlab.example", "", true},
-		{"non-ASCII served api host is refused", "gitlab.example", "api.g\u0130tlab.example", true},
+		{"ASCII host is built", "gitlab.example", "", nil},
+		{"non-ASCII served host is refused", "g\u0130tlab.example", "", ErrNonASCIIHost},
+		{"non-ASCII served api host is refused", "gitlab.example", "api.g\u0130tlab.example", ErrNonASCIIHost},
+		// A bracketed literal with no port reaches AdmitHost only once
+		// stripHostPort has taken the brackets off, so these two are the rows
+		// that prove the constructor guards the shape the CLI never produces.
+		{"zoned served host with no port is refused", "[fe80::1%eth0]", "", ErrZonedHost},
+		{"zoned served api host with no port is refused", "gitlab.example", "[fe80::1%25eth0]", ErrZonedHost},
 		// The served authority is api_host when it is set, so a non-ASCII host
 		// behind an ASCII api_host leaves nothing non-ASCII on the wire.
 		{
 			"non-ASCII host behind an ASCII api host is built",
-			"gitlab.b\u00fccher.example", "gitlab.xn--bcher-kva.example", false,
+			"gitlab.b\u00fccher.example", "gitlab.xn--bcher-kva.example", nil,
 		},
 	}
 
@@ -42,7 +47,7 @@ func TestBuildGitLabProvider_ServedHostAdmission(t *testing.T) {
 
 			p, err := buildGitLabProvider(cfg, tc.host, cred)
 
-			if !tc.wantErr {
+			if tc.want == nil {
 				if err != nil {
 					t.Fatalf("buildGitLabProvider(%q, %q) = %v, want a provider", tc.host, tc.apiHost, err)
 				}
@@ -53,8 +58,8 @@ func TestBuildGitLabProvider_ServedHostAdmission(t *testing.T) {
 				return
 			}
 
-			if !errors.Is(err, ErrNonASCIIHost) {
-				t.Fatalf("buildGitLabProvider(%q, %q) = %v, want ErrNonASCIIHost", tc.host, tc.apiHost, err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("buildGitLabProvider(%q, %q) = %v, want %v", tc.host, tc.apiHost, err, tc.want)
 			}
 			if p != nil {
 				t.Fatalf("buildGitLabProvider(%q, %q) returned a provider alongside %v", tc.host, tc.apiHost, err)

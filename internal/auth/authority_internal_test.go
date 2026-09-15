@@ -9,9 +9,10 @@ import (
 // ASCII scan compares against.
 //
 // The 0x7f and 0x80 rows are the pair that separates that comparison from an
-// off-by-one. Every other row the ASCII scan rejects starts its non-ASCII run
-// with a UTF-8 lead byte, which is 0xc2 or above, so a scan that let 0x80
-// through would still reject all of them. A raw 0x80 is reachable from the tool
+// off-by-one. Every other row the ASCII scan rejects holds a byte above 0x80
+// (0xc4, 0xe2, 0xc3, 0xc2 and 0xff), so a scan that let 0x80 through would
+// still reject all of them, and the 0x80 row is the only one whose single
+// non-ASCII byte is 0x80 itself. A raw 0x80 is reachable from the tool
 // arguments without any invalid UTF-8 in them: [url.Parse] decodes the host of
 // "https://api.%80.com/x" to exactly the 0x80 row's string.
 //

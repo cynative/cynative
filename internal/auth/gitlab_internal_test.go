@@ -687,6 +687,14 @@ func TestValidateGitLabHosts(t *testing.T) {
 		{"empty api host is allowed", "gitlab.com", "", nil},
 		{"ASCII host and api host both set", "gitlab.internal", "api.gitlab.internal", nil},
 		{"bracketed ipv6 host with no zone", "[2001:db8::1]:8443", "", nil},
+		// A bracketed literal with no port: [net.SplitHostPort] fails on it, so
+		// the brackets come off only because stripHostPort takes them off, and
+		// [netip.ParseAddr] refuses a bracketed string. Left on, the zone rows
+		// below would parse as no address at all and be admitted.
+		{"bracketed ipv6 host with no port", "[2001:db8::1]", "", nil},
+		{"zoned served host with no port", "[fe80::1%eth0]", "", ErrZonedHost},
+		{"zoned served api host with no port", "gitlab.com", "[fe80::1%eth0]", ErrZonedHost},
+		{"percent-escaped zone with no port", "gitlab.com", "[fe80::1%25eth0]", ErrZonedHost},
 		{"non-ASCII served host", "g\u0130tlab.internal.example", "", ErrNonASCIIHost},
 		{"non-ASCII served api host", "gitlab.com", "api.g\u0130tlab.example", ErrNonASCIIHost},
 		// A zone is stripped of its brackets and its port like any other host,

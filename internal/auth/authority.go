@@ -58,13 +58,19 @@ func authorizeRequestPort(v authreq.View, want string) error {
 var ErrNonASCIIHost = errors.New("host is not ASCII")
 
 // ErrZonedHost is returned for a host that is an IP literal carrying a zone
-// identifier, as in "fe80::1%eth0". A zone names a local interface and the
-// kernel matches that name exactly, so it is the one part of an ASCII
-// authority that is case-sensitive. The gates classify a lower-cased hostname
-// while the dial keeps the spelling the caller wrote, so "%ETH0" would be
-// authorized as "%eth0" and dialed on whatever "%ETH0" names. Admitting ASCII
-// case as a difference that changes nothing is what the rest of this rule
-// rests on, and the zone is where that stops being true.
+// identifier, as in "fe80::1%eth0". A zone names a local interface, and Go
+// resolves it to a number before the connect: zoneCache.index in
+// net/interface.go looks the zone up in a map keyed by interface name, a
+// case-sensitive lookup, and falls back to reading the zone as a decimal
+// index when that misses. The number it returns is the ZoneId of the
+// SockaddrInet6 (net/ipsock_posix.go). So a numeric zone works too, and a
+// name in the wrong case resolves to a different index than the same name
+// spelled right. That makes the zone the one part of an ASCII authority that
+// is case-sensitive: the gates classify a lower-cased hostname while the dial
+// resolves the spelling the caller wrote, so "%ETH0" would be authorized as
+// "%eth0" and dialed on whatever index "%ETH0" resolves to.
+// Admitting ASCII case as a difference that changes nothing is what the rest
+// of this rule rests on, and the zone is where that stops being true.
 var ErrZonedHost = errors.New("host carries an IP zone identifier")
 
 // AdmitHost is the one admission rule behind the authority invariant: it

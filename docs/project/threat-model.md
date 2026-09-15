@@ -49,11 +49,11 @@ cannot move any of these lines.
   the IDNA conversions can each turn one name into a different one, and
   only one of the results would be the name the gate authorized. An address
   literal carrying a zone identifier is refused for the same reason: the
-  zone names a local interface, the kernel matches that name exactly, and
-  the gates compare a lower-cased host, so the two would not always pick the
-  same interface. Spellings that name the same host are still admitted, so
-  ASCII case varies freely and the cloud host gates also admit a trailing
-  dot.
+  zone names a local interface, Go resolves that name to an interface index
+  with a case-sensitive lookup before it connects, and the gates compare a
+  lower-cased host, so the two would not always pick the same interface.
+  Spellings that name the same host are still admitted, so ASCII case
+  varies freely and the cloud host gates also admit a trailing dot.
 - **Repository-supplied prompts** - agents are read only from
   `~/.cynative/agents/` and the binary, never from the working directory.
   Selection is always explicit by name and the model never chooses an

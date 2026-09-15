@@ -165,9 +165,12 @@ func servedHostOf(host, apiHost string) string {
 // somebody else, and the request side admits ASCII only ([AdmitHost] in the
 // transport), so that folded name is one a model can ask for and be
 // credentialed on. A zoned IP literal cannot either: the gate compares the
-// zone lower-cased and the dial matches it exactly, so the two name different
-// interfaces. An internationalized instance is configured in punycode, which
-// is ASCII and passes. host is still read behind a glab credential: it picks
+// zone lower-cased while the dial resolves the spelling the caller wrote, so
+// the two can name different interfaces. The served authority loses its port
+// and its brackets first ([stripHostPort]), so a literal written either way
+// reaches [AdmitHost] as an address it can parse. An internationalized
+// instance is configured in punycode, which is ASCII and passes. host is
+// still read behind a glab credential: it picks
 // the glab config entry and the instance glab refreshes its own token against,
 // which happens outside cynative's transport (glabFetch). No request this gate
 // authorizes reads it. The kubernetes connector guards its configured server
@@ -192,12 +195,30 @@ func (p *gitlabProvider) servedHost() string {
 	return servedHostOf(p.host, p.apiHost)
 }
 
-// stripHostPort returns host with any :port suffix removed; a host with no port
-// is returned unchanged.
+// stripHostPort returns the hostname of a host[:port] authority: the :port
+// suffix removed and a bracketed IP literal unbracketed.
+//
+// [net.SplitHostPort] alone gives only the first half, because it needs a
+// port to succeed and so leaves the brackets on a literal written without
+// one. No caller here can use a bracketed string. [netip.ParseAddr] refuses
+// the brackets, so [AdmitHost] would find no address in "[fe80::1%eth0]" and
+// admit a zone it exists to turn away; and AuthorizesHost compares against
+// the hostname the transport passes, which comes from [net/url.URL.Hostname]
+// and never carries brackets.
+//
+// The bracket handling matches what url does behind that method: strip a
+// port, then unwrap "[...]". The rest does not, since url requires a numeric
+// port and [net.SplitHostPort] does not, so the two part ways on "[::1]:abc".
+// The config loader refuses a non-numeric port before either one runs.
 func stripHostPort(host string) string {
 	if hostname, _, err := net.SplitHostPort(host); err == nil {
 		return hostname
 	}
+
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+
 	return host
 }
 
@@ -211,7 +232,7 @@ func portOfAuthority(authority string) string {
 	return httpsPort
 }
 
-// servedHostname returns servedHost with any :port suffix stripped. The
+// servedHostname returns the hostname of servedHost (see [stripHostPort]). The
 // transport compares a port-stripped host in AuthorizesHost, and the resolver
 // requires a bare hostname, so both use this rather than servedHost.
 func (p *gitlabProvider) servedHostname() string {
