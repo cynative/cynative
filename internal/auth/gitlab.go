@@ -156,6 +156,30 @@ func servedHostOf(host, apiHost string) string {
 	return host
 }
 
+// validateGitLabHosts rejects a configured host or api_host that is not ASCII.
+// The connector pins on a lower-cased copy of this value and advertises it to
+// the model, and lower-casing can fold a non-ASCII rune into a plain ASCII name
+// that belongs to somebody else. The request side admits ASCII only
+// ([ASCIIHost] in the transport), so the folded name is one a model can ask for
+// and be credentialed on. An internationalized instance is configured in
+// punycode, which is ASCII and passes. The kubernetes connector guards its
+// configured server the same way.
+func validateGitLabHosts(host, apiHost string) error {
+	if err := ASCIIHost(stripHostPort(host)); err != nil {
+		return fmt.Errorf("gitlab: connectors.gitlab.host: %w", err)
+	}
+
+	if apiHost == "" {
+		return nil
+	}
+
+	if err := ASCIIHost(stripHostPort(apiHost)); err != nil {
+		return fmt.Errorf("gitlab: connectors.gitlab.api_host: %w", err)
+	}
+
+	return nil
+}
+
 // servedHost returns the API host override when set, else the primary host.
 // It may include a :port suffix (self-managed GitLab on a non-443 port); it is
 // the value interpolated into the probe URL, so the port is preserved.

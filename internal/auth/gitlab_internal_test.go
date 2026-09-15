@@ -671,3 +671,38 @@ func TestAuthorizeAction_NonAPIPath_FailsClosed(t *testing.T) {
 		t.Fatalf("AuthorizeAction(/-/jobs/artifacts/x) = %v, want ErrUnclassifiable", err)
 	}
 }
+
+func TestValidateGitLabHosts(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		host    string
+		apiHost string
+		wantErr bool
+	}{
+		{"plain host", "gitlab.com", "", false},
+		{"host with port", "gitlab.internal:8443", "", false},
+		{"punycode host", "xn--i-9bb.example", "", false},
+		{"empty api host is allowed", "gitlab.com", "", false},
+		{"ASCII host and api host both set", "gitlab.internal", "api.gitlab.internal", false},
+		{"non-ASCII host", "g\u0130tlab.internal.example", "", true},
+		{"non-ASCII api host", "gitlab.com", "api.g\u0130tlab.example", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateGitLabHosts(tc.host, tc.apiHost)
+			if gotErr := err != nil; gotErr != tc.wantErr {
+				t.Fatalf("validateGitLabHosts(%q, %q) = %v, want error %v",
+					tc.host, tc.apiHost, err, tc.wantErr)
+			}
+			if tc.wantErr && !errors.Is(err, ErrNonASCIIHost) {
+				t.Fatalf("validateGitLabHosts(%q, %q) = %v, want ErrNonASCIIHost",
+					tc.host, tc.apiHost, err)
+			}
+		})
+	}
+}
