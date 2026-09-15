@@ -2565,3 +2565,43 @@ func TestExecute_RejectsNonASCIIHost(t *testing.T) {
 		t.Fatalf("Execute = %v, want auth.ErrNonASCIIHost before any provider gate runs", err)
 	}
 }
+
+// hostSpyProvider records the host the transport handed the host gate and then
+// denies it, so a test reaches the recorder without depending on a dial.
+type hostSpyProvider struct {
+	seen *string
+}
+
+func (p *hostSpyProvider) Name() string                                             { return "spy" }
+func (p *hostSpyProvider) Description() string                                      { return "records the gated host" }
+func (p *hostSpyProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
+
+func (p *hostSpyProvider) AuthorizesHost(_ context.Context, host string, _ authreq.ProviderArgs) (bool, error) {
+	*p.seen = host
+
+	return false, nil
+}
+
+// TestExecute_HostGateSeesTheProjectedHost pins the transport to one derivation
+// of the request authority. The view the action gate judges lower-cases the
+// hostname and req.URL.Hostname() keeps the URL's own case, so a mixed-case URL
+// is the input the two differ on: the host gate must be handed the same string
+// the action gate will read, not a second reading of the URL. The provider
+// denies, so the recorder is reached before any dial and the host never has to
+// resolve.
+func TestExecute_HostGateSeesTheProjectedHost(t *testing.T) {
+	t.Parallel()
+
+	var seen string
+
+	args := makeArgs(t, map[string]any{
+		"url":           "https://API.Example.com/p",
+		"auth_provider": "spy",
+	})
+
+	_, _, _ = NewClient().Execute(context.Background(), args, []auth.Provider{&hostSpyProvider{seen: &seen}})
+
+	if seen != "api.example.com" {
+		t.Fatalf("host gate saw %q, want the view's hostname; the transport must derive the authority once", seen)
+	}
+}

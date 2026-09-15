@@ -3296,16 +3296,24 @@ func TestAKSAuthArgs_validate(t *testing.T) {
 
 // --- AuthorizeHost helper ---
 
+// hostAuthFake answers the host gate with a canned verdict. A non-nil seen
+// records the host string AuthorizeHost handed the provider, so a test can
+// assert AuthorizeHost passed it through unchanged.
 type hostAuthFake struct {
 	name string
 	ok   bool
 	err  error
+	seen *string
 }
 
 func (f *hostAuthFake) Name() string                                             { return f.name }
 func (f *hostAuthFake) Description() string                                      { return "fake" }
 func (f *hostAuthFake) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error { return nil }
-func (f *hostAuthFake) AuthorizesHost(_ context.Context, _ string, _ authreq.ProviderArgs) (bool, error) {
+func (f *hostAuthFake) AuthorizesHost(_ context.Context, host string, _ authreq.ProviderArgs) (bool, error) {
+	if f.seen != nil {
+		*f.seen = host
+	}
+
 	return f.ok, f.err
 }
 
@@ -3360,32 +3368,11 @@ func TestAuthorizeHost_CaseInsensitive(t *testing.T) {
 	}
 }
 
-// hostRecordingProvider records the host string AuthorizeHost hands a provider,
-// so a test can assert that AuthorizeHost passes it through unchanged.
-type hostRecordingProvider struct {
-	seen *string
-}
-
-func (p *hostRecordingProvider) Name() string        { return "recorder" }
-func (p *hostRecordingProvider) Description() string { return "records the classified host" }
-
-func (p *hostRecordingProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
-	return nil
-}
-
-func (p *hostRecordingProvider) AuthorizesHost(
-	_ context.Context, host string, _ authreq.ProviderArgs,
-) (bool, error) {
-	*p.seen = host
-
-	return true, nil
-}
-
 func TestAuthorizeHost_DoesNotLowerCaseItsInput(t *testing.T) {
 	t.Parallel()
 
 	var seen string
-	providers := []Provider{&hostRecordingProvider{seen: &seen}}
+	providers := []Provider{&hostAuthFake{name: "recorder", ok: true, seen: &seen}}
 
 	if err := AuthorizeHost(context.Background(), "recorder", "API.Example.com", providers, nil); err != nil {
 		t.Fatalf("AuthorizeHost: %v", err)
