@@ -2557,7 +2557,7 @@ func TestExecute_RejectsNonASCIIHost(t *testing.T) {
 	// U+0130 lower-cases to a plain ASCII "i", so the gate would classify this
 	// as "i.example" while net/http dials "xn--i-9bb.example".
 	args := makeArgs(t, map[string]any{
-		"url":           "https://İ.example/p",
+		"url":           "https://\u0130.example/p",
 		"auth_provider": "deny",
 	})
 

@@ -19,9 +19,9 @@ func TestASCIIHost(t *testing.T) {
 		{"ipv4 literal passes", "203.0.113.7", false},
 		{"ipv6 zone is ascii and passes", "fe80::1%eth0", false},
 		{"empty passes", "", false},
-		{"U+0130 folds to ascii and is rejected", "api.gİthub.com", true},
-		{"U+212A folds to ascii and is rejected", "gKthub.com", true},
-		{"non-folding unicode is rejected", "straße.example", true},
+		{"U+0130 folds to ascii and is rejected", "api.g\u0130thub.com", true},
+		{"U+212A folds to ascii and is rejected", "g\u212Athub.com", true},
+		{"non-folding unicode is rejected", "stra\u00dfe.example", true},
 		{"unicode whitespace is rejected", "api.github.com ", true},
 		{"invalid utf-8 decodes to U+FFFD and is rejected", "api.\xff.com", true},
 	}

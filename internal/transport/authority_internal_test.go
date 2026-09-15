@@ -90,9 +90,11 @@ func (p *authoritySpyProvider) InjectAuth(req *http.Request, args authreq.Provid
 // The Unicode hosts are written as \u escapes so a row stays readable in a
 // diff and no editor can silently rewrite one; the percent-encoded row is ASCII
 // as written and only becomes a non-ASCII host once [url.Parse] decodes it. Every
-// host is under .example (RFC 6761), so no row can resolve to a domain someone
-// else controls: under a mutation that admits these hosts, the suite dials them
-// with a credential attached.
+// host is under .example, which RFC 6761 reserves from registration, so no row
+// can resolve to a domain someone else has registered; that reservation binds
+// registries, not resolvers, so a hijacking or wildcard resolver could still
+// answer for one of these hosts. Under a mutation that admits these hosts, the
+// suite dials whatever answers, with a credential attached.
 func TestAuthorityInvariant(t *testing.T) {
 	t.Parallel()
 

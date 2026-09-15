@@ -170,12 +170,12 @@ func servedHostOf(host, apiHost string) string {
 // cynative's transport (glabFetch). No request this gate authorizes reads it.
 // The kubernetes connector guards its configured server the same way.
 func validateGitLabHosts(host, apiHost string) error {
-	key := "connectors.gitlab.host"
+	served, key := host, "connectors.gitlab.host"
 	if apiHost != "" {
-		key = "connectors.gitlab.api_host"
+		served, key = apiHost, "connectors.gitlab.api_host"
 	}
 
-	if err := ASCIIHost(stripHostPort(servedHostOf(host, apiHost))); err != nil {
+	if err := ASCIIHost(stripHostPort(served)); err != nil {
 		return fmt.Errorf("gitlab: %s: %w", key, err)
 	}
 
