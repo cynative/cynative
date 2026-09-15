@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -26,6 +27,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,6 +37,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/redact"
 )
 
@@ -947,7 +950,7 @@ func TestConfigureTransport_InstallsTransportWithDialGuard(t *testing.T) {
 	// name == "" short-circuits GetCACertData/GetClientCertData to ("", nil),
 	// so no provider lookup happens, but the dial-guarded transport is still
 	// installed (always-install contract for the SSRF dial pin).
-	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil)
+	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil, mustURL(t, "https://example.test/x"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -964,9 +967,10 @@ func TestConfigureTransport_DisablesProxy(t *testing.T) {
 
 	// The dial-time IP guard must observe the real target IP. A cloned
 	// http.DefaultTransport carries Proxy: ProxyFromEnvironment, which would make
-	// Go dial the proxy instead — so the installed transport must disable Proxy.
+	// Go dial the proxy instead — so an unconfigured client must leave Proxy nil.
 	client := &http.Client{}
-	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil)
+	cleanup, err := NewClient().configureTransport(
+		context.Background(), client, "", nil, nil, mustURL(t, "https://example.test/x"))
 	if err != nil {
 		t.Fatalf("configureTransport returned error: %v", err)
 	}
@@ -981,6 +985,77 @@ func TestConfigureTransport_DisablesProxy(t *testing.T) {
 	}
 }
 
+// TestConfigureTransport_UsesTheOperatorProxy pins the routed path: with a proxy
+// configured, the transport carries it and the dial is pinned to that endpoint
+// instead of the provider's address policy — the request URL, and so every gate
+// already applied to it, is untouched.
+func TestConfigureTransport_UsesTheOperatorProxy(t *testing.T) {
+	t.Parallel()
+
+	routing, err := outbound.New(outbound.Config{HTTPSProxy: "http://127.0.0.1:8080", NoProxy: ""})
+	if err != nil {
+		t.Fatalf("outbound.New: %v", err)
+	}
+
+	client := &http.Client{}
+	cleanup, err := NewClient(WithRouting(routing)).configureTransport(
+		context.Background(), client, "", nil, nil, mustURL(t, "https://ec2.us-east-1.amazonaws.com/"))
+	if err != nil {
+		t.Fatalf("configureTransport returned error: %v", err)
+	}
+	defer cleanup()
+
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("client.Transport is %T, want *http.Transport", client.Transport)
+	}
+	if tr.Proxy == nil {
+		t.Fatal("Proxy = nil, want the configured proxy endpoint")
+	}
+
+	proxy, perr := tr.Proxy(&http.Request{})
+	if perr != nil {
+		t.Fatalf("Proxy: %v", perr)
+	}
+	if proxy == nil || proxy.Host != "127.0.0.1:8080" {
+		t.Fatalf("proxy = %v, want 127.0.0.1:8080", proxy)
+	}
+
+	// The pin: the proxy's own address is dialable, anything else is not.
+	if _, derr := tr.DialContext(context.Background(), "tcp", "127.0.0.2:8080"); !errors.Is(
+		derr, auth.ErrAddrNotAuthorized,
+	) {
+		t.Errorf("dial to a non-proxy address = %v, want ErrAddrNotAuthorized", derr)
+	}
+}
+
+// TestConfigureTransport_NoProxyMatchKeepsTheGuard pins that a NO_PROXY target
+// keeps the provider's own dial-time address authorization.
+func TestConfigureTransport_NoProxyMatchKeepsTheGuard(t *testing.T) {
+	t.Parallel()
+
+	routing, err := outbound.New(outbound.Config{
+		HTTPSProxy: "http://127.0.0.1:8080",
+		NoProxy:    "ec2.us-east-1.amazonaws.com",
+	})
+	if err != nil {
+		t.Fatalf("outbound.New: %v", err)
+	}
+
+	client := &http.Client{}
+	cleanup, err := NewClient(WithRouting(routing)).configureTransport(
+		context.Background(), client, "", nil, nil, mustURL(t, "https://ec2.us-east-1.amazonaws.com/"))
+	if err != nil {
+		t.Fatalf("configureTransport returned error: %v", err)
+	}
+	defer cleanup()
+
+	tr, _ := client.Transport.(*http.Transport)
+	if tr.Proxy != nil {
+		t.Error("a NO_PROXY target must keep dialing direct under the provider's own guard")
+	}
+}
+
 func TestConfigureTransport_NoInheritedTLSDialers(t *testing.T) {
 	t.Parallel()
 
@@ -988,7 +1063,7 @@ func TestConfigureTransport_NoInheritedTLSDialers(t *testing.T) {
 	// http.DefaultTransport), so it carries no DialTLS/DialTLSContext that would
 	// make net/http skip the guarded DialContext for HTTPS.
 	client := &http.Client{}
-	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil)
+	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil, mustURL(t, "https://example.test/x"))
 	if err != nil {
 		t.Fatalf("configureTransport returned error: %v", err)
 	}
@@ -1455,6 +1530,7 @@ func TestConfigureTransport_ClientCertError(t *testing.T) {
 
 	cleanup, err := NewClient().configureTransport(
 		context.Background(), http.DefaultClient, "error-cert", providers, rawArgs,
+		mustURL(t, "https://example.test/x"),
 	)
 	if err == nil || !strings.Contains(err.Error(), "client cert retrieval failed") {
 		t.Errorf("expected error from client cert data, got %v", err)
@@ -2542,5 +2618,192 @@ func TestRequestConstructionRejectsMalformedPort(t *testing.T) {
 	_, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com:abc/p", nil)
 	if err == nil {
 		t.Fatal("new request error = nil, want a parse failure on a malformed port")
+	}
+}
+
+// mustURL parses a target URL for configureTransport, which resolves it against
+// the client's proxy routing.
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+
+	return u
+}
+
+// TestConfigureTransport_UnroutableTargetDenies pins the fail-closed path: a
+// target the routing cannot resolve builds no transport at all, rather than one
+// that would bypass the operator's proxy.
+func TestConfigureTransport_UnroutableTargetDenies(t *testing.T) {
+	t.Parallel()
+
+	routing, err := outbound.New(outbound.Config{HTTPSProxy: "http://127.0.0.1:8080", NoProxy: ""})
+	if err != nil {
+		t.Fatalf("outbound.New: %v", err)
+	}
+
+	// A host net/url renders but refuses to read back, so resolving the route
+	// fails where a real (already parsed) request URL never would.
+	target := &url.URL{Scheme: "https", Host: "exa\x7fmple.test"}
+
+	client := &http.Client{}
+	cleanup, cerr := NewClient(WithRouting(routing)).configureTransport(
+		context.Background(), client, "", nil, nil, target)
+	if cerr == nil {
+		t.Fatal("configureTransport err = nil, want the routing failure surfaced")
+	}
+	if client.Transport != nil {
+		t.Error("no transport must be installed when the route cannot be resolved")
+	}
+
+	cleanup() // the error-path noop cleanup must be safe to call.
+}
+
+// connectProxy is a minimal CONNECT proxy: it records the authority each client
+// asks for and tunnels the bytes to one fixed backend, which is what an
+// operator's proxy does for an https request. It exists so the proxied path is
+// proven end to end — Go really dials the proxy, really issues CONNECT, and the
+// TLS session inside the tunnel is still the origin's.
+type connectProxy struct {
+	addr    string
+	backend string
+
+	mu       sync.Mutex
+	requests []string
+}
+
+// newConnectProxy starts a proxy in front of backend ("host:port") and returns
+// it once it is listening.
+func newConnectProxy(t *testing.T, backend string) *connectProxy {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	p := &connectProxy{addr: ln.Addr().String(), backend: backend} //nolint:exhaustruct // zero mutex/slice.
+
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+
+			go p.serve(conn)
+		}
+	}()
+
+	return p
+}
+
+// serve handles one CONNECT and then copies bytes both ways.
+func (p *connectProxy) serve(conn net.Conn) {
+	defer conn.Close()
+
+	br := bufio.NewReader(conn)
+
+	req, err := http.ReadRequest(br)
+	if err != nil || req.Method != http.MethodConnect {
+		return
+	}
+
+	p.mu.Lock()
+	p.requests = append(p.requests, req.RequestURI)
+	p.mu.Unlock()
+
+	upstream, err := net.Dial("tcp", p.backend)
+	if err != nil {
+		return
+	}
+	defer upstream.Close()
+
+	if _, err = conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
+		return
+	}
+
+	go func() { _, _ = io.Copy(upstream, br) }()
+	_, _ = io.Copy(conn, upstream)
+}
+
+// seen returns the authorities the proxy was asked to connect to.
+func (p *connectProxy) seen() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return slices.Clone(p.requests)
+}
+
+// TestExecute_ThroughAnOperatorProxy is the end-to-end proof of the routed
+// path: the model addresses a host that does not resolve here, the connection
+// is made to the operator's proxy, and the request still arrives at the origin
+// under that host's own name and its own certificate. Everything above the dial
+// — the URL, the gates, the TLS verification — is unchanged by the proxy.
+func TestExecute_ThroughAnOperatorProxy(t *testing.T) {
+	t.Parallel()
+
+	caCertPEM, caKeyPEM, err := authtest.GenerateCA()
+	if err != nil {
+		t.Fatalf("generate CA: %v", err)
+	}
+
+	serverCert, serverKey := signDNSOnlyLeaf(t, caCertPEM, caKeyPEM, "api.example")
+
+	var gotSNI, gotPath string
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The SNI, not the Host header: it is what the TLS session inside the
+		// tunnel was negotiated for, so it proves the handshake is still the
+		// origin's and the proxy only carried the bytes.
+		gotSNI, gotPath = r.TLS.ServerName, r.URL.Path
+		fmt.Fprint(w, "through-the-proxy")
+	}))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{ //nolint:exhaustruct // only the fields under test.
+		{Certificate: [][]byte{serverCert.Raw}, PrivateKey: serverKey},
+	}, MinVersion: tls.VersionTLS12}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	backend := strings.TrimPrefix(srv.URL, "https://")
+	proxy := newConnectProxy(t, backend)
+
+	routing, err := outbound.New(outbound.Config{HTTPSProxy: "http://" + proxy.addr, NoProxy: ""})
+	if err != nil {
+		t.Fatalf("outbound.New: %v", err)
+	}
+
+	providers := []auth.Provider{&githubTestProvider{
+		token:  "t",
+		caCert: base64.StdEncoding.EncodeToString(caCertPEM),
+	}}
+	args := makeArgs(t, map[string]any{
+		"url":           "https://api.example/repos/example/project",
+		"auth_provider": "github",
+	})
+
+	result, status, err := NewClient(WithRouting(routing)).Execute(context.Background(), args, providers)
+	if err != nil {
+		t.Fatalf("Execute through the proxy: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("status = %d, want 200", status)
+	}
+	if !strings.Contains(result, "through-the-proxy") {
+		t.Errorf("body = %q, want the origin's response", result)
+	}
+
+	if seen := proxy.seen(); !slices.Contains(seen, "api.example:443") {
+		t.Errorf("proxy saw %v, want a CONNECT for api.example:443", seen)
+	}
+	if gotSNI != "api.example" {
+		t.Errorf("origin negotiated TLS for %q, want api.example — the request must not be rewritten", gotSNI)
+	}
+	if gotPath != "/repos/example/project" {
+		t.Errorf("origin saw path %q, want the request's own path", gotPath)
 	}
 }

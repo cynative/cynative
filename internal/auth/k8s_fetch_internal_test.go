@@ -111,7 +111,7 @@ func TestClusterHTTPClient_PropagatesBuildError(t *testing.T) {
 
 	// pinnedHTTPClient is shell (gate-exempt); this guards that it hands its
 	// args to BuildTLSConfig and passes the helper's error through.
-	_, err := pinnedHTTPClient("not-base64-!!", "", "", "", nil)
+	_, err := pinnedHTTPClient(pinnedClientConfig{conn: clusterConn{caData: "not-base64-!!"}})
 	if err == nil || !strings.Contains(err.Error(), "failed to decode CA certificate") {
 		t.Fatalf("want decode cluster CA error, got %v", err)
 	}
@@ -143,7 +143,7 @@ func TestFetchViewPolicy_StalledTLSHandshakeIsBounded(t *testing.T) {
 	to := k8sFetchTimeouts{
 		dial: time.Second, tlsHandshake: 150 * time.Millisecond, responseHeader: time.Second, overall: 5 * time.Second,
 	}
-	hc, err := pinnedHTTPClientWithTimeouts("", "", "", "", to, nil)
+	hc, err := pinnedHTTPClientWithTimeouts(pinnedClientConfig{}, to)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClientWithTimeouts: %v", err)
 	}
@@ -176,7 +176,8 @@ func TestFetchViewPolicy_StalledResponseHeadersAreBounded(t *testing.T) {
 		dial: 2 * time.Second, tlsHandshake: 2 * time.Second,
 		responseHeader: 150 * time.Millisecond, overall: 5 * time.Second,
 	}
-	hc, err := pinnedHTTPClientWithTimeouts(tlsServerCABase64(t, srv), "", "", "", to, nil)
+	hc, err := pinnedHTTPClientWithTimeouts(
+		pinnedClientConfig{conn: clusterConn{caData: tlsServerCABase64(t, srv)}}, to)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClientWithTimeouts: %v", err)
 	}
@@ -215,7 +216,8 @@ func TestFetchViewPolicy_StalledResponseBodyIsBounded(t *testing.T) {
 		dial: 2 * time.Second, tlsHandshake: 2 * time.Second,
 		responseHeader: 2 * time.Second, overall: 200 * time.Millisecond,
 	}
-	hc, err := pinnedHTTPClientWithTimeouts(tlsServerCABase64(t, srv), "", "", "", to, nil)
+	hc, err := pinnedHTTPClientWithTimeouts(
+		pinnedClientConfig{conn: clusterConn{caData: tlsServerCABase64(t, srv)}}, to)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClientWithTimeouts: %v", err)
 	}
@@ -238,7 +240,7 @@ func TestPinnedHTTPClient_SetsPhaseTimeouts(t *testing.T) {
 
 	// Without explicit dial/TLS/response-header/overall timeouts a stalled cluster
 	// endpoint wedges the bootstrap fetch even under a deadline-free context.
-	hc, err := pinnedHTTPClient("", "", "", "", nil)
+	hc, err := pinnedHTTPClient(pinnedClientConfig{})
 	if err != nil {
 		t.Fatalf("pinnedHTTPClient: %v", err)
 	}

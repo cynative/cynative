@@ -12,9 +12,11 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/maximhq/bifrost/core/schemas"
+	"github.com/spf13/viper"
 
 	"github.com/cynative/cynative/internal/config"
 	"github.com/cynative/cynative/internal/llm"
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/sandbox"
 )
 
@@ -2005,5 +2007,104 @@ func TestLoad_ConnectorYAMLRejects(t *testing.T) {
 				t.Fatalf("Load(%s) err = %v, want error containing %q", tc.name, err, tc.wantSubs)
 			}
 		})
+	}
+}
+
+// TestLoad_ResolvesTheProxyEnvironment pins that the loader reads the standard
+// proxy variables — not a CYNATIVE_* key or a config-file block — and hands the
+// resolved routing to the rest of the binary.
+func TestLoad_ResolvesTheProxyEnvironment(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER": "openai",
+		"CYNATIVE_LLM_MODEL":    "gpt-5",
+		"HTTPS_PROXY":           "http://127.0.0.1:8080",
+		"NO_PROXY":              "kubernetes.default.svc",
+	}).Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := cfg.Outbound.Endpoint(); got != "http://127.0.0.1:8080" {
+		t.Errorf("Outbound.Endpoint = %q, want the configured proxy", got)
+	}
+
+	proxy, perr := cfg.Outbound.ProxyFor("https://kubernetes.default.svc/api")
+	if perr != nil {
+		t.Fatalf("ProxyFor: %v", perr)
+	}
+	if proxy != nil {
+		t.Errorf("ProxyFor(NO_PROXY host) = %v, want a direct dial", proxy)
+	}
+}
+
+// TestLoad_UnusableProxyFailsTheLoad pins the fail-closed startup: an operator
+// who configured egress through a proxy must not get a run that silently
+// bypasses it.
+func TestLoad_UnusableProxyFailsTheLoad(t *testing.T) {
+	t.Parallel()
+
+	_, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER": "openai",
+		"CYNATIVE_LLM_MODEL":    "gpt-5",
+		"HTTPS_PROXY":           "https://proxy.corp.example:3128",
+	}).Load("")
+	if !errors.Is(err, outbound.ErrProxyURL) {
+		t.Errorf("Load err = %v, want ErrProxyURL", err)
+	}
+}
+
+// TestLoad_NoProxyEnvironmentDialsDirect pins the default: with the variables
+// unset, nothing about the binary's dialing changes.
+func TestLoad_NoProxyEnvironmentDialsDirect(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER": "openai",
+		"CYNATIVE_LLM_MODEL":    "gpt-5",
+	}).Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := cfg.Outbound.Endpoint(); got != "" {
+		t.Errorf("Outbound.Endpoint = %q, want empty", got)
+	}
+}
+
+// TestEnvKeys_ExcludesOutbound pins that the proxy setting gains no CYNATIVE_*
+// alias: it is the environment's variable, read once, in one place.
+func TestEnvKeys_ExcludesOutbound(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range config.EnvKeys() {
+		if strings.HasPrefix(key, "-") || strings.Contains(key, "outbound") {
+			t.Errorf("env key %q, want no key derived from the outbound field", key)
+		}
+	}
+}
+
+// nestedHeldOut is a stand-in for a future nested config block with a field
+// held out of the config surface. The walkers must skip it: a `json:"-"` field
+// has no key to bind, and reading one is what reflection refuses.
+type nestedHeldOut struct {
+	Bound   string                 `json:"bound" default:"x"`
+	HeldOut struct{ inner string } `json:"-"`
+}
+
+func TestStructWalkers_SkipFieldsHeldOutOfTheConfigSurface(t *testing.T) {
+	t.Parallel()
+
+	keys := config.StructEnvKeys(reflect.TypeFor[nestedHeldOut](), "connectors.example")
+	if !slices.Equal(keys, []string{"connectors.example.bound"}) {
+		t.Errorf("structEnvKeys = %v, want only the bound leaf", keys)
+	}
+
+	v := viper.New()
+	config.RegisterStructDefaults(v, "connectors.example", reflect.ValueOf(nestedHeldOut{}))
+
+	if v.IsSet("connectors.example.-") {
+		t.Error("a held-out field must not be registered as a viper default")
 	}
 }

@@ -97,6 +97,28 @@ connectors:
 
 Most keys are also settable through `CYNATIVE_*` environment variables, for example `CYNATIVE_CONNECTORS_AWS_POLICY`, `CYNATIVE_CONNECTORS_GCP_ROLE`, `CYNATIVE_CONNECTORS_AZURE_ROLE_DEFINITION`, `CYNATIVE_CACHE_DIR`, and `CYNATIVE_CACHE_TTL`. The GitHub and GitLab `permissions` maps take a compact comma-separated `key=value` form, e.g. `CYNATIVE_CONNECTORS_GITHUB_PERMISSIONS="default=read,issues=write"` (a non-empty env value replaces the file map wholesale; a blank value is treated as unset).
 
+## Outbound proxy
+
+Every connector request, registration probe and authorization-data fetch honours the standard `HTTPS_PROXY` and `NO_PROXY` environment variables. They are the environment's setting, shared with every other tool on the machine, so they have no config-file key and no `CYNATIVE_*` alias.
+
+```bash
+export HTTPS_PROXY=http://proxy.corp.example:3128
+export NO_PROXY=kubernetes.default.svc,10.0.0.0/8
+```
+
+- **Only `http://` endpoints.** A bare `host:port` means the same thing. An `https://` or `socks5://` endpoint is refused at startup rather than silently ignored, and so is anything with a path: an https proxy would be verified under the request's own pinned server name, and socks5 does not carry the CONNECT tunnel the dial pin assumes.
+- **The request is unchanged.** The URL, host pinning, action authorization, credential injection and TLS verification all still address the original host; only the TCP connection moves. The proxy sees a `CONNECT` for that host and the TLS session is end-to-end, so the proxy cannot read the traffic unless it holds a CA your machine trusts.
+- **The dial-time guard pins to the proxy.** A direct connection keeps the per-connector address checks (the internal-range deny, or a cluster's exact-IP pin). A proxied one is pinned to the proxy endpoint itself, with loopback and RFC1918 admitted because an operator proxy on the local machine or network is the ordinary case; link-local, cloud-metadata and ULA IPv6 addresses stay refused. The endpoint comes from the environment, which no request argument can reach.
+- **What Cynative can no longer verify.** With a proxy in the path, the final destination address is chosen by the proxy, so the dial-time IP authorization that defends against DNS rebinding applies to the proxy and not to the API host. An intercepting proxy additionally sees every response body and, if your trust store accepts its certificate, terminates the TLS the credential is sent over. Only configure a proxy you trust with both. See [threat-model.md](../project/threat-model.md).
+- **Go's own rules apply** to `NO_PROXY` matching: hosts, dotted domain suffixes and CIDR blocks, with `*` meaning "never proxy". `localhost` and loopback targets are never proxied.
+- **Custom CAs** come from the standard `SSL_CERT_FILE` / `SSL_CERT_DIR` variables, which Go reads on Linux, macOS and Windows. They replace the default certificate file rather than adding to it, so a bundle must carry the public roots your run still needs alongside the proxy's CA.
+
+The connector inventory names the proxy when one is configured, above the connector lines it governs:
+
+```
+  outbound: connector traffic routed through http://proxy.corp.example:3128
+```
+
 ## Managed Kubernetes connectors
 
 EKS, GKE, and AKS share the Kubernetes API hardening model described in [kubernetes.md](kubernetes.md). Their individual pages document how each managed service resolves cluster credentials, endpoint hosts, CA data, and connector-specific limitations.

@@ -34,7 +34,7 @@ func (p *eksProvider) defaultFetchView(ctx context.Context, args *EKSAuthArgs) (
 
 	conn := eksClusterConn(ct.host, ct.caData)
 
-	hc, err := pinnedHTTPClient(conn.caData, conn.clientCert, conn.clientKey, conn.serverName, control)
+	hc, err := pinnedHTTPClient(pinnedClientConfig{conn: conn, control: control, routing: p.outbound})
 	if err != nil {
 		return nil, err
 	}

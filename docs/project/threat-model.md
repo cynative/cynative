@@ -44,7 +44,13 @@ cannot move any of these lines.
 - **Command injection** - model output never reaches a shell or the host
   process; scripts run in the JS sandbox.
 - **Request redirection** - hosts pinned, resolved IP verified before
-  connect.
+  connect. An operator-configured `HTTPS_PROXY` moves the connection, not the
+  request: the URL and every gate on it are unchanged, and the dial is pinned to
+  the proxy endpoint, which the model can neither read nor set. The final
+  destination address is then the proxy's choice, so that one check is delegated
+  to it; an intercepting proxy also sees response bodies and, with a trusted CA,
+  terminates the TLS the credential rides. Configuring one is trusting it with
+  both. See docs/connectors/README.md, "Outbound proxy".
 - **Repository-supplied prompts** - agents are read only from
   `~/.cynative/agents/` and the binary, never from the working directory.
   Selection is always explicit by name and the model never chooses an

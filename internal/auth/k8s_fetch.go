@@ -1,6 +1,21 @@
 package auth
 
-import "time"
+import (
+	"time"
+
+	"github.com/cynative/cynative/internal/outbound"
+)
+
+// pinnedClientConfig describes one CA-pinned bootstrap client: the endpoint it
+// is built to reach, the TLS material it trusts, the dial-time address policy
+// its direct connections obey, and the operator's proxy configuration that
+// endpoint is resolved against. It is the bootstrap-fetch counterpart of what
+// the request transport assembles per request.
+type pinnedClientConfig struct {
+	conn    clusterConn
+	control DialControl
+	routing outbound.Routing
+}
 
 // k8sFetchTimeouts bounds each phase of the bootstrap ClusterRole fetch so a
 // cluster endpoint that accepts the connection and then stalls cannot wedge the

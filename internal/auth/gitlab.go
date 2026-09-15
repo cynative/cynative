@@ -18,6 +18,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/exposure"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 	"github.com/cynative/cynative/internal/cache"
+	"github.com/cynative/cynative/internal/outbound"
 
 	"golang.org/x/oauth2"
 )
@@ -133,6 +134,9 @@ type gitlabProvider struct {
 	exposure            exposure.Exposure
 	tables              *cache.TTLCache[gitlabclass.Table]
 	resolver            addrResolver
+	// outbound is the operator's proxy configuration, applied to the token probe
+	// and the OpenAPI spec download so they route as the request path does.
+	outbound outbound.Routing
 }
 
 var (

@@ -9,6 +9,7 @@ import (
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 // defaultClusterRole is the built-in read-only ClusterRole used when the operator
@@ -32,6 +33,11 @@ type k8sGate[A any] struct {
 	// defaultFetchView) and surfaced in denial messages. Set post-construction by
 	// the shell tryRegister* functions.
 	clusterRole string
+
+	// outbound is the operator's proxy configuration, applied to the bootstrap
+	// ClusterRole fetch so it routes exactly as the request path does. Set
+	// post-construction beside clusterRole; the zero value dials directly.
+	outbound outbound.Routing
 }
 
 // authorizeAction enforces the configured read-only ClusterRole posture for a

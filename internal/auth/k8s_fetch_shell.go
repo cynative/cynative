@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"syscall"
 
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
 )
@@ -15,42 +14,41 @@ import (
 // maxViewRoleBytes caps the clusterrole response body read.
 const maxViewRoleBytes = 1 << 20 // 1 MiB.
 
-// pinnedHTTPClient builds an [http.Client] trusting the system roots plus caData
-// (base64 PEM), optionally presenting a client certificate (base64 PEM cert+key)
-// for mTLS clusters, via [BuildTLSConfig] (the same builder the transport
-// request path uses). control, when non-nil, is installed as the [net.Dialer]
-// ControlContext hook so the bootstrap fetch runs through the dial guard. The
-// client carries the production phase timeouts so a stalled cluster endpoint is
-// bounded even when the caller supplies no context deadline.
-func pinnedHTTPClient(
-	caData, clientCert, clientKey, serverName string,
-	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
-) (*http.Client, error) {
-	return pinnedHTTPClientWithTimeouts(caData, clientCert, clientKey, serverName, defaultK8sFetchTimeouts(), control)
+// pinnedHTTPClient builds an [http.Client] trusting the system roots plus the
+// config's caData (base64 PEM), optionally presenting a client certificate
+// (base64 PEM cert+key) for mTLS clusters, via [BuildTLSConfig] (the same
+// builder the transport request path uses). The client carries the production
+// phase timeouts so a stalled cluster endpoint is bounded even when the caller
+// supplies no context deadline.
+func pinnedHTTPClient(cfg pinnedClientConfig) (*http.Client, error) {
+	return pinnedHTTPClientWithTimeouts(cfg, defaultK8sFetchTimeouts())
 }
 
 // pinnedHTTPClientWithTimeouts is pinnedHTTPClient with the phase timeouts made
 // explicit so tests can drive small values against a stalling server; production
 // callers go through pinnedHTTPClient with defaultK8sFetchTimeouts.
-func pinnedHTTPClientWithTimeouts(
-	caData, clientCert, clientKey, serverName string,
-	to k8sFetchTimeouts,
-	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
-) (*http.Client, error) {
-	tlsCfg, err := BuildTLSConfig(x509.SystemCertPool, caData, clientCert, clientKey, serverName)
+//
+// The dial follows the same rule as every other outbound client: the config's
+// control hook guards a direct connection to the endpoint, and an operator
+// proxy replaces it with a pin to that proxy.
+func pinnedHTTPClientWithTimeouts(cfg pinnedClientConfig, to k8sFetchTimeouts) (*http.Client, error) {
+	tlsCfg, err := BuildTLSConfig(
+		x509.SystemCertPool, cfg.conn.caData, cfg.conn.clientCert, cfg.conn.clientKey, cfg.conn.serverName)
 	if err != nil {
 		return nil, err
+	}
+
+	route, routeErr := RouteOutbound(cfg.routing, cfg.conn.endpoint, cfg.control)
+	if routeErr != nil {
+		return nil, routeErr
 	}
 
 	tr := &http.Transport{ //nolint:exhaustruct // only TLS, dial control, and phase timeouts configured.
 		TLSClientConfig:       tlsCfg,
 		TLSHandshakeTimeout:   to.tlsHandshake,
 		ResponseHeaderTimeout: to.responseHeader,
-		DialContext: (&net.Dialer{ //nolint:exhaustruct // only Timeout + ControlContext configured.
-			Timeout:        to.dial,
-			ControlContext: control,
-		}).DialContext,
 	}
+	route.Apply(tr, &net.Dialer{Timeout: to.dial}) //nolint:exhaustruct // only Timeout configured.
 
 	return &http.Client{Transport: tr, Timeout: to.overall}, nil //nolint:exhaustruct // Transport + Timeout set.
 }

@@ -27,7 +27,7 @@ func (p *aksProvider) defaultFetchView(ctx context.Context, args *AKSAuthArgs) (
 
 	conn := aksClusterConn(cfg.Host, caData, clientCert, clientKey)
 
-	hc, err := pinnedHTTPClient(conn.caData, conn.clientCert, conn.clientKey, conn.serverName, control)
+	hc, err := pinnedHTTPClient(pinnedClientConfig{conn: conn, control: control, routing: p.outbound})
 	if err != nil {
 		return nil, err
 	}

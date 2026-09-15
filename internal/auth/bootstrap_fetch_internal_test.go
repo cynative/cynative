@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 func TestBootstrapDialAuthorizer(t *testing.T) {
@@ -41,12 +43,15 @@ func TestBootstrapDialAuthorizer(t *testing.T) {
 func TestBuildBootstrapFetchClient_rejectsRedirects(t *testing.T) {
 	t.Parallel()
 
-	c := buildBootstrapFetchClient(githubFetchTimeout)
+	c, err := buildBootstrapFetchClient(outbound.Routing{}, githubFetchTimeout, githubOpenAPIURL)
+	if err != nil {
+		t.Fatalf("buildBootstrapFetchClient: %v", err)
+	}
 	if c.CheckRedirect == nil {
 		t.Fatal("CheckRedirect = nil, want a no-follow policy")
 	}
-	if err := c.CheckRedirect(nil, nil); !errors.Is(err, http.ErrUseLastResponse) {
-		t.Errorf("CheckRedirect err = %v, want ErrUseLastResponse", err)
+	if rerr := c.CheckRedirect(nil, nil); !errors.Is(rerr, http.ErrUseLastResponse) {
+		t.Errorf("CheckRedirect err = %v, want ErrUseLastResponse", rerr)
 	}
 	if c.Timeout != githubFetchTimeout {
 		t.Errorf("Timeout = %v, want %v", c.Timeout, githubFetchTimeout)
@@ -150,7 +155,8 @@ func TestFetchBootstrapSpec_success(t *testing.T) {
 				got = r
 				return specResponse(http.StatusOK, strings.NewReader("spec-bytes")), nil
 			})
-			fetch := newBootstrapSpecFetcher(client, c.url, c.accept, c.name)
+			fetch := newBootstrapSpecFetcher(
+				func() (*http.Client, error) { return client, nil }, c.url, c.accept, c.name)
 
 			body, err := fetch(context.Background())
 			if err != nil {
@@ -221,10 +227,55 @@ func TestFetchBootstrapSpec_errors(t *testing.T) {
 func TestConnectorFetcherConstructors(t *testing.T) {
 	t.Parallel()
 
-	if newGithubOpenAPIFetcher() == nil {
+	if newGithubOpenAPIFetcher(outbound.Routing{}) == nil {
 		t.Error("newGithubOpenAPIFetcher() = nil, want non-nil func")
 	}
-	if newGitLabOpenAPIFetcher() == nil {
+	if newGitLabOpenAPIFetcher(outbound.Routing{}) == nil {
 		t.Error("newGitLabOpenAPIFetcher() = nil, want non-nil func")
+	}
+}
+
+// TestBootstrapClientBuilder_DefersTheBuild pins that the table source is handed
+// a builder it can call at fetch time: the client it returns is the guarded one,
+// and a routing that cannot resolve the spec host is reported then, not at
+// construction, where there is nowhere to report it.
+func TestBootstrapClientBuilder_DefersTheBuild(t *testing.T) {
+	t.Parallel()
+
+	build := bootstrapClientBuilder(outbound.Routing{}, githubFetchTimeout, githubOpenAPIURL)
+
+	c, err := build()
+	if err != nil {
+		t.Fatalf("builder: %v", err)
+	}
+	if c.Timeout != githubFetchTimeout {
+		t.Errorf("Timeout = %v, want %v", c.Timeout, githubFetchTimeout)
+	}
+}
+
+func TestBuildBootstrapFetchClient_UnroutableSpecHost(t *testing.T) {
+	t.Parallel()
+
+	r, err := outbound.New(outbound.Config{HTTPSProxy: "http://127.0.0.1:8080", NoProxy: ""})
+	if err != nil {
+		t.Fatalf("outbound.New: %v", err)
+	}
+
+	if _, berr := buildBootstrapFetchClient(r, githubFetchTimeout, "://nonsense"); berr == nil {
+		t.Error("buildBootstrapFetchClient err = nil, want the routing failure surfaced")
+	}
+}
+
+// TestNewBootstrapSpecFetcher_BuildFailureIsAFetchError pins that a client the
+// builder cannot make ends the fetch instead of being dialed around.
+func TestNewBootstrapSpecFetcher_BuildFailureIsAFetchError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("no client")
+	fetch := newBootstrapSpecFetcher(
+		func() (*http.Client, error) { return nil, wantErr }, githubOpenAPIURL, "", "github_hardening")
+
+	if _, err := fetch(context.Background()); !errors.Is(err, wantErr) {
+		t.Errorf("fetch err = %v, want the builder error", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/auth"
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/transport"
 )
@@ -35,8 +36,8 @@ type httpRequestTool struct {
 }
 
 // NewHTTPRequestTool builds the http_request tool, capturing the auth providers
-// for use during execution.
-func NewHTTPRequestTool(providers []auth.Provider) schema.InvokableTool {
+// and the operator's outbound proxy routing for use during execution.
+func NewHTTPRequestTool(providers []auth.Provider, routing outbound.Routing) schema.InvokableTool {
 	return &httpRequestTool{
 		info: &schema.ToolInfo{
 			Name:   "http_request",
@@ -44,7 +45,7 @@ func NewHTTPRequestTool(providers []auth.Provider) schema.InvokableTool {
 			Params: schema.ReflectParams[transport.RequestArgs](),
 		},
 		providers: providers,
-		client:    transport.NewClient(),
+		client:    transport.NewClient(transport.WithRouting(routing)),
 	}
 }
 

@@ -153,11 +153,17 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		awsDefaultProfileCreds: awsDefaultProfileFileHasCreds(),
 		scopeNotifyOut:         os.Stderr,
 
-		tokenForHost:   resolveGithubToken,
-		validateGithub: validateGithubToken,
+		outbound: cfg.Outbound,
+
+		tokenForHost: resolveGithubToken,
+		validateGithub: func(ctx context.Context, token string) (string, error) {
+			return validateGithubToken(ctx, cfg.Outbound, token)
+		},
 
 		discoverGitLab: discoverGitLabCred,
-		buildGitLab:    buildGitLabProvider,
+		buildGitLab: func(glCfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
+			return buildGitLabProvider(glCfg, cfg.Outbound, host, cred)
+		},
 		validateGitLab: validateGitLabToken,
 
 		loadAWS: func(ctx context.Context) (aws.Config, error) {
@@ -176,6 +182,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 			hardened := buildHardenedAWSProvider(c, cfg.AWS, scoped)
 			eks := newEKSProvider(c)
 			eks.clusterRole = cfg.EKS.ClusterRole
+			eks.outbound = cfg.Outbound
 
 			return hardened, eks
 		},
@@ -193,6 +200,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildGCP: func(creds *google.Credentials) (*gcpProvider, *gkeProvider) {
 			gke := newGKEProvider(creds.TokenSource)
 			gke.clusterRole = cfg.GKE.ClusterRole
+			gke.outbound = cfg.Outbound
 
 			return buildHardenedGCPProvider(creds.TokenSource, cfg.GCP), gke
 		},
@@ -209,6 +217,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildAzure: func(cred azcore.TokenCredential) (*azureProvider, *aksProvider) {
 			aks := newAKSProvider(cred, azurehardening.ToSDKCloud(azureCloud))
 			aks.clusterRole = cfg.AKS.ClusterRole
+			aks.outbound = cfg.Outbound
 
 			return buildHardenedAzureProvider(cred, cfg.Azure, azureCloud), aks
 		},
@@ -221,6 +230,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildKube: func(rc resolvedCluster) *kubernetesProvider {
 			p := newKubernetesProvider(rc)
 			p.clusterRole = cfg.Kubernetes.ClusterRole
+			p.outbound = cfg.Outbound
 
 			return p
 		},
