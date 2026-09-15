@@ -686,8 +686,15 @@ func TestValidateGitLabHosts(t *testing.T) {
 		{"punycode host", "xn--i-9bb.example", "", false},
 		{"empty api host is allowed", "gitlab.com", "", false},
 		{"ASCII host and api host both set", "gitlab.internal", "api.gitlab.internal", false},
-		{"non-ASCII host", "g\u0130tlab.internal.example", "", true},
-		{"non-ASCII api host", "gitlab.com", "api.g\u0130tlab.example", true},
+		{"non-ASCII served host", "g\u0130tlab.internal.example", "", true},
+		{"non-ASCII served api host", "gitlab.com", "api.g\u0130tlab.example", true},
+		// api_host is what gets pinned, advertised, probed and dialed, so an
+		// ASCII api_host leaves nothing non-ASCII on the request path even when
+		// host is an internationalized name.
+		{
+			"non-ASCII host behind an ASCII api host",
+			"gitlab.b\u00fccher.example", "gitlab.xn--bcher-kva.example", false,
+		},
 	}
 
 	for _, tc := range cases {

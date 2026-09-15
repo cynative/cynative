@@ -336,9 +336,11 @@ var ErrHostNotAuthorized = errors.New("host not authorized for auth_provider")
 // AuthorizeHost resolves the named provider and asks whether it serves host.
 //
 // host must already be the projected hostname the action gate will see, which
-// is what [authreq.NewView] produces and what the transport passes. Deriving it
-// a second time here is what let the classified authority drift from the sent
-// one, so this function normalizes nothing: one derivation, upstream.
+// is what [authreq.NewView] produces and what the transport passes. This
+// function normalizes nothing, so the two gates cannot be handed two different
+// strings: one derivation, upstream. What ties that string to the authority
+// the client actually sends is the ASCII admission in the transport, not the
+// derivation.
 //
 // It returns an error if name is unknown, the provider denies the host, or
 // resolving its endpoint fails.

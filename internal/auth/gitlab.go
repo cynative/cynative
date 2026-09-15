@@ -156,25 +156,27 @@ func servedHostOf(host, apiHost string) string {
 	return host
 }
 
-// validateGitLabHosts rejects a configured host or api_host that is not ASCII.
-// The connector pins on a lower-cased copy of this value and advertises it to
-// the model, and lower-casing can fold a non-ASCII rune into a plain ASCII name
-// that belongs to somebody else. The request side admits ASCII only
-// ([ASCIIHost] in the transport), so the folded name is one a model can ask for
-// and be credentialed on. An internationalized instance is configured in
-// punycode, which is ASCII and passes. The kubernetes connector guards its
-// configured server the same way.
+// validateGitLabHosts rejects a served authority that is not ASCII. The served
+// authority is [servedHostOf]: api_host when it is set, else host. It is the
+// only one of the two that AuthorizesHost pins, Description advertises, the
+// registration probe dials and the dial guard resolves, so it is the only one
+// that has to agree with the wire. A non-ASCII name cannot: lower-casing can
+// fold a rune into a plain ASCII name that belongs to somebody else, and the
+// request side admits ASCII only ([ASCIIHost] in the transport), so that folded
+// name is one a model can ask for and be credentialed on. An internationalized
+// instance is configured in punycode, which is ASCII and passes. host is still
+// read behind a glab credential: it picks the glab config entry and the
+// instance glab refreshes its own token against, which happens outside
+// cynative's transport (glabFetch). No request this gate authorizes reads it.
+// The kubernetes connector guards its configured server the same way.
 func validateGitLabHosts(host, apiHost string) error {
-	if err := ASCIIHost(stripHostPort(host)); err != nil {
-		return fmt.Errorf("gitlab: connectors.gitlab.host: %w", err)
+	key := "connectors.gitlab.host"
+	if apiHost != "" {
+		key = "connectors.gitlab.api_host"
 	}
 
-	if apiHost == "" {
-		return nil
-	}
-
-	if err := ASCIIHost(stripHostPort(apiHost)); err != nil {
-		return fmt.Errorf("gitlab: connectors.gitlab.api_host: %w", err)
+	if err := ASCIIHost(stripHostPort(servedHostOf(host, apiHost))); err != nil {
+		return fmt.Errorf("gitlab: %s: %w", key, err)
 	}
 
 	return nil

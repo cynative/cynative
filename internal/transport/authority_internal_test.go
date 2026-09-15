@@ -22,10 +22,12 @@ var (
 	_ auth.AddrAuthorizer   = (*authoritySpyProvider)(nil)
 )
 
-// authoritySpyProvider records the authority the gates were handed and whether
-// the credential was ever attached. It records the port as well as the host,
-// because an authority that survives the pipeline intact still says nothing
-// about which authority a policy authorized.
+// authoritySpyProvider records the authority each gate was handed and whether
+// the credential was ever attached. It keeps the two gates' hostnames apart and
+// records the port, because an authority that survives the pipeline intact
+// still says nothing about which authority a policy authorized, and one
+// assembled from two gates' observations says nothing about whether the two
+// gates agreed on it.
 //
 // It embeds an [authtest.LoopbackProvider] for everything it does not record,
 // so it authorizes every host and every resolved address and supplies the test
@@ -35,27 +37,33 @@ var (
 // business is the spelling of the authority; the address floor is pinned by the
 // dial-guard tests in transport_internal_test.go.
 //
-// The fields are read after Execute returns, and every gate runs synchronously
-// on the calling goroutine, so no synchronization is needed. Recording rather
-// than failing inside the double keeps the assertions in the rows, where each
-// one can say what it expected.
+// Every field here is written from AuthorizesHost, AuthorizeAction or
+// InjectAuth, which [Client.do] calls in that order on the calling goroutine
+// before the request is dialed, and read after Execute returns, so no
+// synchronization is needed. Address authorization is the gate that does not
+// run there: it runs from the dialer's ControlContext hook, on the dialing
+// goroutine, and this double records nothing from it. Recording rather than
+// failing inside the double keeps the assertions in the rows, where each one
+// can say what it expected.
 type authoritySpyProvider struct {
 	*authtest.LoopbackProvider
 
-	host     string // the host AuthorizesHost was given; "" when it never ran.
-	port     string // the port AuthorizeAction was given; "" for an absent port.
-	injected bool   // whether InjectAuth ran.
+	hostGateHost   string // the host AuthorizesHost was given; "" when it never ran.
+	actionGateHost string // the hostname AuthorizeAction was given; "" when it never ran.
+	port           string // the port AuthorizeAction was given; "" for an absent port.
+	injected       bool   // whether InjectAuth ran.
 }
 
 func (p *authoritySpyProvider) AuthorizesHost(
 	_ context.Context, host string, _ authreq.ProviderArgs,
 ) (bool, error) {
-	p.host = host
+	p.hostGateHost = host
 
 	return true, nil
 }
 
 func (p *authoritySpyProvider) AuthorizeAction(_ context.Context, v authreq.View, _ authreq.ProviderArgs) error {
+	p.actionGateHost = v.Hostname
 	p.port = v.Port
 
 	return nil
@@ -79,11 +87,12 @@ func (p *authoritySpyProvider) InjectAuth(req *http.Request, args authreq.Provid
 // case-insensitive over ASCII and over nothing else. equalAuthority is where
 // that is enforced, and TestEqualAuthority pins it.
 //
-// The hosts are written as \u escapes so a row stays readable in a diff and no
-// editor can silently rewrite one. Every one of them is under .example
-// (RFC 6761), so no row can resolve to a domain someone else controls: under a
-// mutation that admits these hosts, the suite dials them with a credential
-// attached.
+// The Unicode hosts are written as \u escapes so a row stays readable in a
+// diff and no editor can silently rewrite one; the percent-encoded row is ASCII
+// as written and only becomes a non-ASCII host once [url.Parse] decodes it. Every
+// host is under .example (RFC 6761), so no row can resolve to a domain someone
+// else controls: under a mutation that admits these hosts, the suite dials them
+// with a credential attached.
 func TestAuthorityInvariant(t *testing.T) {
 	t.Parallel()
 
@@ -98,10 +107,12 @@ func TestAuthorityInvariant(t *testing.T) {
 		{"non-folding unicode", "stra\u00dfe.example", "refused"},
 		{"non-breaking space", "space.example\u00a0", "refused"},
 		{"ideographic space", "space.example\u3000", "refused"},
-		// Raw invalid UTF-8 cannot reach here: the arguments are JSON, and both
-		// the marshal in makeArgs and the unmarshal in do replace a bad byte
-		// with U+FFFD. TestASCIIHost pins the raw-byte input directly.
+		// A raw invalid byte cannot survive the arguments: they are JSON, and
+		// both the marshal in makeArgs and the unmarshal in do replace a bad
+		// byte with U+FFFD. Percent-encoding is how one actually arrives, and
+		// it is pure ASCII until [url.Parse] decodes the host.
 		{"replacement rune in the host", "exa\ufffdmple.example", "refused"},
+		{"percent-encoded invalid byte", "exa%FFmple.example", "refused"},
 		{"punycode is admitted", "xn--i-9bb.example", "admitted"},
 	}
 
@@ -166,8 +177,9 @@ func assertRefused(t *testing.T, host string, err error, p *authoritySpyProvider
 	if p.injected {
 		t.Fatalf("host %q was refused, but the credential was attached first", host)
 	}
-	if p.host != "" {
-		t.Fatalf("host %q was refused, but a gate had already classified it as %q", host, p.host)
+	if p.hostGateHost != "" || p.actionGateHost != "" {
+		t.Fatalf("host %q was refused, but a gate had already classified it (host gate %q, action gate %q)",
+			host, p.hostGateHost, p.actionGateHost)
 	}
 }
 
@@ -186,8 +198,15 @@ func assertAdmitted(t *testing.T, host string, err error, p *authoritySpyProvide
 	}
 }
 
-// assertSent checks that the authority the gates authorized is the authority
-// the server received.
+// assertSent checks that both gates classified the same hostname and that the
+// authority they authorized is the authority the server received. Without the
+// first half the authority under test is assembled from two separate
+// observations, and a hostname substituted between the gates is invisible.
+//
+// The two hostnames are compared byte for byte rather than through
+// equalAuthority: [Client.do] hands both gates the same v.Hostname, so any
+// difference at all means the host was derived twice, which is the defect class
+// this file exists to catch.
 func assertSent(t *testing.T, err error, p *authoritySpyProvider, received <-chan string) {
 	t.Helper()
 
@@ -195,7 +214,12 @@ func assertSent(t *testing.T, err error, p *authoritySpyProvider, received <-cha
 		t.Fatalf("Execute = %v, want the request to reach the server", err)
 	}
 
-	authorized := net.JoinHostPort(p.host, p.port)
+	if p.hostGateHost != p.actionGateHost {
+		t.Fatalf("the host gate classified %q but the action gate classified %q",
+			p.hostGateHost, p.actionGateHost)
+	}
+
+	authorized := net.JoinHostPort(p.hostGateHost, p.port)
 	if wire := <-received; !equalAuthority(authorized, wire) {
 		t.Fatalf("the gate authorized %q but the server received %q", authorized, wire)
 	}
@@ -225,9 +249,13 @@ func equalAuthority(authorized, wire string) bool {
 		return false
 	}
 
-	// SA6005 reads this as a slower strings.EqualFold. It is not one: the guard
-	// above is what makes ToLower an ASCII fold here, and EqualFold would undo it.
-	//nolint:staticcheck // SA6005 suggests the Unicode-folding call this function exists to avoid.
+	// SA6005 reads this as a slower strings.EqualFold. Behind the guard above
+	// the two are equivalent, because over ASCII, folding and lower-casing agree
+	// and neither changes the length. What is unsafe is dropping the guard:
+	// EqualFold then folds U+212A and U+017F onto "k" and "s" and calls two
+	// different DNS names equal. Keep the two together: the fold is only an
+	// ASCII fold because the guard already ran.
+	//nolint:staticcheck // SA6005 suggests a fold that is only ASCII-safe because of the guard above.
 	return strings.ToLower(ah) == strings.ToLower(wh) && ap == wp
 }
 
@@ -244,13 +272,14 @@ func asciiOnly(s string) bool {
 	return true
 }
 
-// TestEqualAuthority pins the oracle itself. The two folding rows are the
-// regression guard, and each targets a different unsafe substitute for the
-// current asciiOnly-then-ToLower check: the U+212A row catches a switch to a
-// bare [strings.ToLower] with the ASCII guard removed, since ToLower folds
-// U+212A to "k" the same way [strings.EqualFold] does; the U+017F row catches
-// only a switch to [strings.EqualFold], since a bare ToLower leaves U+017F
-// unchanged and would still reject that row correctly.
+// TestEqualAuthority pins the oracle itself. Both folding rows fire only once
+// the asciiOnly guards are gone: with the guards kept, [strings.EqualFold] and
+// the current ToLower comparison agree on every ASCII pair, so swapping one for
+// the other changes no row here. Removing the guards is the unsafe part, and
+// the two rows then separate the substitutes: the U+212A row fails under
+// either, since ToLower and EqualFold both fold it to "k"; the U+017F row fails
+// only under EqualFold, since ToLower leaves U+017F unchanged and would still
+// reject that row correctly.
 func TestEqualAuthority(t *testing.T) {
 	t.Parallel()
 

@@ -57,10 +57,14 @@ func authorizeRequestPort(v authreq.View, want string) error {
 var ErrNonASCIIHost = errors.New("host is not ASCII")
 
 // ASCIIHost rejects a host containing a rune above U+007F. It is the one
-// admission rule behind the authority invariant: once every admitted host is
-// ASCII, the normalizations downstream cannot produce a string the wire does
-// not carry. Ranging over the string decodes invalid UTF-8 to U+FFFD, which is
-// above U+007F, so malformed bytes are rejected too. Pure: no I/O.
+// admission rule behind the authority invariant, and its guarantee is narrow:
+// it removes the Unicode case-folding and the IDNA ambiguity, so lower-casing
+// an admitted host cannot produce a name other than the one the client
+// resolves and sends, up to ASCII case. It does not make every wire transform
+// an identity. A bracketed IPv6 literal carrying a zone is ASCII and is
+// admitted, and Go's HTTP/1 writer still drops the zone from the Host header.
+// Ranging over the string decodes invalid UTF-8 to U+FFFD, which is above
+// U+007F, so malformed bytes are rejected too. Pure: no I/O.
 func ASCIIHost(host string) error {
 	for _, r := range host {
 		if r > unicode.MaxASCII {
