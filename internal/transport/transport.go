@@ -241,7 +241,7 @@ func (c *Client) do(
 
 	v := authreq.NewView(req, viewBody)
 
-	if hostErr := auth.AuthorizeHost(ctx, args.AuthProvider, req.URL.Hostname(), providers, rawArgs); hostErr != nil {
+	if hostErr := auth.AuthorizeHost(ctx, args.AuthProvider, v.Hostname, providers, rawArgs); hostErr != nil {
 		return nil, 0, noop, hostErr
 	}
 

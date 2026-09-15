@@ -23,10 +23,10 @@ func defaultedPort(port string) string {
 }
 
 // authorizeRequestPort denies a request whose port is not the one the
-// connector is pinned to. The host gates receive a port-stripped hostname
-// (auth.AuthorizeHost passes req.URL.Hostname()) and the dial guard sees only an
-// IP, so this is the only place the port is bound: without it a model can reach
-// a different TLS listener on the pinned host or IP and have the injected
+// connector is pinned to. The host gates receive a port-stripped hostname (the
+// transport passes the view's Hostname) and the dial guard sees only an IP, so
+// this is the only place the port is bound: without it a model can reach a
+// different TLS listener on the pinned host or IP and have the injected
 // credential attached there. want is the connector's own port, already
 // defaulted; an empty want denies, so a connector that never configured one
 // cannot silently inherit 443.

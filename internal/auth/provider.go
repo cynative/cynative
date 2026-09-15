@@ -333,12 +333,16 @@ func find(providers []Provider, name string) (Provider, error) {
 // ErrHostNotAuthorized is returned when a provider denies a request's host.
 var ErrHostNotAuthorized = errors.New("host not authorized for auth_provider")
 
-// AuthorizeHost verifies the named provider permits a request to host. host is
-// lower-cased so providers receive a normalized value. It returns an error if
-// name is unknown, the provider denies the host, or resolving its endpoint fails.
+// AuthorizeHost resolves the named provider and asks whether it serves host.
+//
+// host must already be the projected hostname the action gate will see, which
+// is what [authreq.NewView] produces and what the transport passes. Deriving it
+// a second time here is what let the classified authority drift from the sent
+// one, so this function normalizes nothing: one derivation, upstream.
+//
+// It returns an error if name is unknown, the provider denies the host, or
+// resolving its endpoint fails.
 func AuthorizeHost(ctx context.Context, name, host string, providers []Provider, rawArgs json.RawMessage) error {
-	host = strings.ToLower(host)
-
 	p, err := find(providers, name)
 	if err != nil {
 		return err

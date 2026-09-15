@@ -3360,6 +3360,43 @@ func TestAuthorizeHost_CaseInsensitive(t *testing.T) {
 	}
 }
 
+// hostRecordingProvider records the host string AuthorizeHost hands a provider,
+// so a test can assert that AuthorizeHost passes it through unchanged.
+type hostRecordingProvider struct {
+	seen *string
+}
+
+func (p *hostRecordingProvider) Name() string        { return "recorder" }
+func (p *hostRecordingProvider) Description() string { return "records the classified host" }
+
+func (p *hostRecordingProvider) InjectAuth(_ *http.Request, _ authreq.ProviderArgs) error {
+	return nil
+}
+
+func (p *hostRecordingProvider) AuthorizesHost(
+	_ context.Context, host string, _ authreq.ProviderArgs,
+) (bool, error) {
+	*p.seen = host
+
+	return true, nil
+}
+
+func TestAuthorizeHost_DoesNotLowerCaseItsInput(t *testing.T) {
+	t.Parallel()
+
+	var seen string
+	providers := []Provider{&hostRecordingProvider{seen: &seen}}
+
+	if err := AuthorizeHost(context.Background(), "recorder", "API.Example.com", providers, nil); err != nil {
+		t.Fatalf("AuthorizeHost: %v", err)
+	}
+
+	if seen != "API.Example.com" {
+		t.Fatalf("provider saw %q, want the caller's exact string; "+
+			"AuthorizeHost must not normalize, its caller already did", seen)
+	}
+}
+
 // --- AuthorizeAction dispatcher tests ---
 
 // actionView builds the narrowed view the action gates take, projecting a

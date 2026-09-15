@@ -975,7 +975,8 @@ func TestKubernetesProvider_PublishedAuthorityIsAccepted(t *testing.T) {
 				t.Fatalf("published authority %q does not parse as a URL: %v", rc.authority, err)
 			}
 
-			// AuthorizeHost lower-cases and passes the port-stripped hostname.
+			// authreq.NewView lower-cases the hostname the host gate is given,
+			// and url.URL.Hostname() has already stripped the port.
 			ok, err := p.AuthorizesHost(ctx, strings.ToLower(u.Hostname()), noArgs())
 			if err != nil || !ok {
 				t.Fatalf("host gate refused the published authority %q: ok=%v err=%v", rc.authority, ok, err)
