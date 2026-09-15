@@ -141,3 +141,28 @@ func TestHostOf(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeHost_RejectsHostsThatFoldToASCII(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		host string
+	}{
+		{"U+0130 folds to i", "api.g\u0130thub.com"},
+		{"U+212A folds to k", "g\u212Athub.com"},
+		{"trailing non-breaking space", "compute.googleapis.com\u00a0"},
+		{"leading ideographic space", "\u3000compute.googleapis.com"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := NormalizeHost(tc.host)
+			if !errors.Is(err, ErrInvalidHost) {
+				t.Fatalf("NormalizeHost(%q) = %q, %v; want ErrInvalidHost", tc.host, got, err)
+			}
+		})
+	}
+}

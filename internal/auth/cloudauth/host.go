@@ -24,15 +24,25 @@ const maxASCII = 0x7f
 // literal. Callers may wrap it or map it to their own sentinel.
 var ErrInvalidHost = errors.New("cloudauth: invalid host")
 
-// NormalizeHost lower-cases and trims the host, rejects userinfo, rejects a bare
+// NormalizeHost rejects any non-ASCII rune in the caller's exact input, then
+// lower-cases and trims the host, rejects userinfo, rejects a bare
 // (unbracketed) IPv6 literal — which has two or more colons, unlike a host:port
 // that has exactly one — strips a single :port, trims a single trailing dot,
-// rejects any non-ASCII rune, enforces idna.Lookup.ToASCII idempotency, and
-// finally rejects any host that parses as an IP literal. Bracketed IPv6 literals
-// keep their brackets so the idna check rejects them. It does NOT reject
-// localhost or any specific domain — that policy stays in each cloud's
-// rejectHost. Pure: no I/O.
+// enforces idna.Lookup.ToASCII idempotency, and finally rejects any host that
+// parses as an IP literal. Bracketed IPv6 literals keep their brackets so the
+// idna check rejects them. It does NOT reject localhost or any specific
+// domain — that policy stays in each cloud's rejectHost. Pure: no I/O.
 func NormalizeHost(host string) (string, error) {
+	// The ASCII scan runs first, on the caller's exact string. ToLower can fold
+	// a non-ASCII rune to ASCII and TrimSpace strips Unicode whitespace, so a
+	// guard placed after either one judges a string the caller never passed and
+	// can have nothing non-ASCII left to find.
+	for _, r := range host {
+		if r > maxASCII {
+			return "", fmt.Errorf("%w: %q (non-ASCII / IDN host)", ErrInvalidHost, host)
+		}
+	}
+
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
 		return "", fmt.Errorf("%w: host is empty", ErrInvalidHost)
@@ -50,11 +60,6 @@ func NormalizeHost(host string) (string, error) {
 		}
 	}
 	host = strings.TrimSuffix(host, ".")
-	for _, r := range host {
-		if r > maxASCII {
-			return "", fmt.Errorf("%w: %q (non-ASCII / IDN host)", ErrInvalidHost, host)
-		}
-	}
 	ascii, err := idna.Lookup.ToASCII(host)
 	if err != nil || ascii != host {
 		return "", fmt.Errorf("%w: %q (IDN normalization mismatch)", ErrInvalidHost, host)
@@ -62,6 +67,7 @@ func NormalizeHost(host string) (string, error) {
 	if _, perr := netip.ParseAddr(host); perr == nil {
 		return "", fmt.Errorf("%w: %q (IP literal)", ErrInvalidHost, host)
 	}
+
 	return host, nil
 }
 
