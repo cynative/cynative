@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -74,12 +75,15 @@ func (p *authoritySpyProvider) InjectAuth(req *http.Request, args authreq.Provid
 // the credential was attached, or reaches the server under exactly the
 // authority the gate authorized.
 //
-// Two spellings of an authority are treated as equal and no others: ASCII case,
-// because DNS is case-insensitive, and an omitted port against an explicit 443.
-// equalAuthority is where that is enforced.
+// ASCII case is the only difference the oracle forgives, because DNS is
+// case-insensitive over ASCII and over nothing else. equalAuthority is where
+// that is enforced, and TestEqualAuthority pins it.
 //
 // The hosts are written as \u escapes so a row stays readable in a diff and no
-// editor can silently rewrite one.
+// editor can silently rewrite one. Every one of them is under .example
+// (RFC 6761), so no row can resolve to a domain someone else controls: under a
+// mutation that admits these hosts, the suite dials them with a credential
+// attached.
 func TestAuthorityInvariant(t *testing.T) {
 	t.Parallel()
 
@@ -90,14 +94,14 @@ func TestAuthorityInvariant(t *testing.T) {
 	}{
 		{"plain ascii reaches the server", "", "sent"},
 		{"U+0130 folds to ascii", "\u0130.example", "refused"},
-		{"U+212A folds to ascii", "g\u212athub.com", "refused"},
+		{"U+212A folds to ascii", "g\u212athub.example", "refused"},
 		{"non-folding unicode", "stra\u00dfe.example", "refused"},
-		{"non-breaking space", "example.com\u00a0", "refused"},
-		{"ideographic space", "example.com\u3000", "refused"},
+		{"non-breaking space", "space.example\u00a0", "refused"},
+		{"ideographic space", "space.example\u3000", "refused"},
 		// Raw invalid UTF-8 cannot reach here: the arguments are JSON, and both
 		// the marshal in makeArgs and the unmarshal in do replace a bad byte
 		// with U+FFFD. TestASCIIHost pins the raw-byte input directly.
-		{"replacement rune in the host", "exa\ufffdmple.com", "refused"},
+		{"replacement rune in the host", "exa\ufffdmple.example", "refused"},
 		{"punycode is admitted", "xn--i-9bb.example", "admitted"},
 	}
 
@@ -129,15 +133,15 @@ func TestAuthorityInvariant(t *testing.T) {
 			args := makeArgs(t, map[string]any{"url": target, "auth_provider": "invariant"})
 			_, _, err := NewClient().Execute(context.Background(), args, []auth.Provider{p})
 
+			// "sent" is the default arm, so a mistyped want cannot leave a row
+			// asserting nothing: it runs the strictest of the three instead.
 			switch tc.want {
 			case "refused":
 				assertRefused(t, tc.host, err, p)
 			case "admitted":
 				assertAdmitted(t, tc.host, err, p)
-			case "sent":
-				assertSent(t, err, p, received)
 			default:
-				t.Fatalf("row %q wants %q, which asserts nothing", tc.name, tc.want)
+				assertSent(t, err, p, received)
 			}
 		})
 	}
@@ -191,27 +195,23 @@ func assertSent(t *testing.T, err error, p *authoritySpyProvider, received <-cha
 		t.Fatalf("Execute = %v, want the request to reach the server", err)
 	}
 
-	authorized := net.JoinHostPort(p.host, defaultedTestPort(p.port))
+	authorized := net.JoinHostPort(p.host, p.port)
 	if wire := <-received; !equalAuthority(authorized, wire) {
 		t.Fatalf("the gate authorized %q but the server received %q", authorized, wire)
 	}
 }
 
-// defaultedTestPort mirrors the gate's own defaultedPort: the view reports an
-// absent port as "", and an omitted port names the same endpoint as 443.
-func defaultedTestPort(port string) string {
-	if port == "" {
-		return "443"
-	}
-
-	return port
-}
-
 // equalAuthority reports whether the authority the gate authorized and the one
-// the server received name the same endpoint. ASCII case is the only
-// equivalence allowed, because DNS is case-insensitive. Nothing else is
-// normalized: a generous oracle would erase the discrepancies this test exists
-// to catch.
+// the server received name the same endpoint. The two hosts must be the same
+// ASCII string up to case, and the two ports must be identical. Every row that
+// reaches the server carries an explicit port, so there is no default to apply
+// and an absent port on either side is a mismatch.
+//
+// Neither [strings.EqualFold] nor [strings.ToLower] alone can decide this.
+// Both apply Unicode case mapping, which turns U+212A into "k" and U+017F into
+// "s", so either one would call two different DNS names equal and would accept
+// exactly the confusion this test exists to catch. A host carrying any rune
+// above U+007F is therefore rejected before the comparison, not folded into it.
 func equalAuthority(authorized, wire string) bool {
 	ah, ap, aerr := net.SplitHostPort(authorized)
 	wh, wp, werr := net.SplitHostPort(wire)
@@ -219,5 +219,58 @@ func equalAuthority(authorized, wire string) bool {
 		return false
 	}
 
-	return strings.EqualFold(ah, wh) && ap == wp
+	if !asciiOnly(ah) || !asciiOnly(wh) {
+		return false
+	}
+
+	// SA6005 reads this as a slower strings.EqualFold. It is not one: the guard
+	// above is what makes ToLower an ASCII fold here, and EqualFold would undo it.
+	//nolint:staticcheck // SA6005 suggests the Unicode-folding call this function exists to avoid.
+	return strings.ToLower(ah) == strings.ToLower(wh) && ap == wp
+}
+
+// asciiOnly reports whether s is all ASCII. Ranging over the string decodes
+// invalid UTF-8 to U+FFFD, which is above U+007F, so malformed bytes are
+// rejected too. It mirrors [auth.ASCIIHost], the rule under test.
+func asciiOnly(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII {
+			return false
+		}
+	}
+
+	return true
+}
+
+// TestEqualAuthority pins the oracle itself. The two folding rows are the
+// regression guard: U+212A and U+017F are the runes that make Unicode case
+// folding unsafe for a DNS name, and a switch back to [strings.EqualFold] or a
+// bare [strings.ToLower] turns both of them green.
+func TestEqualAuthority(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name             string
+		authorized, wire string
+		want             bool
+	}{
+		{"identical", "example.com:443", "example.com:443", true},
+		{"ascii case only", "ExAmple.com:443", "example.COM:443", true},
+		{"U+212A is not k", "gkthub.example:443", "g\u212athub.example:443", false},
+		{"U+017F is not s", "s.example:443", "\u017f.example:443", false},
+		{"identical non-ascii is still rejected", "stra\u00dfe.example:443", "stra\u00dfe.example:443", false},
+		{"a different port is a different endpoint", "example.com:443", "example.com:8443", false},
+		{"an absent port is not an authority", "example.com:443", "example.com", false},
+		{"an unparseable authority is not an authority", "example.com", "example.com:443", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := equalAuthority(tc.authorized, tc.wire); got != tc.want {
+				t.Fatalf("equalAuthority(%q, %q) = %v, want %v", tc.authorized, tc.wire, got, tc.want)
+			}
+		})
+	}
 }
