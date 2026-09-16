@@ -85,6 +85,7 @@ func TestNewEgress_RejectsUnusableValues(t *testing.T) {
 		{"port zero", "HTTPS_PROXY", "http://proxy.corp:0", "port out of range"},
 		{"non-ascii host", "HTTPS_PROXY", "http://prox\u00fd.corp:3128", "not a valid proxy URL"},
 		{"zoned host", "HTTPS_PROXY", "http://[fe80::1%25eth0]:3128", "not a valid proxy URL"},
+		{"empty host", "HTTPS_PROXY", "//proxy.corp:3128", "not a valid proxy URL"},
 		{"control character", "HTTPS_PROXY", "http://proxy.corp:31\x0128", "not a valid proxy URL"},
 		{"http proxy checked too", "HTTP_PROXY", "https://proxy.corp", `unsupported scheme "https"`},
 		{"lower-case spelling checked", "https_proxy", "https://proxy.corp", `unsupported scheme "https"`},
@@ -271,11 +272,13 @@ func TestEgress_ScrubErrorKeepsChainAndReturnsSameErrorWhenClean(t *testing.T) {
 
 // unchanged reports whether got is want, passed through with no wrapper.
 // ScrubError promises the identical value back when there is nothing to
-// scrub; a direct error comparison would say so too, but errorlint flags that
-// shape as fragile against wrapping, so the two facts it would have checked
-// (same text, not our own wrapper type) are checked explicitly instead.
+// scrub, and [errors.Is] starts by comparing got and want directly (the same
+// identity a bare == would check), so a true result here proves identity
+// unless got merely wraps want. The [errors.As] check rules out exactly that
+// wrapper case: scrubbedError.Unwrap hands back want, which would otherwise
+// satisfy [errors.Is] on its own and let a wrapped result pass as unchanged.
 func unchanged(got, want error) bool {
-	if got.Error() != want.Error() {
+	if !errors.Is(got, want) {
 		return false
 	}
 	var wrapped *scrubbedError
