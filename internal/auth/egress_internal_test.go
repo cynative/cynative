@@ -228,6 +228,18 @@ func TestEgress_ScrubNeverRescansItsOwnPlaceholder(t *testing.T) {
 	}
 }
 
+func TestEgress_ScrubMergesOverlappingForms(t *testing.T) {
+	t.Parallel()
+
+	// The password "Basic YW" is a prefix of the header "Basic <token>"; a scan
+	// that consumed the password first would leave the token's tail, and that
+	// tail decodes to the password itself.
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://alice:Basic%20YW@proxy.corp:3128"})
+	if out, want := e.Scrub("header Basic YWxpY2U6QmFzaWMgWVc= sent"), "header "+scrubPlaceholder+" sent"; out != want {
+		t.Fatalf("Scrub = %q, want %q", out, want)
+	}
+}
+
 func TestEgress_ScrubCoversBothProxiesAndUsernameOnlyCredentials(t *testing.T) {
 	t.Parallel()
 

@@ -57,9 +57,9 @@ type Egress struct {
 	httpProxy  *url.URL
 	noProxy    string
 	proxyFunc  func(*url.URL) (*url.URL, error)
-	// scrubber replaces every spelling of each proxy credential that Go or a
-	// proxy could echo back; nil when no credential is configured.
-	scrubber *strings.Replacer
+	// secrets is the replacement set Scrub applies: every spelling of each
+	// proxy credential that Go or a proxy could echo back, deduplicated.
+	secrets []string
 }
 
 // NoProxy returns a policy with no proxy configured: every route is direct. It
@@ -106,7 +106,7 @@ func NewEgress(lookup func(string) (string, bool)) (*Egress, error) {
 		httpProxy:  httpProxy,
 		noProxy:    noProxy,
 		proxyFunc:  cfg.ProxyFunc(),
-		scrubber:   newScrubber(scrubForms(httpsProxy, httpProxy)),
+		secrets:    scrubForms(httpsProxy, httpProxy),
 	}, nil
 }
 
@@ -229,9 +229,9 @@ func plainForms(s string) []string {
 	return []string{s, quoted[1 : len(quoted)-1]}
 }
 
-// scrubForms orders the replacement set longest first, so an encoded form is
-// replaced before a shorter password it happens to contain, and drops the
-// duplicates two proxies or a username-only userinfo produce.
+// scrubForms collects the replacement set in a fixed order and drops the
+// duplicates two proxies or a username-only userinfo produce. The order does
+// not decide anything: Scrub locates every form and merges what overlaps.
 func scrubForms(proxies ...*url.URL) []string {
 	var forms []string
 	for _, u := range proxies {
@@ -246,25 +246,6 @@ func scrubForms(proxies ...*url.URL) []string {
 	})
 
 	return slices.Compact(forms)
-}
-
-// newScrubber builds the single-pass replacer Scrub applies. One pass matters:
-// the placeholder contains the word "proxy", so a sequential ReplaceAll per
-// form would find a credential such as "prox" inside the placeholder a previous
-// form inserted and nest the markers. At each position the replacer takes the
-// earliest listed form that matches, which is the longest one. Nil for an
-// empty set.
-func newScrubber(forms []string) *strings.Replacer {
-	if len(forms) == 0 {
-		return nil
-	}
-
-	var pairs []string
-	for _, form := range forms {
-		pairs = append(pairs, form, scrubPlaceholder)
-	}
-
-	return strings.NewReplacer(pairs...)
 }
 
 // Notice renders the startup line body: which proxies are configured and the
@@ -287,14 +268,64 @@ func (e *Egress) Notice() string {
 	return strings.Join(parts, " · ")
 }
 
-// Scrub replaces every configured proxy credential form in s with a
-// placeholder, in one pass. Text without a credential is returned unchanged.
+// Scrub replaces every occurrence of every configured proxy credential form
+// in s with a placeholder. Occurrences are located in the original text and
+// overlapping ones are replaced as one span: a form is never found inside a
+// placeholder (the placeholder contains "proxy", a plausible credential), and
+// a shorter form that starts earlier cannot leave the tail of a longer one
+// behind, which for the Basic token would decode to the password. Text without
+// a credential is returned unchanged.
 func (e *Egress) Scrub(s string) string {
-	if e.scrubber == nil {
+	spans := credentialSpans(s, e.secrets)
+	if len(spans) == 0 {
 		return s
 	}
 
-	return e.scrubber.Replace(s)
+	var b strings.Builder
+	last := 0
+	for _, sp := range spans {
+		b.WriteString(s[last:sp.start])
+		b.WriteString(scrubPlaceholder)
+		last = sp.end
+	}
+	b.WriteString(s[last:])
+
+	return b.String()
+}
+
+// span is a half-open [start, end) range of a string.
+type span struct{ start, end int }
+
+// credentialSpans returns the ranges of s that any of forms occupies, ordered
+// and with overlapping or touching ranges merged. Nil when nothing matches.
+func credentialSpans(s string, forms []string) []span {
+	var found []span
+	for _, form := range forms {
+		for from := 0; ; {
+			i := strings.Index(s[from:], form)
+			if i < 0 {
+				break
+			}
+			found = append(found, span{start: from + i, end: from + i + len(form)})
+			from += i + 1
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].start < found[j].start })
+
+	merged := make([]span, 0, len(found))
+	for _, sp := range found {
+		if n := len(merged); n > 0 && sp.start <= merged[n-1].end {
+			merged[n-1].end = max(merged[n-1].end, sp.end)
+
+			continue
+		}
+		merged = append(merged, sp)
+	}
+
+	return merged
 }
 
 // scrubbedError carries scrubbed text while keeping the original error in the
