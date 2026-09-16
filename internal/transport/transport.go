@@ -12,10 +12,12 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
+	"net/url"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/cynative/cynative/internal/audit"
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/redact"
@@ -39,8 +41,9 @@ const (
 
 // Transport knobs mirroring [http.DefaultTransport]'s documented defaults. We
 // build a fresh transport rather than cloning the mutable global so an embedding
-// process cannot inject a Proxy or a DialTLS/DialTLSContext hook that would
-// bypass the dial-time IP guard.
+// process cannot inject a DialTLS/DialTLSContext hook that would bypass the
+// dial-time IP guard, and so the only Proxy the transport carries is the one the
+// egress policy binds for the selected route.
 const (
 	defaultMaxIdleConns          = 100
 	defaultIdleConnTimeout       = 90 * time.Second
@@ -86,6 +89,7 @@ type Client struct {
 	systemCertPool certPoolFunc
 	readAll        readAllFunc
 	redactor       redactor
+	egress         *auth.Egress
 }
 
 // NewClient constructs a Client with production defaults.
@@ -94,6 +98,7 @@ func NewClient(opts ...Option) *Client {
 		systemCertPool: x509.SystemCertPool,
 		readAll:        io.ReadAll,
 		redactor:       redact.New(),
+		egress:         auth.NoProxy(),
 	}
 
 	for _, o := range opts {
@@ -101,6 +106,17 @@ func NewClient(opts ...Option) *Client {
 	}
 
 	return c
+}
+
+// WithEgress installs the operator's outbound routing policy. A nil policy
+// keeps the direct default, so a caller without one (tests, tools built
+// before the policy exists) stays on today's behavior.
+func WithEgress(e *auth.Egress) Option {
+	return func(c *Client) {
+		if e != nil {
+			c.egress = e
+		}
+	}
 }
 
 // KeyValue represents a key-value pair for HTTP headers and query parameters.
@@ -267,7 +283,7 @@ func (c *Client) do(
 		},
 	}
 
-	cleanup, err := c.configureTransport(ctx, httpClient, args.AuthProvider, providers, rawArgs)
+	cleanup, err := c.configureTransport(ctx, httpClient, req.URL, args.AuthProvider, providers, rawArgs)
 	if err != nil {
 		return nil, 0, noop, err
 	}
@@ -293,14 +309,14 @@ func (c *Client) Execute(ctx context.Context, arguments string, providers []auth
 	// so LIFO closes the body — idling the connection — before cleanup releases it.
 	defer cleanup()
 	if err != nil {
-		return "", 0, err
+		return "", 0, c.egress.ScrubError(err)
 	}
 	defer resp.Body.Close()
 
 	status := resp.StatusCode
 	body, ferr := FormatResponse(resp, maxBytes, c.redactor)
 
-	return body, status, ferr
+	return body, status, c.egress.ScrubError(ferr)
 }
 
 // ExecuteStructured performs the request and returns a structured Response. The
@@ -315,7 +331,7 @@ func (c *Client) ExecuteStructured(
 	resp, maxBytes, cleanup, err := c.do(ctx, arguments, providers)
 	defer cleanup() // always non-nil; see Execute for the defer-ordering rationale.
 	if err != nil {
-		return nil, err
+		return nil, c.egress.ScrubError(err)
 	}
 	defer resp.Body.Close()
 
@@ -323,7 +339,7 @@ func (c *Client) ExecuteStructured(
 	// from a body that was actually truncated.
 	body, err := c.readAll(io.LimitReader(resp.Body, int64(maxBytes)+1))
 	if err != nil {
-		return nil, fmt.Errorf("transport: read response body: %w", err)
+		return nil, c.egress.ScrubError(fmt.Errorf("transport: read response body: %w", err))
 	}
 
 	truncated := false
@@ -382,11 +398,13 @@ func dialGuard(
 // from scratch (never the shared [http.DefaultTransport]) whose dialer runs the
 // dial-time IP guard, even when no CA / client cert is supplied. When the active
 // provider supplies a CA and/or client cert, the TLS material is set on that same
-// transport. It returns a cleanup function that must be deferred by the caller to
-// release idle connections.
+// transport. It also selects the egress route for target and records it once for
+// the audit result. It returns a cleanup function that must be deferred by the
+// caller to release idle connections.
 func (c *Client) configureTransport(
 	ctx context.Context,
 	client *http.Client,
+	target *url.URL,
 	providerName string,
 	providers []auth.Provider,
 	rawArgs json.RawMessage,
@@ -408,23 +426,31 @@ func (c *Client) configureTransport(
 		return noop, snErr
 	}
 
+	// Select the route once and record it for the audit result, whether or not
+	// the connection then succeeds: a TLS or CONNECT failure still names the
+	// route it took. Selection is the last step before the dial, so a request
+	// denied above never reaches it.
+	route := c.egress.Route(target)
+	audit.MarkRoute(ctx, route.Proxied())
+
 	// Build a fresh, known transport instead of cloning the mutable global
-	// [http.DefaultTransport]: Proxy is intentionally left nil and no
-	// DialTLS/DialTLSContext is inherited, so the dial-time IP guard always runs
-	// for HTTPS and cannot be bypassed (or panicked) by an embedding process that
-	// customized or replaced the global transport.
+	// [http.DefaultTransport], and let the egress policy bind its Proxy and
+	// DialContext: a direct route keeps the dial-time IP guard in the dialer's
+	// ControlContext, a proxied route may only dial the proxy's own authority.
+	// No DialTLS/DialTLSContext is ever set, so the guard cannot be skipped by
+	// an embedding process that customized the global transport.
 	base := &http.Transport{
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          defaultMaxIdleConns,
 		IdleConnTimeout:       defaultIdleConnTimeout,
 		TLSHandshakeTimeout:   defaultTLSHandshakeTimeout,
 		ExpectContinueTimeout: defaultExpectContinueTimeout,
-		DialContext: (&net.Dialer{
-			Timeout:        defaultDialTimeout,
-			KeepAlive:      defaultDialKeepAlive,
-			ControlContext: dialGuard(providerName, providers, rawArgs),
-		}).DialContext,
 	}
+	c.egress.ConfigureTransport(base, route, &net.Dialer{
+		Timeout:        defaultDialTimeout,
+		KeepAlive:      defaultDialKeepAlive,
+		ControlContext: dialGuard(providerName, providers, rawArgs),
+	})
 
 	tr, err := c.tlsTransport(base, caData, clientCertData, clientKeyData, serverName)
 	if err != nil {

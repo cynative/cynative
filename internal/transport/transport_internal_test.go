@@ -948,7 +948,8 @@ func TestConfigureTransport_InstallsTransportWithDialGuard(t *testing.T) {
 	// name == "" short-circuits GetCACertData/GetClientCertData to ("", nil),
 	// so no provider lookup happens, but the dial-guarded transport is still
 	// installed (always-install contract for the SSRF dial pin).
-	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil)
+	cleanup, err := NewClient().configureTransport(
+		context.Background(), client, mustTarget(t, "https://example.com/"), "", nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -960,14 +961,15 @@ func TestConfigureTransport_InstallsTransportWithDialGuard(t *testing.T) {
 	}
 }
 
-func TestConfigureTransport_DisablesProxy(t *testing.T) {
+func TestConfigureTransport_NoProxyConfiguredLeavesProxyNil(t *testing.T) {
 	t.Parallel()
 
-	// The dial-time IP guard must observe the real target IP. A cloned
-	// http.DefaultTransport carries Proxy: ProxyFromEnvironment, which would make
-	// Go dial the proxy instead — so the installed transport must disable Proxy.
+	// With the default direct policy the transport carries no Proxy, so the
+	// dial-time IP guard observes the real target IP. A configured proxy is
+	// bound by the egress policy and tested in egress_internal_test.go.
 	client := &http.Client{}
-	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil)
+	cleanup, err := NewClient().configureTransport(
+		context.Background(), client, mustTarget(t, "https://example.com/"), "", nil, nil)
 	if err != nil {
 		t.Fatalf("configureTransport returned error: %v", err)
 	}
@@ -989,7 +991,8 @@ func TestConfigureTransport_NoInheritedTLSDialers(t *testing.T) {
 	// http.DefaultTransport), so it carries no DialTLS/DialTLSContext that would
 	// make net/http skip the guarded DialContext for HTTPS.
 	client := &http.Client{}
-	cleanup, err := NewClient().configureTransport(context.Background(), client, "", nil, nil)
+	cleanup, err := NewClient().configureTransport(
+		context.Background(), client, mustTarget(t, "https://example.com/"), "", nil, nil)
 	if err != nil {
 		t.Fatalf("configureTransport returned error: %v", err)
 	}
@@ -1455,7 +1458,8 @@ func TestConfigureTransport_ClientCertError(t *testing.T) {
 	rawArgs := json.RawMessage(`{"auth_provider": "error-cert"}`)
 
 	cleanup, err := NewClient().configureTransport(
-		context.Background(), http.DefaultClient, "error-cert", providers, rawArgs,
+		context.Background(), http.DefaultClient, mustTarget(t, "https://example.com/"),
+		"error-cert", providers, rawArgs,
 	)
 	if err == nil || !strings.Contains(err.Error(), "client cert retrieval failed") {
 		t.Errorf("expected error from client cert data, got %v", err)
