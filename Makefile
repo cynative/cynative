@@ -175,6 +175,7 @@ sh-test:
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML not found, needed by the llm-smoke secret-boundary pin (scripts/ci/check-llm-smoke-secrets.py). apt: python3-yaml, pip: PyYAML."; exit 1; }
 	@sh test/install.unit.test.sh
 	@sh test/install.smoke.test.sh
+	@sh test/proxy.smoke.test.sh
 	@sh test/e2e-guardrails.unit.test.sh
 	@sh test/connector-e2e.unit.test.sh
 	@sh test/agents-catalog.unit.test.sh
@@ -190,7 +191,7 @@ sh-test:
 	@sh test/connector-e2e-roster.unit.test.sh
 	@sh test/llm-smoke-secrets.unit.test.sh
 	@sh test/retrigger.unit.test.sh
-	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/agent-witness.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
+	@PYTHONDONTWRITEBYTECODE=1 sh -c 'for f in scripts/ci/check-llm-smoke-secrets.py test/lib/connector-audit-parser.py test/lib/agent-witness.py test/lib/intercept-proxy.py test/lib/fake-llm.py test/lib/connector_audit/*.py test/lib/connector_audit/specs/*.py; do python3 -B -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$$f" || { echo "FAIL: python syntax error in $$f"; exit 1; }; done'
 	@files=$$(git ls-files 'test/connector.*.e2e.test.sh') || { echo "git ls-files failed for connector selftests" >&2; exit 1; }; \
 	 [ -n "$$files" ] || { echo "no connector e2e selftests matched test/connector.*.e2e.test.sh" >&2; exit 1; }; \
 	 for f in $$files; do echo "  selftest $$f"; sh "$$f" --selftest || exit 1; done
@@ -271,7 +272,7 @@ sh-test:
 	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
 	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
-	@echo "OK: sh-test (install.sh unit + loopback smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + agent witness selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + proxy smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + agent witness selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
