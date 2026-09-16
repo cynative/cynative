@@ -10,8 +10,53 @@ import (
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials/endpointcreds"
+	"github.com/aws/smithy-go/logging"
 	"golang.org/x/oauth2"
 )
+
+// TestAWSConfigOptions_CarryTheSilentLoggerAndTheRoutedClients pins the option
+// list the registration shell hands LoadDefaultConfig. Every AWS client built
+// from the resulting config inherits it, so dropping the routed clients here
+// would send STS, IAM, EKS, assume-role and the credential providers direct
+// under a proxy-only policy with no other test noticing.
+func TestAWSConfigOptions_CarryTheSilentLoggerAndTheRoutedClients(t *testing.T) {
+	t.Parallel()
+
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://proxy.corp:3128", "NO_PROXY": "direct.example"})
+	var lo awsconfig.LoadOptions
+	for _, fn := range e.awsConfigOptions() {
+		if err := fn(&lo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, ok := lo.Logger.(logging.Nop); !ok {
+		t.Errorf("Logger is %T, want logging.Nop so the SDK stays silent", lo.Logger)
+	}
+
+	bc, ok := lo.HTTPClient.(*awshttp.BuildableClient)
+	if !ok {
+		t.Fatalf("LoadOptions.HTTPClient is %T, want *awshttp.BuildableClient", lo.HTTPClient)
+	}
+	tr := bc.GetTransport()
+	if tr.Proxy == nil {
+		t.Fatal("the shared AWS client must carry the selector")
+	}
+	proxied, _ := tr.Proxy(httptest.NewRequest(http.MethodGet, "https://sts.amazonaws.com/", nil))
+	direct, _ := tr.Proxy(httptest.NewRequest(http.MethodGet, "https://direct.example/", nil))
+	if proxied == nil || proxied.Host != "proxy.corp:3128" || direct != nil {
+		t.Fatalf("selection: proxied=%v direct=%v", proxied, direct)
+	}
+
+	if lo.EndpointCredentialOptions == nil {
+		t.Fatal("the container-credential provider needs its own client option")
+	}
+	var eo endpointcreds.Options
+	lo.EndpointCredentialOptions(&eo)
+	if eo.HTTPClient != bc {
+		t.Error("the container-credential provider must use the same routed client")
+	}
+}
 
 func TestAWSHTTPClient_RoutesPerPolicy(t *testing.T) {
 	t.Parallel()

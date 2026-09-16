@@ -8,7 +8,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/aws/smithy-go/logging"
 	"golang.org/x/oauth2/google"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -249,13 +248,9 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 }
 
 // loadAWSDefaultConfig loads the AWS SDK's default configuration with the
-// silent logger and the egress policy's clients, so every client derived from
-// the returned config — including the container-credential provider, which does
-// not inherit the shared one — follows the operator's route.
+// options the policy composes. Shell: the real LoadDefaultConfig.
 func loadAWSDefaultConfig(ctx context.Context, e *Egress) (aws.Config, error) {
-	opts := append([]func(*awsconfig.LoadOptions) error{awsconfig.WithLogger(logging.Nop{})}, e.awsLoadOptions()...)
-
-	return awsconfig.LoadDefaultConfig(ctx, opts...)
+	return awsconfig.LoadDefaultConfig(ctx, e.awsConfigOptions()...)
 }
 
 // validateAWSIdentity is the AWS registration liveness check that also returns a
