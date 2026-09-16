@@ -88,9 +88,11 @@ address; both are delegated to the proxy. That is the trust boundary change:
   retries directly.
 
 Proxy credentials in the URL are sent to the proxy as HTTP Basic (or SOCKS
-authentication) over the plaintext proxy hop. They are never printed, and any
-error text that echoes them is scrubbed before it reaches the model, the
-inventory or the audit log.
+authentication) over the plaintext proxy hop. Cynative never prints them.
+Credentials echoed back in error text are scrubbed before the text reaches
+the model, the inventory or the audit log, both the Basic token and the
+password itself, except that a password shorter than four characters is not
+replaced as plain text (only its Basic token is); use a longer one.
 
 ## Certificate trust
 
@@ -179,8 +181,10 @@ that answers requests itself; cynative's own hermetic suite
    The empty home keeps the cloud SDKs from finding real credentials; the
    proxy sees every `https` connection the run attempts and refuses the ones
    you did not script. Keep `NO_PROXY` unset so nothing bypasses the proxy. On
-   a cloud VM the Google and Azure SDKs still probe their metadata services
-   directly (plain `http`, never proxied); point `GCE_METADATA_HOST` and
+   a cloud VM the Google metadata client always goes direct: it never uses a
+   proxy. The Azure managed-identity probe is plain `http` and follows
+   `HTTP_PROXY` when that is set; this recipe sets only `HTTPS_PROXY`, so the
+   Azure probe goes direct here too. Point `GCE_METADATA_HOST` and
    `MSI_ENDPOINT` at a loopback port that answers 400, as
    `test/proxy.smoke.test.sh` does, or run the test off the cloud.
 
