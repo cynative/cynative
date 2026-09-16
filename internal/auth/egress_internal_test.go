@@ -91,6 +91,7 @@ func TestNewEgress_RejectsUnusableValues(t *testing.T) {
 		{"zoned host", "HTTPS_PROXY", "http://[fe80::1%25eth0]:3128", "not a valid proxy URL"},
 		{"empty host", "HTTPS_PROXY", "//proxy.corp:3128", "not a valid proxy URL"},
 		{"control character", "HTTPS_PROXY", "http://proxy.corp:31\x0128", "not a valid proxy URL"},
+		{"no_proxy control character", "NO_PROXY", "a.example\nb.example", "control character"},
 		{"http proxy checked too", "HTTP_PROXY", "https://proxy.corp", `unsupported scheme "https"`},
 		{"lower-case spelling checked", "https_proxy", "https://proxy.corp", `unsupported scheme "https"`},
 	}

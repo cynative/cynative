@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"golang.org/x/net/http/httpproxy"
 )
@@ -75,7 +76,7 @@ func NoProxy() *Egress {
 func NewEgress(lookup func(string) (string, bool)) (*Egress, error) {
 	httpsRaw, httpsName := firstNonEmpty(lookup, "https_proxy", "HTTPS_PROXY")
 	httpRaw, httpName := firstNonEmpty(lookup, "http_proxy", "HTTP_PROXY")
-	noProxy, _ := firstNonEmpty(lookup, "no_proxy", "NO_PROXY")
+	noProxy, noProxyName := firstNonEmpty(lookup, "no_proxy", "NO_PROXY")
 
 	httpsProxy, err := parseProxyValue(httpsName, httpsRaw)
 	if err != nil {
@@ -85,6 +86,12 @@ func NewEgress(lookup func(string) (string, bool)) (*Egress, error) {
 	httpProxy, err := parseProxyValue(httpName, httpRaw)
 	if err != nil {
 		return nil, err
+	}
+
+	// Notice prints the list as given, so a newline or another control
+	// character would split the startup line in two.
+	if strings.ContainsFunc(noProxy, unicode.IsControl) {
+		return nil, &proxyConfigError{variable: noProxyName, problem: "control character"}
 	}
 
 	cfg := httpproxy.Config{

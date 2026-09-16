@@ -38,7 +38,8 @@ request whose host is an IP literal only, never against what a name resolves
 to), a host name (matches the name and its subdomains), a name with a leading
 dot (subdomains only), and `host:port`. `localhost` in lower case and loopback
 literals are never proxied. Trailing dots are significant on both sides: an
-entry `api.example.com` does not match a request for `api.example.com.`.
+entry `api.example.com` does not match a request for `api.example.com.`. A
+value with a control character in it is rejected at startup.
 
 ## What crosses the proxy
 
