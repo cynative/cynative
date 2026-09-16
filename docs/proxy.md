@@ -89,10 +89,10 @@ address; both are delegated to the proxy. That is the trust boundary change:
 
 Proxy credentials in the URL are sent to the proxy as HTTP Basic (or SOCKS
 authentication) over the plaintext proxy hop. Cynative never prints them.
-Credentials echoed back in error text are scrubbed before the text reaches
-the model, the inventory or the audit log, both the Basic token and the
-password itself, except that a password shorter than four characters is not
-replaced as plain text (only its Basic token is); use a longer one.
+Credentials echoed back in error text are scrubbed before the text reaches the
+model, the inventory or the audit log: the Basic token, the username and the
+password. A username or password shorter than four characters is not replaced
+as plain text (only the Basic token is), so use longer ones.
 
 ## Certificate trust
 

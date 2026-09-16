@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -213,15 +214,25 @@ func TestEgress_ScrubReplacesLongerFormsFirst(t *testing.T) {
 func TestEgress_ScrubCoversBothProxiesAndUsernameOnlyCredentials(t *testing.T) {
 	t.Parallel()
 
+	// The http proxy carries a token as its username, the shape some proxies
+	// use; Go sends Basic b3BhcXVlLWxvbmctdG9rZW46 for it.
 	e := mustEgress(t, map[string]string{
 		"HTTPS_PROXY": "http://alice:s3cret@proxy.corp:3128",
-		"HTTP_PROXY":  "http://bob@other.corp:3128", // Go still sends Basic bob: for this one.
+		"HTTP_PROXY":  "http://opaque-long-token@other.corp:3128",
 	})
-	out := e.Scrub("s3cret YWxpY2U6czNjcmV0 Ym9iOg==")
-	for _, leak := range []string{"s3cret", "YWxpY2U6czNjcmV0", "Ym9iOg=="} {
+	out := e.Scrub("s3cret YWxpY2U6czNjcmV0 opaque-long-token b3BhcXVlLWxvbmctdG9rZW46")
+	for _, leak := range []string{"s3cret", "YWxpY2U6czNjcmV0", "opaque-long-token", "b3BhcXVlLWxvbmctdG9rZW46"} {
 		if strings.Contains(out, leak) {
 			t.Fatalf("Scrub left %q in %q", leak, out)
 		}
+	}
+	// A refusal that names the username as plain text is scrubbed the same way.
+	refusal := e.ScrubError(errors.New("Proxy Authentication Required: user opaque-long-token rejected"))
+	if strings.Contains(refusal.Error(), "opaque-long-token") {
+		t.Fatalf("the refusal still names the username: %v", refusal)
+	}
+	if !strings.Contains(refusal.Error(), scrubPlaceholder) {
+		t.Fatalf("the refusal has no placeholder: %v", refusal)
 	}
 }
 
@@ -237,11 +248,34 @@ func TestCredentialForms_EdgeCases(t *testing.T) {
 	if forms := credentialForms(parseURL(t, "http://:@proxy.corp:1")); forms != nil {
 		t.Fatalf("empty userinfo: %v", forms)
 	}
-	// A short password is not replaced as plain text (it would mangle every
-	// error containing those letters); its Basic token still is.
-	short := credentialForms(parseURL(t, "http://u:abc@proxy.corp:1"))
-	if len(short) != 1 || short[0] != "dTphYmM=" {
-		t.Fatalf("short password forms = %v, want only the Basic token", short)
+	// The quote is percent-encoded in the URL, so the username decodes to
+	// `a"bcd`, %q renders it `a\"bcd` and the userinfo re-encodes it.
+	cases := map[string]struct {
+		raw  string
+		want []string
+	}{
+		"long username, no password": {
+			raw:  "http://a%22bcd@proxy.corp:1",
+			want: []string{"YSJiY2Q6", `a"bcd`, `a\"bcd`, "a%22bcd"},
+		},
+		"short username, long password": {
+			raw:  "http://u:s3cret@proxy.corp:1",
+			want: []string{"dTpzM2NyZXQ=", "s3cret", "s3cret", "u:s3cret"},
+		},
+		// Neither is replaced as plain text (that would mangle every error
+		// containing those letters); the Basic token still is.
+		"both short": {
+			raw:  "http://u:abc@proxy.corp:1",
+			want: []string{"dTphYmM="},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := credentialForms(parseURL(t, tc.raw)); !slices.Equal(got, tc.want) {
+				t.Fatalf("credentialForms(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 

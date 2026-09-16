@@ -178,34 +178,48 @@ func renderProxy(u *url.URL) string {
 	return u.Scheme + "://" + net.JoinHostPort(u.Hostname(), port)
 }
 
-// minScrubbedPasswordLen is the shortest password replaced as plain text. A
-// shorter one would turn every error containing those few letters into
-// placeholders; its Basic token, which is always long, is still scrubbed.
-const minScrubbedPasswordLen = 4
+// minScrubbedCredentialLen is the shortest username or password replaced as
+// plain text. A shorter one would turn every error containing those few
+// letters into placeholders; the Basic token, which is always long, is still
+// scrubbed.
+const minScrubbedCredentialLen = 4
 
 // credentialForms lists every spelling of u's credential that an error or a
 // proxy could echo. Go sends Basic authentication for any userinfo, so the
-// Basic token is always listed; the raw userinfo, the decoded password and
-// its Go-quoted form (what %q produces in a malformed response error) are
-// listed when there is a password long enough. Nil when u carries no userinfo.
+// Basic token is always listed; the username, the password and their Go-quoted
+// forms (what %q produces in a malformed response error) are listed when they
+// are long enough, and the raw userinfo whenever either is. Nil when u carries
+// no userinfo.
 func credentialForms(u *url.URL) []string {
 	if u == nil || u.User == nil {
 		return nil
 	}
 
+	user := u.User.Username()
 	pass, _ := u.User.Password()
-	if u.User.Username() == "" && pass == "" {
+	if user == "" && pass == "" {
 		return nil
 	}
 
-	forms := []string{base64.StdEncoding.EncodeToString([]byte(u.User.Username() + ":" + pass))}
-	if len(pass) < minScrubbedPasswordLen {
-		return forms
+	forms := []string{base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))}
+	forms = append(forms, plainForms(user)...)
+	forms = append(forms, plainForms(pass)...)
+	if len(forms) > 1 {
+		forms = append(forms, u.User.String())
 	}
 
-	quoted := strconv.Quote(pass)
+	return forms
+}
 
-	return append(forms, u.User.String(), pass, quoted[1:len(quoted)-1])
+// plainForms returns s and its Go-quoted spelling when s is long enough to be
+// replaced as plain text; nil otherwise.
+func plainForms(s string) []string {
+	if len(s) < minScrubbedCredentialLen {
+		return nil
+	}
+	quoted := strconv.Quote(s)
+
+	return []string{s, quoted[1 : len(quoted)-1]}
 }
 
 // scrubForms orders the replacement set longest first, so an encoded form is
