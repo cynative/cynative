@@ -16,7 +16,11 @@ every connector transport consults it. Nothing the model sends can change it.
 | `no_proxy`, `NO_PROXY` | comma-separated list of targets that bypass the proxy |
 
 The lower-case spelling wins when both are set and non-empty, the order
-`curl` and Go's `x/net` use. A proxy value is one of:
+`curl` and Go's `x/net` use. Go's standard library reads the upper-case
+spelling first, and an SDK helper that builds its own client, such as MSAL's
+optional regional-authority autodetection (`AZURE_REGIONAL_AUTHORITY_NAME`),
+follows that reading. Set both spellings to the same value so the two cannot
+disagree. A proxy value is one of:
 
 ```
 http://proxy.corp:3128
@@ -48,15 +52,16 @@ value with a control character in it is rejected at startup.
 | `http_request` calls the model makes | yes, one route per request |
 | GitHub and GitLab token probes at startup, OpenAPI description downloads | yes |
 | EKS, GKE, AKS and self-managed Kubernetes ClusterRole fetches | yes |
-| AWS SDK calls (STS, IAM, EKS, `AssumeRole`), the IAM policy document, the service reference and IAM dataset downloads | yes |
+| AWS SDK calls (STS, IAM, EKS, `AssumeRole`), the IAM policy document, the service reference, IAM dataset and API model archive downloads | yes |
 | Google ADC discovery and token refresh, the IAM roles service, the GKE service, the Discovery catalog, the tokeninfo probe | yes |
 | Azure credential chain (environment, workload identity, managed identity), ARM role definitions, managed clusters, the ARM catalog | yes |
-| Google Compute Engine metadata client (`169.254.169.254`) | no, link-local and never proxied, as in the SDK |
+| Google Compute Engine metadata client (`169.254.169.254`, or the `GCE_METADATA_HOST` override) | no, the SDK's metadata client never uses a proxy |
 | `gh`, `glab`, `az`, `azd`, `pwsh` helper processes, an AWS `credential_process`, a Google executable-sourced credential | no, each is a separate process that inherits the environment and decides for itself |
 | The model (LLM) connection | no, see below |
 
-Instance metadata services reject proxied requests. On EC2 or Azure hosts add
-the metadata address to `NO_PROXY`, as the vendors recommend:
+Instance metadata services sit on a link-local address that a proxy cannot
+reach, which is why the vendors' guidance lists them in `NO_PROXY`. On EC2 or
+Azure hosts add the metadata address:
 
 ```sh
 export HTTPS_PROXY=http://proxy.corp:3128
@@ -93,7 +98,10 @@ authentication) over the plaintext proxy hop. Cynative never prints them.
 Credentials echoed back in error text are scrubbed before the text reaches the
 model, the inventory or the audit log: the Basic token, the username and the
 password. A username or password shorter than four characters is not replaced
-as plain text (only the Basic token is), so use longer ones.
+as plain text (only the Basic token is), so use longer ones. Cynative does not
+scan response bodies for the proxy credential: only the proxy itself could
+write it there, and an intercepting proxy already sees every credential in
+transit.
 
 ## Certificate trust
 
@@ -157,8 +165,12 @@ that answers requests itself; cynative's own hermetic suite
    ```
 
    ```sh
-   mitmdump --listen-port 8080 -s fixtures.py
+   mitmdump --listen-port 8080 --set connection_strategy=lazy --set upstream_cert=false -s fixtures.py
    ```
+
+   The two settings keep mitmproxy from connecting to the fixture host, which
+   does not exist, before it serves the scripted response, and from fetching a
+   certificate from it.
 
 2. Point the connector's trust at the proxy's CA. For the kubernetes connector
    put `~/.mitmproxy/mitmproxy-ca-cert.pem` into the kubeconfig's
@@ -195,4 +207,8 @@ The LLM connection is configured separately and is not changed by this
 policy. Bifrost, the embedded LLM client, does not read the proxy variables;
 its own `proxy_config` block (`type: http`, `socks5` or `environment`) governs
 the model connection, and the Bedrock provider's client follows the proxy
-variables through Go's default behavior. See `docs/providers/README.md`.
+variables through Go's default behavior. That path resolves them through the
+copy of `httpproxy` vendored into Go's standard library, which reads the
+upper-case spelling first, so two spellings carrying different values can send
+the model connection and the connectors to different proxies; set both to the
+same value, as under Variables above. See `docs/providers/README.md`.

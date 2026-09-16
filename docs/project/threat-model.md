@@ -24,7 +24,8 @@ credentials the operator supplies.
 3. **Agent to provider** - credentials attach only after the gate
    authorizes and the host and resolved IP are verified. When the operator
    configures a proxy, the connection goes only to that proxy and the
-   resolved IP is verified by the proxy, not by cynative; see docs/proxy.md.
+   resolved IP is verified by the proxy, not by cynative; see
+   [docs/proxy.md](../proxy.md).
 The model never holds credentials and never chooses the policy, so it
 cannot move any of these lines.
 
