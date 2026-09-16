@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
@@ -11,16 +10,19 @@ import (
 )
 
 // validateAzureRole confirms the configured role definition exists and returns
-// its GUID. Shell: real ARM role-definitions client.
+// its GUID. Shell: real ARM role-definitions client, on the egress policy's
+// transport.
 func validateAzureRole(
 	ctx context.Context,
 	cred azcore.TokenCredential,
 	azureCloud azurehardening.CloudConfig,
 	roleDef string,
+	e *Egress,
 ) (string, error) {
 	rc, err := azurehardening.NewRoleClient(azurehardening.RoleClientConfig{ //nolint:exhaustruct // overrides only.
 		Credential: cred,
 		Cloud:      azureCloud,
+		HTTPClient: e.HTTPClient(0),
 	})
 	if err != nil {
 		return "", err
@@ -55,9 +57,9 @@ func probeAzureToken(ctx context.Context, cred azcore.TokenCredential, scope str
 // the operator's raw cred; the home-tenant ARM token is minted against the ARM
 // audience in InjectAuth (cred_scope=none made permanent).
 func buildHardenedAzureProvider(
-	cred azcore.TokenCredential, azureCfg AzureHardeningConfig, cc azurehardening.CloudConfig,
+	cred azcore.TokenCredential, azureCfg AzureHardeningConfig, cc azurehardening.CloudConfig, e *Egress,
 ) *azureProvider {
-	httpClient := &http.Client{Timeout: smithyHTTPTimeout} //nolint:exhaustruct // defaults are fine.
+	httpClient := e.HTTPClient(smithyHTTPTimeout)
 	// armBearer mints the home-tenant ARM bearer against the resolved cloud's ARM
 	// audience — the same token InjectAuth uses. The providerOperations GET
 	// requires Microsoft.Authorization/providerOperations/read; without it ARM
@@ -93,6 +95,7 @@ func buildHardenedAzureProvider(
 			azurehardening.RoleClientConfig{ //nolint:exhaustruct // test fields omitted.
 				Credential: cred,
 				Cloud:      cc,
+				HTTPClient: e.HTTPClient(0),
 			},
 		)
 		if err != nil {

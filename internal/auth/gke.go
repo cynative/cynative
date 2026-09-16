@@ -57,7 +57,9 @@ func newGKEProvider(tokenSource oauth2.TokenSource) *gkeProvider {
 	p.getCluster = func(
 		ctx context.Context, ts oauth2.TokenSource, project, location, clusterName string,
 	) (clusterTLS, error) {
-		return defaultGKEGetCluster(ctx, p.newContainerService, ts, project, location, clusterName)
+		return defaultGKEGetCluster(
+			p.egress.withAPIClient(ctx), p.newContainerService, ts, project, location, clusterName,
+		)
 	}
 	p.fetchView = p.defaultFetchView // branch-free; body in gke_shell.go.
 	p.cacheKey = func(a *GKEAuthArgs) string {
@@ -225,8 +227,12 @@ func (p *gkeProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, args au
 	return p.authorizesAddr(ctx, ip, args, authreq.Parse[GKEAuthArgs], (*GKEAuthArgs).validate, p.authorizesDialIP)
 }
 
+// defaultGKENewContainerService builds the Container API service on an
+// explicit oauth2 client: option.WithHTTPClient overrides WithTokenSource, and
+// the client's base transport comes from the oauth2.HTTPClient the context
+// carries (the egress policy's routed API client).
 func defaultGKENewContainerService(ctx context.Context, ts oauth2.TokenSource) (*container.Service, error) {
-	return container.NewService(ctx, option.WithTokenSource(ts))
+	return container.NewService(ctx, option.WithHTTPClient(oauth2.NewClient(ctx, ts)))
 }
 
 func defaultGKEGetCluster(

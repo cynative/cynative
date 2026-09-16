@@ -32,10 +32,13 @@ import (
 // sovereign-cloud operator's token is minted against the correct Entra ID
 // authority; the CLI/Developer/PowerShell credentials determine their own cloud.
 //
+// clientOpts carries the resolved cloud and the routed transport for every token
+// request of the Environment, WorkloadIdentity and ManagedIdentity credentials;
+// the CLI, azd and PowerShell credentials are subprocesses and decide their own
+// routing.
+//
 // Lives in the imperative shell: every line is a non-injectable SDK constructor.
-func NewCredentialChain(cc CloudConfig) (azcore.TokenCredential, error) {
-	clientOpts := azcore.ClientOptions{Cloud: ToSDKCloud(cc)} //nolint:exhaustruct // only Cloud set.
-
+func NewCredentialChain(clientOpts azcore.ClientOptions) (azcore.TokenCredential, error) {
 	var (
 		sources []azcore.TokenCredential
 		skipped []string

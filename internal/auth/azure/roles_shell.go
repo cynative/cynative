@@ -44,11 +44,7 @@ type roleClientImpl struct {
 func NewRoleClient(cfg RoleClientConfig) (roleClient, error) {
 	cred := cfg.Credential
 	if cred == nil {
-		cc := cfg.Cloud
-		if cc.Name == "" {
-			cc = ResolveCloudConfig(CloudPublic, "", nil)
-		}
-		dc, err := NewCredentialChain(cc)
+		dc, err := NewCredentialChain(defaultChainOptions(cfg))
 		if err != nil {
 			return nil, fmt.Errorf("default credential: %w", err)
 		}

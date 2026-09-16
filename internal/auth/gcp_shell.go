@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"net/http"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -17,13 +16,14 @@ const gcpScope = "https://www.googleapis.com/auth/cloud-platform"
 // the full lazy bootstrap). Shell: mints a fresh, ctx-bounded credential source
 // (like probeGCPToken) so a hung ADC/token endpoint cannot stall startup beyond
 // ceilingValidationTimeout. A plain [http.Client] disables ADC auth and 401s,
-// so an oauth2-authed client is required for the IAM Roles API.
-func validateGCPRole(ctx context.Context, role string) error {
-	creds, err := google.FindDefaultCredentials(ctx, gcpScope)
+// so an oauth2-authed client is required for the IAM Roles API. Both the
+// discovery refresh and the Roles call go through the egress policy.
+func validateGCPRole(ctx context.Context, role string, e *Egress) error {
+	creds, err := google.FindDefaultCredentials(e.withRefreshClient(ctx), gcpScope)
 	if err != nil {
 		return err
 	}
-	authedClient := oauth2.NewClient(ctx, creds.TokenSource)
+	authedClient := e.apiClient(ctx, creds.TokenSource)
 	authedClient.Timeout = ceilingValidationTimeout
 	rc, err := gcphardening.NewIAMRolesClient(ctx, gcphardening.IAMClientConfig{HTTPClient: authedClient})
 	if err != nil {
@@ -54,8 +54,8 @@ func probeGCPToken(ctx context.Context) error {
 // Layer 3 host gating works before lazy init completes. The doLazyResolve
 // closure performs identity → role-union → permission-catalog on first
 // InjectAuth / AuthorizeAction; the injected token is the raw ADC source.
-func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig) *gcpProvider {
-	httpClient := &http.Client{Timeout: smithyHTTPTimeout} //nolint:exhaustruct // defaults are fine.
+func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig, e *Egress) *gcpProvider {
+	httpClient := e.HTTPClient(smithyHTTPTimeout)
 	catalog := gcphardening.NewCatalog(gcphardening.CatalogConfig{
 		Config:     gcpCfg.Config,
 		HTTPClient: httpClient,
@@ -84,8 +84,8 @@ func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig
 		// catalog (per-request host gating) and iam-dataset (per-request action
 		// authorization) keep the 30s httpClient — they are NOT on the bootstrap
 		// path and are bounded by the request context.
-		bootstrapHTTPClient := &http.Client{Timeout: hardeningBootstrapTimeout} //nolint:exhaustruct // defaults fine.
-		authedClient := oauth2.NewClient(ctx, root)
+		bootstrapHTTPClient := e.HTTPClient(hardeningBootstrapTimeout)
+		authedClient := e.apiClient(ctx, root)
 		authedClient.Timeout = hardeningBootstrapTimeout
 
 		roles, err := gcphardening.NewIAMRolesClient(ctx, gcphardening.IAMClientConfig{
@@ -94,7 +94,7 @@ func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig
 		if err != nil {
 			return err
 		}
-		res, err := gcphardening.LazyResolve(ctx, gcphardening.LazyDeps{
+		res, err := gcphardening.LazyResolve(e.withRefreshClient(ctx), gcphardening.LazyDeps{
 			Role:       gcpCfg.Role,
 			Catalog:    catalog,
 			Dataset:    iamDataset,

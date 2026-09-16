@@ -63,9 +63,10 @@ var (
 func newAKSProvider(credential azcore.TokenCredential, sdkCloud cloud.Configuration) *aksProvider {
 	p := &aksProvider{
 		credential: credential,
-		newClient:  defaultAKSNewManagedClustersClient,
+		newClient:  nil,
 		sdkCloud:   sdkCloud,
 	}
+	p.newClient = p.defaultNewClient // branch-free; body in aks_shell.go.
 	p.fetchView = p.defaultFetchView // branch-free; body in aks_shell.go.
 	p.cacheKey = func(a *AKSAuthArgs) string {
 		return a.SubscriptionID + "/" + a.ResourceGroup + "/" + a.ClusterName
@@ -301,16 +302,17 @@ func (p *aksProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, args au
 	return p.authorizesAddr(ctx, ip, args, authreq.Parse[AKSAuthArgs], (*AKSAuthArgs).validate, p.authorizesDialIP)
 }
 
+// defaultAKSNewManagedClustersClient builds the ARM ManagedClusters client from
+// the azcore options the caller resolved: a zero cloud is safe (the SDK defaults
+// to the public cloud), and a non-empty one pins ARM to the resolved sovereign
+// endpoint so ListClusterUserCredentials targets the right cloud. The transport
+// the options carry is the one the operator's egress policy selected.
 func defaultAKSNewManagedClustersClient(
 	subscriptionID string,
 	cred azcore.TokenCredential,
-	sdkCloud cloud.Configuration,
+	clientOpts azcore.ClientOptions,
 ) (*armcontainerservice.ManagedClustersClient, error) {
-	// Assign unconditionally: a zero cloud.Configuration is safe (the SDK defaults
-	// to the public cloud), and a non-empty one pins ARM to the resolved sovereign
-	// endpoint so ListClusterUserCredentials targets the right cloud.
-	opts := &arm.ClientOptions{} //nolint:exhaustruct // only Cloud set.
-	opts.ClientOptions.Cloud = sdkCloud
+	opts := &arm.ClientOptions{ClientOptions: clientOpts}
 	return armcontainerservice.NewManagedClustersClient(subscriptionID, cred, opts)
 }
 

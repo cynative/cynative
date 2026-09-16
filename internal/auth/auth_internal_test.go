@@ -2734,7 +2734,7 @@ func TestDefaultAKSNewManagedClustersClient(t *testing.T) {
 	client, err := defaultAKSNewManagedClustersClient(
 		"sub-123",
 		mockCredential(azcore.AccessToken{}, nil),
-		cloud.Configuration{},
+		NoProxy().azureClientOptions(cloud.Configuration{}),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

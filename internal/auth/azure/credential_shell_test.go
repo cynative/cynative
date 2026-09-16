@@ -3,6 +3,8 @@ package azure_test
 import (
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+
 	azurehardening "github.com/cynative/cynative/internal/auth/azure"
 )
 
@@ -11,7 +13,9 @@ import (
 // constructors defer all I/O to GetToken, so construction succeeds even on a
 // host with no Azure auth — the chain is always built. Not gated.
 func TestNewCredentialChainBuilds(t *testing.T) {
-	cred, err := azurehardening.NewCredentialChain(azurehardening.ResolveCloudConfig("AzureCloud", "", nil))
+	cred, err := azurehardening.NewCredentialChain(azcore.ClientOptions{
+		Cloud: azurehardening.ToSDKCloud(azurehardening.ResolveCloudConfig("AzureCloud", "", nil)),
+	})
 	if err != nil {
 		t.Fatalf("NewCredentialChain: %v", err)
 	}

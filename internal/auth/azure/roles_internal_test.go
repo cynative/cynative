@@ -1,10 +1,57 @@
 package azure
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 )
+
+// TestDefaultChainOptions_UnconfiguredFallsBackToPublicAndNoTransport pins the
+// two absences: a config that names no cloud gets the public one, and a nil
+// HTTP client leaves Transport unset. Assigning the nil client would store a
+// non-nil policy.Transporter and the pipeline would call it.
+func TestDefaultChainOptions_UnconfiguredFallsBackToPublicAndNoTransport(t *testing.T) {
+	t.Parallel()
+
+	want := ToSDKCloud(ResolveCloudConfig(CloudPublic, "", nil))
+
+	got := defaultChainOptions(RoleClientConfig{})
+	if got.Cloud.ActiveDirectoryAuthorityHost != want.ActiveDirectoryAuthorityHost {
+		t.Errorf(
+			"authority host = %q, want the public cloud's %q",
+			got.Cloud.ActiveDirectoryAuthorityHost, want.ActiveDirectoryAuthorityHost,
+		)
+	}
+	if got.Transport != nil {
+		t.Errorf("Transport = %v, want none when the config carries no client", got.Transport)
+	}
+}
+
+// TestDefaultChainOptions_CarriesTheConfiguredCloudAndClient pins the present
+// case: the configured cloud reaches the chain, and so does the caller's
+// client, which is how the operator's egress route gets applied to every token
+// request the chain makes.
+func TestDefaultChainOptions_CarriesTheConfiguredCloudAndClient(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{}
+	got := defaultChainOptions(RoleClientConfig{
+		Cloud: CloudConfig{
+			Name:          CloudUSGov,
+			AuthorityHost: "https://login.example",
+			ARMEndpoint:   "https://arm.example",
+		},
+		HTTPClient: client,
+	})
+
+	if got.Cloud.ActiveDirectoryAuthorityHost != "https://login.example" {
+		t.Errorf("authority host = %q, want the configured one", got.Cloud.ActiveDirectoryAuthorityHost)
+	}
+	if got.Transport != client {
+		t.Errorf("Transport = %v, want the configured client", got.Transport)
+	}
+}
 
 func TestSelectRoleID(t *testing.T) {
 	t.Parallel()

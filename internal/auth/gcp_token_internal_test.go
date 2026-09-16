@@ -18,7 +18,7 @@ import (
 func TestWithBoundedTokenRefresh_InjectsClientWithoutDeadline(t *testing.T) {
 	t.Parallel()
 
-	ctx := withBoundedTokenRefresh(context.Background())
+	ctx := NoProxy().withRefreshClient(context.Background())
 
 	hc, ok := ctx.Value(oauth2.HTTPClient).(*http.Client)
 	if !ok || hc == nil {
@@ -28,7 +28,7 @@ func TestWithBoundedTokenRefresh_InjectsClientWithoutDeadline(t *testing.T) {
 		t.Errorf("Client.Timeout = %v, want %v", hc.Timeout, gcpTokenRefreshOverallTimeout)
 	}
 	if _, hasDeadline := ctx.Deadline(); hasDeadline {
-		t.Error("withBoundedTokenRefresh must not add a deadline (a fixed deadline would poison the retained source)")
+		t.Error("withRefreshClient must not add a deadline (a fixed deadline would poison the retained source)")
 	}
 }
 
@@ -38,7 +38,7 @@ func TestWithBoundedTokenRefresh_InjectsClientWithoutDeadline(t *testing.T) {
 func TestBoundedTokenRefreshClient_SetsTimeouts(t *testing.T) {
 	t.Parallel()
 
-	hc := boundedTokenRefreshClient()
+	hc := NoProxy().refreshClient()
 	if hc.Timeout != gcpTokenRefreshOverallTimeout {
 		t.Errorf("Client.Timeout = %v, want overall backstop %v", hc.Timeout, gcpTokenRefreshOverallTimeout)
 	}
@@ -50,11 +50,19 @@ func TestBoundedTokenRefreshClient_SetsTimeouts(t *testing.T) {
 	if tr.ResponseHeaderTimeout != gcpTokenRefreshResponseHeaderTimeout {
 		t.Errorf("ResponseHeaderTimeout = %v, want %v", tr.ResponseHeaderTimeout, gcpTokenRefreshResponseHeaderTimeout)
 	}
-	if tr.TLSHandshakeTimeout != gcpTokenRefreshTLSHandshakeTimeout {
-		t.Errorf("TLSHandshakeTimeout = %v, want %v", tr.TLSHandshakeTimeout, gcpTokenRefreshTLSHandshakeTimeout)
+	if tr.TLSHandshakeTimeout != defaultTransportTLSHandshakeTimeout {
+		t.Errorf("TLSHandshakeTimeout = %v, want %v", tr.TLSHandshakeTimeout, defaultTransportTLSHandshakeTimeout)
 	}
-	if tr.Proxy == nil {
-		t.Error("Proxy must be honored so a token refresh still traverses a configured egress proxy")
+
+	proxied := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://proxy.corp:3128"})
+	ptr, ok := proxied.refreshClient().Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport is %T, want *http.Transport", proxied.refreshClient().Transport)
+	}
+	if got, _ := ptr.Proxy(
+		httptest.NewRequest(http.MethodGet, "https://oauth2.googleapis.com/token", nil),
+	); got == nil {
+		t.Error("a token refresh must follow the configured proxy")
 	}
 }
 
@@ -81,7 +89,7 @@ func TestBoundedTokenRefresh_StalledResponseBodyIsBounded(t *testing.T) {
 
 	// A small overall backstop keeps the test fast; the response-header timeout is
 	// loose so the OVERALL Client.Timeout is what must end the stalled-body refresh.
-	client := boundedTokenRefreshClientWithTimeouts(200*time.Millisecond, 5*time.Second)
+	client := NoProxy().refreshClientWithTimeouts(200*time.Millisecond, 5*time.Second)
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, client)
 
 	cfg := &oauth2.Config{ //nolint:exhaustruct // only Endpoint is relevant to a refresh.
@@ -114,7 +122,7 @@ func TestBoundedTokenRefresh_StalledResponseHeadersAreBounded(t *testing.T) {
 
 	// A tight response-header timeout with a loose overall backstop so the phase
 	// timeout is what ends the wait.
-	client := boundedTokenRefreshClientWithTimeouts(5*time.Second, 150*time.Millisecond)
+	client := NoProxy().refreshClientWithTimeouts(5*time.Second, 150*time.Millisecond)
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, client)
 
 	cfg := &oauth2.Config{ //nolint:exhaustruct // only Endpoint is relevant to a refresh.

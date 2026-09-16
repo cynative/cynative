@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -38,7 +37,7 @@ func validateAWSPolicy(ctx context.Context, cfg aws.Config, policyARN string) er
 // eagerly at registration (resolveScopeAWS); the pre-built scoped chain
 // becomes the provider's request-signing credentials at construction.
 func buildHardenedAWSProvider(
-	cfg aws.Config, hardeningCfg AWSHardeningConfig, scoped aws.CredentialsProvider,
+	cfg aws.Config, hardeningCfg AWSHardeningConfig, scoped aws.CredentialsProvider, e *Egress,
 ) *awsProvider {
 	// IAM is partition-global; the AWS SDK still requires a region for
 	// endpoint resolution. Default to us-east-1 (resolveRegion's defaultRegion)
@@ -48,7 +47,7 @@ func buildHardenedAWSProvider(
 	cfg.Region = resolveRegion(cfg.Region)
 
 	iamClient := iam.NewFromConfig(cfg)
-	httpClient := &http.Client{Timeout: smithyHTTPTimeout} //nolint:exhaustruct // defaults are fine.
+	httpClient := e.HTTPClient(smithyHTTPTimeout)
 	archive := awshardening.NewModelArchive(awshardening.ModelArchiveConfig{
 		Config:  hardeningCfg.Config,
 		Fetcher: awshardening.NewModelArchiveFetcher(httpClient, awshardening.DefaultModelArchiveURL),

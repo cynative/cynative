@@ -73,6 +73,11 @@ type registrationDeps struct {
 // slow tokeninfo/token-acquire cannot stall startup past the liveness budget.
 const identityProbeTimeout = credentialProbeTimeout
 
+// identityProbeHTTPTimeout is the per-request budget of the GCP identity
+// prober's tokeninfo client, mirroring the subpackage default the routed client
+// replaces.
+const identityProbeHTTPTimeout = 30 * time.Second
+
 // skipOutcome builds a single-status outcome for a skipped connector, computing
 // visibility from the (already-escalated) policy via the same shouldEmit primitive
 // the prior emit path used — preserving ambient-quiet. Actionable mirrors
@@ -214,8 +219,8 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 	// tokens from it for the whole session. Only the probe is bounded — and it
 	// builds a SEPARATE source (probeGCPToken), so cancelling pctx never poisons
 	// the registered source. The production findGCP still bounds each refresh via a
-	// per-request client timeout (withBoundedTokenRefresh) rather than a ctx
-	// deadline, which would poison the retained source.
+	// per-request client timeout (withRefreshClient) rather than a ctx deadline,
+	// which would poison the retained source.
 	creds, findErr := d.findGCP(ctx)
 
 	var probeErr error

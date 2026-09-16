@@ -3,8 +3,29 @@ package azure
 import (
 	"strings"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2"
 )
+
+// defaultChainOptions builds the azcore options for the credential chain a
+// RoleClientConfig without a credential falls back to: the configured cloud,
+// public when the config names none, and the configured HTTP client only when
+// there is one. Transport is assigned conditionally because a nil
+// [*http.Client] stored in that interface field is a non-nil Transporter,
+// which the pipeline would then call.
+func defaultChainOptions(cfg RoleClientConfig) azcore.ClientOptions {
+	cc := cfg.Cloud
+	if cc.Name == "" {
+		cc = ResolveCloudConfig(CloudPublic, "", nil)
+	}
+
+	opts := azcore.ClientOptions{Cloud: ToSDKCloud(cc)}
+	if cfg.HTTPClient != nil {
+		opts.Transport = cfg.HTTPClient
+	}
+
+	return opts
+}
 
 func matchesRole(rd *armauthorization.RoleDefinition, want string) bool {
 	if rd.Name != nil && strings.EqualFold(*rd.Name, want) {
