@@ -9,13 +9,15 @@ CONNECT for exactly <authority> (host:port), answers 200, terminates TLS with
 "view" ClusterRole and a namespace list whose only namespace is named <marker>.
 Every other CONNECT authority is refused with 403 and every other inner request
 gets a 403 Status. Appends one JSON line per event to <logfile>:
+  {"event": "connection"}
   {"event": "connect", "authority": ..., "allowed": bool}
   {"event": "request", "method": ..., "path": ..., "auth": "expected"|"other"|"none"}
   {"event": "plain", "method": ..., "target": ...}
 where "expected" means the Authorization header carried exactly "Bearer <token>";
-the token itself is never written. A plain (non-CONNECT) request of any method
-is answered 405 and logged, so no traffic reaches this proxy without leaving a
-line. Hermetic: loopback-only; no upstream connection is ever made. Stdlib only.
+the token itself is never written. Every accepted connection is logged before
+any parsing and a plain (non-CONNECT) request of any method is answered 405 and
+logged, so no traffic reaches this proxy without leaving a line. Hermetic:
+loopback-only; no upstream connection is ever made. Stdlib only.
 """
 import http.server
 import json
@@ -105,6 +107,12 @@ class Proxy(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+    def setup(self):
+        # Logged before any parsing: a TLS hello or a garbled request line never
+        # reaches a do_ method, but it is still a connection that got here.
+        super().setup()
+        log({"event": "connection"})
 
     def do_CONNECT(self):
         ok = self.path == allowed

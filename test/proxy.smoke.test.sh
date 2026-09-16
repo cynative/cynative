@@ -214,17 +214,21 @@ PY
 #           GET, both with the expected bearer;
 #   delete: one CONNECT and exactly the ClusterRole GET (the write never left);
 #   empty:  no events at all.
-# Any event of another kind (a plain request, an unknown type) fails every mode:
-# the fixture logs everything it receives, and every mode names all of it.
+# The fixture logs every accepted connection before it parses anything, so the
+# connection count must equal the CONNECT count in every mode, and an event of
+# any other kind (a plain request, an unknown type) fails every mode.
 check_proxy() {
 	python3 - "$proxylog" "$authority" "$1" <<'PY'
 import json, sys
 path, authority, mode = sys.argv[1:4]
 events = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
-other = [e for e in events if e.get("event") not in ("connect", "request")]
+other = [e for e in events if e.get("event") not in ("connection", "connect", "request")]
 if other:
     sys.exit("FAIL: unexpected proxy events: %r" % other)
+connections = [e for e in events if e["event"] == "connection"]
 connects = [e for e in events if e["event"] == "connect"]
+if len(connections) != len(connects):
+    sys.exit("FAIL: %d connections but %d CONNECTs" % (len(connections), len(connects)))
 requests = [(r["method"], r["path"], r["auth"]) for r in events if r["event"] == "request"]
 ROLE = ("GET", "/apis/rbac.authorization.k8s.io/v1/clusterroles/view", "expected")
 NS = ("GET", "/api/v1/namespaces", "expected")
@@ -270,7 +274,8 @@ check_proxy delete
 # hostname. That hostname resolves nowhere, so a connector that ignored the
 # policy and dialed the cluster direct would fail on exactly that lookup. A
 # fallback that dialed and then reported only the proxy error would pass here;
-# the transport tests in internal/transport observe the dial itself.
+# what rules that out is the proxied transport's dialer, which refuses every
+# address but the proxy's (ErrProxyDialMismatch, pinned in internal/auth).
 printf '== phase 4: proxy down, no direct fallback ==\n' >&2
 run_cyn "http://127.0.0.1:1" "$out" "$err" doctor && rc=0 || rc=$?
 expect_rc 1 "$rc" "doctor with the proxy down" "$err"
