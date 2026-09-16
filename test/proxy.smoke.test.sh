@@ -10,8 +10,10 @@
 #      carries route=proxy and the answer carries the fixture marker.
 #   3  delete: the gate denies the write before it reaches the proxy; the audit
 #      record has outcome=error and no route.
-#   4  proxy down: registration fails naming the proxy; nothing goes direct.
-#   5  https:// proxy: the run stops at startup before any connector line.
+#   4  proxy down: registration fails on the proxy hop instead of dialing the
+#      cluster direct.
+#   5  https:// proxy: the run stops at startup, before any connector line and
+#      before the live fixture proxy is asked for anything.
 # Part of `make sh-test`. Needs go (builds this checkout once), python3 and
 # openssl. Each cynative run is bounded by a portable watchdog (no GNU timeout).
 # Every run gets an explicit environment (env -i) so nothing ambient leaks in.
@@ -252,18 +254,25 @@ expect_rc 0 "$rc" "denied write" "$err"
 check_audit none error 'cluster_role='
 check_proxy delete
 
+# The configured proxy here is a dead port, not the fixture, so the fixture log
+# says nothing about this run either way. What rules out a direct dial is that
+# the failure names the proxy hop: a connector that ignored the policy would
+# fail on the unresolvable fixture hostname instead.
 printf '== phase 4: proxy down, no direct fallback ==\n' >&2
 run_cyn "http://127.0.0.1:1" "$out" "$err" doctor && rc=0 || rc=$?
 expect_rc 1 "$rc" "doctor with the proxy down" "$err"
 grep -q '✗ kubernetes' "$err" || { printf 'FAIL: kubernetes should be unavailable. stderr:\n' >&2; cat "$err" >&2; exit 1; }
 grep -q 'proxyconnect' "$err" || { printf 'FAIL: failure should name the proxy hop. stderr:\n' >&2; cat "$err" >&2; exit 1; }
-check_proxy empty
 
+# The rejected scheme names the live fixture, which the scheme check refuses
+# before it looks at the host, so the empty log is real evidence: the same
+# authority spelled http:// is phase 1, which logs two events.
 printf '== phase 5: https:// proxy rejected at startup ==\n' >&2
-run_cyn "https://127.0.0.1:1" "$out" "$err" doctor && rc=0 || rc=$?
+run_cyn "https://127.0.0.1:$proxy_port" "$out" "$err" doctor && rc=0 || rc=$?
 expect_rc 1 "$rc" "https proxy" "$err"
 grep -q 'egress' "$err" || { printf 'FAIL: startup error missing. stderr:\n' >&2; cat "$err" >&2; exit 1; }
 grep -q 'unsupported scheme' "$err" || { printf 'FAIL: startup error should name the scheme. stderr:\n' >&2; cat "$err" >&2; exit 1; }
 grep -q 'kubernetes' "$err" && { printf 'FAIL: connectors must not register after the startup error\n' >&2; exit 1; }
+check_proxy empty
 
 printf 'OK: proxy smoke (doctor + read + denied write + proxy down + https rejected)\n'
