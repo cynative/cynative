@@ -33,7 +33,7 @@ func tlsCertBase64(t *testing.T, srv *httptest.Server) string {
 func TestNewHTTPRequestTool_Info(t *testing.T) {
 	t.Parallel()
 
-	tl := tools.NewHTTPRequestTool(nil)
+	tl := tools.NewHTTPRequestTool(nil, nil)
 
 	info := tl.Info()
 	if info.Name != "http_request" {
@@ -70,7 +70,7 @@ func TestHTTPRequestTool_InvokableRun_Success(t *testing.T) {
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
 
-	tl := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers, nil)
 	args, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL, "auth_provider": "loopback"})
 
 	out, err := tl.Run(context.Background(), string(args))
@@ -85,7 +85,7 @@ func TestHTTPRequestTool_InvokableRun_Success(t *testing.T) {
 func TestHTTPRequestTool_InvokableRun_BadJSON(t *testing.T) {
 	t.Parallel()
 
-	tl := tools.NewHTTPRequestTool(nil)
+	tl := tools.NewHTTPRequestTool(nil, nil)
 
 	out, err := tl.Run(context.Background(), "not-json")
 	if err != nil {
@@ -108,7 +108,7 @@ func TestHTTPRequestTool_StructuredRun(t *testing.T) {
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
 
-	tl := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers, nil)
 
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
@@ -135,7 +135,7 @@ func TestHTTPRequestTool_StructuredRun(t *testing.T) {
 func TestHTTPRequestTool_StructuredRun_TransportError(t *testing.T) {
 	t.Parallel()
 
-	tl := tools.NewHTTPRequestTool(nil)
+	tl := tools.NewHTTPRequestTool(nil, nil)
 
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
@@ -158,7 +158,7 @@ func TestHTTPRequestTool_Run_MarksFailedOnServerError(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers, nil)
 	args, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL, "auth_provider": "loopback"})
 
 	ctx, fail := audit.WithFailure(context.Background())
@@ -179,7 +179,7 @@ func TestHTTPRequestTool_Run_DoesNotMarkFailedOn2xx(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers, nil)
 	args, _ := json.Marshal(map[string]any{"method": "GET", "url": srv.URL, "auth_provider": "loopback"})
 
 	ctx, fail := audit.WithFailure(context.Background())
@@ -203,7 +203,7 @@ func TestHTTPRequestTool_StructuredRun_MarksFailedOnServerError(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers, nil)
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
 		t.Fatalf("http_request does not implement StructuredRunner")
@@ -228,7 +228,7 @@ func TestHTTPRequestTool_StructuredRun_DoesNotMarkFailedOn2xx(t *testing.T) {
 	defer srv.Close()
 
 	providers := []auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}}
-	tl := tools.NewHTTPRequestTool(providers)
+	tl := tools.NewHTTPRequestTool(providers, nil)
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
 		t.Fatalf("http_request does not implement StructuredRunner")
@@ -247,7 +247,7 @@ func TestHTTPRequestTool_StructuredRun_DoesNotMarkFailedOn2xx(t *testing.T) {
 func TestHTTPRequestTool_StructuredRun_MarksFailedOnTransportError(t *testing.T) {
 	t.Parallel()
 
-	tl := tools.NewHTTPRequestTool(nil)
+	tl := tools.NewHTTPRequestTool(nil, nil)
 	sr, ok := tl.(schema.StructuredRunner)
 	if !ok {
 		t.Fatalf("http_request does not implement StructuredRunner")
@@ -276,7 +276,7 @@ func assertRequiredSet(t *testing.T, where string, got, want []string) {
 func TestNewHTTPRequestTool_RequiredFields(t *testing.T) {
 	t.Parallel()
 
-	tl := tools.NewHTTPRequestTool(nil)
+	tl := tools.NewHTTPRequestTool(nil, nil)
 	info := tl.Info()
 
 	// Top level: only method, url, auth_provider are required.

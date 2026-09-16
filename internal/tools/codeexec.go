@@ -241,7 +241,7 @@ func loggingToolFunc(it schema.InvokableTool, name string, sink audit.Sink, newI
 			SessionID: scope.SessionID, RunID: scope.RunID, CallID: callID, Depth: scope.Depth,
 			Phase: audit.PhaseResult, Via: audit.ViaCodeExecution, Tool: name,
 			Arguments: audit.RawArgs(argsJSON), Decision: innerResultDecision(ctx), RedactArgs: true,
-			Outcome: inner.outcome, Result: inner.result,
+			Outcome: inner.outcome, Result: inner.result, Route: inner.route,
 		}
 		if err := sink.Log(result); err != nil {
 			if hasFatal {
@@ -262,6 +262,7 @@ type innerOutcome struct {
 	err     error
 	outcome string
 	result  string
+	route   string
 }
 
 // runInnerCall executes one inner tool under its own failure recorder so a 4xx (a
@@ -271,6 +272,7 @@ type innerOutcome struct {
 // classifies the outcome.
 func runInnerCall(ctx context.Context, base sandbox.ToolFunc, argsJSON string) innerOutcome {
 	innerCtx, innerFail := audit.WithFailure(ctx)
+	innerCtx, innerRoute := audit.WithRoute(innerCtx)
 	out, rerr := base(innerCtx, argsJSON)
 	for range innerFail.Count() {
 		audit.MarkFailed(ctx)
@@ -281,12 +283,18 @@ func runInnerCall(ctx context.Context, base sandbox.ToolFunc, argsJSON string) i
 
 	switch {
 	case rerr != nil:
-		return innerOutcome{out: out, err: rerr, outcome: audit.OutcomeError, result: rerr.Error()}
+		return innerOutcome{
+			out:     out,
+			err:     rerr,
+			outcome: audit.OutcomeError,
+			result:  rerr.Error(),
+			route:   innerRoute.Value(),
+		}
 	case innerFail.Failed():
 		// A rejected response (4xx/5xx) — the body is still the result.
-		return innerOutcome{out: out, err: nil, outcome: audit.OutcomeError, result: out}
+		return innerOutcome{out: out, err: nil, outcome: audit.OutcomeError, result: out, route: innerRoute.Value()}
 	default:
-		return innerOutcome{out: out, err: nil, outcome: audit.OutcomeOK, result: out}
+		return innerOutcome{out: out, err: nil, outcome: audit.OutcomeOK, result: out, route: innerRoute.Value()}
 	}
 }
 

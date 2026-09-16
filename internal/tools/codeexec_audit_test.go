@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -339,6 +340,107 @@ func TestCodeExec_InnerProgress_PropagatesToOuter(t *testing.T) {
 	}
 	if sink.recs[1].Outcome != audit.OutcomeOK {
 		t.Errorf("a progress-only inner call must record OK, got %q", sink.recs[1].Outcome)
+	}
+}
+
+// routeMarkingTool is an inner primitive that marks the audit route the way the
+// transport does; proxied when the arguments carry "p".
+type routeMarkingTool struct{}
+
+func (routeMarkingTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request", Desc: "route", Params: nil}
+}
+
+func (routeMarkingTool) Run(ctx context.Context, args string) (string, error) {
+	audit.MarkRoute(ctx, strings.Contains(args, `"p"`))
+
+	return `{"ok":true}`, nil
+}
+
+// fanOut calls the inner http_request concurrently with each argument and
+// waits for all of them, like a script doing Promise.all.
+func fanOut(args ...string) func(context.Context, map[string]sandbox.ToolFunc) (string, error) {
+	return func(ctx context.Context, funcs map[string]sandbox.ToolFunc) (string, error) {
+		var wg sync.WaitGroup
+		for _, a := range args {
+			wg.Add(1)
+			go func(arg string) {
+				defer wg.Done()
+				_, _ = funcs["http_request"](ctx, arg)
+			}(a)
+		}
+		wg.Wait()
+
+		return "done", nil
+	}
+}
+
+// lockedSink is a captureSink safe for the concurrent inner calls fanOut makes.
+type lockedSink struct {
+	mu   sync.Mutex
+	recs []audit.Record
+}
+
+func (s *lockedSink) Log(rec audit.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.recs = append(s.recs, rec)
+
+	return nil
+}
+
+func (s *lockedSink) records() []audit.Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return append([]audit.Record(nil), s.recs...)
+}
+
+func TestCodeExec_InnerResultRecordsCarryTheirOwnRoute(t *testing.T) {
+	t.Parallel()
+
+	sink := &lockedSink{}
+	tool := newCodeToolWithFakeSandbox(t, sink, routeMarkingTool{}, fanOut(`{"r":"p"}`, `{"r":"d"}`, `{"r":"p"}`))
+	ctx, outer := audit.WithRoute(
+		audit.WithScope(context.Background(), audit.Scope{SessionID: "S", RunID: "R", Depth: 0}),
+	)
+	if _, err := tool.Run(ctx, `{"code":"x"}`); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Each record's route must match its own arguments, not just the totals.
+	results := 0
+	for _, rec := range sink.records() {
+		if rec.Phase != audit.PhaseResult || rec.Via != audit.ViaCodeExecution {
+			continue
+		}
+		results++
+		want := audit.RouteDirect
+		if strings.Contains(string(rec.Arguments), `"p"`) {
+			want = audit.RouteProxy
+		}
+		if rec.Route != want {
+			t.Fatalf("record %s has route %q, want %q", rec.Arguments, rec.Route, want)
+		}
+	}
+	if results != 3 {
+		t.Fatalf("inner result records = %d, want 3", results)
+	}
+	if outer.Value() != "" {
+		t.Fatalf("the outer code_execution recorder must stay unset, got %q", outer.Value())
+	}
+}
+
+func TestCodeExec_NilSinkSharesTheOuterRecorderWithoutRacing(t *testing.T) {
+	t.Parallel()
+
+	tool := newCodeToolWithFakeSandbox(t, nil, routeMarkingTool{},
+		fanOut(`{"r":"p"}`, `{"r":"d"}`, `{"r":"p"}`, `{"r":"d"}`))
+	ctx, outer := audit.WithRoute(context.Background())
+	if _, err := tool.Run(ctx, `{"code":"x"}`); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v := outer.Value(); v != audit.RouteProxy && v != audit.RouteDirect {
+		t.Fatalf("shared recorder must hold one of the routes, got %q", v)
 	}
 }
 

@@ -350,6 +350,58 @@ func TestDispatch_SessionGrant_PersistsAndLabelsApprovedSession(t *testing.T) {
 	}
 }
 
+// routeTool marks the audit route like the transport does, so the dispatch
+// loop's result record can be checked without a network.
+type routeTool struct {
+	proxied bool
+}
+
+func (routeTool) Info() *schema.ToolInfo {
+	return &schema.ToolInfo{Name: "http_request", Desc: "", Params: nil}
+}
+
+func (r routeTool) Run(ctx context.Context, _ string) (string, error) {
+	audit.MarkRoute(ctx, r.proxied)
+
+	return "ok", nil
+}
+
+func TestDispatch_ResultRecordCarriesTheRoute(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		tool schema.InvokableTool
+		want string
+	}{
+		{"proxied", routeTool{proxied: true}, audit.RouteProxy},
+		{"direct", routeTool{proxied: false}, audit.RouteDirect},
+		{"never selected", stubTool{name: "http_request", out: "ok", err: nil}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			a := auditAgent(sink, map[string]schema.InvokableTool{"http_request": tc.tool})
+			rs := &runState{depth: 0, out: io.Discard, runID: "R"}
+			if _, _, err := a.dispatch(context.Background(), rs, dispatchTC("http_request", `{}`)); err != nil {
+				t.Fatal(err)
+			}
+			var result *audit.Record
+			for i := range sink.recs {
+				if sink.recs[i].Phase == audit.PhaseResult {
+					result = &sink.recs[i]
+				}
+			}
+			if result == nil {
+				t.Fatal("no result record")
+			}
+			if result.Route != tc.want {
+				t.Fatalf("Route = %q, want %q", result.Route, tc.want)
+			}
+		})
+	}
+}
+
 func TestRun_AbortsWhenAuditAttemptFails(t *testing.T) {
 	t.Parallel()
 

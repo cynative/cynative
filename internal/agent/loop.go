@@ -520,6 +520,9 @@ type callOutcome struct {
 	// progress counts the useful sub-outcomes (sub-4xx responses); when > 0 the call made
 	// progress, so a mixed-success fan-out resets the streak instead of halting.
 	progress int
+	// route is the egress route the http_request selected (audit.RouteDirect or
+	// RouteProxy), empty when never selected.
+	route string
 }
 
 // dispatch records an attempt, runs the tool, records the result, and returns the
@@ -554,7 +557,7 @@ func (a *Agent) dispatch(ctx context.Context, rs *runState, tc schema.ToolCallBl
 	if err := a.audited(audit.Record{ //nolint:exhaustruct // Via unused for outer calls.
 		SessionID: a.sessionID, RunID: rs.runID, CallID: callID, Depth: rs.depth,
 		Phase: audit.PhaseResult, Tool: tc.Name, Arguments: args, RedactArgs: redactArgs,
-		Decision: oc.decision, Outcome: oc.outcome, Result: oc.result,
+		Decision: oc.decision, Outcome: oc.outcome, Result: oc.result, Route: oc.route,
 	}); err != nil {
 		return "", 0, err
 	}
@@ -657,6 +660,7 @@ func (a *Agent) invokeIO(
 	ctx, dec := audit.WithDecision(ctx)
 	ctx = audit.WithScope(ctx, audit.Scope{SessionID: a.sessionID, RunID: rs.runID, Depth: rs.depth})
 	ctx, fail := audit.WithFailure(ctx)
+	ctx, rt := audit.WithRoute(ctx)
 
 	// Fail-closed guard: if the operator interrupted since the dispatch loop
 	// checked, skip the credentialed I/O tool entirely. The caller's post-dispatch
@@ -683,7 +687,9 @@ func (a *Agent) invokeIO(
 		}
 		msg := fmt.Sprintf("Error executing tool %q: %v", tc.Name, err)
 
-		return msg, callOutcome{decision: decisionLabel(dec), outcome: audit.OutcomeError, result: msg}, nil
+		return msg, callOutcome{
+			decision: decisionLabel(dec), outcome: audit.OutcomeError, result: msg, route: rt.Value(),
+		}, nil
 	}
 
 	decision := decisionLabel(dec)
@@ -707,7 +713,7 @@ func (a *Agent) invokeIO(
 
 	return ret, callOutcome{
 		decision: decision, outcome: outcome, result: out,
-		failures: fail.Count(), progress: fail.Progress(),
+		failures: fail.Count(), progress: fail.Progress(), route: rt.Value(),
 	}, nil
 }
 

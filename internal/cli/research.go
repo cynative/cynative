@@ -160,7 +160,7 @@ type deps struct {
 	run                  func(ctx context.Context, req runRequest, cfg config.Config, flags researchFlags) error
 	getProviders         getProvidersFunc
 	newChatModel         func(ctx context.Context, cfg config.Config, recordUsage func(schema.Usage)) (chatModel, error)
-	newHTTPRequestTool   func(providers []auth.Provider) schema.InvokableTool
+	newHTTPRequestTool   func(providers []auth.Provider, egress *auth.Egress) schema.InvokableTool
 	newCodeExecutionTool func(primitives []schema.InvokableTool, verbose io.Writer, maxConcurrency int, sink audit.Sink) (schema.InvokableTool, error)
 	newAuditSink         func(cfg config.Config, prov *audit.AgentProvenance) (audit.Sink, func() error, error)
 	newAgent             func(ctx context.Context, cfg agent.Config, opts ...agent.Option) *agent.Agent
@@ -604,7 +604,7 @@ func (d *deps) buildToolSet(
 	sink audit.Sink,
 ) ([]schema.InvokableTool, error) {
 	// Primitives are exposed (raw) inside the sandbox; the code tool wraps them.
-	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers)}
+	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers, nil)}
 
 	codeTool, err := d.newCodeExecutionTool(primitives, verboseWriter, cfg.SandboxMaxConcurrency, sink)
 	if err != nil {

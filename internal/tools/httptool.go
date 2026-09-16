@@ -35,8 +35,9 @@ type httpRequestTool struct {
 }
 
 // NewHTTPRequestTool builds the http_request tool, capturing the auth providers
-// for use during execution.
-func NewHTTPRequestTool(providers []auth.Provider) schema.InvokableTool {
+// and the operator's egress policy (nil keeps the direct default) for use
+// during execution.
+func NewHTTPRequestTool(providers []auth.Provider, egress *auth.Egress) schema.InvokableTool {
 	return &httpRequestTool{
 		info: &schema.ToolInfo{
 			Name:   "http_request",
@@ -44,7 +45,7 @@ func NewHTTPRequestTool(providers []auth.Provider) schema.InvokableTool {
 			Params: schema.ReflectParams[transport.RequestArgs](),
 		},
 		providers: providers,
-		client:    transport.NewClient(),
+		client:    transport.NewClient(transport.WithEgress(egress)),
 	}
 }
 
