@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/cynative/cynative/internal/auth"
+	"github.com/cynative/cynative/internal/schema"
+	"github.com/cynative/cynative/internal/tools"
 )
 
 func proxiedEgress(t *testing.T) *auth.Egress {
@@ -111,6 +114,27 @@ func TestBuildProviders_ThreadsTheEgressPolicy(t *testing.T) {
 	d.buildProviders(validCfg(), false, e)
 	if got != e {
 		t.Fatal("buildProviders must hand the policy to GetProviders through HardeningConfig.Egress")
+	}
+}
+
+func TestBuildToolSet_ForwardsTheEgressToTheHTTPTool(t *testing.T) {
+	t.Parallel()
+
+	// Nothing below the tool constructor looks at the policy again, so a nil or
+	// stale value here would only show up as a request leaving direct.
+	d := testDeps()
+	var got *auth.Egress
+	d.newHTTPRequestTool = func(providers []auth.Provider, e *auth.Egress) schema.InvokableTool {
+		got = e
+
+		return tools.NewHTTPRequestTool(providers, e)
+	}
+	e := proxiedEgress(t)
+	if _, err := d.buildToolSet(nil, e, validCfg(), researchFlags{}, io.Discard, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got != e {
+		t.Fatal("buildToolSet must hand the egress policy to newHTTPRequestTool")
 	}
 }
 

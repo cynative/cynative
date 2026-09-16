@@ -145,6 +145,9 @@ func originURL(srv *httptest.Server) string {
 
 func originTarget(srv *httptest.Server) string { return strings.TrimPrefix(srv.URL, "https://") }
 
+// placeholder is what Egress.Scrub leaves behind in place of a credential.
+const placeholder = "[REDACTED:proxy-credential]"
+
 // denyAddrProvider authorizes every host but no address, so a direct route
 // always stops at the dial guard before any connection is attempted.
 type denyAddrProvider struct{}
@@ -361,7 +364,7 @@ func TestExecute_ProxyCredentialIsScrubbedFromErrors(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "s3cret") {
 		t.Fatalf("the proxy credential leaked into the error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "[REDACTED:proxy-credential]") {
+	if !strings.Contains(err.Error(), placeholder) {
 		t.Fatalf("expected the placeholder in the error, got %v", err)
 	}
 	// ExecuteStructured takes the same path.
@@ -370,6 +373,9 @@ func TestExecute_ProxyCredentialIsScrubbedFromErrors(t *testing.T) {
 		[]auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}})
 	if serr == nil || strings.Contains(serr.Error(), "s3cret") {
 		t.Fatalf("ExecuteStructured leaked the credential: %v", serr)
+	}
+	if !strings.Contains(serr.Error(), placeholder) {
+		t.Fatalf("ExecuteStructured: expected the placeholder, got %v", serr)
 	}
 
 	// A malformed reply line quotes what the proxy sent; the Basic token of
@@ -380,6 +386,9 @@ func TestExecute_ProxyCredentialIsScrubbedFromErrors(t *testing.T) {
 		[]auth.Provider{&authtest.LoopbackProvider{CACert: tlsCertBase64(t, srv)}})
 	if err == nil || strings.Contains(err.Error(), "YWxpY2U6czNjcmV0") {
 		t.Fatalf("a malformed proxy reply leaked the Basic token: %v", err)
+	}
+	if !strings.Contains(err.Error(), placeholder) {
+		t.Fatalf("a malformed proxy reply must be scrubbed to the placeholder, got %v", err)
 	}
 }
 
@@ -418,12 +427,12 @@ func TestExecute_TrailerParseErrorIsScrubbed(t *testing.T) {
 	args := makeArgs(t, map[string]any{"url": originURL(srv), "auth_provider": "loopback"})
 
 	_, _, err = NewClient(WithEgress(egress)).Execute(context.Background(), args, providers)
-	if err == nil || strings.Contains(err.Error(), "YWxpY2U6czNjcmV0") {
-		t.Fatalf("Execute: trailer error must be scrubbed, got %v", err)
+	if err == nil || strings.Contains(err.Error(), "YWxpY2U6czNjcmV0") || !strings.Contains(err.Error(), placeholder) {
+		t.Fatalf("Execute: trailer error must be scrubbed to the placeholder, got %v", err)
 	}
 	_, err = NewClient(WithEgress(egress)).ExecuteStructured(context.Background(), args, providers)
-	if err == nil || strings.Contains(err.Error(), "YWxpY2U6czNjcmV0") {
-		t.Fatalf("ExecuteStructured: trailer error must be scrubbed, got %v", err)
+	if err == nil || strings.Contains(err.Error(), "YWxpY2U6czNjcmV0") || !strings.Contains(err.Error(), placeholder) {
+		t.Fatalf("ExecuteStructured: trailer error must be scrubbed to the placeholder, got %v", err)
 	}
 }
 

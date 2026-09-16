@@ -56,6 +56,21 @@ func TestRoute_NoProxyMatchingFollowsHTTPProxyRules(t *testing.T) {
 	}
 }
 
+func TestRoute_CIDREntryMatchesOnlyAnIPLiteral(t *testing.T) {
+	t.Parallel()
+
+	// A CIDR entry is matched against a request whose host is an IP literal,
+	// never against what a name resolves to, which is what docs/proxy.md
+	// promises: cynative resolves nothing when it routes.
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://proxy.corp:3128", "NO_PROXY": "10.0.0.0/8"})
+	if e.Route(mustURL("https://10.1.2.3/")).Proxied() {
+		t.Fatal("an IP literal inside the CIDR must go direct")
+	}
+	if !e.Route(mustURL("https://host.example/")).Proxied() {
+		t.Fatal("a host name must stay proxied whatever it resolves to")
+	}
+}
+
 func TestRoute_WildcardDisablesTheProxy(t *testing.T) {
 	t.Parallel()
 
@@ -259,6 +274,52 @@ func TestConfigureTransport_ProxiedDialerDropsTheControlHook(t *testing.T) {
 	}
 }
 
+func TestConfigureTransport_BothDialersKeepTheCallersTimeouts(t *testing.T) {
+	t.Parallel()
+
+	// The proxied dialer is a copy of the caller's with the guard cleared, so
+	// the caller's dial timeout still bounds the proxy hop (for the ClusterRole
+	// fetch that is its phase budget). A dialer built fresh instead would drop
+	// it. A negative Timeout is a deadline that has already passed, which
+	// net.Dialer accepts, so every dial through it fails where a fresh dialer
+	// would connect to the listener below.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			c, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://" + ln.Addr().String()})
+	routes := map[string]Route{
+		"proxied": e.Route(mustURL("https://api.github.com/")),
+		"direct":  {Proxy: nil},
+	}
+	for name, route := range routes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			tr := &http.Transport{}
+			configureTransport(tr, route, &net.Dialer{Timeout: -time.Second})
+			c, derr := tr.DialContext(context.Background(), "tcp", ln.Addr().String())
+			if derr == nil {
+				c.Close()
+				t.Fatal("the dial must carry the caller's expired deadline")
+			}
+			var nerr net.Error
+			if !errors.As(derr, &nerr) || !nerr.Timeout() {
+				t.Fatalf("dial error = %v, want the caller's timeout", derr)
+			}
+		})
+	}
+}
+
 func TestTransport_DefaultsAndPerRequestSelection(t *testing.T) {
 	t.Parallel()
 
@@ -284,12 +345,43 @@ func TestTransport_DefaultsAndPerRequestSelection(t *testing.T) {
 	}
 }
 
-// TestSOCKS5H_SendsTheNameToTheProxy proves a socks5h route hands the unresolved
-// destination name to the proxy: a fake SOCKS5 server records the domain-name
-// address the client sends, then refuses, so no origin is ever dialed.
-func TestSOCKS5H_SendsTheNameToTheProxy(t *testing.T) {
+// TestSOCKS_SendsTheNameToTheProxy proves both SOCKS schemes hand the
+// unresolved destination name to the proxy, which is what docs/proxy.md claims
+// for the pair: a fake SOCKS5 server records the domain-name address the client
+// sends, then refuses, so no origin is ever dialed.
+func TestSOCKS_SendsTheNameToTheProxy(t *testing.T) {
 	t.Parallel()
 
+	for _, scheme := range []string{schemeSOCKS5, schemeSOCKS5H} {
+		t.Run(scheme, func(t *testing.T) {
+			t.Parallel()
+			ln, got := fakeSOCKS5Server(t)
+			e := mustEgress(t, map[string]string{"HTTPS_PROXY": scheme + "://" + ln.Addr().String()})
+			tr := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+			e.ConfigureTransport(tr, e.Route(mustURL("https://origin.invalid/")), &net.Dialer{Timeout: time.Second})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req := httptest.NewRequest(http.MethodGet, "https://origin.invalid/", nil).WithContext(ctx)
+			if _, err := tr.RoundTrip(req); err == nil {
+				t.Fatal("the fake SOCKS server refuses, so the round trip must fail")
+			}
+			select {
+			case name := <-got:
+				if name != "origin.invalid" {
+					t.Fatalf("SOCKS request named %q, want origin.invalid", name)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("no SOCKS request reached the fake proxy")
+			}
+		})
+	}
+}
+
+// fakeSOCKS5Server listens on loopback and serves one SOCKS5 handshake,
+// publishing the domain name the client asked it to connect to and then
+// refusing the request. An empty name means the handshake failed earlier.
+func fakeSOCKS5Server(t *testing.T) (net.Listener, <-chan string) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -339,21 +431,5 @@ func TestSOCKS5H_SendsTheNameToTheProxy(t *testing.T) {
 		_, _ = c.Write([]byte{5, 2, 0, 1, 0, 0, 0, 0, 0, 0}) // reply: connection not allowed.
 	}()
 
-	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "socks5h://" + ln.Addr().String()})
-	tr := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
-	e.ConfigureTransport(tr, e.Route(mustURL("https://origin.invalid/")), &net.Dialer{Timeout: time.Second})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_, err = tr.RoundTrip(httptest.NewRequest(http.MethodGet, "https://origin.invalid/", nil).WithContext(ctx))
-	if err == nil {
-		t.Fatal("the fake SOCKS server refuses, so the round trip must fail")
-	}
-	select {
-	case name := <-got:
-		if name != "origin.invalid" {
-			t.Fatalf("SOCKS request named %q, want origin.invalid", name)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no SOCKS request reached the fake proxy")
-	}
+	return ln, got
 }

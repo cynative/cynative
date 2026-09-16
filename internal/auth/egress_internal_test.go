@@ -72,6 +72,12 @@ func TestNewEgress_AcceptsSchemesAndDefaults(t *testing.T) {
 				t.Fatalf("parsed %s://%s, want %s://%s",
 					e.httpsProxy.Scheme, e.httpsProxy.Host, tc.wantScheme, tc.wantHost)
 			}
+			// The selector parses the same value separately, in httpproxy; the
+			// two readings have to agree or the notice would name one proxy
+			// while requests went to another.
+			if got := e.Route(mustURL("https://api.example.test/")).Proxy; got.String() != e.httpsProxy.String() {
+				t.Fatalf("the selector routes to %q, the validated value is %q", got, e.httpsProxy)
+			}
 		})
 	}
 }
@@ -90,6 +96,7 @@ func TestNewEgress_RejectsUnusableValues(t *testing.T) {
 		{"non-ascii host", "HTTPS_PROXY", "http://prox\u00fd.corp:3128", "not a valid proxy URL"},
 		{"zoned host", "HTTPS_PROXY", "http://[fe80::1%25eth0]:3128", "not a valid proxy URL"},
 		{"empty host", "HTTPS_PROXY", "//proxy.corp:3128", "not a valid proxy URL"},
+		{"root path only", "HTTPS_PROXY", "/", "not a valid proxy URL"},
 		{"control character", "HTTPS_PROXY", "http://proxy.corp:31\x0128", "not a valid proxy URL"},
 		{"no_proxy control character", "NO_PROXY", "a.example\nb.example", "control character"},
 		{"http proxy checked too", "HTTP_PROXY", "https://proxy.corp", `unsupported scheme "https"`},
