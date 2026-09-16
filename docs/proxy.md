@@ -59,9 +59,10 @@ value with a control character in it is rejected at startup.
 | `gh`, `glab`, `az`, `azd`, `pwsh` helper processes, an AWS `credential_process`, a Google executable-sourced credential | no, each is a separate process that inherits the environment and decides for itself |
 | The model (LLM) connection | no, see below |
 
-Instance metadata services sit on a link-local address that a proxy cannot
-reach, which is why the vendors' guidance lists them in `NO_PROXY`. On EC2 or
-Azure hosts add the metadata address:
+Instance metadata services sit on a link-local address that answers for the
+host that asks, so a request sent through a proxy on another machine reaches
+that machine's metadata or nothing; the vendors' guidance lists them in
+`NO_PROXY` for that reason. On EC2 or Azure hosts add the metadata address:
 
 ```sh
 export HTTPS_PROXY=http://proxy.corp:3128
@@ -97,8 +98,8 @@ Proxy credentials in the URL are sent to the proxy as HTTP Basic (or SOCKS
 authentication) over the plaintext proxy hop. Cynative never prints them.
 Credentials echoed back in error text are scrubbed before the text reaches the
 model, the inventory or the audit log: the Basic token, the username and the
-password. A username or password shorter than four characters is not replaced
-as plain text (only the Basic token is), so use longer ones. Cynative does not
+password. A username or password shorter than four bytes is not replaced as
+plain text (only the Basic token is), so use longer ones. Cynative does not
 scan response bodies for the proxy credential: only the proxy itself could
 write it there, and an intercepting proxy already sees every credential in
 transit.
