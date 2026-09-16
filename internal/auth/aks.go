@@ -72,6 +72,7 @@ func newAKSProvider(credential azcore.TokenCredential, sdkCloud cloud.Configurat
 	}
 	p.validate = (*AKSAuthArgs).validate
 	p.clusterRole = defaultClusterRole
+	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.resolver = defaultResolveAddrs
 

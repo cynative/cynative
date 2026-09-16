@@ -41,6 +41,11 @@ type k8sGate[A any] struct {
 	// defaultFetchView) and surfaced in denial messages. Set post-construction by
 	// the shell tryRegister* functions.
 	clusterRole string
+
+	// egress is the operator's routing policy for the bootstrap ClusterRole
+	// fetch. Constructors default it to NoProxy; the registration shell sets
+	// the real one.
+	egress *Egress
 }
 
 // authorizeAction enforces the configured read-only ClusterRole posture for a

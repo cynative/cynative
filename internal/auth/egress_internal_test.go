@@ -6,6 +6,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/cloud"
+	"github.com/aws/aws-sdk-go-v2/aws"
 )
 
 // mustEgress builds a policy from vars or fails the test.
@@ -302,6 +305,41 @@ func TestRenderProxy_DefaultPortsAndNoUserinfo(t *testing.T) {
 		}
 		if got := renderProxy(u); got != want {
 			t.Fatalf("renderProxy(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestScrubStatus_ScrubsReasonAndPassesThrough(t *testing.T) {
+	t.Parallel()
+
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://alice:s3cret@proxy.corp:3128"})
+	var got ConnectorStatus
+	wrapped := scrubStatus(e, func(s ConnectorStatus) { got = s })
+	wrapped(ConnectorStatus{Name: "gitlab", Reason: "407 s3cret", Posture: "read"})
+	if got.Name != "gitlab" || got.Posture != "read" {
+		t.Fatalf("scrubStatus must pass the status through, got %+v", got)
+	}
+	if strings.Contains(got.Reason, "s3cret") {
+		t.Fatalf("Reason still carries the credential: %q", got.Reason)
+	}
+	// A nil onStatus stays nil so GetProviders' nil-safe contract holds.
+	if scrubStatus(e, nil) != nil {
+		t.Fatal("scrubStatus(e, nil) must be nil")
+	}
+}
+
+func TestProviderConstructors_DefaultToDirectEgress(t *testing.T) {
+	t.Parallel()
+
+	target := mustURL("https://api.example.test/")
+	for name, e := range map[string]*Egress{
+		"eks":        newEKSProvider(aws.Config{}).egress,
+		"gke":        newGKEProvider(nil).egress,
+		"aks":        newAKSProvider(nil, cloud.Configuration{}).egress,
+		"kubernetes": newKubernetesProvider(resolvedCluster{}).egress,
+	} {
+		if e == nil || e.Route(target).Proxied() {
+			t.Fatalf("%s: constructor must default to a direct policy, got %v", name, e)
 		}
 	}
 }

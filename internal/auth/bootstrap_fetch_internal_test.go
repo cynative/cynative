@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBootstrapDialAuthorizer(t *testing.T) {
@@ -41,7 +42,7 @@ func TestBootstrapDialAuthorizer(t *testing.T) {
 func TestBuildBootstrapFetchClient_rejectsRedirects(t *testing.T) {
 	t.Parallel()
 
-	c := buildBootstrapFetchClient(githubFetchTimeout)
+	c := buildBootstrapFetchClient(githubFetchTimeout, NoProxy().Route(mustURL(githubOpenAPIURL)))
 	if c.CheckRedirect == nil {
 		t.Fatal("CheckRedirect = nil, want a no-follow policy")
 	}
@@ -221,10 +222,49 @@ func TestFetchBootstrapSpec_errors(t *testing.T) {
 func TestConnectorFetcherConstructors(t *testing.T) {
 	t.Parallel()
 
-	if newGithubOpenAPIFetcher() == nil {
+	if newGithubOpenAPIFetcher(NoProxy()) == nil {
 		t.Error("newGithubOpenAPIFetcher() = nil, want non-nil func")
 	}
-	if newGitLabOpenAPIFetcher() == nil {
+	if newGitLabOpenAPIFetcher(NoProxy()) == nil {
 		t.Error("newGitLabOpenAPIFetcher() = nil, want non-nil func")
+	}
+}
+
+func TestBuildBootstrapFetchClient_BindsRoute(t *testing.T) {
+	t.Parallel()
+
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://127.0.0.1:3128"})
+
+	proxied := buildBootstrapFetchClient(time.Second, e.Route(mustURL(githubOpenAPIURL)))
+	tr, ok := proxied.Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil {
+		t.Fatalf("proxied bootstrap client must carry the proxy, got %T", proxied.Transport)
+	}
+	if _, err := tr.DialContext(context.Background(), "tcp", "10.0.0.1:443"); !errors.Is(err, ErrProxyDialMismatch) {
+		t.Fatalf("proxied bootstrap dialer must refuse other addresses, got %v", err)
+	}
+
+	direct := buildBootstrapFetchClient(time.Second, NoProxy().Route(mustURL(githubOpenAPIURL)))
+	dtr, ok := direct.Transport.(*http.Transport)
+	if !ok || dtr.Proxy != nil {
+		t.Fatalf("direct bootstrap client must not carry a proxy, got %T", direct.Transport)
+	}
+	// The guard still runs on the direct path: loopback is an internal address.
+	if _, err := dtr.DialContext(context.Background(), "tcp", "127.0.0.1:1"); !errors.Is(err, ErrAddrNotAuthorized) {
+		t.Fatalf("direct bootstrap dialer must keep the internal-range guard, got %v", err)
+	}
+}
+
+func TestGuardedGithubClient_BindsRoute(t *testing.T) {
+	t.Parallel()
+
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://127.0.0.1:3128"})
+	tr, ok := guardedGithubClient(e).Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil {
+		t.Fatal("guarded github client must carry the proxy when one is configured")
+	}
+	dtr, ok := guardedGithubClient(NoProxy()).Transport.(*http.Transport)
+	if !ok || dtr.Proxy != nil {
+		t.Fatal("guarded github client must stay direct without a proxy")
 	}
 }

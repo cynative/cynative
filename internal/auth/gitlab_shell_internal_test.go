@@ -45,7 +45,7 @@ func TestBuildGitLabProvider_ServedHostAdmission(t *testing.T) {
 			cfg := GitLabHardeningConfig{Host: tc.host, APIHost: tc.apiHost}
 			cred := glabCredential{AccessToken: "glpat-test"}
 
-			p, err := buildGitLabProvider(cfg, tc.host, cred)
+			p, err := buildGitLabProvider(cfg, tc.host, cred, NoProxy())
 
 			if tc.want == nil {
 				if err != nil {

@@ -11,7 +11,7 @@ import (
 func TestGuardedGithubClient(t *testing.T) {
 	t.Parallel()
 
-	c := guardedGithubClient()
+	c := guardedGithubClient(NoProxy())
 	if !errors.Is(c.CheckRedirect(nil, nil), http.ErrUseLastResponse) {
 		t.Fatal("guarded client must refuse redirects")
 	}

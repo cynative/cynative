@@ -31,6 +31,8 @@ type registrationDeps struct {
 	// scopeNotifyOut receives the one-line startup credential-scope degrade notice
 	// for AWS. Set to os.Stderr in buildRegistrationDeps and io.Discard in stubDeps.
 	scopeNotifyOut io.Writer
+	// egress is the operator's routing policy, threaded to every bootstrap client and provider.
+	egress *Egress
 
 	tokenForHost   func(ctx context.Context) (token string, present bool, err error)
 	validateGithub func(ctx context.Context, token string) (login string, err error)
@@ -398,7 +400,7 @@ func (d *registrationDeps) githubOutcome(
 
 	exposure := githubhardening.BuildExposure(ghCfg.Permissions)
 	posture, warn := githubPosture(exposure, ghCfg.Permissions)
-	tables := cache.NewTableCache(ghCfg.Config, newGithubOpenAPIFetcher(),
+	tables := cache.NewTableCache(ghCfg.Config, newGithubOpenAPIFetcher(d.egress),
 		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
 		githubhardening.UnmarshalTable, githubhardening.AdmitTable)
 	gh := newGithubProvider(token, exposure, tables)

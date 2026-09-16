@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -106,7 +107,7 @@ func TestPinnedHTTPClient_DoesNotFollowRedirects(t *testing.T) {
 		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: target.Certificate().Raw})...,
 	))
 
-	hc, err := pinnedHTTPClient(bundle, "", "", "", nil)
+	hc, err := pinnedHTTPClient(bundle, "", "", "", Route{}, nil)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClient: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestClusterHTTPClient_PropagatesBuildError(t *testing.T) {
 
 	// pinnedHTTPClient is shell (gate-exempt); this guards that it hands its
 	// args to BuildTLSConfig and passes the helper's error through.
-	_, err := pinnedHTTPClient("not-base64-!!", "", "", "", nil)
+	_, err := pinnedHTTPClient("not-base64-!!", "", "", "", Route{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "failed to decode CA certificate") {
 		t.Fatalf("want decode cluster CA error, got %v", err)
 	}
@@ -200,7 +201,7 @@ func TestFetchViewPolicy_StalledTLSHandshakeIsBounded(t *testing.T) {
 	to := k8sFetchTimeouts{
 		dial: time.Second, tlsHandshake: 150 * time.Millisecond, responseHeader: time.Second, overall: 5 * time.Second,
 	}
-	hc, err := pinnedHTTPClientWithTimeouts("", "", "", "", to, nil)
+	hc, err := pinnedHTTPClientWithTimeouts("", "", "", "", Route{}, to, nil)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClientWithTimeouts: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestFetchViewPolicy_StalledResponseHeadersAreBounded(t *testing.T) {
 		dial: 2 * time.Second, tlsHandshake: 2 * time.Second,
 		responseHeader: 150 * time.Millisecond, overall: 5 * time.Second,
 	}
-	hc, err := pinnedHTTPClientWithTimeouts(tlsServerCABase64(t, srv), "", "", "", to, nil)
+	hc, err := pinnedHTTPClientWithTimeouts(tlsServerCABase64(t, srv), "", "", "", Route{}, to, nil)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClientWithTimeouts: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestFetchViewPolicy_StalledResponseBodyIsBounded(t *testing.T) {
 		dial: 2 * time.Second, tlsHandshake: 2 * time.Second,
 		responseHeader: 2 * time.Second, overall: 200 * time.Millisecond,
 	}
-	hc, err := pinnedHTTPClientWithTimeouts(tlsServerCABase64(t, srv), "", "", "", to, nil)
+	hc, err := pinnedHTTPClientWithTimeouts(tlsServerCABase64(t, srv), "", "", "", Route{}, to, nil)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClientWithTimeouts: %v", err)
 	}
@@ -295,7 +296,7 @@ func TestPinnedHTTPClient_SetsPhaseTimeouts(t *testing.T) {
 
 	// Without explicit dial/TLS/response-header/overall timeouts a stalled cluster
 	// endpoint wedges the bootstrap fetch even under a deadline-free context.
-	hc, err := pinnedHTTPClient("", "", "", "", nil)
+	hc, err := pinnedHTTPClient("", "", "", "", Route{}, nil)
 	if err != nil {
 		t.Fatalf("pinnedHTTPClient: %v", err)
 	}
@@ -349,5 +350,40 @@ func TestFetchViewPolicyStatusBody(t *testing.T) {
 	})
 	if !errors.Is(err, k8sauthz.ErrUnclassifiable) {
 		t.Fatalf("expected ErrUnclassifiable for Status body, got: %v", err)
+	}
+}
+
+func TestPinnedHTTPClient_BindsRoute(t *testing.T) {
+	t.Parallel()
+
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://127.0.0.1:3128"})
+	route, err := e.RouteEndpoint("https://kube.example.test:6443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := dialControl(func(context.Context, netip.Addr) (bool, error) { return false, nil })
+
+	hc, err := pinnedHTTPClient("", "", "", "", route, control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr, ok := hc.Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil {
+		t.Fatal("proxied ClusterRole fetch client must carry the proxy")
+	}
+	if _, err = tr.DialContext(context.Background(), "tcp", "10.0.0.1:6443"); !errors.Is(err, ErrProxyDialMismatch) {
+		t.Fatalf("proxied dialer must refuse the cluster address, got %v", err)
+	}
+
+	direct, err := pinnedHTTPClient("", "", "", "", Route{Proxy: nil}, control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dtr, ok := direct.Transport.(*http.Transport)
+	if !ok || dtr.Proxy != nil {
+		t.Fatal("direct ClusterRole fetch client must not carry a proxy")
+	}
+	if _, err = dtr.DialContext(context.Background(), "tcp", "127.0.0.1:1"); !errors.Is(err, ErrAddrNotAuthorized) {
+		t.Fatalf("direct dialer must keep the control hook, got %v", err)
 	}
 }

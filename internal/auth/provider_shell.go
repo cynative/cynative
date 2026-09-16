@@ -133,7 +133,7 @@ func GetProviders(cfg HardeningConfig, verbose bool, onStatus func(ConnectorStat
 		func() connectorOutcome { return deps.registerGCP(ctx, verbose) },
 		func() connectorOutcome { return deps.registerAzure(ctx, verbose) },
 		func() connectorOutcome { return deps.registerKube(verbose) },
-	}, onStatus)
+	}, scrubStatus(deps.egress, onStatus))
 }
 
 // buildRegistrationDeps wires the real I/O seams for the registration router and
@@ -141,6 +141,11 @@ func GetProviders(cfg HardeningConfig, verbose bool, onStatus func(ConnectorStat
 // builders set the per-provider clusterRole fields the registration router does
 // not touch. Shell only.
 func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
+	egress := cfg.Egress
+	if egress == nil {
+		egress = NoProxy()
+	}
+
 	// Resolve the Azure target cloud once (config override → AZURE_AUTHORITY_HOST →
 	// az CLI config → public) and thread it to the credential chain, the probe
 	// scope, and both the azure/aks providers — matching tryRegisterAzure.
@@ -152,12 +157,17 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		homeDir:                homeDirOrEmpty(),
 		awsDefaultProfileCreds: awsDefaultProfileFileHasCreds(),
 		scopeNotifyOut:         os.Stderr,
+		egress:                 egress,
 
-		tokenForHost:   resolveGithubToken,
-		validateGithub: validateGithubToken,
+		tokenForHost: resolveGithubToken,
+		validateGithub: func(ctx context.Context, token string) (string, error) {
+			return validateGithubToken(ctx, token, egress)
+		},
 
 		discoverGitLab: discoverGitLabCred,
-		buildGitLab:    buildGitLabProvider,
+		buildGitLab: func(c GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
+			return buildGitLabProvider(c, host, cred, egress)
+		},
 		validateGitLab: validateGitLabToken,
 
 		loadAWS: func(ctx context.Context) (aws.Config, error) {
@@ -176,6 +186,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 			hardened := buildHardenedAWSProvider(c, cfg.AWS, scoped)
 			eks := newEKSProvider(c)
 			eks.clusterRole = cfg.EKS.ClusterRole
+			eks.egress = egress
 
 			return hardened, eks
 		},
@@ -193,6 +204,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildGCP: func(creds *google.Credentials) (*gcpProvider, *gkeProvider) {
 			gke := newGKEProvider(creds.TokenSource)
 			gke.clusterRole = cfg.GKE.ClusterRole
+			gke.egress = egress
 
 			return buildHardenedGCPProvider(creds.TokenSource, cfg.GCP), gke
 		},
@@ -209,6 +221,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildAzure: func(cred azcore.TokenCredential) (*azureProvider, *aksProvider) {
 			aks := newAKSProvider(cred, azurehardening.ToSDKCloud(azureCloud))
 			aks.clusterRole = cfg.AKS.ClusterRole
+			aks.egress = egress
 
 			return buildHardenedAzureProvider(cred, cfg.Azure, azureCloud), aks
 		},
@@ -221,6 +234,7 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildKube: func(rc resolvedCluster) *kubernetesProvider {
 			p := newKubernetesProvider(rc)
 			p.clusterRole = cfg.Kubernetes.ClusterRole
+			p.egress = egress
 
 			return p
 		},

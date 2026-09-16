@@ -13,4 +13,7 @@ type HardeningConfig struct {
 	Azure      AzureHardeningConfig
 	AKS        AKSHardeningConfig
 	Kubernetes KubernetesHardeningConfig
+	// Egress is the operator's outbound routing policy, built once at the
+	// composition root from the environment. Nil means direct (no proxy).
+	Egress *Egress
 }

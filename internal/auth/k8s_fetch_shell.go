@@ -18,17 +18,21 @@ const maxViewRoleBytes = 1 << 20 // 1 MiB.
 // pinnedHTTPClient builds an [http.Client] trusting the system roots plus caData
 // (base64 PEM), optionally presenting a client certificate (base64 PEM cert+key)
 // for mTLS clusters, via [BuildTLSConfig] (the same builder the transport
-// request path uses). control, when non-nil, is installed as the [net.Dialer]
-// ControlContext hook so the bootstrap fetch runs through the dial guard. The
-// client carries the production phase timeouts so a stalled cluster endpoint is
-// bounded even when the caller supplies no context deadline, and refuses
-// redirects so a 30x cannot carry the credential to a destination the request
-// gates never saw.
+// request path uses). route decides how the fetch leaves the host: a direct
+// route installs control as the [net.Dialer] ControlContext hook so the
+// bootstrap fetch runs through the dial guard, and a proxied route may only
+// dial the proxy. The client carries the production phase timeouts so a stalled
+// cluster endpoint is bounded even when the caller supplies no context
+// deadline, and refuses redirects so a 30x cannot carry the credential to a
+// destination the request gates never saw.
 func pinnedHTTPClient(
 	caData, clientCert, clientKey, serverName string,
+	route Route,
 	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
 ) (*http.Client, error) {
-	return pinnedHTTPClientWithTimeouts(caData, clientCert, clientKey, serverName, defaultK8sFetchTimeouts(), control)
+	return pinnedHTTPClientWithTimeouts(
+		caData, clientCert, clientKey, serverName, route, defaultK8sFetchTimeouts(), control,
+	)
 }
 
 // pinnedHTTPClientWithTimeouts is pinnedHTTPClient with the phase timeouts made
@@ -36,6 +40,7 @@ func pinnedHTTPClient(
 // callers go through pinnedHTTPClient with defaultK8sFetchTimeouts.
 func pinnedHTTPClientWithTimeouts(
 	caData, clientCert, clientKey, serverName string,
+	route Route,
 	to k8sFetchTimeouts,
 	control func(ctx context.Context, network, address string, c syscall.RawConn) error,
 ) (*http.Client, error) {
@@ -44,15 +49,15 @@ func pinnedHTTPClientWithTimeouts(
 		return nil, err
 	}
 
-	tr := &http.Transport{ //nolint:exhaustruct // only TLS, dial control, and phase timeouts configured.
+	tr := &http.Transport{
 		TLSClientConfig:       tlsCfg,
 		TLSHandshakeTimeout:   to.tlsHandshake,
 		ResponseHeaderTimeout: to.responseHeader,
-		DialContext: (&net.Dialer{ //nolint:exhaustruct // only Timeout + ControlContext configured.
-			Timeout:        to.dial,
-			ControlContext: control,
-		}).DialContext,
 	}
+	configureTransport(tr, route, &net.Dialer{
+		Timeout:        to.dial,
+		ControlContext: control,
+	})
 
 	// Never follow a redirect, matching the request transport: Go's default policy
 	// keeps the Authorization header when a hop changes only the port (it compares

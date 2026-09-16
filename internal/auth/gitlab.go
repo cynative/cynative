@@ -133,6 +133,8 @@ type gitlabProvider struct {
 	exposure            exposure.Exposure
 	tables              *cache.TTLCache[gitlabclass.Table]
 	resolver            addrResolver
+	// egress routes the registration probe; set by buildGitLabProvider.
+	egress *Egress
 }
 
 var (

@@ -427,6 +427,7 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 	p.cacheKey = func(*KubernetesAuthArgs) string { return "self" }
 	p.validate = func(*KubernetesAuthArgs) error { return nil }
 	p.clusterRole = defaultClusterRole
+	p.egress = NoProxy()
 	p.expectedPort = defaultedPort(cluster.port)
 
 	return p

@@ -39,7 +39,9 @@ func readCACertBase64(path string) (string, error) {
 // second of two checks; it sits here so the rule does not rest on the caller.
 // The token source is static for an env/PAT credential and a caching
 // glab-helper source for a glab OAuth credential (newTokenSource).
-func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
+func buildGitLabProvider(
+	cfg GitLabHardeningConfig, host string, cred glabCredential, e *Egress,
+) (*gitlabProvider, error) {
 	if err := validateGitLabHosts(host, cfg.APIHost); err != nil {
 		return nil, err
 	}
@@ -53,8 +55,9 @@ func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCreden
 		host: host, apiHost: cfg.APIHost,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		caData:              caData, resolver: defaultResolveAddrs,
+		egress:   e,
 		exposure: gitlabclass.BuildExposure(cfg.Permissions),
-		tables: cache.NewTableCache(cfg.Config, newGitLabOpenAPIFetcher(),
+		tables: cache.NewTableCache(cfg.Config, newGitLabOpenAPIFetcher(e),
 			gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
 			gitlabclass.UnmarshalTable, gitlabclass.AdmitTable),
 	}
@@ -65,10 +68,15 @@ func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCreden
 }
 
 // buildProbeClient constructs the pinned HTTP client used for the eager /user
-// validation and the OAuth refresh POST: dial-guarded, configured CA, and
-// fail-closed on redirects.
+// validation and the OAuth refresh POST: routed by the egress policy,
+// dial-guarded on the direct path, configured CA, and fail-closed on redirects.
 func buildProbeClient(p *gitlabProvider) (*http.Client, error) {
-	hc, err := pinnedHTTPClient(p.caData, "", "", "", dialControl(p.authorizesDialIP))
+	route, err := p.egress.RouteEndpoint("https://" + p.servedHost())
+	if err != nil {
+		return nil, fmt.Errorf("%w: route: %w", errGitLabProbe, err)
+	}
+
+	hc, err := pinnedHTTPClient(p.caData, "", "", "", route, dialControl(p.authorizesDialIP))
 	if err != nil {
 		return nil, fmt.Errorf("%w: build client: %w", errGitLabProbe, err)
 	}

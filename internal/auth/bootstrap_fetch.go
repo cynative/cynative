@@ -38,22 +38,25 @@ const (
 )
 
 // newGithubOpenAPIFetcher returns a fetcher that downloads the raw OpenAPI over
-// the dedicated bootstrap client. It deliberately bypasses the gated transport
-// (raw.githubusercontent.com is not a pinned host and InjectAuth would otherwise
-// attach the gh token), mirroring the K8s ClusterRole bootstrap fetch.
-func newGithubOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
+// the dedicated bootstrap client, routed by the egress policy. It deliberately
+// bypasses the gated transport (raw.githubusercontent.com is not a pinned host
+// and InjectAuth would otherwise attach the gh token), mirroring the K8s
+// ClusterRole bootstrap fetch.
+func newGithubOpenAPIFetcher(e *Egress) func(ctx context.Context) ([]byte, error) {
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(githubFetchTimeout), githubOpenAPIURL, githubFetchAccept, "github_hardening",
+		buildBootstrapFetchClient(githubFetchTimeout, e.Route(mustURL(githubOpenAPIURL))),
+		githubOpenAPIURL, githubFetchAccept, "github_hardening",
 	)
 }
 
 // newGitLabOpenAPIFetcher returns a fetcher that downloads the raw OpenAPI v3
-// YAML over the dedicated dial-guarded bootstrap client (gitlab.com is not a
-// pinned host and the gitlab provider's InjectAuth must not run for this
-// anonymous fetch). https-only, no-redirect, size-capped.
-func newGitLabOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
+// YAML over the dedicated bootstrap client, routed by the egress policy
+// (gitlab.com is not a pinned host and the gitlab provider's InjectAuth must
+// not run for this anonymous fetch). https-only, no-redirect, size-capped.
+func newGitLabOpenAPIFetcher(e *Egress) func(ctx context.Context) ([]byte, error) {
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(gitlabFetchTimeout), gitlabOpenAPIURL, "", "gitlab_hardening",
+		buildBootstrapFetchClient(gitlabFetchTimeout, e.Route(mustURL(gitlabOpenAPIURL))),
+		gitlabOpenAPIURL, "", "gitlab_hardening",
 	)
 }
 
@@ -64,15 +67,17 @@ func bootstrapDialAuthorizer(_ context.Context, ip netip.Addr) (bool, error) {
 	return !isInternalIP(ip), nil
 }
 
-// buildBootstrapFetchClient builds a dedicated bootstrap client: dial-guarded,
-// redirect-refusing, timeout-bounded, with no shared/default transport.
-func buildBootstrapFetchClient(timeout time.Duration) *http.Client {
-	tr := &http.Transport{ //nolint:exhaustruct // only dial control configured; Proxy intentionally nil.
-		DialContext: (&net.Dialer{ //nolint:exhaustruct // only ControlContext configured.
-			ControlContext: dialControl(bootstrapDialAuthorizer),
-		}).DialContext,
-	}
-	return &http.Client{ //nolint:exhaustruct // only Transport/Timeout/CheckRedirect set.
+// buildBootstrapFetchClient builds a dedicated bootstrap client bound to route:
+// on a direct route the dialer runs the internal-range guard; on a proxied
+// route it may only dial the proxy. Redirect-refusing and timeout-bounded, with
+// no shared/default transport.
+func buildBootstrapFetchClient(timeout time.Duration, route Route) *http.Client {
+	tr := &http.Transport{}
+	configureTransport(tr, route, &net.Dialer{
+		ControlContext: dialControl(bootstrapDialAuthorizer),
+	})
+
+	return &http.Client{
 		Timeout:   timeout,
 		Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error {

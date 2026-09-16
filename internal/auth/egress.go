@@ -278,3 +278,17 @@ func (e *Egress) ScrubError(err error) error {
 
 	return &scrubbedError{text: scrubbed, err: err}
 }
+
+// scrubStatus wraps an inventory callback so every connector status reason
+// passes through Scrub before it leaves auth. A nil callback stays nil, which
+// GetProviders' consumers treat as "no listener".
+func scrubStatus(e *Egress, onStatus func(ConnectorStatus)) func(ConnectorStatus) {
+	if onStatus == nil {
+		return nil
+	}
+
+	return func(s ConnectorStatus) {
+		s.Reason = e.Scrub(s.Reason)
+		onStatus(s)
+	}
+}

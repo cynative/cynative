@@ -53,6 +53,7 @@ func wantLoudSkip(t *testing.T, out connectorOutcome) {
 func stubDeps() *registrationDeps {
 	return &registrationDeps{ //nolint:exhaustruct // posture labels default empty; scopeNotifyOut set to Discard.
 		scopeNotifyOut: io.Discard,
+		egress:         NoProxy(),
 		lookupEnv:      envFrom(nil),
 		fileExists:     func(string) bool { return false },
 		homeDir:        "/home/u",

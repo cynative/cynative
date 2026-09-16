@@ -41,25 +41,26 @@ func resolveGithubToken(ctx context.Context) (string, bool, error) {
 }
 
 // guardedGithubClient builds the bootstrap transport for the github bearer-token
-// probes: NO redirects (the bearer never follows a 3xx) and a dial guard via
-// githubDialAllowed (public-global-unicast only — NOT isInternalIP, which permits
-// CGNAT/benchmark ranges for private K8s), so a DNS-rebound api.github.com can never
-// reach an internal/special-use address.
-func guardedGithubClient() *http.Client {
+// probes: NO redirects (the bearer never follows a 3xx), routed by the egress
+// policy, and on the direct path a dial guard via githubDialAllowed
+// (public-global-unicast only, NOT isInternalIP, which permits CGNAT/benchmark
+// ranges for private K8s), so a DNS-rebound api.github.com can never reach an
+// internal/special-use address.
+func guardedGithubClient(e *Egress) *http.Client {
 	control := dialControl(func(_ context.Context, ip netip.Addr) (bool, error) {
 		return githubDialAllowed(ip), nil
 	})
+	tr := &http.Transport{}
+	configureTransport(tr, e.Route(mustURL(githubUserURL)), &net.Dialer{ControlContext: control})
 
-	return &http.Client{ //nolint:exhaustruct // only Transport + CheckRedirect set.
-		Transport: &http.Transport{ //nolint:exhaustruct // only DialContext set.
-			DialContext: (&net.Dialer{ControlContext: control}).DialContext, //nolint:exhaustruct // only ControlContext.
-		},
+	return &http.Client{
+		Transport:     tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
 
 // validateGithubToken is the production validation seam: the /user→/rate_limit
 // fallback probe over the guarded client and the real GitHub URLs.
-func validateGithubToken(ctx context.Context, token string) (string, error) {
-	return githubValidate(ctx, guardedGithubClient(), githubUserURL, githubRateLimitURL, token)
+func validateGithubToken(ctx context.Context, token string, e *Egress) (string, error) {
+	return githubValidate(ctx, guardedGithubClient(e), githubUserURL, githubRateLimitURL, token)
 }
