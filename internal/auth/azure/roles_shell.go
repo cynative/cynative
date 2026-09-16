@@ -17,7 +17,7 @@ import (
 // document and GCP's GetRole.
 type RoleClientConfig struct {
 	Endpoint   string                 // test override; "" uses the cloud's ARM host.
-	HTTPClient *http.Client           // test override.
+	HTTPClient *http.Client           // the egress policy's routed client; nil uses azcore's default.
 	Credential azcore.TokenCredential // home-tenant ARM credential; nil → NewCredentialChain.
 	Cloud      CloudConfig            // resolved cloud; its ARM endpoint/audience + AAD authority target the role-defs client.
 }

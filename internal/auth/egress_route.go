@@ -47,7 +47,10 @@ func (e *Egress) Route(target *url.URL) Route {
 }
 
 // RouteEndpoint selects the route for a raw endpoint string, for the shells
-// that hold a cluster endpoint rather than a parsed URL.
+// that hold a cluster endpoint rather than a parsed URL. Every caller passes an
+// absolute https:// URL. A value with neither an http nor an https scheme routes
+// direct, and a direct route keeps the dial guard, so such a value connects the
+// way it did before there was a policy.
 func (e *Egress) RouteEndpoint(endpoint string) (Route, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil {

@@ -29,7 +29,7 @@ type proxyConfigError struct {
 
 func (e *proxyConfigError) Error() string { return e.variable + ": " + e.problem }
 
-func (e *proxyConfigError) Is(target error) bool { return errors.Is(target, ErrProxyConfig) }
+func (e *proxyConfigError) Is(target error) bool { return target == ErrProxyConfig }
 
 // scrubPlaceholder replaces proxy credential material in text that leaves the
 // process (tool errors, connector status reasons).
@@ -139,7 +139,6 @@ func parseProxyValue(name, raw string) (*url.URL, error) {
 		return nil, &proxyConfigError{variable: name, problem: "not a valid proxy URL"}
 	}
 
-	u.Scheme = strings.ToLower(u.Scheme)
 	if u.Scheme != schemeHTTP && u.Scheme != schemeSOCKS5 && u.Scheme != schemeSOCKS5H {
 		return nil, &proxyConfigError{
 			variable: name,

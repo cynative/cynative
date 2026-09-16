@@ -64,7 +64,8 @@ type Record struct {
 	RedactArgs bool `json:"-"`
 }
 
-// Phase, Decision, Outcome, Via and Route field values.
+// Phase, Decision, Outcome and Via field values. The Route values live in
+// context.go, beside the recorder that produces them.
 const (
 	PhaseAttempt = "attempt"
 	PhaseResult  = "result"

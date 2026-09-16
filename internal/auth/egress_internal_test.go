@@ -23,18 +23,6 @@ func mustEgress(t *testing.T, vars map[string]string) *Egress {
 	return e
 }
 
-// parseURL parses raw or fails the test. A later task adds a shared mustURL
-// test helper; this one is local to keep this file self-contained until then.
-func parseURL(t *testing.T, raw string) *url.URL {
-	t.Helper()
-	u, err := url.Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	return u
-}
-
 func TestNewEgress_NoVariablesIsDirect(t *testing.T) {
 	t.Parallel()
 
@@ -250,10 +238,10 @@ func TestCredentialForms_EdgeCases(t *testing.T) {
 	if forms := credentialForms(nil); forms != nil {
 		t.Fatalf("nil URL: %v", forms)
 	}
-	if forms := credentialForms(parseURL(t, "http://proxy.corp:1")); forms != nil {
+	if forms := credentialForms(mustURL("http://proxy.corp:1")); forms != nil {
 		t.Fatalf("no userinfo: %v", forms)
 	}
-	if forms := credentialForms(parseURL(t, "http://:@proxy.corp:1")); forms != nil {
+	if forms := credentialForms(mustURL("http://:@proxy.corp:1")); forms != nil {
 		t.Fatalf("empty userinfo: %v", forms)
 	}
 	// The quote is percent-encoded in the URL, so the username decodes to
@@ -280,7 +268,7 @@ func TestCredentialForms_EdgeCases(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if got := credentialForms(parseURL(t, tc.raw)); !slices.Equal(got, tc.want) {
+			if got := credentialForms(mustURL(tc.raw)); !slices.Equal(got, tc.want) {
 				t.Fatalf("credentialForms(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 		})

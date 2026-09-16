@@ -300,7 +300,7 @@ func gcpRegistrationIdentity(ctx context.Context, creds *google.Credentials, e *
 	if creds != nil {
 		project = creds.ProjectID
 	}
-	prober := gcphardening.NewIdentityProber(gcphardening.IdentityConfig{ //nolint:exhaustruct // URL + scopes default.
+	prober := gcphardening.NewIdentityProber(gcphardening.IdentityConfig{
 		HTTPClient: e.HTTPClient(identityProbeHTTPTimeout),
 	})
 	principal, probeProject, _ := prober.Probe(e.withRefreshClient(ctx))

@@ -180,7 +180,7 @@ const (
 	RouteProxy  = "proxy"
 )
 
-// routeState encodes the recorder's atomic value: 0 unset, 1 direct, 2 proxy.
+// The recorder's atomic value: 0 unset, 1 direct, 2 proxy.
 const (
 	routeUnset int32 = iota
 	routeDirect

@@ -68,8 +68,9 @@ func buildGitLabProvider(
 }
 
 // buildProbeClient constructs the pinned HTTP client used for the eager /user
-// validation and the OAuth refresh POST: routed by the egress policy,
-// dial-guarded on the direct path, configured CA, and fail-closed on redirects.
+// validation: routed by the egress policy, dial-guarded on the direct path,
+// configured CA, and fail-closed on redirects. An OAuth refresh never uses it;
+// the glab helper performs that exchange in its own process.
 func buildProbeClient(p *gitlabProvider) (*http.Client, error) {
 	route, err := p.egress.RouteEndpoint("https://" + p.servedHost())
 	if err != nil {

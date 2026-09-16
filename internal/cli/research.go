@@ -573,6 +573,8 @@ func (d *deps) resolveEgress() (*auth.Egress, error) {
 // buildProviders probes the environment and assembles the auth.Provider list
 // from cfg's per-connector hardening settings, streaming a connector-inventory
 // line per resolved connector to d.errOut and returning the collected views.
+// egress is the routing policy the connectors it builds send their requests
+// through.
 func (d *deps) buildProviders(
 	cfg config.Config,
 	verbose bool,
@@ -634,7 +636,9 @@ func (d *deps) buildProviders(
 }
 
 // buildToolSet builds the approval-wrapped tool set (http_request + code_execution)
-// from the given providers, config, flags, verbose writer, and audit sink.
+// from the given providers, egress policy, config, flags, verbose writer, and audit
+// sink. egress goes to http_request, which is where a model request picks its
+// route.
 func (d *deps) buildToolSet(
 	providers []auth.Provider,
 	egress *auth.Egress,

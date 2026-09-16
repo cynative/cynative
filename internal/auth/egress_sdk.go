@@ -47,7 +47,12 @@ func (e *Egress) awsConfigOptions() []func(*awsconfig.LoadOptions) error {
 }
 
 // azureClientOptions are the azcore client options every Azure SDK client and
-// credential gets: the resolved cloud and the routed transport.
+// credential gets: the resolved cloud and the routed transport. The routed
+// transport replaces azcore's default one, so azcore's Renegotiation
+// (RenegotiateFreelyAsClient), its MaxIdleConnsPerHost of 10 and its HTTP/2 ping
+// health check (ReadIdleTimeout 10s, PingTimeout 5s) do not apply, and the TLS
+// 1.2 floor it sets is Go's client default anyway. The connector's ARM and login
+// calls are short-lived and need none of them.
 func (e *Egress) azureClientOptions(sdkCloud cloud.Configuration) azcore.ClientOptions {
 	return azcore.ClientOptions{Cloud: sdkCloud, Transport: e.HTTPClient(0)}
 }

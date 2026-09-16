@@ -255,8 +255,8 @@ func loggingToolFunc(it schema.InvokableTool, name string, sink audit.Sink, newI
 	}
 }
 
-// innerOutcome is one audited inner sandbox call's result: its output, error, and the
-// classified audit outcome/result strings.
+// innerOutcome is one audited inner sandbox call's result: its output, error, the
+// classified audit outcome/result strings, and the egress route the call took.
 type innerOutcome struct {
 	out     string
 	err     error
@@ -269,7 +269,8 @@ type innerOutcome struct {
 // failure with no Go error) shows up in this call's audit outcome rather than "ok", then
 // propagates that recorder's tallies to the outer code_execution recorder (a per-call
 // recorder, not a shared-counter delta, so concurrent siblings do not race) and
-// classifies the outcome.
+// classifies the outcome. The call also gets its own route recorder, so the route
+// it reports is the one this request took rather than a sibling's.
 func runInnerCall(ctx context.Context, base sandbox.ToolFunc, argsJSON string) innerOutcome {
 	innerCtx, innerFail := audit.WithFailure(ctx)
 	innerCtx, innerRoute := audit.WithRoute(innerCtx)
