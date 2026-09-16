@@ -63,8 +63,9 @@ func TestNewEgress_AcceptsSchemesAndDefaults(t *testing.T) {
 			// The selector parses the same value separately, in httpproxy; the
 			// two readings have to agree or the notice would name one proxy
 			// while requests went to another.
-			if got := e.Route(mustURL("https://api.example.test/")).Proxy; got.String() != e.httpsProxy.String() {
-				t.Fatalf("the selector routes to %q, the validated value is %q", got, e.httpsProxy)
+			got := e.Route(mustURL("https://api.example.test/")).Proxy
+			if got == nil || got.String() != e.httpsProxy.String() {
+				t.Fatalf("the selector routes to %v, the validated value is %q", got, e.httpsProxy)
 			}
 		})
 	}
@@ -204,6 +205,26 @@ func TestEgress_ScrubReplacesLongerFormsFirst(t *testing.T) {
 	out := e.Scrub("Basic YWxpY2U6WVd4cA== and YWxp")
 	if strings.Contains(out, "Y2U6") || strings.Contains(out, "YWxp") {
 		t.Fatalf("an encoded form survived: %q", out)
+	}
+}
+
+func TestEgress_ScrubNeverRescansItsOwnPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	// "prox" is both a credential and a substring of the placeholder; a pass
+	// per form would find it inside the marker the userinfo form inserted.
+	e := mustEgress(t, map[string]string{
+		"HTTPS_PROXY": "http://prox:s3cret@proxy.corp:3128",
+		"HTTP_PROXY":  "http://proxy@other.corp:3128", // username-only, listed twice before dedupe.
+	})
+	if out := e.Scrub("prox:s3cret"); out != scrubPlaceholder {
+		t.Fatalf("Scrub(userinfo) = %q, want exactly one placeholder", out)
+	}
+	if out, want := e.Scrub("user proxy rejected"), "user "+scrubPlaceholder+" rejected"; out != want {
+		t.Fatalf("Scrub = %q, want %q", out, want)
+	}
+	if out := e.Scrub("no credential here"); out != "no credential here" {
+		t.Fatalf("clean text changed: %q", out)
 	}
 }
 

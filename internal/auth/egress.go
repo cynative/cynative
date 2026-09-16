@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,9 +57,9 @@ type Egress struct {
 	httpProxy  *url.URL
 	noProxy    string
 	proxyFunc  func(*url.URL) (*url.URL, error)
-	// secrets is the replacement set Scrub applies: every spelling of each
-	// proxy credential that Go or a proxy could echo back.
-	secrets []string
+	// scrubber replaces every spelling of each proxy credential that Go or a
+	// proxy could echo back; nil when no credential is configured.
+	scrubber *strings.Replacer
 }
 
 // NoProxy returns a policy with no proxy configured: every route is direct. It
@@ -105,7 +106,7 @@ func NewEgress(lookup func(string) (string, bool)) (*Egress, error) {
 		httpProxy:  httpProxy,
 		noProxy:    noProxy,
 		proxyFunc:  cfg.ProxyFunc(),
-		secrets:    scrubForms(httpsProxy, httpProxy),
+		scrubber:   newScrubber(scrubForms(httpsProxy, httpProxy)),
 	}, nil
 }
 
@@ -229,15 +230,41 @@ func plainForms(s string) []string {
 }
 
 // scrubForms orders the replacement set longest first, so an encoded form is
-// replaced before a shorter password it happens to contain.
+// replaced before a shorter password it happens to contain, and drops the
+// duplicates two proxies or a username-only userinfo produce.
 func scrubForms(proxies ...*url.URL) []string {
 	var forms []string
 	for _, u := range proxies {
 		forms = append(forms, credentialForms(u)...)
 	}
-	sort.Slice(forms, func(i, j int) bool { return len(forms[i]) > len(forms[j]) })
+	sort.Slice(forms, func(i, j int) bool {
+		if len(forms[i]) != len(forms[j]) {
+			return len(forms[i]) > len(forms[j])
+		}
 
-	return forms
+		return forms[i] < forms[j]
+	})
+
+	return slices.Compact(forms)
+}
+
+// newScrubber builds the single-pass replacer Scrub applies. One pass matters:
+// the placeholder contains the word "proxy", so a sequential ReplaceAll per
+// form would find a credential such as "prox" inside the placeholder a previous
+// form inserted and nest the markers. At each position the replacer takes the
+// earliest listed form that matches, which is the longest one. Nil for an
+// empty set.
+func newScrubber(forms []string) *strings.Replacer {
+	if len(forms) == 0 {
+		return nil
+	}
+
+	var pairs []string
+	for _, form := range forms {
+		pairs = append(pairs, form, scrubPlaceholder)
+	}
+
+	return strings.NewReplacer(pairs...)
 }
 
 // Notice renders the startup line body: which proxies are configured and the
@@ -261,13 +288,13 @@ func (e *Egress) Notice() string {
 }
 
 // Scrub replaces every configured proxy credential form in s with a
-// placeholder. Text without a credential is returned unchanged.
+// placeholder, in one pass. Text without a credential is returned unchanged.
 func (e *Egress) Scrub(s string) string {
-	for _, secret := range e.secrets {
-		s = strings.ReplaceAll(s, secret, scrubPlaceholder)
+	if e.scrubber == nil {
+		return s
 	}
 
-	return s
+	return e.scrubber.Replace(s)
 }
 
 // scrubbedError carries scrubbed text while keeping the original error in the
