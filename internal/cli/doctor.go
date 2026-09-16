@@ -122,7 +122,12 @@ func llmDoctorProbeMismatchStatus(cfg config.Config) ui.LLMStatus {
 func (d *deps) runDoctor(ctx context.Context, cfg config.Config, verbose, liveLLM bool) error {
 	d.ui.RenderBanner(d.errOut)
 
-	_, views := d.buildProviders(cfg, verbose)
+	egress, egressErr := d.resolveEgress()
+	if egressErr != nil {
+		return egressErr
+	}
+
+	_, views := d.buildProviders(cfg, verbose, egress)
 	if len(views) == 0 {
 		fmt.Fprintln(d.errOut, "  (no connectors detected)")
 	}

@@ -156,9 +156,13 @@ type researchFlags struct {
 // production implementations from the real environment; tests build a deps with
 // fakes. cfg is populated by the root command's PersistentPreRunE before run.
 type deps struct {
-	loadConfig           func(cfgFile string) (config.Config, error)
-	run                  func(ctx context.Context, req runRequest, cfg config.Config, flags researchFlags) error
-	getProviders         getProvidersFunc
+	loadConfig   func(cfgFile string) (config.Config, error)
+	run          func(ctx context.Context, req runRequest, cfg config.Config, flags researchFlags) error
+	getProviders getProvidersFunc
+	// newEgress builds the operator's outbound routing policy from the
+	// environment. Production reads the real variables in the shell; tests
+	// inject a policy or an error.
+	newEgress            func() (*auth.Egress, error)
 	newChatModel         func(ctx context.Context, cfg config.Config, recordUsage func(schema.Usage)) (chatModel, error)
 	newHTTPRequestTool   func(providers []auth.Provider, egress *auth.Egress) schema.InvokableTool
 	newCodeExecutionTool func(primitives []schema.InvokableTool, verbose io.Writer, maxConcurrency int, sink audit.Sink) (schema.InvokableTool, error)
@@ -273,9 +277,14 @@ func (d *deps) runResearch(ctx context.Context, req runRequest, cfg config.Confi
 
 	d.ui.RenderBanner(d.errOut)
 
+	egress, err := d.resolveEgress()
+	if err != nil {
+		return err
+	}
+
 	// buildProviders streams a connector-inventory line per resolved connector to
 	// d.errOut; views are consumed by the welcome and system prompt below.
-	providers, views := d.buildProviders(cfg, flags.verbose)
+	providers, views := d.buildProviders(cfg, flags.verbose, egress)
 
 	if len(views) == 0 {
 		fmt.Fprintln(d.errOut, "  (no connectors detected)")
@@ -311,7 +320,7 @@ func (d *deps) runResearch(ctx context.Context, req runRequest, cfg config.Confi
 		}
 	}()
 
-	toolSet, err := d.buildToolSet(providers, cfg, flags, verboseWriter, sink)
+	toolSet, err := d.buildToolSet(providers, egress, cfg, flags, verboseWriter, sink)
 	if err != nil {
 		return err
 	}
@@ -536,10 +545,39 @@ func statusToView(s auth.ConnectorStatus) ui.ConnectorView {
 	}
 }
 
+// renderEgress prints the one-line egress notice under the Connectors header
+// when a proxy is configured, in the inventory's column layout. Nothing is
+// printed for a direct policy, so the default output is unchanged.
+func renderEgress(w io.Writer, e *auth.Egress) {
+	if notice := e.Notice(); notice != "" {
+		fmt.Fprintf(w, "  ~ %-11s %s\n", "egress", notice)
+	}
+}
+
+// resolveEgress builds the routing policy and renders its outcome: the notice
+// line on success, a failure line on error. The error aborts the command
+// before any connector registers, because a malformed proxy setting must never
+// degrade into a direct connection.
+func (d *deps) resolveEgress() (*auth.Egress, error) {
+	egress, err := d.newEgress()
+	if err != nil {
+		fmt.Fprintf(d.errOut, "  ✗ %-11s %v\n", "egress", err)
+
+		return nil, err
+	}
+	renderEgress(d.errOut, egress)
+
+	return egress, nil
+}
+
 // buildProviders probes the environment and assembles the auth.Provider list
 // from cfg's per-connector hardening settings, streaming a connector-inventory
 // line per resolved connector to d.errOut and returning the collected views.
-func (d *deps) buildProviders(cfg config.Config, verbose bool) ([]auth.Provider, []ui.ConnectorView) {
+func (d *deps) buildProviders(
+	cfg config.Config,
+	verbose bool,
+	egress *auth.Egress,
+) ([]auth.Provider, []ui.ConnectorView) {
 	hc := auth.HardeningConfig{
 		Github: auth.GithubHardeningConfig{
 			Permissions: cfg.Connectors.Github.Permissions,
@@ -582,6 +620,7 @@ func (d *deps) buildProviders(cfg config.Config, verbose bool) ([]auth.Provider,
 		},
 		AKS:        auth.AKSHardeningConfig{ClusterRole: cfg.Connectors.AKS.ClusterRole},
 		Kubernetes: auth.KubernetesHardeningConfig{ClusterRole: cfg.Connectors.Kubernetes.ClusterRole},
+		Egress:     egress,
 	}
 
 	var views []ui.ConnectorView
@@ -598,13 +637,14 @@ func (d *deps) buildProviders(cfg config.Config, verbose bool) ([]auth.Provider,
 // from the given providers, config, flags, verbose writer, and audit sink.
 func (d *deps) buildToolSet(
 	providers []auth.Provider,
+	egress *auth.Egress,
 	cfg config.Config,
 	flags researchFlags,
 	verboseWriter io.Writer,
 	sink audit.Sink,
 ) ([]schema.InvokableTool, error) {
 	// Primitives are exposed (raw) inside the sandbox; the code tool wraps them.
-	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers, nil)}
+	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers, egress)}
 
 	codeTool, err := d.newCodeExecutionTool(primitives, verboseWriter, cfg.SandboxMaxConcurrency, sink)
 	if err != nil {

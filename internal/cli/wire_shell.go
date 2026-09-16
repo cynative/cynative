@@ -192,6 +192,7 @@ func newDeps() *deps {
 		},
 		run:          nil, // set below to the runResearch method bound to d.
 		getProviders: auth.GetProviders,
+		newEgress:    func() (*auth.Egress, error) { return auth.NewEgress(os.LookupEnv) },
 		newChatModel: func(ctx context.Context, cfg config.Config, recordUsage func(schema.Usage)) (chatModel, error) {
 			return llm.NewBifrostChatModel(
 				ctx,

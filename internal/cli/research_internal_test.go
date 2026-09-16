@@ -209,6 +209,7 @@ func testDeps() *deps {
 		getProviders: func(auth.HardeningConfig, bool, func(auth.ConnectorStatus)) []auth.Provider {
 			return nil
 		},
+		newEgress: func() (*auth.Egress, error) { return auth.NoProxy(), nil },
 		newChatModel: func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
 			return &fakeChatModel{}, nil //nolint:exhaustruct // benign default; tests override per case
 		},
