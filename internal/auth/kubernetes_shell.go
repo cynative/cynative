@@ -58,7 +58,7 @@ func (p *kubernetesProvider) defaultFetchView(
 
 	conn := kubernetesClusterConn(p.cluster)
 
-	hc, err := pinnedHTTPClient(conn.caData, conn.clientCert, conn.clientKey, conn.serverName, control)
+	hc, err := pinnedHTTPClient(pinnedClientConfig{conn: conn, control: control, routing: p.outbound})
 	if err != nil {
 		return nil, err
 	}

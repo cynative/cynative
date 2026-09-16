@@ -22,6 +22,7 @@ import (
 
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
 	"github.com/cynative/cynative/internal/llm"
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 // validate is the singleton validator instance.
@@ -145,6 +146,13 @@ type ConnectorsConfig struct {
 
 // Config holds the application configuration, unmarshaled from Viper.
 type Config struct {
+	// Outbound is the operator's proxy routing, resolved by the loader from the
+	// standard HTTPS_PROXY / NO_PROXY variables rather than from the config file
+	// or a CYNATIVE_* key — it is the environment's setting, shared with every
+	// other tool on the machine. json:"-" keeps it out of the viper/env surface
+	// and out of any serialized config.
+	Outbound outbound.Routing `mapstructure:"-" json:"-"`
+
 	LLM                    llm.ProviderEntry `mapstructure:"llm"                      json:"llm"`
 	Cache                  CacheConfig       `mapstructure:"cache"                    json:"cache"`
 	Audit                  AuditConfig       `mapstructure:"audit"                    json:"audit"`
@@ -196,7 +204,11 @@ func setDefaults(v *viper.Viper) {
 
 	for i := range t.NumField() {
 		field := t.Field(i)
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+
+		name, bound := configKey(field)
+		if !bound {
+			continue
+		}
 		if field.Type.Kind() == reflect.Struct && name != "llm" {
 			registerStructDefaults(v, name, val.Field(i))
 
@@ -209,6 +221,17 @@ func setDefaults(v *viper.Viper) {
 	}
 
 	v.SetDefault("llm.network_config.max_retries", defaultLLMMaxRetries)
+}
+
+// configKey returns the config key a struct field is bound to, and whether it
+// participates in the config surface at all. A `json:"-"` field does not: it is
+// held out of the file, of viper and of the CYNATIVE_* keys, because something
+// else resolves it (outbound, from the standard proxy variables). Walking into
+// one would also mean reading unexported fields, which reflection refuses.
+func configKey(field reflect.StructField) (string, bool) {
+	name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+
+	return name, name != "-"
 }
 
 // registerStructDefaults walks the fields of a nested Config struct (e.g.
@@ -226,7 +249,12 @@ func registerStructDefaults(v *viper.Viper, prefix string, val reflect.Value) {
 	t := val.Type()
 	for i := range t.NumField() {
 		field := t.Field(i)
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+
+		name, bound := configKey(field)
+		if !bound {
+			continue
+		}
+
 		key := prefix + "." + name
 		if field.Type.Kind() == reflect.Map {
 			// Maps (e.g. connectors.github.permissions, connectors.gitlab.permissions)
@@ -534,8 +562,10 @@ func envKeys() []string {
 	keys := llm.ProviderEnvKeys()
 
 	for field := range reflect.TypeFor[Config]().Fields() {
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
-		if name == "llm" {
+		// "llm" is enumerated by ProviderEnvKeys above, and a field outside the
+		// config surface (see configKey) gets no CYNATIVE_* key at all.
+		name, bound := configKey(field)
+		if !bound || name == "llm" {
 			continue
 		}
 		if field.Type.Kind() == reflect.Struct {
@@ -560,7 +590,11 @@ func envKeys() []string {
 func structEnvKeys(t reflect.Type, prefix string) []string {
 	var keys []string
 	for field := range t.Fields() {
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		name, bound := configKey(field)
+		if !bound {
+			continue
+		}
+
 		key := prefix + "." + name
 		if field.Type.Kind() == reflect.Struct {
 			keys = append(keys, structEnvKeys(field.Type, key)...)
@@ -698,6 +732,16 @@ func (l *Loader) Load(cfgFile string) (Config, error) {
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
+
+	// The proxy variables are the environment's, not Cynative's: they are read
+	// here rather than bound as config keys, and an endpoint that cannot be used
+	// fails the load instead of silently leaving traffic unproxied.
+	routing, outErr := outbound.FromEnv(outbound.LookupEnv(l.env))
+	if outErr != nil {
+		return Config{}, outErr
+	}
+
+	cfg.Outbound = routing
 
 	return cfg, nil
 }

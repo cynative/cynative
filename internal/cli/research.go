@@ -18,6 +18,7 @@ import (
 	"github.com/cynative/cynative/internal/config"
 	"github.com/cynative/cynative/internal/llm"
 	"github.com/cynative/cynative/internal/metrics"
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/redact"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/tools"
@@ -160,7 +161,7 @@ type deps struct {
 	run                  func(ctx context.Context, req runRequest, cfg config.Config, flags researchFlags) error
 	getProviders         getProvidersFunc
 	newChatModel         func(ctx context.Context, cfg config.Config, recordUsage func(schema.Usage)) (chatModel, error)
-	newHTTPRequestTool   func(providers []auth.Provider) schema.InvokableTool
+	newHTTPRequestTool   func(providers []auth.Provider, routing outbound.Routing) schema.InvokableTool
 	newCodeExecutionTool func(primitives []schema.InvokableTool, verbose io.Writer, maxConcurrency int, sink audit.Sink) (schema.InvokableTool, error)
 	newAuditSink         func(cfg config.Config, prov *audit.AgentProvenance) (audit.Sink, func() error, error)
 	newAgent             func(ctx context.Context, cfg agent.Config, opts ...agent.Option) *agent.Agent
@@ -539,7 +540,15 @@ func statusToView(s auth.ConnectorStatus) ui.ConnectorView {
 // buildProviders probes the environment and assembles the auth.Provider list
 // from cfg's per-connector hardening settings, streaming a connector-inventory
 // line per resolved connector to d.errOut and returning the collected views.
+//
+// A configured outbound proxy is announced once, above the inventory: it governs
+// every connector below it, including the registration probes those lines report
+// on, so an operator reading a surprising line knows what the traffic crossed.
 func (d *deps) buildProviders(cfg config.Config, verbose bool) ([]auth.Provider, []ui.ConnectorView) {
+	if endpoint := cfg.Outbound.Endpoint(); endpoint != "" {
+		fmt.Fprintf(d.errOut, "  outbound: connector traffic routed through %s\n", endpoint)
+	}
+
 	hc := auth.HardeningConfig{
 		Github: auth.GithubHardeningConfig{
 			Permissions: cfg.Connectors.Github.Permissions,
@@ -582,6 +591,7 @@ func (d *deps) buildProviders(cfg config.Config, verbose bool) ([]auth.Provider,
 		},
 		AKS:        auth.AKSHardeningConfig{ClusterRole: cfg.Connectors.AKS.ClusterRole},
 		Kubernetes: auth.KubernetesHardeningConfig{ClusterRole: cfg.Connectors.Kubernetes.ClusterRole},
+		Outbound:   cfg.Outbound,
 	}
 
 	var views []ui.ConnectorView
@@ -604,7 +614,7 @@ func (d *deps) buildToolSet(
 	sink audit.Sink,
 ) ([]schema.InvokableTool, error) {
 	// Primitives are exposed (raw) inside the sandbox; the code tool wraps them.
-	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers)}
+	primitives := []schema.InvokableTool{d.newHTTPRequestTool(providers, cfg.Outbound)}
 
 	codeTool, err := d.newCodeExecutionTool(primitives, verboseWriter, cfg.SandboxMaxConcurrency, sink)
 	if err != nil {

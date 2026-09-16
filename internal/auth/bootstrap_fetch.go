@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/netip"
 	"time"
+
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 const (
@@ -40,10 +42,13 @@ const (
 // newGithubOpenAPIFetcher returns a fetcher that downloads the raw OpenAPI over
 // the dedicated bootstrap client. It deliberately bypasses the gated transport
 // (raw.githubusercontent.com is not a pinned host and InjectAuth would otherwise
-// attach the gh token), mirroring the K8s ClusterRole bootstrap fetch.
-func newGithubOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
+// attach the gh token), mirroring the K8s ClusterRole bootstrap fetch. A failure
+// to resolve the operator's proxy is deferred to the fetch, which is the only
+// place the table source can report it.
+func newGithubOpenAPIFetcher(r outbound.Routing) func(ctx context.Context) ([]byte, error) {
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(githubFetchTimeout), githubOpenAPIURL, githubFetchAccept, "github_hardening",
+		bootstrapClientBuilder(r, githubFetchTimeout, githubOpenAPIURL),
+		githubOpenAPIURL, githubFetchAccept, "github_hardening",
 	)
 }
 
@@ -51,10 +56,20 @@ func newGithubOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
 // YAML over the dedicated dial-guarded bootstrap client (gitlab.com is not a
 // pinned host and the gitlab provider's InjectAuth must not run for this
 // anonymous fetch). https-only, no-redirect, size-capped.
-func newGitLabOpenAPIFetcher() func(ctx context.Context) ([]byte, error) {
+func newGitLabOpenAPIFetcher(r outbound.Routing) func(ctx context.Context) ([]byte, error) {
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(gitlabFetchTimeout), gitlabOpenAPIURL, "", "gitlab_hardening",
+		bootstrapClientBuilder(r, gitlabFetchTimeout, gitlabOpenAPIURL),
+		gitlabOpenAPIURL, "", "gitlab_hardening",
 	)
+}
+
+// bootstrapClientBuilder defers the client build to fetch time, which is where a
+// proxy misconfiguration can be reported: the table source takes a fetcher, not
+// a constructor that can fail.
+func bootstrapClientBuilder(r outbound.Routing, timeout time.Duration, url string) func() (*http.Client, error) {
+	return func() (*http.Client, error) {
+		return buildBootstrapFetchClient(r, timeout, url)
+	}
 }
 
 // bootstrapDialAuthorizer denies dials to internal IPs (loopback/link-local/
@@ -64,29 +79,40 @@ func bootstrapDialAuthorizer(_ context.Context, ip netip.Addr) (bool, error) {
 	return !isInternalIP(ip), nil
 }
 
-// buildBootstrapFetchClient builds a dedicated bootstrap client: dial-guarded,
-// redirect-refusing, timeout-bounded, with no shared/default transport.
-func buildBootstrapFetchClient(timeout time.Duration) *http.Client {
-	tr := &http.Transport{ //nolint:exhaustruct // only dial control configured; Proxy intentionally nil.
-		DialContext: (&net.Dialer{ //nolint:exhaustruct // only ControlContext configured.
-			ControlContext: dialControl(bootstrapDialAuthorizer),
-		}).DialContext,
+// buildBootstrapFetchClient builds a dedicated bootstrap client for url:
+// dial-guarded, redirect-refusing, timeout-bounded, with no shared/default
+// transport. The spec host is resolved against the operator's proxy
+// configuration like every other outbound target: direct dials keep the
+// internal-range deny, a proxied one is pinned to the proxy endpoint.
+func buildBootstrapFetchClient(r outbound.Routing, timeout time.Duration, url string) (*http.Client, error) {
+	route, err := RouteOutbound(r, url, dialControl(bootstrapDialAuthorizer))
+	if err != nil {
+		return nil, err
 	}
+
+	tr := &http.Transport{} //nolint:exhaustruct // only the route's dial config is set, below.
+	route.Apply(tr, &net.Dialer{})
+
 	return &http.Client{ //nolint:exhaustruct // only Transport/Timeout/CheckRedirect set.
 		Timeout:   timeout,
 		Transport: tr,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}
+	}, nil
 }
 
-// newBootstrapSpecFetcher binds a client and per-connector constants into the
-// fetcher shape the table sources consume.
+// newBootstrapSpecFetcher binds a client builder and the per-connector constants
+// into the fetcher shape the table sources consume.
 func newBootstrapSpecFetcher(
-	client *http.Client, url, accept, errPrefix string,
+	newClient func() (*http.Client, error), url, accept, errPrefix string,
 ) func(ctx context.Context) ([]byte, error) {
 	return func(ctx context.Context) ([]byte, error) {
+		client, err := newClient()
+		if err != nil {
+			return nil, err
+		}
+
 		return fetchBootstrapSpec(ctx, client, url, accept, errPrefix)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 	"github.com/cynative/cynative/internal/cache"
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 // maxIntrospectBytes caps the eager /user validation response read.
@@ -35,7 +36,9 @@ func readCACertBase64(path string) (string, error) {
 // unreadable — which gitlabOutcome surfaces as a visible unavailable status — and
 // (provider, nil) otherwise. The token source is static for an env/PAT credential and
 // a caching glab-helper source for a glab OAuth credential (newTokenSource).
-func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
+func buildGitLabProvider(
+	cfg GitLabHardeningConfig, r outbound.Routing, host string, cred glabCredential,
+) (*gitlabProvider, error) {
 	caData, err := readCACertBase64(cfg.CACertPath)
 	if err != nil {
 		return nil, err
@@ -45,8 +48,9 @@ func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCreden
 		host: host, apiHost: cfg.APIHost,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		caData:              caData, resolver: defaultResolveAddrs,
+		outbound: r,
 		exposure: gitlabclass.BuildExposure(cfg.Permissions),
-		tables: cache.NewTableCache(cfg.Config, newGitLabOpenAPIFetcher(),
+		tables: cache.NewTableCache(cfg.Config, newGitLabOpenAPIFetcher(r),
 			gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
 			gitlabclass.UnmarshalTable, gitlabclass.AdmitTable),
 	}
@@ -60,7 +64,11 @@ func buildGitLabProvider(cfg GitLabHardeningConfig, host string, cred glabCreden
 // validation and the OAuth refresh POST: dial-guarded, configured CA, and
 // fail-closed on redirects.
 func buildProbeClient(p *gitlabProvider) (*http.Client, error) {
-	hc, err := pinnedHTTPClient(p.caData, "", "", "", dialControl(p.authorizesDialIP))
+	hc, err := pinnedHTTPClient(pinnedClientConfig{
+		conn:    clusterConn{endpoint: "https://" + p.servedHost(), caData: p.caData},
+		control: dialControl(p.authorizesDialIP),
+		routing: p.outbound,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: build client: %w", errGitLabProbe, err)
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/cynative/cynative/internal/interrupt"
 	"github.com/cynative/cynative/internal/llm"
 	"github.com/cynative/cynative/internal/metrics"
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/tools"
 	"github.com/cynative/cynative/internal/ui"
@@ -2375,5 +2376,52 @@ func TestRunResearch_AuditCloseFailureWinsOverNoAnswer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "audit log close") {
 		t.Errorf("err = %v, want the audit-close failure surfaced", err)
+	}
+}
+
+// TestBuildProviders_AnnouncesTheOutboundProxy pins two things an operator
+// depends on: the routing reaches every connector through the hardening bundle,
+// and the inventory says so, because a proxy governs every line under it.
+func TestBuildProviders_AnnouncesTheOutboundProxy(t *testing.T) {
+	t.Parallel()
+
+	routing, err := outbound.New(outbound.Config{HTTPSProxy: "http://127.0.0.1:8080", NoProxy: ""})
+	if err != nil {
+		t.Fatalf("outbound.New: %v", err)
+	}
+
+	var buf bytes.Buffer
+
+	d := testDeps()
+	d.errOut = &buf
+	rec := captureHardening(d)
+
+	cfg := validCfg()
+	cfg.Outbound = routing
+	d.buildProviders(cfg, false)
+
+	if got := rec.cfg.Outbound.Endpoint(); got != "http://127.0.0.1:8080" {
+		t.Errorf("HardeningConfig.Outbound = %q, want the configured proxy", got)
+	}
+	if !strings.Contains(buf.String(), "http://127.0.0.1:8080") {
+		t.Errorf("inventory = %q, want the proxy endpoint announced", buf.String())
+	}
+}
+
+// TestBuildProviders_SilentWithoutAProxy pins that an unproxied run prints
+// nothing extra.
+func TestBuildProviders_SilentWithoutAProxy(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	d := testDeps()
+	d.errOut = &buf
+	captureHardening(d)
+
+	d.buildProviders(validCfg(), false)
+
+	if strings.Contains(buf.String(), "outbound:") {
+		t.Errorf("inventory = %q, want no outbound line without a proxy", buf.String())
 	}
 }

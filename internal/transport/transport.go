@@ -12,12 +12,14 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
+	"net/url"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authreq"
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/redact"
 )
 
@@ -86,6 +88,17 @@ type Client struct {
 	systemCertPool certPoolFunc
 	readAll        readAllFunc
 	redactor       redactor
+	// routing is the operator's outbound proxy configuration. The zero value
+	// dials every request directly, which is the default and what every test
+	// that does not opt in gets.
+	routing outbound.Routing
+}
+
+// WithRouting sets the outbound proxy routing every request is resolved
+// against. The composition root passes the operator's configuration; without it
+// a Client dials directly.
+func WithRouting(r outbound.Routing) Option {
+	return func(c *Client) { c.routing = r }
 }
 
 // NewClient constructs a Client with production defaults.
@@ -94,6 +107,7 @@ func NewClient(opts ...Option) *Client {
 		systemCertPool: x509.SystemCertPool,
 		readAll:        io.ReadAll,
 		redactor:       redact.New(),
+		routing:        outbound.Routing{},
 	}
 
 	for _, o := range opts {
@@ -257,7 +271,7 @@ func (c *Client) do(
 		},
 	}
 
-	cleanup, err := c.configureTransport(ctx, httpClient, args.AuthProvider, providers, rawArgs)
+	cleanup, err := c.configureTransport(ctx, httpClient, args.AuthProvider, providers, rawArgs, req.URL)
 	if err != nil {
 		return nil, 0, noop, err
 	}
@@ -374,12 +388,20 @@ func dialGuard(
 // provider supplies a CA and/or client cert, the TLS material is set on that same
 // transport. It returns a cleanup function that must be deferred by the caller to
 // release idle connections.
+//
+// target is the request URL, resolved against the operator's proxy
+// configuration: with no proxy (the default) the transport dials target's host
+// under the provider's dial-time IP guard, exactly as it always has; with one,
+// it dials the proxy under a pin to that endpoint and the request reaches
+// target through it. Nothing above the dial changes either way — the gates and
+// the TLS verification have already been decided for target's host.
 func (c *Client) configureTransport(
 	ctx context.Context,
 	client *http.Client,
 	providerName string,
 	providers []auth.Provider,
 	rawArgs json.RawMessage,
+	target *url.URL,
 ) (func(), error) {
 	noop := func() {}
 
@@ -399,22 +421,26 @@ func (c *Client) configureTransport(
 	}
 
 	// Build a fresh, known transport instead of cloning the mutable global
-	// [http.DefaultTransport]: Proxy is intentionally left nil and no
-	// DialTLS/DialTLSContext is inherited, so the dial-time IP guard always runs
-	// for HTTPS and cannot be bypassed (or panicked) by an embedding process that
-	// customized or replaced the global transport.
+	// [http.DefaultTransport]: no Proxy and no DialTLS/DialTLSContext are
+	// inherited, so the dial-time IP guard always runs for HTTPS and cannot be
+	// bypassed (or panicked) by an embedding process that customized or replaced
+	// the global transport. The only Proxy this transport can carry is the one
+	// RouteOutbound puts there from the operator's own configuration.
 	base := &http.Transport{
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          defaultMaxIdleConns,
 		IdleConnTimeout:       defaultIdleConnTimeout,
 		TLSHandshakeTimeout:   defaultTLSHandshakeTimeout,
 		ExpectContinueTimeout: defaultExpectContinueTimeout,
-		DialContext: (&net.Dialer{
-			Timeout:        defaultDialTimeout,
-			KeepAlive:      defaultDialKeepAlive,
-			ControlContext: dialGuard(providerName, providers, rawArgs),
-		}).DialContext,
 	}
+
+	route, routeErr := auth.RouteOutbound(
+		c.routing, target.String(), dialGuard(providerName, providers, rawArgs))
+	if routeErr != nil {
+		return noop, routeErr
+	}
+
+	route.Apply(base, &net.Dialer{Timeout: defaultDialTimeout, KeepAlive: defaultDialKeepAlive})
 
 	tr, err := c.tlsTransport(base, caData, clientCertData, clientKeyData, serverName)
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 	"github.com/cynative/cynative/internal/cache"
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 // registrationDeps carries every external I/O seam used to register the cloud /
@@ -31,6 +32,11 @@ type registrationDeps struct {
 	// scopeNotifyOut receives the one-line startup credential-scope degrade notice
 	// for AWS. Set to os.Stderr in buildRegistrationDeps and io.Discard in stubDeps.
 	scopeNotifyOut io.Writer
+
+	// outbound is the operator's proxy configuration, used by the connector
+	// bootstrap fetches these registrars start. The per-connector seams below
+	// capture it in the shell, so only the fetch built here reads it.
+	outbound outbound.Routing
 
 	tokenForHost   func(ctx context.Context) (token string, present bool, err error)
 	validateGithub func(ctx context.Context, token string) (login string, err error)
@@ -396,7 +402,7 @@ func (d *registrationDeps) githubOutcome(
 
 	exposure := githubhardening.BuildExposure(ghCfg.Permissions)
 	posture, warn := githubPosture(exposure, ghCfg.Permissions)
-	tables := cache.NewTableCache(ghCfg.Config, newGithubOpenAPIFetcher(),
+	tables := cache.NewTableCache(ghCfg.Config, newGithubOpenAPIFetcher(d.outbound),
 		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
 		githubhardening.UnmarshalTable, githubhardening.AdmitTable)
 	gh := newGithubProvider(token, exposure, tables)

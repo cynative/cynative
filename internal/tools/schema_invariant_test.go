@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/cynative/cynative/internal/outbound"
 	"github.com/cynative/cynative/internal/redact"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/tools"
@@ -17,7 +18,7 @@ import (
 func TestToolSchemas_ContainNoSecretShapedContent(t *testing.T) {
 	t.Parallel()
 
-	httpTool := tools.NewHTTPRequestTool(nil)
+	httpTool := tools.NewHTTPRequestTool(nil, outbound.Routing{})
 	codeTool, err := tools.NewCodeExecutionTool([]schema.InvokableTool{httpTool}, nil, 1, nil)
 	if err != nil {
 		t.Fatalf("NewCodeExecutionTool: %v", err)

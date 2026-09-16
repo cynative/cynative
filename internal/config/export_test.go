@@ -51,3 +51,13 @@ type StubFieldError struct {
 
 func (s StubFieldError) Namespace() string { return s.NamespaceVal }
 func (s StubFieldError) Tag() string       { return s.TagVal }
+
+// EnvKeys re-exports envKeys so tests can pin what does — and does not — get a
+// CYNATIVE_* alias.
+var EnvKeys = envKeys //nolint:gochecknoglobals // test export
+
+// StructEnvKeys re-exports structEnvKeys so tests can walk a synthetic struct.
+var StructEnvKeys = structEnvKeys //nolint:gochecknoglobals // test export
+
+// RegisterStructDefaults re-exports registerStructDefaults for the same reason.
+var RegisterStructDefaults = registerStructDefaults //nolint:gochecknoglobals // test export

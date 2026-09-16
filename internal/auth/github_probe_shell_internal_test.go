@@ -6,12 +6,17 @@ import (
 	"net"
 	"net/http"
 	"testing"
+
+	"github.com/cynative/cynative/internal/outbound"
 )
 
 func TestGuardedGithubClient(t *testing.T) {
 	t.Parallel()
 
-	c := guardedGithubClient()
+	c, err := guardedGithubClient(outbound.Routing{})
+	if err != nil {
+		t.Fatalf("guardedGithubClient: %v", err)
+	}
 	if !errors.Is(c.CheckRedirect(nil, nil), http.ErrUseLastResponse) {
 		t.Fatal("guarded client must refuse redirects")
 	}
@@ -21,9 +26,9 @@ func TestGuardedGithubClient(t *testing.T) {
 		// Assert the dial-guard sentinel, not just any error: a broken guard that
 		// let the dial through would still fail with a real connect error and pass
 		// an err==nil check — errors.Is(ErrAddrNotAuthorized) proves it fired pre-connect.
-		_, err := tr.DialContext(context.Background(), "tcp", net.JoinHostPort(ip, "443"))
-		if !errors.Is(err, ErrAddrNotAuthorized) {
-			t.Errorf("guarded dial to internal %s = %v, want ErrAddrNotAuthorized", ip, err)
+		_, derr := tr.DialContext(context.Background(), "tcp", net.JoinHostPort(ip, "443"))
+		if !errors.Is(derr, ErrAddrNotAuthorized) {
+			t.Errorf("guarded dial to internal %s = %v, want ErrAddrNotAuthorized", ip, derr)
 		}
 	}
 }
