@@ -34,10 +34,11 @@ Cynative calls Google Application Default Credentials with the `https://www.goog
 Cynative loads GCP credentials through `google.FindDefaultCredentials`. The ADC search order determines which identity is used — cynative reads `GOOGLE_APPLICATION_CREDENTIALS` (and, on Windows, `APPDATA` to locate the well-known ADC file) only as startup presence signals. The gcloud project/config variables (`CLOUDSDK_*`, `GOOGLE_CLOUD_PROJECT`) are **not** consulted by cynative's project resolution — see [Target selection](#target-selection) for what actually sets the permission-catalog project.
 
 - `GOOGLE_APPLICATION_CREDENTIALS` — path to a credential JSON; first source in the ADC search order.
+- `connectors.gcp.credentials_file` (`CYNATIVE_CONNECTORS_GCP_CREDENTIALS_FILE`) — path to a credential JSON the connector loads **instead of** ADC. ADC itself is left untouched, which matters when the model runs on Vertex AI: cynative's embedded LLM provider resolves ADC in the same process, so this is the only way for the connector and the model to be different identities. See [Credential file](#credential-file).
 
 ### Registration and validation
 
-Cynative finds ADC and then **eagerly validates it at startup** by minting a test cloud-platform token; the `gcp` and `gke` connectors register only if that succeeds. If ADC cannot be found, or the credential cannot mint a token (for example a revoked refresh token), both connectors are skipped. That skip is shown (as unavailable at startup) only when GCP is explicitly configured — `GOOGLE_APPLICATION_CREDENTIALS` set or a well-known ADC file present — or under `--verbose`; an ambient no-ADC workstation is skipped quietly.
+Cynative finds the credentials (ADC, or the configured `credentials_file`) and then **eagerly validates them at startup** by minting a test cloud-platform token; the `gcp` and `gke` connectors register only if that succeeds. If no credentials can be found, or the credential cannot mint a token (for example a revoked refresh token), both connectors are skipped. That skip is shown (as unavailable at startup) only when GCP is explicitly configured — `connectors.gcp.credentials_file` set, `GOOGLE_APPLICATION_CREDENTIALS` set or a well-known ADC file present — or under `--verbose`; an ambient no-ADC workstation is skipped quietly.
 
 ### References
 
@@ -51,7 +52,7 @@ The identity is whatever the ADC chain resolves — typically the user credentia
 
 ### Change the target
 
-Change the identity by re-pointing ADC: run `gcloud auth application-default login`, set `GOOGLE_APPLICATION_CREDENTIALS` to a credential JSON (see [Credential discovery](#credential-discovery)), or run on a host with a different attached service account.
+Change the identity by re-pointing ADC: run `gcloud auth application-default login`, set `GOOGLE_APPLICATION_CREDENTIALS` to a credential JSON (see [Credential discovery](#credential-discovery)), or run on a host with a different attached service account. To change the connector's identity without touching ADC, set `connectors.gcp.credentials_file` (see [Credential file](#credential-file)).
 
 Change the project cynative reports for the permission catalog at its source. cynative resolves that project from the ADC credential, in order: the credential's own project (`Credentials.ProjectID` — populated from a service-account key's `project_id`; empty for `gcloud auth application-default login` user credentials), then the ADC file's `quota_project_id`, then the GCE metadata project. So set one of:
 
@@ -186,6 +187,22 @@ connectors:
 
 ```bash
 export CYNATIVE_CONNECTORS_GCP_ROLE=projects/my-project/roles/cynativeReadonly
+```
+
+### Credential file
+
+By default the connector authenticates with Application Default Credentials. `connectors.gcp.credentials_file` names a credential JSON — a service-account key, or any type `google.CredentialsFromJSON` accepts — the connector loads instead, leaving ADC to everything else in the process. Its `project_id` becomes the permission-catalog project, exactly as a key in `GOOGLE_APPLICATION_CREDENTIALS` would. A leading `~` is expanded. A file that is missing or unreadable skips the `gcp` and `gke` connectors loudly, since naming it is an explicit configuration.
+
+The case it exists for is Vertex AI as the model: cynative's LLM provider resolves ADC for Vertex in the same process, so with ADC alone the connector and the model are always the same identity. Give the connector its own key here and the model keeps ADC — an attached service account on a GCE VM, say — and neither credential reaches the other's endpoints.
+
+```yaml
+connectors:
+  gcp:
+    credentials_file: ~/keys/cynative-reader.json
+```
+
+```bash
+export CYNATIVE_CONNECTORS_GCP_CREDENTIALS_FILE=~/keys/cynative-reader.json
 ```
 
 ### Cache settings

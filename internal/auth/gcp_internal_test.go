@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
@@ -316,5 +317,39 @@ func TestGCPAuthorizeAction_NilHardening(t *testing.T) {
 	v := actionView(t, http.MethodGet, "https://compute.googleapis.com/")
 	if err := p.AuthorizeAction(context.Background(), v, providerArgs(gcpProviderName, `{}`)); err == nil {
 		t.Error("AuthorizeAction should error when hardeningAction is nil")
+	}
+}
+
+func TestGCPCredentialType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		raw     string
+		want    google.CredentialsType
+		wantErr bool
+	}{
+		{"service account", `{"type":"service_account","project_id":"p"}`, google.ServiceAccount, false},
+		{"authorized user", `{"type":"authorized_user"}`, google.AuthorizedUser, false},
+		{"external account", `{"type":"external_account"}`, google.ExternalAccount, false},
+		{"unknown type", `{"type":"gdch_service_account"}`, "", true},
+		{"missing type", `{"project_id":"p"}`, "", true},
+		{"malformed", `not json`, "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := gcpCredentialType([]byte(tc.raw))
+			if tc.wantErr {
+				if !errors.Is(err, ErrGCPCredentialsFile) {
+					t.Fatalf("err = %v, want ErrGCPCredentialsFile", err)
+				}
+
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("gcpCredentialType = (%q, %v), want (%q, nil)", got, err, tc.want)
+			}
+		})
 	}
 }

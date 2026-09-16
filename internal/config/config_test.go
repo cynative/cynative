@@ -1869,6 +1869,10 @@ func TestLoad_ConnectorScalarFromEnv(t *testing.T) {
 			func(c config.Config) string { return c.Connectors.GCP.Role }, "projects/my-proj/roles/cynativeReadonly",
 		},
 		{
+			"gcp.credentials_file", "CYNATIVE_CONNECTORS_GCP_CREDENTIALS_FILE", "/keys/bench.json",
+			func(c config.Config) string { return c.Connectors.GCP.CredentialsFile }, "/keys/bench.json",
+		},
+		{
 			"azure.role_definition", "CYNATIVE_CONNECTORS_AZURE_ROLE_DEFINITION", "Security Reader",
 			func(c config.Config) string { return c.Connectors.Azure.RoleDefinition }, "Security Reader",
 		},

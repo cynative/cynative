@@ -53,12 +53,15 @@ type registrationDeps struct {
 	awsPolicyARN      string
 	validateAWSPolicy func(ctx context.Context, cfg aws.Config, policyARN string) error
 
-	findGCP         func(context.Context) (*google.Credentials, error)
-	probeGCP        func(context.Context) error
-	gcpIdentity     func(context.Context, *google.Credentials) string
-	buildGCP        func(*google.Credentials) (*gcpProvider, *gkeProvider)
-	gcpRole         string
-	validateGCPRole func(ctx context.Context, role string) error
+	findGCP     func(context.Context) (*google.Credentials, error)
+	probeGCP    func(context.Context) error
+	gcpIdentity func(context.Context, *google.Credentials) string
+	buildGCP    func(*google.Credentials) (*gcpProvider, *gkeProvider)
+	gcpRole     string
+	// gcpCredentialsFile is connectors.gcp.credentials_file; non-empty means the
+	// operator configured GCP explicitly, so a credential skip is loud.
+	gcpCredentialsFile string
+	validateGCPRole    func(ctx context.Context, role string) error
 
 	newAzure            func() (azcore.TokenCredential, error)
 	probeAzure          func(context.Context, azcore.TokenCredential) error
@@ -205,7 +208,8 @@ func awsScopeDegraded(decision awshardening.CredScopeDecision, result awshardeni
 		"requests run with full base AWS credentials, gated client-side only.\n", result.Reason), true
 }
 
-// registerGCP discovers ADC and validates it by minting a token (the live check)
+// registerGCP discovers the connector's credentials (ADC, or the configured
+// credentials_file) and validates them by minting a token (the live check)
 // regardless of explicit config, so a host whose ADC/metadata source cannot
 // actually mint a token is not registered. The probe is ctx-bounded and retried
 // once on a transient error. A credential skip is explicit-gated, escalated to
@@ -231,18 +235,14 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 	}
 
 	if skipped, msg := gcpSkipResult(findErr, probeErr); skipped {
-		explicit := gcpExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir)
-
-		return skipOutcome(gcpProviderName, explicit, verbose,
+		return skipOutcome(gcpProviderName, d.gcpExplicit(), verbose,
 			escalateForTransient(emitWhenExplicitOrVerbose, cmpErr(findErr, probeErr)), msg)
 	}
 
 	vctx, vcancel := context.WithTimeout(ctx, ceilingValidationTimeout)
 	defer vcancel()
 	if verr := retryProbe(func() error { return d.validateGCPRole(vctx, d.gcpRole) }); verr != nil {
-		explicit := gcpExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir)
-
-		return skipOutcome(gcpProviderName, explicit, verbose,
+		return skipOutcome(gcpProviderName, d.gcpExplicit(), verbose,
 			emitAlways,
 			fmt.Sprintf("gcp_hardening: skipped (role validation failed): %v", verr))
 	}
@@ -261,6 +261,13 @@ func (d *registrationDeps) registerGCP(ctx context.Context, verbose bool) connec
 		statuses:  []ConnectorStatus{status},
 		visible:   []bool{true},
 	}
+}
+
+// gcpExplicit reports whether the operator aimed the GCP connector at a
+// credential: a configured connectors.gcp.credentials_file, or one of the host's
+// ADC signals (gcpExplicitlyConfigured).
+func (d *registrationDeps) gcpExplicit() bool {
+	return d.gcpCredentialsFile != "" || gcpExplicitlyConfigured(d.lookupEnv, d.fileExists, d.homeDir)
 }
 
 // registerAzure builds the credential chain and validates it by minting an ARM

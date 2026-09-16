@@ -318,6 +318,7 @@ func TestRunResearch_PassesHardeningConfig(t *testing.T) {
 	cfg.Cache.Dir = "/c"
 	cfg.Connectors.AWS.Policy = "arn:aws:iam::aws:policy/SecurityAudit"
 	cfg.Connectors.GCP.Role = "roles/viewer"
+	cfg.Connectors.GCP.CredentialsFile = "/keys/bench.json"
 	cfg.Connectors.Azure.RoleDefinition = "Reader"
 	cfg.Connectors.EKS.ClusterRole = "view"
 	cfg.Connectors.Github.Permissions = map[string]string{"issues": "write"}
@@ -335,6 +336,8 @@ func TestRunResearch_PassesHardeningConfig(t *testing.T) {
 		t.Errorf("AWS policy not threaded: %q", rec.cfg.AWS.PolicyARN)
 	case rec.cfg.GCP.Role != "roles/viewer":
 		t.Errorf("GCP role not threaded: %q", rec.cfg.GCP.Role)
+	case rec.cfg.GCP.CredentialsFile != "/keys/bench.json":
+		t.Errorf("GCP credentials_file not threaded: %q", rec.cfg.GCP.CredentialsFile)
 	case rec.cfg.Azure.RoleDefinition != "Reader":
 		t.Errorf("Azure role not threaded: %q", rec.cfg.Azure.RoleDefinition)
 	case rec.cfg.EKS.ClusterRole != "view":

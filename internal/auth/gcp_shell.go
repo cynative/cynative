@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"os"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -10,16 +12,44 @@ import (
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
 )
 
-// gcpScope is the cloud-platform scope used for ADC discovery and the probe.
+// gcpScope is the cloud-platform scope used for credential discovery and the probe.
 const gcpScope = "https://www.googleapis.com/auth/cloud-platform"
+
+// loadGCPCredentials resolves the connector's Google credentials: the credential
+// JSON at credentialsFile (connectors.gcp.credentials_file) when one is
+// configured, otherwise Application Default Credentials. The file's type is
+// checked against gcpCredentialTypes before it is parsed as a credential. The
+// explicit file is what lets the connector run as one identity while ADC —
+// which the embedded LLM provider also resolves for Vertex — stays another. The
+// token source it returns retains ctx, so callers pass the context they want
+// the refreshes bound by.
+func loadGCPCredentials(ctx context.Context, credentialsFile string) (*google.Credentials, error) {
+	if credentialsFile == "" {
+		return google.FindDefaultCredentials(ctx, gcpScope)
+	}
+	data, err := os.ReadFile(credentialsFile)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrGCPCredentialsFile, err)
+	}
+	credType, err := gcpCredentialType(data)
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s)", err, credentialsFile)
+	}
+	creds, err := google.CredentialsFromJSONWithType(ctx, data, credType, gcpScope)
+	if err != nil {
+		return nil, fmt.Errorf("%w (%s): %w", ErrGCPCredentialsFile, credentialsFile, err)
+	}
+
+	return creds, nil
+}
 
 // validateGCPRole confirms the configured GCP role resolves (ceiling only; not
 // the full lazy bootstrap). Shell: mints a fresh, ctx-bounded credential source
 // (like probeGCPToken) so a hung ADC/token endpoint cannot stall startup beyond
 // ceilingValidationTimeout. A plain [http.Client] disables ADC auth and 401s,
 // so an oauth2-authed client is required for the IAM Roles API.
-func validateGCPRole(ctx context.Context, role string) error {
-	creds, err := google.FindDefaultCredentials(ctx, gcpScope)
+func validateGCPRole(ctx context.Context, credentialsFile, role string) error {
+	creds, err := loadGCPCredentials(ctx, credentialsFile)
 	if err != nil {
 		return err
 	}
@@ -34,12 +64,12 @@ func validateGCPRole(ctx context.Context, role string) error {
 	return err
 }
 
-// probeGCPToken validates that ADC can mint a token, using a SEPARATE
-// credentials source bound to the caller's (already-bounded) ctx so the
-// registered (Background-bound) source is never poisoned by the probe's
-// context cancellation.
-func probeGCPToken(ctx context.Context) error {
-	creds, err := google.FindDefaultCredentials(ctx, gcpScope)
+// probeGCPToken validates that the configured credentials can mint a token,
+// using a SEPARATE credentials source bound to the caller's (already-bounded)
+// ctx so the registered (Background-bound) source is never poisoned by the
+// probe's context cancellation.
+func probeGCPToken(ctx context.Context, credentialsFile string) error {
+	creds, err := loadGCPCredentials(ctx, credentialsFile)
 	if err != nil {
 		return err
 	}
@@ -53,8 +83,9 @@ func probeGCPToken(ctx context.Context) error {
 // I/O deferred to first use. The catalog is built eagerly (cheap, no I/O) so
 // Layer 3 host gating works before lazy init completes. The doLazyResolve
 // closure performs identity → role-union → permission-catalog on first
-// InjectAuth / AuthorizeAction; the injected token is the raw ADC source.
-func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig) *gcpProvider {
+// InjectAuth / AuthorizeAction; the injected token is creds' raw source.
+func buildHardenedGCPProvider(creds *google.Credentials, gcpCfg GCPHardeningConfig) *gcpProvider {
+	root := creds.TokenSource
 	httpClient := &http.Client{Timeout: smithyHTTPTimeout} //nolint:exhaustruct // defaults are fine.
 	catalog := gcphardening.NewCatalog(gcphardening.CatalogConfig{
 		Config:     gcpCfg.Config,
@@ -95,11 +126,13 @@ func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig
 			return err
 		}
 		res, err := gcphardening.LazyResolve(ctx, gcphardening.LazyDeps{
-			Role:       gcpCfg.Role,
-			Catalog:    catalog,
-			Dataset:    iamDataset,
-			Roles:      roles,
-			Identity:   gcphardening.NewIdentityProber(gcphardening.IdentityConfig{HTTPClient: bootstrapHTTPClient}),
+			Role:    gcpCfg.Role,
+			Catalog: catalog,
+			Dataset: iamDataset,
+			Roles:   roles,
+			Identity: gcphardening.NewIdentityProber(gcphardening.IdentityConfig{ //nolint:exhaustruct // defaults.
+				HTTPClient: bootstrapHTTPClient, Credentials: creds,
+			}),
 			RootSource: root,
 		})
 		if err != nil {

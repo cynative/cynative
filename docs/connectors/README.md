@@ -95,7 +95,7 @@ connectors:
     role_definition: Reader
 ```
 
-Most keys are also settable through `CYNATIVE_*` environment variables, for example `CYNATIVE_CONNECTORS_AWS_POLICY`, `CYNATIVE_CONNECTORS_GCP_ROLE`, `CYNATIVE_CONNECTORS_AZURE_ROLE_DEFINITION`, `CYNATIVE_CACHE_DIR`, and `CYNATIVE_CACHE_TTL`. The GitHub and GitLab `permissions` maps take a compact comma-separated `key=value` form, e.g. `CYNATIVE_CONNECTORS_GITHUB_PERMISSIONS="default=read,issues=write"` (a non-empty env value replaces the file map wholesale; a blank value is treated as unset).
+Most keys are also settable through `CYNATIVE_*` environment variables, for example `CYNATIVE_CONNECTORS_AWS_POLICY`, `CYNATIVE_CONNECTORS_GCP_ROLE`, `CYNATIVE_CONNECTORS_GCP_CREDENTIALS_FILE`, `CYNATIVE_CONNECTORS_AZURE_ROLE_DEFINITION`, `CYNATIVE_CACHE_DIR`, and `CYNATIVE_CACHE_TTL`. The GitHub and GitLab `permissions` maps take a compact comma-separated `key=value` form, e.g. `CYNATIVE_CONNECTORS_GITHUB_PERMISSIONS="default=read,issues=write"` (a non-empty env value replaces the file map wholesale; a blank value is treated as unset).
 
 ## Outbound proxy
 

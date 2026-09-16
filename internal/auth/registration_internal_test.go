@@ -278,6 +278,18 @@ func TestRegisterGCP_Outcome(t *testing.T) {
 		wantQuietSkip(t, d.registerGCP(context.Background(), false))
 	})
 
+	t.Run("configured credentials_file makes a find failure loud", func(t *testing.T) {
+		t.Parallel()
+		d := stubDeps()
+		d.gcpCredentialsFile = "/keys/bench.json"
+		d.findGCP = func(context.Context) (*google.Credentials, error) { return nil, errors.New("open: no such file") }
+		out := d.registerGCP(context.Background(), false)
+		wantLoudSkip(t, out)
+		if !out.statuses[0].Actionable {
+			t.Fatalf("out=%+v, want an actionable skip: the operator named the file", out)
+		}
+	})
+
 	t.Run("ambient find failure verbose loud", func(t *testing.T) {
 		t.Parallel()
 		d := stubDeps()

@@ -61,6 +61,9 @@ type GCPHardeningConfig struct {
 	cache.Config
 
 	Role string
+	// CredentialsFile is the credential JSON the connector authenticates with
+	// instead of Application Default Credentials; "" means ADC.
+	CredentialsFile string
 }
 
 // AzureHardeningConfig is the cfg.Connectors.Azure subset relevant to provider
@@ -193,19 +196,22 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		// client-side HTTP timeout, so every refresh is bounded even though ctx is
 		// (deliberately) deadline-free and oauth2.TokenSource.Token takes no context.
 		findGCP: func(ctx context.Context) (*google.Credentials, error) {
-			return google.FindDefaultCredentials(withBoundedTokenRefresh(ctx), gcpScope)
+			return loadGCPCredentials(withBoundedTokenRefresh(ctx), cfg.GCP.CredentialsFile)
 		},
-		probeGCP:    probeGCPToken,
+		probeGCP:    func(ctx context.Context) error { return probeGCPToken(ctx, cfg.GCP.CredentialsFile) },
 		gcpIdentity: gcpRegistrationIdentity,
 		buildGCP: func(creds *google.Credentials) (*gcpProvider, *gkeProvider) {
 			gke := newGKEProvider(creds.TokenSource)
 			gke.clusterRole = cfg.GKE.ClusterRole
 			gke.outbound = cfg.Outbound
 
-			return buildHardenedGCPProvider(creds.TokenSource, cfg.GCP), gke
+			return buildHardenedGCPProvider(creds, cfg.GCP), gke
 		},
-		gcpRole:         cfg.GCP.Role,
-		validateGCPRole: validateGCPRole,
+		gcpRole:            cfg.GCP.Role,
+		gcpCredentialsFile: cfg.GCP.CredentialsFile,
+		validateGCPRole: func(ctx context.Context, role string) error {
+			return validateGCPRole(ctx, cfg.GCP.CredentialsFile, role)
+		},
 
 		newAzure: func() (azcore.TokenCredential, error) { return azurehardening.NewCredentialChain(azureCloud) },
 		probeAzure: func(ctx context.Context, cred azcore.TokenCredential) error {
@@ -281,13 +287,17 @@ func resolveScopeAWS(
 // creds.ProjectID, falling back to the prober's resolved project (quota_project_id,
 // e.g. for gcloud authorized-user ADC where creds.ProjectID is empty). Probe
 // failure degrades to project-only (or ""). Display-only; never fails
-// registration. The caller bounds ctx (identityProbeTimeout).
+// registration. The caller bounds ctx (identityProbeTimeout). The prober
+// describes creds itself (a nil creds falls back to ADC discovery), so the
+// identity shown is the one registered.
 func gcpRegistrationIdentity(ctx context.Context, creds *google.Credentials) string {
 	project := ""
 	if creds != nil {
 		project = creds.ProjectID
 	}
-	prober := gcphardening.NewIdentityProber(gcphardening.IdentityConfig{}) //nolint:exhaustruct // defaults.
+	prober := gcphardening.NewIdentityProber(
+		gcphardening.IdentityConfig{Credentials: creds},
+	) //nolint:exhaustruct // defaults.
 	principal, probeProject, _ := prober.Probe(ctx)
 	if project == "" {
 		// gcloud authorized-user ADC leaves creds.ProjectID empty; the prober

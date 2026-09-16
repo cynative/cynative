@@ -2,12 +2,14 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
@@ -132,4 +134,39 @@ func (p *gcpProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) erro
 	}
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	return nil
+}
+
+// ErrGCPCredentialsFile is returned when connectors.gcp.credentials_file cannot
+// be read or does not hold a credential JSON of an accepted type.
+var ErrGCPCredentialsFile = errors.New("connectors.gcp.credentials_file")
+
+// gcpCredentialTypes is the closed set of credential JSON types
+// connectors.gcp.credentials_file accepts, keyed by the file's "type" field.
+// google.CredentialsFromJSON is deprecated because it parses whatever type the
+// JSON claims; naming the type up front is the replacement the library asks
+// for. The set mirrors the one the embedded LLM provider accepts for Vertex.
+var gcpCredentialTypes = map[string]google.CredentialsType{ //nolint:gochecknoglobals // immutable lookup table.
+	string(google.ServiceAccount):                google.ServiceAccount,
+	string(google.AuthorizedUser):                google.AuthorizedUser,
+	string(google.ExternalAccount):               google.ExternalAccount,
+	string(google.ExternalAccountAuthorizedUser): google.ExternalAccountAuthorizedUser,
+	string(google.ImpersonatedServiceAccount):    google.ImpersonatedServiceAccount,
+}
+
+// gcpCredentialType reads a credential JSON's "type" and returns the
+// google.CredentialsType to parse it as, or ErrGCPCredentialsFile when the JSON
+// is malformed or names a type outside gcpCredentialTypes.
+func gcpCredentialType(raw []byte) (google.CredentialsType, error) {
+	var hdr struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(raw, &hdr); err != nil {
+		return "", fmt.Errorf("%w: not a credential JSON: %w", ErrGCPCredentialsFile, err)
+	}
+	credType, ok := gcpCredentialTypes[hdr.Type]
+	if !ok {
+		return "", fmt.Errorf("%w: unsupported credential type %q", ErrGCPCredentialsFile, hdr.Type)
+	}
+
+	return credType, nil
 }

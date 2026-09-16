@@ -576,8 +576,13 @@ func (d *deps) buildProviders(cfg config.Config, verbose bool) ([]auth.Provider,
 		},
 		EKS: auth.EKSHardeningConfig{ClusterRole: cfg.Connectors.EKS.ClusterRole},
 		GCP: auth.GCPHardeningConfig{
-			Role:   cfg.Connectors.GCP.Role,
-			Config: cache.Config{Dir: filepath.Join(cfg.Cache.Dir, "gcp"), TTL: cfg.Cache.TTL, Clock: time.Now},
+			Role:            cfg.Connectors.GCP.Role,
+			CredentialsFile: cfg.Connectors.GCP.CredentialsFile,
+			Config: cache.Config{
+				Dir:   filepath.Join(cfg.Cache.Dir, "gcp"),
+				TTL:   cfg.Cache.TTL,
+				Clock: time.Now,
+			},
 		},
 		GKE: auth.GKEHardeningConfig{ClusterRole: cfg.Connectors.GKE.ClusterRole},
 		Azure: auth.AzureHardeningConfig{

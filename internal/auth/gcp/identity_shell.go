@@ -26,6 +26,11 @@ type IdentityConfig struct {
 	HTTPClient   *http.Client
 	TokeninfoURL string
 	Scopes       []string
+	// Credentials, when set, are the credentials the prober describes; nil means
+	// discover Application Default Credentials with Scopes. The connector sets
+	// it so the identity it reports is the credential it registered with, which
+	// is not ADC when connectors.gcp.credentials_file is configured.
+	Credentials *google.Credentials
 }
 
 // realMetadata adapts cloud.google.com/go/compute/metadata to metadataProber.
@@ -44,11 +49,11 @@ func (realMetadata) ProjectID(ctx context.Context) (string, error) {
 type realIdentity struct {
 	client       *http.Client
 	tokeninfoURL string
-	scopes       []string
+	find         func(context.Context) (*google.Credentials, error)
 	md           metadataProber
 }
 
-// NewIdentityProber builds the real ADC identity prober. Excluded from the gate.
+// NewIdentityProber builds the real identity prober. Excluded from the gate.
 func NewIdentityProber(cfg IdentityConfig) identityProber {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: defaultIdentityTimeout} //nolint:exhaustruct // defaults fine
@@ -59,14 +64,22 @@ func NewIdentityProber(cfg IdentityConfig) identityProber {
 	if len(cfg.Scopes) == 0 {
 		cfg.Scopes = []string{defaultCloudPlatformScope}
 	}
-	return &realIdentity{client: cfg.HTTPClient, tokeninfoURL: cfg.TokeninfoURL, scopes: cfg.Scopes, md: realMetadata{}}
+	find := func(ctx context.Context) (*google.Credentials, error) {
+		return google.FindDefaultCredentials(ctx, cfg.Scopes...)
+	}
+	if cfg.Credentials != nil {
+		creds := cfg.Credentials
+		find = func(context.Context) (*google.Credentials, error) { return creds, nil }
+	}
+	return &realIdentity{client: cfg.HTTPClient, tokeninfoURL: cfg.TokeninfoURL, find: find, md: realMetadata{}}
 }
 
-// Probe resolves the ADC principal email and the caller's project ID. The
+// Probe resolves the principal email and the caller's project ID of the
+// configured credentials (ADC unless IdentityConfig.Credentials is set). The
 // credential type is computed internally to detect the metadata/attached-SA
 // case but is not returned (Layer-2 + host pinning do not need it).
 func (r *realIdentity) Probe(ctx context.Context) (string, string, error) {
-	creds, err := google.FindDefaultCredentials(ctx, r.scopes...)
+	creds, err := r.find(ctx)
 	if err != nil {
 		return "", "", fmt.Errorf("find default credentials: %w", err)
 	}

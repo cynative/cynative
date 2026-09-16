@@ -44,9 +44,16 @@ type AWSConfig struct {
 // the single role the Layer-2 action-authorization evaluator authorizes each
 // request against (default roles/viewer). Accepts a predefined role (roles/<id>)
 // or a custom role (projects/<p>/roles/<r>, organizations/<o>/roles/<r>); the
-// form is validated by validateGCPRole.
+// form is validated by validateGCPRole. CredentialsFile names a credential JSON
+// (a service-account key, or any type google.CredentialsFromJSON accepts) the
+// connector authenticates with instead of Application Default Credentials. It
+// exists for the host where ADC is spoken for: the embedded LLM's Vertex
+// provider resolves ADC in the same process, so without it the connector and
+// the model are always the same identity. Empty (the default) means ADC; a
+// leading ~ is expanded like cache.dir.
 type GCPConfig struct {
-	Role string `mapstructure:"role" json:"role" default:"roles/viewer" validate:"required" errmsg:"connectors.gcp.role must be a predefined role (roles/<id>) or a custom role (projects/<p>/roles/<r> or organizations/<o>/roles/<r>)"` //nolint:lll // struct tags
+	Role            string `mapstructure:"role"             json:"role"             default:"roles/viewer" validate:"required" errmsg:"connectors.gcp.role must be a predefined role (roles/<id>) or a custom role (projects/<p>/roles/<r> or organizations/<o>/roles/<r>)"` //nolint:lll // struct tags
+	CredentialsFile string `mapstructure:"credentials_file" json:"credentials_file"`
 }
 
 // validateGCPRole checks connectors.gcp.role is a predefined or custom role
@@ -708,6 +715,13 @@ func (l *Loader) Load(cfgFile string) (Config, error) {
 	}
 
 	cfg.Audit.Path = expandedAuditPath
+
+	expandedGCPCredentials, expandErr := expandTilde(cfg.Connectors.GCP.CredentialsFile, l.homeDir)
+	if expandErr != nil {
+		return Config{}, fmt.Errorf("expand connectors.gcp.credentials_file: %w", expandErr)
+	}
+
+	cfg.Connectors.GCP.CredentialsFile = expandedGCPCredentials
 
 	if err := validateGCPRole(cfg.Connectors.GCP.Role); err != nil {
 		return Config{}, err
