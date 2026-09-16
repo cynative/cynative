@@ -13,9 +13,9 @@ gets a 403 Status. Appends one JSON line per event to <logfile>:
   {"event": "request", "method": ..., "path": ..., "auth": "expected"|"other"|"none"}
   {"event": "plain", "method": ..., "target": ...}
 where "expected" means the Authorization header carried exactly "Bearer <token>";
-the token itself is never written. A plain (non-CONNECT) request is answered 405
-and logged, so no traffic reaches this proxy without leaving a line. Hermetic: loopback-only; no upstream
-connection is ever made. Stdlib only.
+the token itself is never written. A plain (non-CONNECT) request of any method
+is answered 405 and logged, so no traffic reaches this proxy without leaving a
+line. Hermetic: loopback-only; no upstream connection is ever made. Stdlib only.
 """
 import http.server
 import json
@@ -140,8 +140,12 @@ class Proxy(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    do_GET = _not_connect
-    do_POST = _not_connect
+    def __getattr__(self, name):
+        # The base handler dispatches on "do_" + method and answers an unlogged
+        # 501 when the attribute is missing; every verb but CONNECT logs instead.
+        if name.startswith("do_"):
+            return self._not_connect
+        raise AttributeError(name)
 
 
 class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
