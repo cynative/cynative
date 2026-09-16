@@ -11,8 +11,9 @@ Single static Go binary, no server, no external state.
   authorizes against the configured policy before credentials are attached.
   Fails closed.
 - **Network layer** - pins each request host to its mapped service and
-  region, verifies the resolved IP before connect, or, when the operator
-  configured a proxy, connects only to that proxy.
+  region and, on a direct route (no proxy configured, or a `NO_PROXY`
+  match), verifies the resolved IP before connect; when the operator's proxy
+  policy selects a proxy, it connects only to that proxy.
 - **JS sandbox** - runs model-written scripts with no network, filesystem
   or package access. Only exposed tools are reachable.
 - **Connectors** - AWS, GCP, Azure, Kubernetes, GitHub, GitLab. Use the

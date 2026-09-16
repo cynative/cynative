@@ -288,8 +288,9 @@ Finding verification (`verify_findings` tool) makes extra model calls - budget f
 
 On top of the credentials in your shell, Cynative enforces read-only at three layers:
 - **Network** - every request host is pinned to its mapped service and region
-  and the resolved IP is verified before connecting - your agent can reach
-  your infrastructure and nothing else.
+  and, on a direct route, the resolved IP is verified before connecting (through
+  an operator-configured proxy the connection goes only to that proxy) - your
+  agent can reach your infrastructure and nothing else.
 - **Action gate** - every operation is resolved to its required IAM actions,
   derived from the providers' own API definitions, then authorized by a
   read-only policy before any credential is attached: `SecurityAudit` (AWS),
@@ -307,7 +308,7 @@ On top of the credentials in your shell, Cynative enforces read-only at three la
   their base credentials, gated by the action gate above.
 
 Cynative connects AWS, GCP, Azure, EKS/GKE/AKS, self-managed Kubernetes, GitHub and GitLab. See [docs/connectors/README.md](docs/connectors/README.md) for credential
-discovery, hardening, limitations and connector-specific examples. Corporate proxies are honored through the standard `HTTPS_PROXY`/`NO_PROXY` variables; see [docs/proxy.md](docs/proxy.md) for what crosses the proxy and what an intercepting proxy can see.
+discovery, hardening, limitations and connector-specific examples. Corporate proxies are honored through the standard `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` variables; see [docs/proxy.md](docs/proxy.md) for what crosses the proxy and what an intercepting proxy can see.
 
 ## Code execution & tool orchestration
 For bulk work - "check every public S3 bucket", "list EKS clusters in every

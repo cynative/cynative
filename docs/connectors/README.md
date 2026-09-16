@@ -71,7 +71,7 @@ Cynative applies request authorization before attaching credentials, then applie
 2. The selected connector must authorize the request host.
 3. The selected connector must authorize the requested action when it implements action authorization.
 4. Credentials are attached only after host and action authorization pass.
-5. At dial time, the selected connector or the default dial guard authorizes the resolved IP address before the credential-bearing request is sent. When the operator has configured a proxy through the standard `HTTPS_PROXY`/`NO_PROXY` variables, a proxied request connects only to that proxy and the address check is the proxy's; see [proxy.md](../proxy.md).
+5. At dial time, the selected connector or the default dial guard authorizes the resolved IP address before the credential-bearing request is sent. When the operator has configured a proxy through the standard `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` variables, a proxied request connects only to that proxy and the address check is the proxy's; see [proxy.md](../proxy.md).
 
 ## Shared configuration
 
