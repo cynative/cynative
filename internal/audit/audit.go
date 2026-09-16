@@ -52,6 +52,10 @@ type Record struct {
 	Decision  string           `json:"decision,omitempty"`
 	Outcome   string           `json:"outcome,omitempty"`
 	Result    string           `json:"result,omitempty"`
+	// Route is the egress route transport.do selected for an http_request
+	// result (RouteDirect or RouteProxy); empty when the request was rejected
+	// before selection or the record is not an http_request result.
+	Route string `json:"route,omitempty"`
 	// RedactArgs requests redaction of Arguments before logging. It is set for
 	// calls whose arguments were never shown at an approval prompt (inner
 	// code_execution calls, ungated orchestration tools, unknown tools), so a
@@ -60,7 +64,7 @@ type Record struct {
 	RedactArgs bool `json:"-"`
 }
 
-// Phase, Decision, Outcome, and Via field values.
+// Phase, Decision, Outcome, Via and Route field values.
 const (
 	PhaseAttempt = "attempt"
 	PhaseResult  = "result"

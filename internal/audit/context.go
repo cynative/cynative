@@ -14,6 +14,7 @@ const (
 	decisionKey
 	fatalKey
 	failureKey
+	routeKey
 )
 
 // Scope is the per-call correlation threaded from the agent dispatch loop into
@@ -170,3 +171,61 @@ func (f *Failure) Count() int { return int(f.count.Load()) }
 // Progress returns how many useful (sub-4xx) outcomes the call (or its inner sandbox
 // calls) recorded — used to keep a mixed-success fan-out off the no-progress halt.
 func (f *Failure) Progress() int { return int(f.progress.Load()) }
+
+// Route values recorded on an http_request result: the route transport.do
+// selected for the request, recorded whether or not the connection then
+// succeeded. A request denied before route selection carries none.
+const (
+	RouteDirect = "direct"
+	RouteProxy  = "proxy"
+)
+
+// routeState encodes the recorder's atomic value: 0 unset, 1 direct, 2 proxy.
+const (
+	routeUnset int32 = iota
+	routeDirect
+	routeProxy
+)
+
+// Route is the context-carried route recorder. transport.do marks it once per
+// request; the dispatch loop and code_execution read it into the result
+// record. The value is atomic because, with auditing disabled, inner sandbox
+// calls share the outer call's recorder and may mark it concurrently.
+type Route struct {
+	v atomic.Int32
+}
+
+// WithRoute installs a fresh Route recorder on ctx and returns it.
+func WithRoute(ctx context.Context) (context.Context, *Route) {
+	r := &Route{}
+
+	return context.WithValue(ctx, routeKey, r), r
+}
+
+// MarkRoute records whether the request left through the proxy. It is a no-op
+// when no recorder is installed and safe to call from concurrent workers.
+func MarkRoute(ctx context.Context, proxied bool) {
+	r, ok := ctx.Value(routeKey).(*Route)
+	if !ok {
+		return
+	}
+	if proxied {
+		r.v.Store(routeProxy)
+
+		return
+	}
+	r.v.Store(routeDirect)
+}
+
+// Value returns the recorded route label, or "" when the request never
+// reached route selection.
+func (r *Route) Value() string {
+	switch r.v.Load() {
+	case routeDirect:
+		return RouteDirect
+	case routeProxy:
+		return RouteProxy
+	default:
+		return ""
+	}
+}
