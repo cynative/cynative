@@ -22,7 +22,9 @@ credentials the operator supplies.
 2. **Sandbox to host** - scripts get the exposed tools only. No network,
    filesystem or packages.
 3. **Agent to provider** - credentials attach only after the gate
-   authorizes and the host and resolved IP are verified.
+   authorizes and the host and resolved IP are verified. When the operator
+   configures a proxy, the connection goes only to that proxy and the
+   resolved IP is verified by the proxy, not by cynative; see docs/proxy.md.
 The model never holds credentials and never chooses the policy, so it
 cannot move any of these lines.
 
@@ -44,7 +46,12 @@ cannot move any of these lines.
 - **Command injection** - model output never reaches a shell or the host
   process; scripts run in the JS sandbox.
 - **Request redirection** - hosts pinned, ports bound, and the resolved IP
-  verified before connect. A non-ASCII request host is refused, which
+  verified before connect. A proxied connection (operator-configured through
+  the standard proxy variables, never through a tool argument) dials only the
+  proxy's own address; destination resolution and address enforcement are
+  then the proxy's, and an intercepting proxy can read credentials and
+  rewrite responses, including the authorization data the gate is built from.
+  A non-ASCII request host is refused, which
   removes the spellings that change on the way to the wire: case folding and
   the IDNA conversions can each turn one name into a different one, and
   only one of the results would be the name the gate authorized. An address

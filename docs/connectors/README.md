@@ -59,6 +59,8 @@ Each connector page distributes the details across three sections: **Credential 
 
 Cynative ships a vendor-curated, read-only baseline that you can re-point to a different policy or role per connector — a spectrum of exposure that is safe by default, not a binary read/write toggle. **Only AWS has credential downscoping**, and even there it applies to **assumed-role identities only** (an STS `AssumeRole`-scoped session); IAM-user and root identities run unscoped with their base credentials, gated client-side by host pinning and the action gate. For every other connector the action/RBAC gate is the **sole client-side control**; the per-connector "Credential downscoping —" cells above link the reason, whether a vendor platform gap or a tracking issue. Kubernetes exposure is operator-selectable per connector via `connectors.<id>.cluster_role` (default the built-in `view` role). See each connector's page for its full "Defense at a glance" snapshot and limitations.
 
+Outbound proxies apply to every connector uniformly; [proxy.md](../proxy.md) lists what is routed, what is not, and what an intercepting proxy can see.
+
 ## Shared request model
 
 All connector-backed requests go through the `http_request` tool. The model must set `auth_provider` to one of the registered connector ids and include the connector-specific auth argument object, such as `aws_auth`, `gcp_auth`, or `aks_auth`.
@@ -69,7 +71,7 @@ Cynative applies request authorization before attaching credentials, then applie
 2. The selected connector must authorize the request host.
 3. The selected connector must authorize the requested action when it implements action authorization.
 4. Credentials are attached only after host and action authorization pass.
-5. At dial time, the selected connector or the default dial guard authorizes the resolved IP address before the credential-bearing request is sent.
+5. At dial time, the selected connector or the default dial guard authorizes the resolved IP address before the credential-bearing request is sent. When the operator has configured a proxy through the standard `HTTPS_PROXY`/`NO_PROXY` variables, a proxied request connects only to that proxy and the address check is the proxy's; see [proxy.md](../proxy.md).
 
 ## Shared configuration
 

@@ -307,7 +307,7 @@ On top of the credentials in your shell, Cynative enforces read-only at three la
   their base credentials, gated by the action gate above.
 
 Cynative connects AWS, GCP, Azure, EKS/GKE/AKS, self-managed Kubernetes, GitHub and GitLab. See [docs/connectors/README.md](docs/connectors/README.md) for credential
-discovery, hardening, limitations and connector-specific examples.
+discovery, hardening, limitations and connector-specific examples. Corporate proxies are honored through the standard `HTTPS_PROXY`/`NO_PROXY` variables; see [docs/proxy.md](docs/proxy.md) for what crosses the proxy and what an intercepting proxy can see.
 
 ## Code execution & tool orchestration
 For bulk work - "check every public S3 bucket", "list EKS clusters in every
