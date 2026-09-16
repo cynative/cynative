@@ -162,7 +162,28 @@ func parseProxyValue(name, raw string) (*url.URL, error) {
 		return nil, &proxyConfigError{variable: name, problem: "proxy URL must not carry a path or query"}
 	}
 
+	if u.User != nil && u.Scheme != schemeHTTP && !socksCredentialFits(u.User) {
+		return nil, &proxyConfigError{
+			variable: name,
+			problem:  "socks5 credentials must be 1 to 255 bytes of username and at most 255 bytes of password",
+		}
+	}
+
 	return u, nil
+}
+
+// maxSOCKSCredentialLen is the longest username or password the SOCKS5
+// username/password handshake can carry: each length travels in one byte.
+const maxSOCKSCredentialLen = 255
+
+// socksCredentialFits reports whether Go's SOCKS5 dialer would accept the
+// userinfo. It refuses an empty username and any part over 255 bytes, but only
+// at dial time, which would leave a policy that startup reported valid failing
+// every connector; the same rule at startup fails closed instead.
+func socksCredentialFits(user *url.Userinfo) bool {
+	pass, _ := user.Password()
+
+	return user.Username() != "" && len(user.Username()) <= maxSOCKSCredentialLen && len(pass) <= maxSOCKSCredentialLen
 }
 
 // proxyDefaultPort is the port net/http dials when the proxy URL has none.
@@ -192,11 +213,13 @@ func renderProxy(u *url.URL) string {
 const minScrubbedCredentialLen = 4
 
 // credentialForms lists every spelling of u's credential that an error or a
-// proxy could echo. Go sends Basic authentication for any userinfo, so the
-// Basic token is always listed; the username, the password and their Go-quoted
-// forms (what %q produces in a malformed response error) are listed when they
-// are long enough, and the raw userinfo whenever either is. Nil when u carries
-// no userinfo.
+// proxy could echo, without duplicates. Go sends Basic authentication for any
+// userinfo, so the Basic token and the decoded "user:password" pair it encodes
+// (the exact credential the proxy receives, with a colon even when the URL
+// sets no password) are always listed, each with its Go-quoted form (what %q
+// produces in a malformed response error). The username, the password and the
+// userinfo as spelled in the URL are listed the same way when they are at
+// least minScrubbedCredentialLen bytes. Nil when u carries no userinfo.
 func credentialForms(u *url.URL) []string {
 	if u == nil || u.User == nil {
 		return nil
@@ -208,11 +231,15 @@ func credentialForms(u *url.URL) []string {
 		return nil
 	}
 
-	forms := []string{base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))}
-	forms = append(forms, plainForms(user)...)
-	forms = append(forms, plainForms(pass)...)
-	if len(forms) > 1 {
-		forms = append(forms, u.User.String())
+	pair := user + ":" + pass
+	forms := []string{base64.StdEncoding.EncodeToString([]byte(pair))}
+	candidates := [][]string{plainForms(user), plainForms(pass), plainForms(u.User.String()), quotedForms(pair)}
+	for _, group := range candidates {
+		for _, form := range group {
+			if !slices.Contains(forms, form) {
+				forms = append(forms, form)
+			}
+		}
 	}
 
 	return forms
@@ -224,6 +251,12 @@ func plainForms(s string) []string {
 	if len(s) < minScrubbedCredentialLen {
 		return nil
 	}
+
+	return quotedForms(s)
+}
+
+// quotedForms returns s and its Go-quoted spelling.
+func quotedForms(s string) []string {
 	quoted := strconv.Quote(s)
 
 	return []string{s, quoted[1 : len(quoted)-1]}

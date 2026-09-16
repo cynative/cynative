@@ -5,7 +5,9 @@ makes: the requests the model issues through `http_request`, the startup
 probes, the Kubernetes ClusterRole fetches, credential discovery and refresh,
 and the authorization-data downloads (IAM policy documents, permission
 catalogs, OpenAPI descriptions). One policy is read when the process starts and
-every connector transport consults it. Nothing the model sends can change it.
+every connector transport consults it; the policy itself routes a `NO_PROXY`
+match direct, and the traffic that never consults it is listed in the routing
+table below. Nothing the model sends can change it.
 
 ## Variables
 
@@ -31,7 +33,10 @@ proxy.corp:3128            # no scheme means http
 ```
 
 Both SOCKS spellings hand the unresolved destination name to the proxy; Go
-never resolves the target locally for either. An `https://` proxy (TLS to the
+never resolves the target locally for either. Their handshake carries a
+username of 1 to 255 bytes and a password of at most 255 bytes, so a SOCKS
+value with credentials outside that range is rejected at startup rather than
+failing every dial. An `https://` proxy (TLS to the
 proxy itself) is rejected at startup: Go would reuse the connector's TLS
 settings (a cluster's private CA, an mTLS client certificate, a
 `tls-server-name`) for the proxy hop, and no documentation makes that safe.
@@ -97,9 +102,12 @@ address; both are delegated to the proxy. That is the trust boundary change:
 Proxy credentials in the URL are sent to the proxy as HTTP Basic (or SOCKS
 authentication) over the plaintext proxy hop. Cynative never prints them.
 Credentials echoed back in error text are scrubbed before the text reaches the
-model, the inventory or the audit log: the Basic token, the username and the
-password. A username or password shorter than four bytes is not replaced as
-plain text (only the Basic token is), so use longer ones. Cynative does not
+model, the inventory or the audit log: the Basic token and the `user:password`
+pair always, the username and the password on their own when they are at
+least four bytes long (a shorter part alone would match ordinary words), so
+use longer ones. A very short pair is still replaced wherever it occurs, so a
+one-letter username such as `s` also blanks the `s:` inside every `https:` in
+an error message; that is the cost of never letting the pair through. Cynative does not
 scan response bodies for the proxy credential: only the proxy itself could
 write it there, and an intercepting proxy already sees every credential in
 transit.
@@ -112,8 +120,10 @@ kubeconfig or the cloud API, `connectors.gitlab.ca_cert`). A TLS-intercepting
 corporate proxy therefore works once its CA is in the OS store. On Linux, and
 since Go 1.27 on macOS and Windows as well, `SSL_CERT_FILE` and `SSL_CERT_DIR`
 replace the platform store rather than extend it, so a bundle named there must
-contain the public roots too. No cynative option adds a CA; the existing
-mechanisms cover the cases.
+contain the public roots too. `GODEBUG=x509sslcertoverrideplatform=0` restores
+the earlier macOS and Windows behaviour, where the platform verifier ignores
+those two variables. No cynative option adds a CA; the existing mechanisms
+cover the cases.
 
 ## Startup and audit
 

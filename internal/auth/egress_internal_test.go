@@ -48,6 +48,7 @@ func TestNewEgress_AcceptsSchemesAndDefaults(t *testing.T) {
 		{"socks5h", "SOCKS5H://proxy.corp", "socks5h", "proxy.corp"},
 		{"ipv6 literal", "http://[::1]:3128", "http", "[::1]:3128"},
 		{"userinfo kept", "http://user:s3cret@proxy.corp:3128", "http", "proxy.corp:3128"},
+		{"socks5 userinfo within the handshake limits", "socks5://alice:s3cret@proxy.corp", "socks5", "proxy.corp"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +89,19 @@ func TestNewEgress_RejectsUnusableValues(t *testing.T) {
 		{"root path only", "HTTPS_PROXY", "/", "not a valid proxy URL"},
 		{"control character", "HTTPS_PROXY", "http://proxy.corp:31\x0128", "not a valid proxy URL"},
 		{"no_proxy control character", "NO_PROXY", "a.example\nb.example", "control character"},
+		{
+			"socks5 username too long",
+			"HTTPS_PROXY",
+			"socks5://" + strings.Repeat("u", 256) + ":pw@proxy.corp",
+			"1 to 255 bytes",
+		},
+		{
+			"socks5h password too long",
+			"HTTPS_PROXY",
+			"socks5h://alice:" + strings.Repeat("p", 256) + "@proxy.corp",
+			"1 to 255 bytes",
+		},
+		{"socks5 empty username", "HTTPS_PROXY", "socks5://:s3cret@proxy.corp", "1 to 255 bytes"},
 		{"http proxy checked too", "HTTP_PROXY", "https://proxy.corp", `unsupported scheme "https"`},
 		{"lower-case spelling checked", "https_proxy", "https://proxy.corp", `unsupported scheme "https"`},
 	}
@@ -240,6 +254,19 @@ func TestEgress_ScrubMergesOverlappingForms(t *testing.T) {
 	}
 }
 
+func TestEgress_ScrubReplacesAShortPairEvenInsideOtherText(t *testing.T) {
+	t.Parallel()
+
+	// The pair has no length floor, so a one-letter username also blanks the
+	// "s:" inside "https:"; the docs state that cost, and this pins it as the
+	// chosen trade-off rather than an accident.
+	e := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://s@proxy.corp:3128"})
+	out := e.Scrub(`Get "https://api.example.test/user": context deadline exceeded`)
+	if want := `Get "http` + scrubPlaceholder + `//api.example.test/user": context deadline exceeded`; out != want {
+		t.Fatalf("Scrub = %q, want %q", out, want)
+	}
+}
+
 func TestEgress_ScrubCoversBothProxiesAndUsernameOnlyCredentials(t *testing.T) {
 	t.Parallel()
 
@@ -283,19 +310,26 @@ func TestCredentialForms_EdgeCases(t *testing.T) {
 		raw  string
 		want []string
 	}{
+		// Go sends "a\"bcd:" as the Basic credential, so that pair is listed
+		// even though the URL sets no password.
 		"long username, no password": {
 			raw:  "http://a%22bcd@proxy.corp:1",
-			want: []string{"YSJiY2Q6", `a"bcd`, `a\"bcd`, "a%22bcd"},
+			want: []string{"YSJiY2Q6", `a"bcd`, `a\"bcd`, "a%22bcd", `a"bcd:`, `a\"bcd:`},
 		},
 		"short username, long password": {
 			raw:  "http://u:s3cret@proxy.corp:1",
-			want: []string{"dTpzM2NyZXQ=", "s3cret", "s3cret", "u:s3cret"},
+			want: []string{"dTpzM2NyZXQ=", "s3cret", "u:s3cret"},
 		},
-		// Neither is replaced as plain text (that would mangle every error
-		// containing those letters); the Basic token still is.
+		// Neither part is replaced as plain text on its own (that would mangle
+		// every error containing those letters); the pair always is, whatever
+		// its length, because a proxy echoes the credential it received.
 		"both short": {
 			raw:  "http://u:abc@proxy.corp:1",
-			want: []string{"dTphYmM="},
+			want: []string{"dTphYmM=", "u:abc"},
+		},
+		"pair under the floor is still listed": {
+			raw:  "http://u:a@proxy.corp:1",
+			want: []string{"dTph", "u:a"},
 		},
 	}
 	for name, tc := range cases {
