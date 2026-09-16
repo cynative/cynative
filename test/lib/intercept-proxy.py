@@ -11,8 +11,10 @@ Every other CONNECT authority is refused with 403 and every other inner request
 gets a 403 Status. Appends one JSON line per event to <logfile>:
   {"event": "connect", "authority": ..., "allowed": bool}
   {"event": "request", "method": ..., "path": ..., "auth": "expected"|"other"|"none"}
+  {"event": "plain", "method": ..., "target": ...}
 where "expected" means the Authorization header carried exactly "Bearer <token>";
-the token itself is never written. Hermetic: loopback-only; no upstream
+the token itself is never written. A plain (non-CONNECT) request is answered 405
+and logged, so no traffic reaches this proxy without leaving a line. Hermetic: loopback-only; no upstream
 connection is ever made. Stdlib only.
 """
 import http.server
@@ -133,6 +135,7 @@ class Proxy(http.server.BaseHTTPRequestHandler):
                 pass
 
     def _not_connect(self):
+        log({"event": "plain", "method": self.command, "target": self.path})
         self.send_response(405)
         self.send_header("Content-Length", "0")
         self.end_headers()

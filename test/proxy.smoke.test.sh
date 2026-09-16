@@ -183,7 +183,9 @@ expect_rc() {
 }
 
 # check_audit ROUTE OUTCOME RESULT_SUBSTRING - exactly one http_request result
-# record with the expected route ("none" for absent), outcome and result text.
+# record with the expected route, outcome and result text. ROUTE "none" means the
+# record must carry no route key at all, which is what a request denied before
+# route selection looks like.
 check_audit() {
 	python3 - "$audit" "$1" "$2" "$3" <<'PY'
 import json, sys
@@ -193,8 +195,11 @@ results = [r for r in recs if r.get("tool") == "http_request" and r.get("phase")
 if len(results) != 1:
     sys.exit("FAIL: want exactly one http_request result record, got %d" % len(results))
 r = results[0]
-if r.get("route", "none") != want_route:
-    sys.exit("FAIL: route=%s want %s" % (r.get("route", "none"), want_route))
+if want_route == "none":
+    if "route" in r:
+        sys.exit("FAIL: a denied request must carry no route, got route=%r" % r["route"])
+elif r.get("route") != want_route:
+    sys.exit("FAIL: route=%s want %s" % (r.get("route"), want_route))
 if r.get("outcome") != want_outcome:
     sys.exit("FAIL: outcome=%s want %s" % (r.get("outcome"), want_outcome))
 if want_result not in str(r.get("result", "")):
@@ -255,14 +260,17 @@ check_audit none error 'cluster_role='
 check_proxy delete
 
 # The configured proxy here is a dead port, not the fixture, so the fixture log
-# says nothing about this run either way. What rules out a direct dial is that
-# the failure names the proxy hop: a connector that ignored the policy would
-# fail on the unresolvable fixture hostname instead.
+# says nothing about this run either way. What rules out a direct dial is the
+# failure itself: it must name the proxy hop, and it must not name a lookup of
+# the fixture hostname. That hostname resolves nowhere, so a connector that
+# ignored the policy and dialed the cluster direct would fail on exactly that
+# lookup, which is the signature the second assertion rules out.
 printf '== phase 4: proxy down, no direct fallback ==\n' >&2
 run_cyn "http://127.0.0.1:1" "$out" "$err" doctor && rc=0 || rc=$?
 expect_rc 1 "$rc" "doctor with the proxy down" "$err"
 grep -q '✗ kubernetes' "$err" || { printf 'FAIL: kubernetes should be unavailable. stderr:\n' >&2; cat "$err" >&2; exit 1; }
 grep -q 'proxyconnect' "$err" || { printf 'FAIL: failure should name the proxy hop. stderr:\n' >&2; cat "$err" >&2; exit 1; }
+grep -q 'lookup kube.example.test' "$err" && { printf 'FAIL: a direct dial was attempted. stderr:\n' >&2; cat "$err" >&2; exit 1; }
 
 # The rejected scheme names the live fixture, which the scheme check refuses
 # before it looks at the host, so the empty log is real evidence: the same
