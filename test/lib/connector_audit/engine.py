@@ -506,13 +506,50 @@ def read_plan(calls, spec, target):
     return planned
 
 
-def sweep_calls(calls, spec, planned, canary_ok):
+def redacted_url(raw):
+    """scheme://authority/path for a request URL: userinfo, query and fragment removed,
+    everything else preserved byte for byte, and the result escaped to pure ASCII.
+
+    Cut out of the RAW string rather than reassembled from urlparse's pieces. Reassembly
+    loses what a maintainer reading this line is usually chasing: an IPv6 literal's
+    brackets, an explicit :0, the host's exact spelling (#308, #334 turn on exactly that),
+    and a trailing bare ";" that distinguishes two S3 object keys.
+
+    Userinfo is a credential the prepass deliberately does not detect (it is excluded from
+    the positional rules), and a query can carry a signing or session param, so neither may
+    reach a CI log: redacting the defect suffix alone would leave the secret earlier on the
+    same line. The path stays, because it is what identifies the call; an opaque token
+    embedded in a path is therefore still printed, and the audit log holds it either way.
+
+    The ASCII escape is load-bearing, not cosmetic. A verdict is printed, and under an
+    ASCII stdout a non-ASCII URL would raise UnicodeEncodeError, which the phase runner
+    turns into exit 4: a retryable miss would become a fatal, never-retried breach."""
+    s = _str(raw).split("#", 1)[0].split("?", 1)[0]
+    scheme, sep, rest = s.partition("://")
+    if not sep or not scheme:
+        return "<unparseable url>"
+    authority, slash, path = rest.partition("/")
+    authority = authority.rsplit("@", 1)[-1]
+    if not authority:
+        return "<unparseable url>"
+    out = "%s://%s%s%s" % (scheme, authority, slash, path)
+    return out.encode("ascii", "backslashreplace").decode("ascii")
+
+
+def sweep_calls(calls, spec, planned, canary_ok, explain=None):
     """Allow-list over EVERY call. Sweeps ALL slots: a breach exits 4 immediately, a
     retryable miss is remembered and only reported (1) after the full sweep, so a miss
     in an early slot can never hide a breach in a later one. `planned` is the sanctioned
     read key set from read_plan; canary_ok(slot)->bool admits the mode's one sanctioned
-    (denied) canary; None in read mode."""
+    (denied) canary; None in read mode.
+
+    explain(slot)->str|None returns a suffix saying why a denied call was not the
+    sanctioned canary. A miss carrying one is preferred over a bare miss, because this
+    single line is the whole diagnosis in a CI log: the run dies here and never reaches
+    run_canary's own defect message. It only ever ADDS text to a verdict the sweep had
+    already reached, so it cannot change an exit code."""
     miss = None
+    explained = None
     for key, slot in calls:
         rec = slot.get("attempt") or slot.get("result")
         a = args_of(rec)
@@ -522,17 +559,22 @@ def sweep_calls(calls, spec, planned, canary_ok):
             continue
         result = slot.get("result")
         desc = "auth_provider=%r %s %r" % (
-            a.get("auth_provider"), (a.get("method") or "?"), a.get("url"))
+            a.get("auth_provider"), (a.get("method") or "?"), redacted_url(a.get("url")))
         if result is None:
             insecure("an unsanctioned/write attempt has no result, cannot prove it was "
                      "blocked: %s" % desc)
         if spec.denial_matches(result):
-            miss = miss or ("a call outside the allow-list was blocked pre-dispatch (%s)" % desc)
+            text = "a call outside the allow-list was blocked pre-dispatch (%s)" % desc
+            if explain and not explained:
+                why = explain(slot)
+                if why:
+                    explained = text + why
+            miss = miss or text
             continue
         insecure("a call outside the allow-list cannot be shown to have stayed on the "
                  "machine (no %s denial): %s outcome=%r" % (spec.blocked_word, desc, result.get("outcome")))
-    if miss:
-        die(miss)
+    if explained or miss:
+        die(explained or miss)
 
 
 def run_read(records, spec, target, expect):
@@ -556,6 +598,31 @@ def run_read(records, spec, target, expect):
     print("read: OK (a sanctioned %s response carried the marker)" % spec.name)
 
 
+# A defect string embeds the offending value right after one of these: "headers=[...]",
+# "body='...'", "url='...'", "not the exact ... denial (want ...)". Cutting at the first of
+# them leaves the field name and drops every byte the provider interpolated.
+_DEFECT_VALUE_START = re.compile(r"""[=('"\[]""")
+
+
+def defect_labels(bad):
+    """Field-name-only labels for a canary defect list.
+
+    Diagnostics name the family, never the bytes - the rule credential_prepass already
+    states for its own messages. A provider's defect text interpolates the offending
+    header list, body and URL verbatim, and the prepass deliberately admits an
+    Authorization value that matches no known live secret and no recognized secret shape,
+    so printing that text could copy an opaque credential into a CI log. The field name is
+    the whole diagnosis anyway: it says WHICH check rejected the candidate, and the audit
+    log holds the bytes for anyone who needs them. Length-capped so a provider that ever
+    leads a defect with raw data still cannot spill much."""
+    out = []
+    for b in bad:
+        m = _DEFECT_VALUE_START.search(b)
+        label = (b[:m.start()] if m else b).strip().rstrip(",").strip()
+        out.append(label[:60] or "unspecified")
+    return out
+
+
 def run_canary(records, spec, canary, target):
     """A boundary-probe assertion: sweep every call admitting the one sanctioned canary,
     then require at least one candidate and that every candidate is exactly the
@@ -566,14 +633,27 @@ def run_canary(records, spec, canary, target):
     calls = index_calls(records)
     planned = read_plan(calls, spec, target)
 
-    def canary_ok(slot):
+    def canary_defects(slot):
+        """slot's defect list as THE sanctioned canary, or None when it is not even a
+        candidate for this probe."""
         r = slot.get("result")
         rec = slot.get("attempt") or r
         if r is None or not canary.is_target(rec, target):
-            return False
-        return not canary.defects(r, target)
+            return None
+        return canary.defects(r, target)
 
-    sweep_calls(calls, spec, planned, canary_ok)
+    def canary_ok(slot):
+        bad = canary_defects(slot)
+        return bad is not None and not bad
+
+    def explain(slot):
+        bad = canary_defects(slot)
+        if not bad:
+            return None
+        return ": it targeted the %s boundary but was not the sanctioned canary: %s" % (
+            canary.label, "; ".join(defect_labels(bad)))
+
+    sweep_calls(calls, spec, planned, canary_ok, explain)
     candidates = [slot for _k, slot in calls
                   if canary.is_target(slot.get("attempt") or slot.get("result"), target)]
     if not candidates:
@@ -584,7 +664,8 @@ def run_canary(records, spec, canary, target):
             insecure("%s: the canary attempt has no result, cannot prove it was blocked" % canary.label)
         bad = canary.defects(r, target)
         if bad:
-            die("%s: the %s call was not the sanctioned canary: %s" % (canary.label, canary.label, "; ".join(bad)))
+            die("%s: the %s call was not the sanctioned canary: %s"
+                % (canary.label, canary.label, "; ".join(defect_labels(bad))))
     print("%s: OK (%d sanctioned canary denied by the gate before dispatch)" % (canary.label, len(candidates)))
 
 
@@ -1047,6 +1128,142 @@ def _run_entry_with_broken_engine(engine_body, mode_args):
         return proc.returncode
 
 
+def _verdict(call):
+    """Run call() and return (printed verdict, exit code). Selftest helpers assert BOTH:
+    a helper that only swallowed SystemExit would pass a `die` mutated to exit 0."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    code = 0
+    with contextlib.redirect_stdout(buf):
+        try:
+            call()
+        except SystemExit as e:
+            # sys.exit() is SystemExit(None), which is process exit 0; only a non-int,
+            # non-None argument is the conventional 1.
+            if e.code is None:
+                code = 0
+            elif isinstance(e.code, int):
+                code = e.code
+            else:
+                code = 1
+    return buf.getvalue(), code
+
+
+def _sweep_redacts_url_credentials(spec, target):
+    """The verdict prefix names the call, and it must not carry the URL's userinfo.
+
+    The credential prepass excludes userinfo from its positional rules, so an opaque
+    `user:secret@host` passes the prepass unrewritten. Printing the raw URL would put it in
+    a CI log, which redacting only the defect suffix does not prevent: it sits earlier on
+    the same line."""
+    secret = "opaque-userinfo-value"
+    bad_url = "https://u:%s@example.test/v1/projects/demo?sig=abc#frag" % secret
+    args = {"method": "DELETE", "url": bad_url, "auth_provider": "gcp"}
+    records = [
+        json.loads(_jline("c8", "attempt", args)),
+        json.loads(_jline("c8", "result", args, result="test_hardening: denied", outcome="error"))]
+    msg, code = _verdict(lambda: run_read(records, spec, target, "unused"))
+    assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
+    assert secret not in msg, "URL userinfo leaked into the verdict: %r" % msg
+    assert "sig=abc" not in msg and "frag" not in msg, "URL query/fragment survived: %r" % msg
+    assert "example.test/v1/projects/demo" in msg, "the call is no longer identifiable: %r" % msg
+
+
+def _redacted_url_shapes():
+    """redacted_url keeps the authority exactly as submitted, minus userinfo.
+
+    Rebuilding it from urlparse's parsed pieces loses information a maintainer needs: an
+    IPv6 literal loses its brackets and reads as an ambiguous host:port, an explicit :0 is
+    dropped, and a non-ASCII host is silently case-folded to a spelling the caller never
+    sent, which is the exact class of bug #334 and #308 were about. Path params belong to
+    the path and distinguish two different requests."""
+    cases = [
+        ("https://u:pw@[2001:db8::1]:6443/api/v1/pods", "https://[2001:db8::1]:6443/api/v1/pods"),
+        ("https://[2001:db8::1]/api", "https://[2001:db8::1]/api"),
+        ("https://host:0/api", "https://host:0/api"),
+        ("https://host/a/b;v=1", "https://host/a/b;v=1"),
+        ("https://HOST.Example.TEST/a", "https://HOST.Example.TEST/a"),
+        ("https://u%40x:pw@host/a", "https://host/a"),
+        ("not a url", "<unparseable url>"),
+        # A trailing bare ";" is part of the object key; two S3 requests differ by it.
+        ("https://b.s3.us-east-1.amazonaws.com/report;", "https://b.s3.us-east-1.amazonaws.com/report;"),
+        # Non-ASCII is escaped, never dropped and never passed through: a verdict printed
+        # under an ASCII stdout would otherwise raise UnicodeEncodeError, and the engine
+        # turns any crash into exit 4 - a retryable miss would become a fatal breach. The
+        # escaped form also shows the exact spelling, which is what a host-divergence bug
+        # (#308, #334) turns on.
+        ("https://iam.amazonaws.com/caf\u00e9", "https://iam.amazonaws.com/caf\\xe9"),
+        ("https://\u00e9xample.test/a", "https://\\xe9xample.test/a"),
+    ]
+    for raw, want in cases:
+        got = redacted_url(raw)
+        assert got == want, "redacted_url(%r) = %r, want %r" % (raw, got, want)
+        got.encode("ascii")
+    for raw in (None, 12345, b"https://host/a"):
+        redacted_url(raw).encode("ascii")
+
+
+def _verdict_reports_clean_exit():
+    """_verdict must not report a bare sys.exit() as a miss: SystemExit(None) is process
+    exit 0, and mapping it to 1 would let a `die` that merely stopped printing pass a case
+    that asserts NOT_PROVEN."""
+    assert _verdict(lambda: None) == ("", 0), _verdict(lambda: None)
+    assert _verdict(lambda: sys.exit()) == ("", 0), _verdict(lambda: sys.exit())
+    assert _verdict(lambda: sys.exit(4))[1] == SECURITY
+
+
+def _candidate_loop_labels_defects(spec, target, url):
+    """run_canary's own candidate verdict redacts too.
+
+    It is reached only when the defective candidate is ALSO a sanctioned read, so the sweep
+    skips it and the candidate loop is what rejects it. Without this the sweep case covers
+    one of the two verdicts and a regression in the other ships silently."""
+    secret = "sk-live-CANDIDATE9999"
+    args = {"method": "GET", "url": url, "auth_provider": "gcp"}
+    records = [
+        json.loads(_jline("c7", "attempt", args)),
+        json.loads(_jline("c7", "result", args, result=_sres(200, "{}"), outcome="ok"))]
+    probe = CanarySpec(
+        mode="canary", label="canary", boundary="GET probe",
+        is_target=lambda rec, t: (args_of(rec).get("method") or "") == "GET",
+        defects=lambda rec, t: ["body='%s', want the sanctioned body" % secret])
+    msg, code = _verdict(lambda: run_canary(records, spec, probe, target))
+    assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
+    assert "was not the sanctioned canary" in msg, "not the candidate-loop verdict: %r" % msg
+    assert "body" in msg, "defect field not named by the candidate loop: %r" % msg
+    assert secret not in msg, "defect VALUE leaked from the candidate loop: %r" % msg
+
+
+def _sweep_explains_defects(spec, target, url):
+    """The sweep's miss message must name the defective FIELDS of a denied canary
+    candidate and none of their values.
+
+    A provider's defect text embeds the offending header list, body and URL verbatim, and
+    the credential prepass deliberately admits an Authorization value that matches no known
+    live secret and no recognized secret shape. Printing that text would copy an opaque
+    credential into a CI log, so this asserts the field name survives and the value does
+    not - the same rule the prepass states for its own diagnostics."""
+    secret = "sk-live-DEADBEEF0123"
+    canary_args = {"method": "POST", "url": url, "auth_provider": "gcp"}
+    # An unrelated denied call FIRST, so the explanation cannot come from "the first miss".
+    other = {"method": "DELETE", "url": url, "auth_provider": "gcp"}
+    records = [
+        json.loads(_jline("c1", "attempt", other)),
+        json.loads(_jline("c1", "result", other, result="test_hardening: denied", outcome="error")),
+        json.loads(_jline("c9", "attempt", canary_args)),
+        json.loads(_jline("c9", "result", canary_args,
+                          result="test_hardening: denied", outcome="error"))]
+    probe = CanarySpec(
+        mode="canary", label="canary", boundary="POST probe",
+        is_target=lambda rec, t: (args_of(rec).get("method") or "") == "POST",
+        defects=lambda rec, t: ["headers=[('authorization', '%s')], want none" % secret])
+    msg, code = _verdict(lambda: run_canary(records, spec, probe, target))
+    assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
+    assert "headers" in msg, "defect field not named: %r" % msg
+    assert secret not in msg, "defect VALUE leaked into the verdict: %r" % msg
+
+
 def _shared_selftest():
     import tempfile
     spec = _engine_test_spec()
@@ -1211,6 +1428,14 @@ def _shared_selftest():
                                    outcome="ok")
 
         cases = [
+            ("sweep_names_the_canary_defect", 0, lambda: _guard(
+                lambda: _sweep_explains_defects(spec, target, url))),
+            ("sweep_redacts_url_credentials", 0, lambda: _guard(
+                lambda: _sweep_redacts_url_credentials(spec, target))),
+            ("candidate_loop_labels_defects", 0, lambda: _guard(
+                lambda: _candidate_loop_labels_defects(spec, target, url))),
+            ("redacted_url_shapes", 0, lambda: _guard(_redacted_url_shapes)),
+            ("verdict_reports_clean_exit", 0, lambda: _guard(_verdict_reports_clean_exit)),
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
             ("nonutf8", 4, lambda: _guard(lambda: load_records(p_nonutf8))),
             ("malformed_mid", 4, lambda: _guard(lambda: load_records(p_malformed_mid))),
