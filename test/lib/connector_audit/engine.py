@@ -506,13 +506,20 @@ def read_plan(calls, spec, target):
     return planned
 
 
-def sweep_calls(calls, spec, planned, canary_ok):
+def sweep_calls(calls, spec, planned, canary_ok, explain=None):
     """Allow-list over EVERY call. Sweeps ALL slots: a breach exits 4 immediately, a
     retryable miss is remembered and only reported (1) after the full sweep, so a miss
     in an early slot can never hide a breach in a later one. `planned` is the sanctioned
     read key set from read_plan; canary_ok(slot)->bool admits the mode's one sanctioned
-    (denied) canary; None in read mode."""
+    (denied) canary; None in read mode.
+
+    explain(slot)->str|None returns a suffix saying why a denied call was not the
+    sanctioned canary. A miss carrying one is preferred over a bare miss, because this
+    single line is the whole diagnosis in a CI log: the run dies here and never reaches
+    run_canary's own defect message. It only ever ADDS text to a verdict the sweep had
+    already reached, so it cannot change an exit code."""
     miss = None
+    explained = None
     for key, slot in calls:
         rec = slot.get("attempt") or slot.get("result")
         a = args_of(rec)
@@ -527,12 +534,16 @@ def sweep_calls(calls, spec, planned, canary_ok):
             insecure("an unsanctioned/write attempt has no result, cannot prove it was "
                      "blocked: %s" % desc)
         if spec.denial_matches(result):
-            miss = miss or ("a call outside the allow-list was blocked pre-dispatch (%s)" % desc)
+            text = "a call outside the allow-list was blocked pre-dispatch (%s)" % desc
+            why = explain(slot) if explain else None
+            if why:
+                explained = explained or (text + why)
+            miss = miss or text
             continue
         insecure("a call outside the allow-list cannot be shown to have stayed on the "
                  "machine (no %s denial): %s outcome=%r" % (spec.blocked_word, desc, result.get("outcome")))
-    if miss:
-        die(miss)
+    if explained or miss:
+        die(explained or miss)
 
 
 def run_read(records, spec, target, expect):
@@ -566,14 +577,27 @@ def run_canary(records, spec, canary, target):
     calls = index_calls(records)
     planned = read_plan(calls, spec, target)
 
-    def canary_ok(slot):
+    def canary_defects(slot):
+        """slot's defect list as THE sanctioned canary, or None when it is not even a
+        candidate for this probe."""
         r = slot.get("result")
         rec = slot.get("attempt") or r
         if r is None or not canary.is_target(rec, target):
-            return False
-        return not canary.defects(r, target)
+            return None
+        return canary.defects(r, target)
 
-    sweep_calls(calls, spec, planned, canary_ok)
+    def canary_ok(slot):
+        bad = canary_defects(slot)
+        return bad is not None and not bad
+
+    def explain(slot):
+        bad = canary_defects(slot)
+        if not bad:
+            return None
+        return ": it targeted the %s boundary but was not the sanctioned canary: %s" % (
+            canary.label, "; ".join(bad))
+
+    sweep_calls(calls, spec, planned, canary_ok, explain)
     candidates = [slot for _k, slot in calls
                   if canary.is_target(slot.get("attempt") or slot.get("result"), target)]
     if not candidates:
@@ -1210,7 +1234,38 @@ def _shared_selftest():
                                    result='HTTP/1.1 200 OK\r\n\r\n{"projectId":"cynative-cli-ci"}',
                                    outcome="ok")
 
+        # A canary candidate the gate DID deny, but whose shape is wrong. The sweep
+        # records it as a miss, and in CI that one line is the whole diagnosis, so it has
+        # to name WHICH part of the shape was wrong instead of only "blocked pre-dispatch"
+        # (the run never reaches run_canary's own defect message, because the sweep dies
+        # first).
+        canary_args = {"method": "POST", "url": url, "auth_provider": "gcp"}
+        canary_denied = [
+            r("c9", "attempt", canary_args),
+            r("c9", "result", canary_args, result="test_hardening: denied", outcome="error")]
+        defect_canary = CanarySpec(
+            mode="canary", label="canary", boundary="POST probe",
+            is_target=lambda rec, t: (args_of(rec).get("method") or "") == "POST",
+            defects=lambda rec, t: ["body='wrong-body', want the sanctioned body"])
+
+        def _canary_miss_message():
+            import io
+            buf, old = io.StringIO(), sys.stdout
+            sys.stdout = buf
+            try:
+                run_canary(canary_denied, spec, defect_canary, target)
+            except SystemExit:
+                pass
+            finally:
+                sys.stdout = old
+            return buf.getvalue()
+
+        def _assert_in(needle, text):
+            assert needle in text, "missing %r in %r" % (needle, text)
+
         cases = [
+            ("sweep_names_the_canary_defect", 0, lambda: _guard(
+                lambda: _assert_in("wrong-body", _canary_miss_message()))),
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
             ("nonutf8", 4, lambda: _guard(lambda: load_records(p_nonutf8))),
             ("malformed_mid", 4, lambda: _guard(lambda: load_records(p_malformed_mid))),
