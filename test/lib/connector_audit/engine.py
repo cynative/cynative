@@ -506,6 +506,26 @@ def read_plan(calls, spec, target):
     return planned
 
 
+def redacted_url(raw):
+    """scheme://host[:port]/path, with userinfo, query and fragment dropped.
+
+    A verdict names the offending call, and what identifies it is the method, the authority
+    and the path. Userinfo is a credential the prepass deliberately does NOT detect (it is
+    excluded from the positional rules), and a query can carry a signing or session param,
+    so neither may reach a CI log: redacting the defect suffix alone would leave the secret
+    earlier on the same line. The port is kept because a port gate denial turns on it."""
+    try:
+        u = urlparse(_str(raw))
+        port = u.port
+    except ValueError:
+        return "<unparseable url>"
+    if not u.scheme and not u.netloc:
+        return "<unparseable url>"
+    host = u.hostname or ""
+    authority = "%s:%d" % (host, port) if port else host
+    return "%s://%s%s" % (u.scheme, authority, u.path)
+
+
 def sweep_calls(calls, spec, planned, canary_ok, explain=None):
     """Allow-list over EVERY call. Sweeps ALL slots: a breach exits 4 immediately, a
     retryable miss is remembered and only reported (1) after the full sweep, so a miss
@@ -529,15 +549,16 @@ def sweep_calls(calls, spec, planned, canary_ok, explain=None):
             continue
         result = slot.get("result")
         desc = "auth_provider=%r %s %r" % (
-            a.get("auth_provider"), (a.get("method") or "?"), a.get("url"))
+            a.get("auth_provider"), (a.get("method") or "?"), redacted_url(a.get("url")))
         if result is None:
             insecure("an unsanctioned/write attempt has no result, cannot prove it was "
                      "blocked: %s" % desc)
         if spec.denial_matches(result):
             text = "a call outside the allow-list was blocked pre-dispatch (%s)" % desc
-            why = explain(slot) if explain else None
-            if why:
-                explained = explained or (text + why)
+            if explain and not explained:
+                why = explain(slot)
+                if why:
+                    explained = text + why
             miss = miss or text
             continue
         insecure("a call outside the allow-list cannot be shown to have stayed on the "
@@ -565,6 +586,31 @@ def run_read(records, spec, target, expect):
     if witness is None:
         die(spec.witness_hint)
     print("read: OK (a sanctioned %s response carried the marker)" % spec.name)
+
+
+# A defect string embeds the offending value right after one of these: "headers=[...]",
+# "body='...'", "url='...'", "not the exact ... denial (want ...)". Cutting at the first of
+# them leaves the field name and drops every byte the provider interpolated.
+_DEFECT_VALUE_START = re.compile(r"""[=('"\[]""")
+
+
+def defect_labels(bad):
+    """Field-name-only labels for a canary defect list.
+
+    Diagnostics name the family, never the bytes - the rule credential_prepass already
+    states for its own messages. A provider's defect text interpolates the offending
+    header list, body and URL verbatim, and the prepass deliberately admits an
+    Authorization value that matches no known live secret and no recognized secret shape,
+    so printing that text could copy an opaque credential into a CI log. The field name is
+    the whole diagnosis anyway: it says WHICH check rejected the candidate, and the audit
+    log holds the bytes for anyone who needs them. Length-capped so a provider that ever
+    leads a defect with raw data still cannot spill much."""
+    out = []
+    for b in bad:
+        m = _DEFECT_VALUE_START.search(b)
+        label = (b[:m.start()] if m else b).strip().rstrip(",").strip()
+        out.append(label[:60] or "unspecified")
+    return out
 
 
 def run_canary(records, spec, canary, target):
@@ -595,7 +641,7 @@ def run_canary(records, spec, canary, target):
         if not bad:
             return None
         return ": it targeted the %s boundary but was not the sanctioned canary: %s" % (
-            canary.label, "; ".join(bad))
+            canary.label, "; ".join(defect_labels(bad)))
 
     sweep_calls(calls, spec, planned, canary_ok, explain)
     candidates = [slot for _k, slot in calls
@@ -608,7 +654,8 @@ def run_canary(records, spec, canary, target):
             insecure("%s: the canary attempt has no result, cannot prove it was blocked" % canary.label)
         bad = canary.defects(r, target)
         if bad:
-            die("%s: the %s call was not the sanctioned canary: %s" % (canary.label, canary.label, "; ".join(bad)))
+            die("%s: the %s call was not the sanctioned canary: %s"
+                % (canary.label, canary.label, "; ".join(defect_labels(bad))))
     print("%s: OK (%d sanctioned canary denied by the gate before dispatch)" % (canary.label, len(candidates)))
 
 
@@ -1071,6 +1118,87 @@ def _run_entry_with_broken_engine(engine_body, mode_args):
         return proc.returncode
 
 
+def _verdict(call):
+    """Run call() and return (printed verdict, exit code). Selftest helpers assert BOTH:
+    a helper that only swallowed SystemExit would pass a `die` mutated to exit 0."""
+    import contextlib
+    import io
+    buf = io.StringIO()
+    code = 0
+    with contextlib.redirect_stdout(buf):
+        try:
+            call()
+        except SystemExit as e:
+            code = e.code if isinstance(e.code, int) else 1
+    return buf.getvalue(), code
+
+
+def _sweep_redacts_url_credentials(spec, target):
+    """The verdict prefix names the call, and it must not carry the URL's userinfo.
+
+    The credential prepass excludes userinfo from its positional rules, so an opaque
+    `user:secret@host` passes the prepass unrewritten. Printing the raw URL would put it in
+    a CI log, which redacting only the defect suffix does not prevent: it sits earlier on
+    the same line."""
+    secret = "opaque-userinfo-value"
+    bad_url = "https://u:%s@example.test/v1/projects/demo?sig=abc#frag" % secret
+    args = {"method": "DELETE", "url": bad_url, "auth_provider": "gcp"}
+    records = [
+        json.loads(_jline("c8", "attempt", args)),
+        json.loads(_jline("c8", "result", args, result="test_hardening: denied", outcome="error"))]
+    msg, code = _verdict(lambda: run_read(records, spec, target, "unused"))
+    assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
+    assert secret not in msg, "URL userinfo leaked into the verdict: %r" % msg
+    assert "sig=abc" not in msg and "frag" not in msg, "URL query/fragment survived: %r" % msg
+    assert "example.test/v1/projects/demo" in msg, "the call is no longer identifiable: %r" % msg
+
+
+def _candidate_loop_labels_defects(spec, target, url):
+    """run_canary's own candidate verdict redacts too.
+
+    It is reached only when the defective candidate is ALSO a sanctioned read, so the sweep
+    skips it and the candidate loop is what rejects it. Without this the sweep case covers
+    one of the two verdicts and a regression in the other ships silently."""
+    secret = "sk-live-CANDIDATE9999"
+    args = {"method": "GET", "url": url, "auth_provider": "gcp"}
+    records = [
+        json.loads(_jline("c7", "attempt", args)),
+        json.loads(_jline("c7", "result", args, result=_sres(200, "{}"), outcome="ok"))]
+    probe = CanarySpec(
+        mode="canary", label="canary", boundary="GET probe",
+        is_target=lambda rec, t: (args_of(rec).get("method") or "") == "GET",
+        defects=lambda rec, t: ["body='%s', want the sanctioned body" % secret])
+    msg, code = _verdict(lambda: run_canary(records, spec, probe, target))
+    assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
+    assert "was not the sanctioned canary" in msg, "not the candidate-loop verdict: %r" % msg
+    assert secret not in msg, "defect VALUE leaked from the candidate loop: %r" % msg
+
+
+def _sweep_explains_defects(spec, target, url):
+    """The sweep's miss message must name the defective FIELDS of a denied canary
+    candidate and none of their values.
+
+    A provider's defect text embeds the offending header list, body and URL verbatim, and
+    the credential prepass deliberately admits an Authorization value that matches no known
+    live secret and no recognized secret shape. Printing that text would copy an opaque
+    credential into a CI log, so this asserts the field name survives and the value does
+    not - the same rule the prepass states for its own diagnostics."""
+    secret = "sk-live-DEADBEEF0123"
+    canary_args = {"method": "POST", "url": url, "auth_provider": "gcp"}
+    records = [
+        json.loads(_jline("c9", "attempt", canary_args)),
+        json.loads(_jline("c9", "result", canary_args,
+                          result="test_hardening: denied", outcome="error"))]
+    probe = CanarySpec(
+        mode="canary", label="canary", boundary="POST probe",
+        is_target=lambda rec, t: (args_of(rec).get("method") or "") == "POST",
+        defects=lambda rec, t: ["headers=[('authorization', '%s')], want none" % secret])
+    msg, code = _verdict(lambda: run_canary(records, spec, probe, target))
+    assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
+    assert "headers" in msg, "defect field not named: %r" % msg
+    assert secret not in msg, "defect VALUE leaked into the verdict: %r" % msg
+
+
 def _shared_selftest():
     import tempfile
     spec = _engine_test_spec()
@@ -1234,38 +1362,13 @@ def _shared_selftest():
                                    result='HTTP/1.1 200 OK\r\n\r\n{"projectId":"cynative-cli-ci"}',
                                    outcome="ok")
 
-        # A canary candidate the gate DID deny, but whose shape is wrong. The sweep
-        # records it as a miss, and in CI that one line is the whole diagnosis, so it has
-        # to name WHICH part of the shape was wrong instead of only "blocked pre-dispatch"
-        # (the run never reaches run_canary's own defect message, because the sweep dies
-        # first).
-        canary_args = {"method": "POST", "url": url, "auth_provider": "gcp"}
-        canary_denied = [
-            r("c9", "attempt", canary_args),
-            r("c9", "result", canary_args, result="test_hardening: denied", outcome="error")]
-        defect_canary = CanarySpec(
-            mode="canary", label="canary", boundary="POST probe",
-            is_target=lambda rec, t: (args_of(rec).get("method") or "") == "POST",
-            defects=lambda rec, t: ["body='wrong-body', want the sanctioned body"])
-
-        def _canary_miss_message():
-            import io
-            buf, old = io.StringIO(), sys.stdout
-            sys.stdout = buf
-            try:
-                run_canary(canary_denied, spec, defect_canary, target)
-            except SystemExit:
-                pass
-            finally:
-                sys.stdout = old
-            return buf.getvalue()
-
-        def _assert_in(needle, text):
-            assert needle in text, "missing %r in %r" % (needle, text)
-
         cases = [
             ("sweep_names_the_canary_defect", 0, lambda: _guard(
-                lambda: _assert_in("wrong-body", _canary_miss_message()))),
+                lambda: _sweep_explains_defects(spec, target, url))),
+            ("sweep_redacts_url_credentials", 0, lambda: _guard(
+                lambda: _sweep_redacts_url_credentials(spec, target))),
+            ("candidate_loop_labels_defects", 0, lambda: _guard(
+                lambda: _candidate_loop_labels_defects(spec, target, url))),
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
             ("nonutf8", 4, lambda: _guard(lambda: load_records(p_nonutf8))),
             ("malformed_mid", 4, lambda: _guard(lambda: load_records(p_malformed_mid))),
