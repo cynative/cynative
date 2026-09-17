@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.12.1](https://github.com/cynative/cynative/compare/v1.12.0...v1.12.1) (2026-09-17)
+
+
+### Dependencies
+
+* bump github.com/apache/arrow-go/v18 from 18.7.0 to 18.8.0 ([ab11230](https://github.com/cynative/cynative/commit/ab11230429c39140579e64fddbd0d2b7ffe7fc49))
+* bump github.com/creasty/defaults from 1.9.0 to 1.10.0 ([ab11230](https://github.com/cynative/cynative/commit/ab11230429c39140579e64fddbd0d2b7ffe7fc49))
+* bump github.com/pierrec/lz4/v4 from 4.1.28 to 4.1.29 ([ab11230](https://github.com/cynative/cynative/commit/ab11230429c39140579e64fddbd0d2b7ffe7fc49))
+
 ## [1.12.0](https://github.com/cynative/cynative/compare/v1.11.3...v1.12.0) (2026-09-16)
 
 
