@@ -507,29 +507,33 @@ def read_plan(calls, spec, target):
 
 
 def redacted_url(raw):
-    """scheme://authority/path, with userinfo, query and fragment dropped.
+    """scheme://authority/path for a request URL: userinfo, query and fragment removed,
+    everything else preserved byte for byte, and the result escaped to pure ASCII.
 
-    The authority is the SUBMITTED netloc minus userinfo, cut at the last '@', not one
-    rebuilt from urlparse's pieces: rebuilding loses an IPv6 literal's brackets, drops an
-    explicit :0, and case-folds the host to a spelling the caller never sent, which is the
-    class of divergence #308 and #334 turn on and exactly what a maintainer reading this
-    line would be chasing.
+    Cut out of the RAW string rather than reassembled from urlparse's pieces. Reassembly
+    loses what a maintainer reading this line is usually chasing: an IPv6 literal's
+    brackets, an explicit :0, the host's exact spelling (#308, #334 turn on exactly that),
+    and a trailing bare ";" that distinguishes two S3 object keys.
 
     Userinfo is a credential the prepass deliberately does not detect (it is excluded from
     the positional rules), and a query can carry a signing or session param, so neither may
     reach a CI log: redacting the defect suffix alone would leave the secret earlier on the
-    same line. The path stays because it is what identifies the call, so an opaque token
-    embedded in a path is still printed; the audit log the suite already keeps holds it
-    either way."""
-    try:
-        u = urlparse(_str(raw))
-    except ValueError:
+    same line. The path stays, because it is what identifies the call; an opaque token
+    embedded in a path is therefore still printed, and the audit log holds it either way.
+
+    The ASCII escape is load-bearing, not cosmetic. A verdict is printed, and under an
+    ASCII stdout a non-ASCII URL would raise UnicodeEncodeError, which the phase runner
+    turns into exit 4: a retryable miss would become a fatal, never-retried breach."""
+    s = _str(raw).split("#", 1)[0].split("?", 1)[0]
+    scheme, sep, rest = s.partition("://")
+    if not sep or not scheme:
         return "<unparseable url>"
-    if not u.scheme or not u.netloc:
+    authority, slash, path = rest.partition("/")
+    authority = authority.rsplit("@", 1)[-1]
+    if not authority:
         return "<unparseable url>"
-    authority = u.netloc.rsplit("@", 1)[-1]
-    path = u.path + (";" + u.params if u.params else "")
-    return "%s://%s%s" % (u.scheme, authority, path)
+    out = "%s://%s%s%s" % (scheme, authority, slash, path)
+    return out.encode("ascii", "backslashreplace").decode("ascii")
 
 
 def sweep_calls(calls, spec, planned, canary_ok, explain=None):
@@ -1135,7 +1139,14 @@ def _verdict(call):
         try:
             call()
         except SystemExit as e:
-            code = e.code if isinstance(e.code, int) else 1
+            # sys.exit() is SystemExit(None), which is process exit 0; only a non-int,
+            # non-None argument is the conventional 1.
+            if e.code is None:
+                code = 0
+            elif isinstance(e.code, int):
+                code = e.code
+            else:
+                code = 1
     return buf.getvalue(), code
 
 
@@ -1175,12 +1186,31 @@ def _redacted_url_shapes():
         ("https://HOST.Example.TEST/a", "https://HOST.Example.TEST/a"),
         ("https://u%40x:pw@host/a", "https://host/a"),
         ("not a url", "<unparseable url>"),
+        # A trailing bare ";" is part of the object key; two S3 requests differ by it.
+        ("https://b.s3.us-east-1.amazonaws.com/report;", "https://b.s3.us-east-1.amazonaws.com/report;"),
+        # Non-ASCII is escaped, never dropped and never passed through: a verdict printed
+        # under an ASCII stdout would otherwise raise UnicodeEncodeError, and the engine
+        # turns any crash into exit 4 - a retryable miss would become a fatal breach. The
+        # escaped form also shows the exact spelling, which is what a host-divergence bug
+        # (#308, #334) turns on.
+        ("https://iam.amazonaws.com/caf\u00e9", "https://iam.amazonaws.com/caf\\xe9"),
+        ("https://\u00e9xample.test/a", "https://\\xe9xample.test/a"),
     ]
     for raw, want in cases:
         got = redacted_url(raw)
         assert got == want, "redacted_url(%r) = %r, want %r" % (raw, got, want)
+        got.encode("ascii")
     for raw in (None, 12345, b"https://host/a"):
-        redacted_url(raw)
+        redacted_url(raw).encode("ascii")
+
+
+def _verdict_reports_clean_exit():
+    """_verdict must not report a bare sys.exit() as a miss: SystemExit(None) is process
+    exit 0, and mapping it to 1 would let a `die` that merely stopped printing pass a case
+    that asserts NOT_PROVEN."""
+    assert _verdict(lambda: None) == ("", 0), _verdict(lambda: None)
+    assert _verdict(lambda: sys.exit()) == ("", 0), _verdict(lambda: sys.exit())
+    assert _verdict(lambda: sys.exit(4))[1] == SECURITY
 
 
 def _candidate_loop_labels_defects(spec, target, url):
@@ -1405,6 +1435,7 @@ def _shared_selftest():
             ("candidate_loop_labels_defects", 0, lambda: _guard(
                 lambda: _candidate_loop_labels_defects(spec, target, url))),
             ("redacted_url_shapes", 0, lambda: _guard(_redacted_url_shapes)),
+            ("verdict_reports_clean_exit", 0, lambda: _guard(_verdict_reports_clean_exit)),
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
             ("nonutf8", 4, lambda: _guard(lambda: load_records(p_nonutf8))),
             ("malformed_mid", 4, lambda: _guard(lambda: load_records(p_malformed_mid))),
