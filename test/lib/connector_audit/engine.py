@@ -507,23 +507,29 @@ def read_plan(calls, spec, target):
 
 
 def redacted_url(raw):
-    """scheme://host[:port]/path, with userinfo, query and fragment dropped.
+    """scheme://authority/path, with userinfo, query and fragment dropped.
 
-    A verdict names the offending call, and what identifies it is the method, the authority
-    and the path. Userinfo is a credential the prepass deliberately does NOT detect (it is
-    excluded from the positional rules), and a query can carry a signing or session param,
-    so neither may reach a CI log: redacting the defect suffix alone would leave the secret
-    earlier on the same line. The port is kept because a port gate denial turns on it."""
+    The authority is the SUBMITTED netloc minus userinfo, cut at the last '@', not one
+    rebuilt from urlparse's pieces: rebuilding loses an IPv6 literal's brackets, drops an
+    explicit :0, and case-folds the host to a spelling the caller never sent, which is the
+    class of divergence #308 and #334 turn on and exactly what a maintainer reading this
+    line would be chasing.
+
+    Userinfo is a credential the prepass deliberately does not detect (it is excluded from
+    the positional rules), and a query can carry a signing or session param, so neither may
+    reach a CI log: redacting the defect suffix alone would leave the secret earlier on the
+    same line. The path stays because it is what identifies the call, so an opaque token
+    embedded in a path is still printed; the audit log the suite already keeps holds it
+    either way."""
     try:
         u = urlparse(_str(raw))
-        port = u.port
     except ValueError:
         return "<unparseable url>"
-    if not u.scheme and not u.netloc:
+    if not u.scheme or not u.netloc:
         return "<unparseable url>"
-    host = u.hostname or ""
-    authority = "%s:%d" % (host, port) if port else host
-    return "%s://%s%s" % (u.scheme, authority, u.path)
+    authority = u.netloc.rsplit("@", 1)[-1]
+    path = u.path + (";" + u.params if u.params else "")
+    return "%s://%s%s" % (u.scheme, authority, path)
 
 
 def sweep_calls(calls, spec, planned, canary_ok, explain=None):
@@ -1153,6 +1159,30 @@ def _sweep_redacts_url_credentials(spec, target):
     assert "example.test/v1/projects/demo" in msg, "the call is no longer identifiable: %r" % msg
 
 
+def _redacted_url_shapes():
+    """redacted_url keeps the authority exactly as submitted, minus userinfo.
+
+    Rebuilding it from urlparse's parsed pieces loses information a maintainer needs: an
+    IPv6 literal loses its brackets and reads as an ambiguous host:port, an explicit :0 is
+    dropped, and a non-ASCII host is silently case-folded to a spelling the caller never
+    sent, which is the exact class of bug #334 and #308 were about. Path params belong to
+    the path and distinguish two different requests."""
+    cases = [
+        ("https://u:pw@[2001:db8::1]:6443/api/v1/pods", "https://[2001:db8::1]:6443/api/v1/pods"),
+        ("https://[2001:db8::1]/api", "https://[2001:db8::1]/api"),
+        ("https://host:0/api", "https://host:0/api"),
+        ("https://host/a/b;v=1", "https://host/a/b;v=1"),
+        ("https://HOST.Example.TEST/a", "https://HOST.Example.TEST/a"),
+        ("https://u%40x:pw@host/a", "https://host/a"),
+        ("not a url", "<unparseable url>"),
+    ]
+    for raw, want in cases:
+        got = redacted_url(raw)
+        assert got == want, "redacted_url(%r) = %r, want %r" % (raw, got, want)
+    for raw in (None, 12345, b"https://host/a"):
+        redacted_url(raw)
+
+
 def _candidate_loop_labels_defects(spec, target, url):
     """run_canary's own candidate verdict redacts too.
 
@@ -1171,6 +1201,7 @@ def _candidate_loop_labels_defects(spec, target, url):
     msg, code = _verdict(lambda: run_canary(records, spec, probe, target))
     assert code == NOT_PROVEN, "want a retryable miss, got exit %r: %r" % (code, msg)
     assert "was not the sanctioned canary" in msg, "not the candidate-loop verdict: %r" % msg
+    assert "body" in msg, "defect field not named by the candidate loop: %r" % msg
     assert secret not in msg, "defect VALUE leaked from the candidate loop: %r" % msg
 
 
@@ -1185,7 +1216,11 @@ def _sweep_explains_defects(spec, target, url):
     not - the same rule the prepass states for its own diagnostics."""
     secret = "sk-live-DEADBEEF0123"
     canary_args = {"method": "POST", "url": url, "auth_provider": "gcp"}
+    # An unrelated denied call FIRST, so the explanation cannot come from "the first miss".
+    other = {"method": "DELETE", "url": url, "auth_provider": "gcp"}
     records = [
+        json.loads(_jline("c1", "attempt", other)),
+        json.loads(_jline("c1", "result", other, result="test_hardening: denied", outcome="error")),
         json.loads(_jline("c9", "attempt", canary_args)),
         json.loads(_jline("c9", "result", canary_args,
                           result="test_hardening: denied", outcome="error"))]
@@ -1369,6 +1404,7 @@ def _shared_selftest():
                 lambda: _sweep_redacts_url_credentials(spec, target))),
             ("candidate_loop_labels_defects", 0, lambda: _guard(
                 lambda: _candidate_loop_labels_defects(spec, target, url))),
+            ("redacted_url_shapes", 0, lambda: _guard(_redacted_url_shapes)),
             ("dupkey", 4, lambda: _guard(lambda: load_records(p_dupkey))),
             ("nonutf8", 4, lambda: _guard(lambda: load_records(p_nonutf8))),
             ("malformed_mid", 4, lambda: _guard(lambda: load_records(p_malformed_mid))),
