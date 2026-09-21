@@ -5,7 +5,7 @@ go 1.27.1
 require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
-	cloud.google.com/go/compute/metadata v0.9.0
+	cloud.google.com/go/compute/metadata v0.9.1
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.1
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.1
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2 v2.2.0
@@ -19,7 +19,7 @@ require (
 	github.com/aws/smithy-go v1.28.1
 	github.com/clbanning/mxj/v2 v2.7.0
 	github.com/cli/go-gh/v2 v2.16.1
-	github.com/creasty/defaults v1.10.0
+	github.com/creasty/defaults v1.11.0
 	github.com/go-playground/validator/v10 v10.30.4
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/google/uuid v1.6.0
@@ -27,7 +27,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jmespath/go-jmespath v0.4.1-0.20220621161143-b0104c826a24
-	github.com/maximhq/bifrost/core v1.8.6
+	github.com/maximhq/bifrost/core v1.9.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/net v0.59.0
@@ -47,13 +47,13 @@ require (
 	al.essio.dev/pkg/shellescape v1.6.1 // indirect
 	cel.dev/expr v0.25.3 // indirect
 	cloud.google.com/go v0.123.0 // indirect
-	cloud.google.com/go/auth v0.23.2 // indirect
+	cloud.google.com/go/auth v0.23.3 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/iam v1.13.0 // indirect
-	cloud.google.com/go/kms v1.33.0 // indirect
+	cloud.google.com/go/kms v1.34.0 // indirect
 	cloud.google.com/go/longrunning v1.2.0 // indirect
 	cloud.google.com/go/monitoring v1.30.0 // indirect
-	cloud.google.com/go/storage v1.67.1 // indirect
+	cloud.google.com/go/storage v1.68.0 // indirect
 	code.gitea.io/sdk/gitea v0.25.1 // indirect
 	codeberg.org/chavacava/garif v0.2.1 // indirect
 	codeberg.org/polyfloyd/go-errorlint v1.9.0 // indirect
@@ -121,13 +121,13 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.3 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.3 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ecr v1.65.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ecr v1.66.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecrpublic v1.47.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.19 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/kms v1.60.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/kms v1.61.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.113.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.10.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.38.0 // indirect
@@ -205,7 +205,7 @@ require (
 	github.com/docker/docker-credential-helpers v0.9.9 // indirect
 	github.com/docker/go-connections v0.8.1 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.39.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
@@ -287,7 +287,7 @@ require (
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-containerregistry v0.22.1 // indirect
-	github.com/google/go-github/v91 v91.0.0 // indirect
+	github.com/google/go-github/v92 v92.0.0 // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/ko v0.19.1 // indirect
@@ -301,7 +301,7 @@ require (
 	github.com/goreleaser/chglog v0.7.4 // indirect
 	github.com/goreleaser/fileglob v1.4.1 // indirect
 	github.com/goreleaser/go-shellwords v1.0.13 // indirect
-	github.com/goreleaser/goreleaser/v2 v2.18.1 // indirect
+	github.com/goreleaser/goreleaser/v2 v2.18.2 // indirect
 	github.com/goreleaser/nfpm/v2 v2.47.0 // indirect
 	github.com/goreleaser/quill v0.0.0-20260630015114-8310f3e9a321 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
@@ -352,10 +352,10 @@ require (
 	github.com/kunwardeep/paralleltest v1.0.15 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ldez/exptostd v0.4.5 // indirect
-	github.com/ldez/gomoddirectives v0.9.0 // indirect
+	github.com/ldez/gomoddirectives v0.10.0 // indirect
 	github.com/ldez/grignotin v0.10.1 // indirect
 	github.com/ldez/structtags v0.6.1 // indirect
-	github.com/ldez/tagliatelle v0.7.2 // indirect
+	github.com/ldez/tagliatelle v0.8.0 // indirect
 	github.com/ldez/usetesting v0.5.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/leonklingele/grouper v1.1.2 // indirect
@@ -524,7 +524,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.starlark.net v0.0.0-20260102030733-3fee463870c9 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
@@ -543,7 +543,7 @@ require (
 	google.golang.org/genproto v0.0.0-20260715232425-e75dac1f907d // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
-	google.golang.org/grpc v1.83.2 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/alexcesaro/quotedprintable.v3 v3.0.0-20150716171945-2caba252f4dc // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
