@@ -44,11 +44,14 @@ jobs:
           # A Dependabot-authored PR is not enough: someone else may have pushed to
           # its branch. Dependabot's own commits are authored by dependabot[bot] and
           # committed and signed by GitHub (web-flow), so require all three on every
-          # commit, and require that the listing is complete (the API caps it).
-          commits_url="/repos/${GITHUB_REPOSITORY}/pulls/${num}/commits"
-          expected="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${num}" --jq '.commits')"
-          listed="$(gh api --paginate "${commits_url}" --jq '.[].sha' | wc -l)"
-          foreign="$(gh api --paginate "${commits_url}" --jq '.[] | select(.author.login != "dependabot[bot]" or .committer.login != "web-flow" or .commit.verification.verified != true) | "\(.sha[0:7]) author=\(.author.login // "none") committer=\(.committer.login // "none") verified=\(.commit.verification.verified)"')"
+          # commit, and require that the listing is complete (the API caps it). The
+          # commits are read from HEAD_SHA itself (base...sha), not from the PR, so
+          # what is checked is the exact history the merge below is pinned to, even
+          # if the branch is force-pushed in between.
+          commits_url="/repos/${GITHUB_REPOSITORY}/compare/main...${HEAD_SHA}"
+          expected="$(gh api "${commits_url}" --jq '.total_commits')"
+          listed="$(gh api --paginate "${commits_url}" --jq '.commits[].sha' | wc -l)"
+          foreign="$(gh api --paginate "${commits_url}" --jq '.commits[] | select(.author.login != "dependabot[bot]" or .committer.login != "web-flow" or .commit.verification.verified != true) | "\(.sha[0:7]) author=\(.author.login // "none") committer=\(.committer.login // "none") verified=\(.commit.verification.verified)"')"
           if [ "${listed}" != "${expected}" ] || [ -n "${foreign}" ]; then
             echo "PR #${num} has commits that are not Dependabot's own (listed ${listed} of ${expected}); not merging."
             [ -z "${foreign}" ] || echo "${foreign}"

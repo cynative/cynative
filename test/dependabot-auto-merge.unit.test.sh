@@ -45,8 +45,9 @@ printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/sleep"
 chmod +x "$tmp/bin/sleep"
 
 # Fake gh: `gh api <path> [--paginate] [--jq <filter>]`, answered from $FIX.
-# commits.json is an array of pages. Like the real gh, --paginate runs the
-# filter over every page and without it only the first page is fetched.
+# commits.json is an array of pages of commits, served as compare responses
+# ({total_commits, commits}). Like the real gh, --paginate runs the filter over
+# every page and without it only the first page is fetched.
 cat > "$tmp/bin/gh" <<'EOF_GH'
 #!/bin/sh
 if [ "$1" = pr ]; then
@@ -75,15 +76,15 @@ while [ "$#" -gt 0 ]; do
 done
 case "$path" in
   */commits/*/pulls) file=$FIX/pulls.json ;;
-  */pulls/*/commits) file=$FIX/commits.json ;;
+  */compare/main...aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) file=$FIX/commits.json ;;
   */pulls/*) file=$FIX/pr.json ;;
   *) echo "unexpected gh path: $path" >&2; exit 1 ;;
 esac
 if [ "$file" = "$FIX/commits.json" ]; then
   if [ -n "$paginate" ]; then
-    jq -c '.[]' "$file"
+    jq -c --slurpfile t "$FIX/total.json" '.[] | {total_commits: $t[0], commits: .}' "$file"
   else
-    jq -c '.[0]' "$file"
+    jq -c --slurpfile t "$FIX/total.json" '.[0] | {total_commits: $t[0], commits: .}' "$file"
   fi | while IFS= read -r page; do
     printf '%s\n' "$page" | jq -r "$filter"
   done
@@ -98,13 +99,13 @@ sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 # dependabot commit: author dependabot[bot], committer web-flow, verified.
 dep='{"sha":"1111111111111111","author":{"login":"dependabot[bot]"},"committer":{"login":"web-flow"},"commit":{"verification":{"verified":true}}}'
 
-# run_case <name> <commits-json> <pr-commit-count> <pulls-json>; sets out and log.
+# run_case <name> <commit pages json> <total_commits> <pulls-json>; sets out and log.
 run_case() {
   fix="$tmp/fix.$1"
   mkdir "$fix"
   printf '%s\n' "$4" > "$fix/pulls.json"
   printf '%s\n' "$2" > "$fix/commits.json"
-  printf '{"commits":%s}\n' "$3" > "$fix/pr.json"
+  printf '%s\n' "$3" > "$fix/total.json"
   : > "$fix/out"
   PATH="$tmp/bin:$PATH" FIX="$fix" GITHUB_OUTPUT="$fix/out" \
     GITHUB_REPOSITORY=cynative/cynative HEAD_SHA="$sha" GH_TOKEN=x \
