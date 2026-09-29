@@ -39,6 +39,7 @@ func ValidateProvider(entry *ProviderEntry) error {
 var nonChatProviders = map[schemas.ModelProvider]bool{
 	schemas.Elevenlabs: true,
 	schemas.Runway:     true,
+	schemas.Typesafe:   true,
 }
 
 // ChatProviders returns every provider cynative can select: Bifrost's
