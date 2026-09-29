@@ -54,8 +54,8 @@ if [ "$1" = pr ]; then
   # gh pr merge <args>: record the call, answer from merge.results (line N for
   # call N, the last line once they run out): "ok" or "fail:<message>".
   printf '%s\n' "$*" >> "$FIX/merge.calls"
-  n=$(wc -l < "$FIX/merge.calls")
-  total=$(wc -l < "$FIX/merge.results")
+  n=$(wc -l < "$FIX/merge.calls" | tr -d ' ')
+  total=$(wc -l < "$FIX/merge.results" | tr -d ' ')
   [ "$n" -le "$total" ] || n=$total
   result=$(sed -n "${n}p" "$FIX/merge.results")
   case "$result" in
