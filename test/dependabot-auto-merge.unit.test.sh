@@ -35,15 +35,18 @@ if [ ! -s "$tmp/step.sh" ]; then
 fi
 
 # Fake gh: `gh api <path> [--paginate] [--jq <filter>]`, answered from $FIX.
+# commits.json is an array of pages. Like the real gh, --paginate runs the
+# filter over every page and without it only the first page is fetched.
 cat > "$tmp/bin/gh" <<'EOF_GH'
 #!/bin/sh
 path=""
 filter=""
+paginate=""
 shift
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --jq) filter=$2; shift 2 ;;
-    --paginate) shift ;;
+    --paginate) paginate=1; shift ;;
     *) path=$1; shift ;;
   esac
 done
@@ -53,7 +56,17 @@ case "$path" in
   */pulls/*) file=$FIX/pr.json ;;
   *) echo "unexpected gh path: $path" >&2; exit 1 ;;
 esac
-jq -r "$filter" "$file"
+if [ "$file" = "$FIX/commits.json" ]; then
+  if [ -n "$paginate" ]; then
+    jq -c '.[]' "$file"
+  else
+    jq -c '.[0]' "$file"
+  fi | while IFS= read -r page; do
+    printf '%s\n' "$page" | jq -r "$filter"
+  done
+else
+  jq -r "$filter" "$file"
+fi
 EOF_GH
 chmod +x "$tmp/bin/gh"
 
@@ -91,39 +104,39 @@ expect_out() {
 
 open_pr="[{\"number\":7,\"state\":\"open\",\"base\":{\"ref\":\"main\"},\"user\":{\"login\":\"dependabot[bot]\"},\"head\":{\"sha\":\"$sha\"}}]"
 
-run_case clean "[$dep]" 1 "$open_pr"
+run_case clean "[[$dep]]" 1 "$open_pr"
 expect_out "pure Dependabot PR is armed" "number=7"
 
-run_case two "[$dep,$dep]" 2 "$open_pr"
-expect_out "several Dependabot commits are armed" "number=7"
+run_case two "[[$dep],[$dep]]" 2 "$open_pr"
+expect_out "Dependabot commits across two pages are armed" "number=7"
 
 human='{"sha":"2222222222222222","author":{"login":"someone"},"committer":{"login":"someone"},"commit":{"verification":{"verified":false}}}'
-run_case mixed "[$dep,$human]" 2 "$open_pr"
-expect_out "a pushed human commit is not armed" ""
+run_case mixed "[[$dep],[$human]]" 2 "$open_pr"
+expect_out "a human commit on the second page is not armed" ""
 case "$log" in *"2222222 author=someone committer=someone verified=false"*"not arming"*|*"not arming"*"2222222 author=someone"*) pass "the skip names the offending commit" ;; *) fail "skip log: [$log]" ;; esac
 
 unverified='{"sha":"3333333333333333","author":{"login":"dependabot[bot]"},"committer":{"login":"web-flow"},"commit":{"verification":{"verified":false}}}'
-run_case unverified "[$unverified]" 1 "$open_pr"
+run_case unverified "[[$unverified]]" 1 "$open_pr"
 expect_out "an unverified Dependabot-looking commit is not armed" ""
 
 selfsigned='{"sha":"4444444444444444","author":{"login":"dependabot[bot]"},"committer":{"login":"someone"},"commit":{"verification":{"verified":true}}}'
-run_case committer "[$selfsigned]" 1 "$open_pr"
+run_case committer "[[$selfsigned]]" 1 "$open_pr"
 expect_out "a commit not committed by GitHub is not armed" ""
 
 nologin='{"sha":"5555555555555555","author":null,"committer":{"login":"web-flow"},"commit":{"verification":{"verified":true}}}'
-run_case nologin "[$nologin]" 1 "$open_pr"
+run_case nologin "[[$nologin]]" 1 "$open_pr"
 expect_out "a commit with no linked author is not armed" ""
 
-run_case truncated "[$dep]" 3 "$open_pr"
+run_case truncated "[[$dep]]" 3 "$open_pr"
 expect_out "an incomplete commit listing is not armed" ""
 case "$log" in *"listed 1 of 3"*) pass "the skip reports the counts" ;; *) fail "count log: [$log]" ;; esac
 
-run_case nopr "[$dep]" 1 '[]'
+run_case nopr "[[$dep]]" 1 '[]'
 expect_out "no matching PR is not armed" ""
 case "$log" in *"nothing to do"*) pass "no matching PR logs and stops" ;; *) fail "no PR log: [$log]" ;; esac
 
 human_pr=$(printf '%s' "$open_pr" | sed 's/"dependabot\[bot\]"/"someone"/')
-run_case humanpr "[$dep]" 1 "$human_pr"
+run_case humanpr "[[$dep]]" 1 "$human_pr"
 expect_out "a human-authored PR is not armed" ""
 
 if [ "$fails" -ne 0 ]; then
