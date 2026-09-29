@@ -24,9 +24,10 @@ jobs:
     steps:
       # Identify the PR from the completed run's head SHA using the read-only GITHUB_TOKEN.
       # Only an open, base-main, Dependabot-authored PR whose current head is still exactly
-      # that SHA proceeds; everything else no-ops (human PRs, push-triggered CI runs, or a
-      # stale run after a Dependabot rebase, which the new head's CI run re-arms), so the
-      # App token is never even minted for them.
+      # that SHA, and whose every commit is Dependabot's own, proceeds; everything else
+      # no-ops (human PRs, PRs someone else pushed to, push-triggered CI runs, or a stale
+      # run after a Dependabot rebase, which the new head's CI run re-arms), so the App
+      # token is never even minted for them.
       - name: Resolve Dependabot PR
         id: pr
         env:
@@ -36,12 +37,25 @@ jobs:
           set -euo pipefail
           num="$(gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
             --jq '[.[] | select(.state=="open" and .base.ref=="main" and .user.login=="dependabot[bot]" and .head.sha==env.HEAD_SHA)][0].number // empty')"
-          if [ -n "${num}" ]; then
-            echo "number=${num}" >> "${GITHUB_OUTPUT}"
-            echo "Matched Dependabot PR #${num}"
-          else
+          if [ -z "${num}" ]; then
             echo "No matching open Dependabot PR for ${HEAD_SHA}; nothing to do."
+            exit 0
           fi
+          # A Dependabot-authored PR is not enough: someone else may have pushed to
+          # its branch. Dependabot's own commits are authored by dependabot[bot] and
+          # committed and signed by GitHub (web-flow), so require all three on every
+          # commit, and require that the listing is complete (the API caps it).
+          commits_url="/repos/${GITHUB_REPOSITORY}/pulls/${num}/commits"
+          expected="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${num}" --jq '.commits')"
+          listed="$(gh api --paginate "${commits_url}" --jq '.[].sha' | wc -l)"
+          foreign="$(gh api --paginate "${commits_url}" --jq '.[] | select(.author.login != "dependabot[bot]" or .committer.login != "web-flow" or .commit.verification.verified != true) | "\(.sha[0:7]) author=\(.author.login // "none") committer=\(.committer.login // "none") verified=\(.commit.verification.verified)"')"
+          if [ "${listed}" != "${expected}" ] || [ -n "${foreign}" ]; then
+            echo "PR #${num} has commits that are not Dependabot's own (listed ${listed} of ${expected}); not arming auto-merge."
+            [ -z "${foreign}" ] || echo "${foreign}"
+            exit 0
+          fi
+          echo "Matched Dependabot PR #${num}; all ${listed} commits are Dependabot's own."
+          echo "number=${num}" >> "${GITHUB_OUTPUT}"
       # Mint a dedicated-App installation token, scoped to this repo and downscoped to the
       # three permissions arming auto-merge on a workflow-touching PR needs. Only reached
       # for a real Dependabot PR. This is the trusted default-branch workflow, so the key
@@ -121,10 +135,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
           for attempt in 1 2 3; do
-            if gh pr merge --auto --squash --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}"; then
+            if gh pr merge --auto --squash --match-head-commit "${HEAD_SHA}" --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}"; then
               exit 0
             fi
             if [ "${attempt}" -lt 3 ]; then
