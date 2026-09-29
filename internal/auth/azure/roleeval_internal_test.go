@@ -128,7 +128,7 @@ func TestRoleEvaluatorNotActions(t *testing.T) {
 func TestFetchRolePermissions(t *testing.T) {
 	t.Parallel()
 
-	rc := &roleClientMock{
+	rc := &RoleClientMock{
 		RolePermissionsFunc: func(_ context.Context, role string) (RolePermissions, error) {
 			if role == "Reader" {
 				return RolePermissions{Actions: []string{"*/read"}}, nil
@@ -148,7 +148,7 @@ func TestFetchRolePermissions(t *testing.T) {
 func TestFetchRolePermissionsFailClosed(t *testing.T) {
 	t.Parallel()
 
-	rc := &roleClientMock{
+	rc := &RoleClientMock{
 		RolePermissionsFunc: func(context.Context, string) (RolePermissions, error) {
 			return RolePermissions{}, errors.New("403")
 		},

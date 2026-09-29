@@ -21,7 +21,7 @@ type LazyDeps struct {
 	Catalog    Catalog
 	Dataset    datasetLookuper // iam-dataset GCP tier (nil → derive-only).
 	Roles      iamRolesClient
-	Identity   identityProber
+	Identity   IdentityProber
 	RootSource oauth2.TokenSource // operator ADC token source, injected raw.
 }
 

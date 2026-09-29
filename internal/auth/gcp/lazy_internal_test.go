@@ -9,7 +9,7 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// identityProberFunc is a func-to-interface adapter for identityProber.
+// identityProberFunc is a func-to-interface adapter for IdentityProber.
 type identityProberFunc func(ctx context.Context) (principal, projectID string, err error)
 
 func (f identityProberFunc) Probe(ctx context.Context) (string, string, error) { return f(ctx) }

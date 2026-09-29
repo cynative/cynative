@@ -38,10 +38,10 @@ func credTypeFromJSON(raw []byte) string {
 	return hdr.Type
 }
 
-// identityProber resolves the caller's identity facts: principal email and
+// IdentityProber resolves the caller's identity facts: principal email and
 // project ID. Real impl (FindDefaultCredentials + tokeninfo + metadata) in
 // identity_shell.go.
-type identityProber interface {
+type IdentityProber interface {
 	Probe(ctx context.Context) (principal, projectID string, err error)
 }
 

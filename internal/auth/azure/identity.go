@@ -15,9 +15,9 @@ type Identity struct {
 	TenantID  string
 }
 
-// identityProber resolves the caller's Identity from the home-tenant-authority
+// IdentityProber resolves the caller's Identity from the home-tenant-authority
 // ARM token. Real impl (token acquisition + DecodeClaims) in identity_shell.go.
-type identityProber interface {
+type IdentityProber interface {
 	Probe(ctx context.Context) (Identity, error)
 }
 

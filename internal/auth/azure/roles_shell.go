@@ -24,7 +24,7 @@ type RoleClientConfig struct {
 
 // roleDefinitionsClient is the armauthorization subset the shell needs: list (to
 // resolve roleName → definition). Mirrored locally so the seam is moq-free here
-// (gated tests hit roleClient via the moq in roleeval.go).
+// (gated tests hit RoleClient via the moq in roleeval.go).
 type roleDefinitionsClient interface {
 	NewListPager(scope string, opts *armauthorization.RoleDefinitionsClientListOptions) listPager
 }
@@ -41,7 +41,7 @@ type roleClientImpl struct {
 }
 
 // NewRoleClient builds the real role client. Excluded from the coverage gate.
-func NewRoleClient(cfg RoleClientConfig) (roleClient, error) {
+func NewRoleClient(cfg RoleClientConfig) (RoleClient, error) {
 	cred := cfg.Credential
 	if cred == nil {
 		dc, err := NewCredentialChain(defaultChainOptions(cfg))
@@ -99,7 +99,7 @@ func (a roleDefsAdapter) NewListPager(
 }
 
 // RoleID resolves roleNameOrID to its role-definition GUID (the Name field).
-// Implements roleClient; matches by GUID or properties.roleName case-insensitively.
+// Implements RoleClient; matches by GUID or properties.roleName case-insensitively.
 func (c *roleClientImpl) RoleID(ctx context.Context, roleNameOrID string) (string, error) {
 	pager := c.defs.NewListPager(c.scope, nil)
 	for pager.More() {
@@ -117,7 +117,7 @@ func (c *roleClientImpl) RoleID(ctx context.Context, roleNameOrID string) (strin
 
 // RolePermissions resolves roleNameOrID to its static permission set. A bare GUID
 // is matched against the definition name; otherwise it is matched against
-// properties.roleName (case-insensitive). Implements roleClient.
+// properties.roleName (case-insensitive). Implements RoleClient.
 func (c *roleClientImpl) RolePermissions(ctx context.Context, roleNameOrID string) (RolePermissions, error) {
 	pager := c.defs.NewListPager(c.scope, nil)
 	for pager.More() {

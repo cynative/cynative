@@ -49,7 +49,7 @@ type realIdentity struct {
 }
 
 // NewIdentityProber builds the real ADC identity prober. Excluded from the gate.
-func NewIdentityProber(cfg IdentityConfig) identityProber {
+func NewIdentityProber(cfg IdentityConfig) IdentityProber {
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: defaultIdentityTimeout} //nolint:exhaustruct // defaults fine
 	}

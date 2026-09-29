@@ -30,7 +30,7 @@ type realIdentity struct {
 
 // NewIdentityProber builds the real ADC-token identity prober. Excluded from
 // the coverage gate.
-func NewIdentityProber(cfg IdentityConfig) identityProber {
+func NewIdentityProber(cfg IdentityConfig) IdentityProber {
 	token := cfg.TokenFunc
 	if token == nil {
 		token = defaultAzureNewTokenSource(cfg.Credential)

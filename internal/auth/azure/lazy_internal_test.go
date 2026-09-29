@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// identityProberFunc is a func-to-interface adapter for identityProber.
+// identityProberFunc is a func-to-interface adapter for IdentityProber.
 type identityProberFunc func(ctx context.Context) (Identity, error)
 
 func (f identityProberFunc) Probe(ctx context.Context) (Identity, error) { return f(ctx) }
@@ -17,7 +17,7 @@ func happyLazyDeps(t *testing.T) LazyDeps {
 	return LazyDeps{
 		RoleDefinition: "Reader",
 		Catalog:        fakeCatalog(t), // from the catalog test helpers.
-		Roles: &roleClientMock{
+		Roles: &RoleClientMock{
 			RolePermissionsFunc: func(context.Context, string) (RolePermissions, error) {
 				return RolePermissions{Actions: []string{"*/read"}}, nil
 			},
@@ -62,7 +62,7 @@ func TestLazyResolveNotReady(t *testing.T) {
 		t.Parallel()
 		cause := errors.New("roleDefinitions 403")
 		deps := happyLazyDeps(t)
-		deps.Roles = &roleClientMock{
+		deps.Roles = &RoleClientMock{
 			RolePermissionsFunc: func(context.Context, string) (RolePermissions, error) {
 				return RolePermissions{}, cause
 			},

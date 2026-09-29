@@ -7,11 +7,11 @@ import (
 	"strings"
 )
 
-//go:generate go tool moq -out roles_mock_test.go . roleClient
+//go:generate go tool moq -out roles_mock_test.go . RoleClient
 
-// roleClient fetches the configured role definition's permissions and resolves
+// RoleClient fetches the configured role definition's permissions and resolves
 // its GUID. Real impl (roleDefinitions list) in roles_shell.go.
-type roleClient interface {
+type RoleClient interface {
 	RolePermissions(ctx context.Context, roleNameOrID string) (RolePermissions, error)
 	RoleID(ctx context.Context, roleNameOrID string) (string, error)
 }
@@ -79,7 +79,7 @@ func matchPattern(pattern, action string) bool {
 
 // FetchRolePermissions fetches the configured role definition's permissions,
 // failing closed on the fetch error (ErrRoleFetchFailed).
-func FetchRolePermissions(ctx context.Context, rc roleClient, roleDefinition string) (RolePermissions, error) {
+func FetchRolePermissions(ctx context.Context, rc RoleClient, roleDefinition string) (RolePermissions, error) {
 	perms, err := rc.RolePermissions(ctx, roleDefinition)
 	if err != nil {
 		return RolePermissions{}, fmt.Errorf("%w: %q: %w", ErrRoleFetchFailed, roleDefinition, err)

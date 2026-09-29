@@ -12,8 +12,8 @@ import (
 type LazyDeps struct {
 	RoleDefinition string
 	Catalog        Catalog
-	Roles          roleClient
-	Identity       identityProber
+	Roles          RoleClient
+	Identity       IdentityProber
 }
 
 // LazyResult is what LazyResolve hands back on success. Azure has no scoped
