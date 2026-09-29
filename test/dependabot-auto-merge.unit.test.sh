@@ -80,42 +80,51 @@ run_case() {
   log=$(cat "$fix/log")
 }
 
+# expect_out <description> <expected out>: compare the step's output file.
+expect_out() {
+  if [ "$out" = "$2" ]; then
+    pass "$1"
+  else
+    fail "$1: out=[$out] log=[$log]"
+  fi
+}
+
 open_pr="[{\"number\":7,\"state\":\"open\",\"base\":{\"ref\":\"main\"},\"user\":{\"login\":\"dependabot[bot]\"},\"head\":{\"sha\":\"$sha\"}}]"
 
 run_case clean "[$dep]" 1 "$open_pr"
-[ "$out" = "number=7" ] && pass "pure Dependabot PR is armed" || fail "pure Dependabot PR: out=[$out] log=[$log]"
+expect_out "pure Dependabot PR is armed" "number=7"
 
 run_case two "[$dep,$dep]" 2 "$open_pr"
-[ "$out" = "number=7" ] && pass "several Dependabot commits are armed" || fail "several Dependabot commits: out=[$out]"
+expect_out "several Dependabot commits are armed" "number=7"
 
 human='{"sha":"2222222222222222","author":{"login":"someone"},"committer":{"login":"someone"},"commit":{"verification":{"verified":false}}}'
 run_case mixed "[$dep,$human]" 2 "$open_pr"
-[ -z "$out" ] && pass "a pushed human commit is not armed" || fail "mixed commits armed: out=[$out]"
+expect_out "a pushed human commit is not armed" ""
 case "$log" in *"2222222 author=someone committer=someone verified=false"*"not arming"*|*"not arming"*"2222222 author=someone"*) pass "the skip names the offending commit" ;; *) fail "skip log: [$log]" ;; esac
 
 unverified='{"sha":"3333333333333333","author":{"login":"dependabot[bot]"},"committer":{"login":"web-flow"},"commit":{"verification":{"verified":false}}}'
 run_case unverified "[$unverified]" 1 "$open_pr"
-[ -z "$out" ] && pass "an unverified Dependabot-looking commit is not armed" || fail "unverified armed: out=[$out]"
+expect_out "an unverified Dependabot-looking commit is not armed" ""
 
 selfsigned='{"sha":"4444444444444444","author":{"login":"dependabot[bot]"},"committer":{"login":"someone"},"commit":{"verification":{"verified":true}}}'
 run_case committer "[$selfsigned]" 1 "$open_pr"
-[ -z "$out" ] && pass "a commit not committed by GitHub is not armed" || fail "committer armed: out=[$out]"
+expect_out "a commit not committed by GitHub is not armed" ""
 
 nologin='{"sha":"5555555555555555","author":null,"committer":{"login":"web-flow"},"commit":{"verification":{"verified":true}}}'
 run_case nologin "[$nologin]" 1 "$open_pr"
-[ -z "$out" ] && pass "a commit with no linked author is not armed" || fail "null author armed: out=[$out]"
+expect_out "a commit with no linked author is not armed" ""
 
 run_case truncated "[$dep]" 3 "$open_pr"
-[ -z "$out" ] && pass "an incomplete commit listing is not armed" || fail "truncated armed: out=[$out]"
+expect_out "an incomplete commit listing is not armed" ""
 case "$log" in *"listed 1 of 3"*) pass "the skip reports the counts" ;; *) fail "count log: [$log]" ;; esac
 
 run_case nopr "[$dep]" 1 '[]'
-[ -z "$out" ] && pass "no matching PR is not armed" || fail "no PR armed: out=[$out]"
+expect_out "no matching PR is not armed" ""
 case "$log" in *"nothing to do"*) pass "no matching PR logs and stops" ;; *) fail "no PR log: [$log]" ;; esac
 
 human_pr=$(printf '%s' "$open_pr" | sed 's/"dependabot\[bot\]"/"someone"/')
 run_case humanpr "[$dep]" 1 "$human_pr"
-[ -z "$out" ] && pass "a human-authored PR is not armed" || fail "human PR armed: out=[$out]"
+expect_out "a human-authored PR is not armed" ""
 
 if [ "$fails" -ne 0 ]; then
   printf '%s dependabot-auto-merge unit test(s) failed\n' "$fails" >&2
