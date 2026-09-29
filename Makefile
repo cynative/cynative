@@ -139,7 +139,8 @@ pwsh-test:
 # library unit tests (test/lib/e2e-guardrails.sh), the shared connector e2e shell
 # orchestration unit tests (test/lib/connector-e2e.sh: arbitrate + connector_run_phase
 # + e2e_pin_audit_size), the per-package changelog override renderer unit tests
-# (test/dependabot-override.unit.test.sh), the release asset-set assertion script's unit
+# (test/dependabot-override.unit.test.sh), the auto-merge commit-origin gate unit tests
+# (test/dependabot-auto-merge.unit.test.sh), the release asset-set assertion script's unit
 # tests (test/assert-assets.unit.test.sh: the fail-closed-on-missing-digest branches plus
 # the generate-mode artifact-type allowlist), the release signing contract pins
 # (test/release-signing.unit.test.sh: the .goreleaser.yaml signs stanza, the asset gate's
@@ -182,6 +183,7 @@ sh-test:
 	@sh test/render-scoop.unit.test.sh
 	@sh test/render-formula.unit.test.sh
 	@sh test/dependabot-override.unit.test.sh
+	@sh test/dependabot-auto-merge.unit.test.sh
 	@sh test/assert-assets.unit.test.sh
 	@sh test/release-signing.unit.test.sh
 	@sh test/tool-downloads.unit.test.sh
@@ -272,7 +274,7 @@ sh-test:
 	@# next line, a `#` inside a run block, an apostrophe desyncing a comment
 	@# stripper - cannot slip past or misfire (#216). It is unit-tested above.
 	@PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/ci/check-llm-smoke-secrets.py
-	@echo "OK: sh-test (install.sh unit + loopback smoke + proxy smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + agent witness selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
+	@echo "OK: sh-test (install.sh unit + loopback smoke + proxy smoke + e2e guardrails unit + connector-e2e unit + agents-catalog unit + render-scoop unit + render-formula unit + dependabot-override unit + dependabot-auto-merge unit + assert-assets unit + release-signing contract pins + ci-gate-contract unit + ci-gate-assert unit + llm-smoke roster unit + connector-e2e roster unit + llm-smoke secret-reference unit + retrigger unit + python syntax gate + connector audit parsers + shared-machinery selftest + agent witness selftest + gate trusted-caller pin check + release publish-gate pin check + release trigger pin + llm-smoke secret-reference pin)"
 
 SHELL_COMPLEXITY_MAX := 6
 
