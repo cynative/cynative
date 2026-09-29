@@ -26,7 +26,7 @@ jobs:
       # Only an open, base-main, Dependabot-authored PR whose current head is still exactly
       # that SHA, and whose every commit is Dependabot's own, proceeds; everything else
       # no-ops (human PRs, PRs someone else pushed to, push-triggered CI runs, or a stale
-      # run after a Dependabot rebase, which the new head's CI run re-arms), so the App
+      # run after a Dependabot rebase, which the new head's CI run re-decides), so the App
       # token is never even minted for them.
       - name: Resolve Dependabot PR
         id: pr
@@ -50,14 +50,14 @@ jobs:
           listed="$(gh api --paginate "${commits_url}" --jq '.[].sha' | wc -l)"
           foreign="$(gh api --paginate "${commits_url}" --jq '.[] | select(.author.login != "dependabot[bot]" or .committer.login != "web-flow" or .commit.verification.verified != true) | "\(.sha[0:7]) author=\(.author.login // "none") committer=\(.committer.login // "none") verified=\(.commit.verification.verified)"')"
           if [ "${listed}" != "${expected}" ] || [ -n "${foreign}" ]; then
-            echo "PR #${num} has commits that are not Dependabot's own (listed ${listed} of ${expected}); not arming auto-merge."
+            echo "PR #${num} has commits that are not Dependabot's own (listed ${listed} of ${expected}); not merging."
             [ -z "${foreign}" ] || echo "${foreign}"
             exit 0
           fi
           echo "Matched Dependabot PR #${num}; all ${listed} commits are Dependabot's own."
           echo "number=${num}" >> "${GITHUB_OUTPUT}"
       # Mint a dedicated-App installation token, scoped to this repo and downscoped to the
-      # three permissions arming auto-merge on a workflow-touching PR needs. Only reached
+      # three permissions merging a workflow-touching PR needs. Only reached
       # for a real Dependabot PR. This is the trusted default-branch workflow, so the key
       # is never handed to unreviewed PR code.
       - name: Generate App Token
@@ -121,31 +121,53 @@ jobs:
           fi
           gh api -X PATCH "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" -f body="${new_body}"
           echo "Wrote per-package override to PR #${PR_NUMBER}."
-      # Arm auto-merge with the App token so the completed merge is attributed to the App
-      # and its push to main triggers the Release Pipeline.
-      # Retried because the body edit above races the merge: the PATCH fires a
-      # pull_request_target "edited" event that re-runs the required "Validate PR title"
-      # check, while gh handles GitHub's refusal to arm auto-merge on an already-clean PR
-      # by falling back to a direct merge. When the re-run check registers between those
-      # two calls, the ruleset rejects the direct merge ("Validate PR title is expected")
-      # and nothing re-triggers this workflow. A later attempt converges either way:
-      # check still pending arms auto-merge, check finished direct-merges clean.
-      - name: Enable auto-merge
+      # Merge directly with the App token so the completed merge is attributed to the App
+      # and its push to main triggers the Release Pipeline. A direct merge, not auto-merge,
+      # so nothing stays armed for someone with write access to push to afterwards.
+      # --match-head-commit makes the merge fail unless the head is still exactly the SHA CI
+      # passed on, and the commit check above ran on that head. Retried because the body edit
+      # above races the merge: the PATCH fires a pull_request_target "edited" event that
+      # re-runs the required "Validate PR title" check, and the ruleset rejects a merge made
+      # while it is pending ("Validate PR title is expected"). Nothing re-triggers this
+      # workflow, so a later attempt, after the check finishes, is what merges. A moved
+      # head or a branch that is behind main is logged and not retried.
+      - name: Merge Dependabot PR
         if: steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if gh pr merge --auto --squash --match-head-commit "${HEAD_SHA}" --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}"; then
+          set -uo pipefail
+          attempts=5
+          for attempt in $(seq 1 "${attempts}"); do
+            if out="$(gh pr merge --squash --match-head-commit "${HEAD_SHA}" --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}" 2>&1)"; then
+              echo "${out}"
+              echo "Merged PR #${PR_NUMBER} at ${HEAD_SHA}."
               exit 0
             fi
-            if [ "${attempt}" -lt 3 ]; then
-              echo "Merge attempt ${attempt} rejected; retrying in 20s."
+            echo "${out}"
+            # Ask the PR why the merge failed rather than parse gh's message.
+            state="$(gh api "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '[.merged, .head.sha, .mergeable_state] | @tsv' 2>/dev/null)" || state=""
+            # shellcheck disable=SC2086
+            set -- ${state}
+            merged="${1:-}" head="${2:-}" mstate="${3:-}"
+            if [ "${merged}" = "true" ]; then
+              echo "PR #${PR_NUMBER} is already merged; nothing to do."
+              exit 0
+            fi
+            if [ -n "${head}" ] && [ "${head}" != "${HEAD_SHA}" ]; then
+              echo "Head moved to ${head} after CI passed on ${HEAD_SHA}; not merging. The new head's CI run decides."
+              exit 0
+            fi
+            if [ "${mstate}" = "behind" ]; then
+              echo "PR #${PR_NUMBER} is behind main and the ruleset requires an up-to-date branch; not merging until Dependabot rebases it."
+              exit 0
+            fi
+            if [ "${attempt}" -lt "${attempts}" ]; then
+              echo "Merge attempt ${attempt} failed (mergeable_state=${mstate:-unknown}); retrying in 20s."
               sleep 20
             fi
           done
-          echo "Auto-merge still rejected after 3 attempts." >&2
+          echo "Merge still failing after ${attempts} attempts." >&2
           exit 1
