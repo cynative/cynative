@@ -132,7 +132,8 @@ jobs:
       # above races the merge: the PATCH fires a pull_request_target "edited" event that
       # re-runs the required "Validate PR title" check, and the ruleset rejects a merge made
       # while it is pending ("Validate PR title is expected"). Nothing re-triggers this
-      # workflow, so a later attempt, after the check finishes, is what merges. A moved
+      # workflow, so a later attempt, after the check finishes, is what merges: twelve attempts,
+      # 20s apart, about 4 minutes against a check that usually takes 10 to 30s. A moved
       # head or a branch that is behind main is logged and not retried.
       - name: Merge Dependabot PR
         if: steps.pr.outputs.number != ''
@@ -142,7 +143,7 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -uo pipefail
-          attempts=5
+          attempts=12
           for attempt in $(seq 1 "${attempts}"); do
             if out="$(gh pr merge --squash --match-head-commit "${HEAD_SHA}" --repo "${GITHUB_REPOSITORY}" "${PR_NUMBER}" 2>&1)"; then
               echo "${out}"

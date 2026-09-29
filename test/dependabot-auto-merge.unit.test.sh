@@ -209,7 +209,8 @@ run_merge transient "$clean_pr" "fail:HTTP 502" ok
 expect "a transient error is retried and then merges" "$([ "$rc" = 0 ] && [ "$calls" = 2 ] && echo 1 || echo 0)"
 
 run_merge persistent "$clean_pr" "fail:HTTP 502"
-expect "a persistent error stops after five attempts and fails the job" "$([ "$rc" = 1 ] && [ "$calls" = 5 ] && echo 1 || echo 0)"
+max_attempts=$(sed -n 's/^attempts=\([0-9][0-9]*\)$/\1/p' "$tmp/merge.sh")
+expect "a persistent error stops after $max_attempts attempts and fails the job" "$([ "$rc" = 1 ] && [ "$calls" = "$max_attempts" ] && echo 1 || echo 0)"
 
 merged_pr="{\"merged\":true,\"head\":{\"sha\":\"$sha\"},\"mergeable_state\":\"unknown\"}"
 run_merge already "$merged_pr" "fail:Pull request is already merged"
