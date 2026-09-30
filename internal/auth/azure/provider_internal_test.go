@@ -238,3 +238,174 @@ func TestProviderValidateActionError(t *testing.T) {
 		t.Fatalf("expected ErrActionUnresolved, got %v", err)
 	}
 }
+
+// TestProviderAuthorizeSingleProviderRead locks the subscription and tenant
+// single-provider GETs through AuthorizeAction: Microsoft.Resources control-plane
+// reads allowed for Reader, and the claim, catalog, data-action, and role
+// denials on that same path.
+func TestProviderAuthorizeSingleProviderRead(t *testing.T) {
+	t.Parallel()
+
+	controlPlane := providerFakeCatalog{
+		verbs: map[string][]string{
+			"microsoft.resources|subscriptions/providers|read": {"read"},
+			"microsoft.resources|providers|read":               {"read"},
+		},
+	}
+	dataPlane := providerFakeCatalog{
+		verbs: controlPlane.verbs,
+		data: map[string]bool{
+			"microsoft.resources/subscriptions/providers/read": true,
+			"microsoft.resources/providers/read":               true,
+		},
+	}
+	reader := NewRoleEvaluator(RolePermissions{Actions: []string{"*/read"}})
+	denySubscription := NewRoleEvaluator(RolePermissions{
+		Actions:    []string{"*/read"},
+		NotActions: []string{"Microsoft.Resources/subscriptions/providers/read"},
+	})
+	denyTenant := NewRoleEvaluator(RolePermissions{
+		Actions:    []string{"*/read"},
+		NotActions: []string{"Microsoft.Resources/providers/read"},
+	})
+
+	const (
+		subscriptionURL = "https://management.azure.com/subscriptions/s/providers/Microsoft.ContainerService?api-version=2021-04-01"
+		tenantURL       = "https://management.azure.com/providers/Microsoft.Compute?api-version=2021-04-01"
+		mixedCaseURL    = "https://management.azure.com/Subscriptions/sub/Providers/Microsoft.Security?api-version=2020-06-01"
+	)
+
+	tests := []struct {
+		name    string
+		cat     Catalog
+		eval    RoleEvaluator
+		method  string
+		url     string
+		service string
+		wantErr error
+	}{
+		{
+			name:    "subscription single-provider read under Reader",
+			cat:     controlPlane,
+			eval:    reader,
+			method:  "GET",
+			url:     subscriptionURL,
+			service: "Microsoft.Resources",
+		},
+		{
+			name:    "tenant single-provider read under Reader",
+			cat:     controlPlane,
+			eval:    reader,
+			method:  "GET",
+			url:     tenantURL,
+			service: "Microsoft.Resources",
+		},
+		{
+			name:    "mixed-case single-provider read under Reader",
+			cat:     controlPlane,
+			eval:    reader,
+			method:  "GET",
+			url:     mixedCaseURL,
+			service: "Microsoft.Resources",
+		},
+		{
+			name:    "claiming the resource provider is a service mismatch",
+			cat:     controlPlane,
+			eval:    reader,
+			method:  "GET",
+			url:     subscriptionURL,
+			service: "Microsoft.ContainerService",
+			wantErr: ErrHostClaimMismatch,
+		},
+		{
+			name:    "subscription read missing from catalog",
+			cat:     providerValidateCatalog{providerFakeCatalog: controlPlane},
+			eval:    reader,
+			method:  "GET",
+			url:     subscriptionURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrActionUnresolved,
+		},
+		{
+			name:    "tenant read missing from catalog",
+			cat:     providerValidateCatalog{providerFakeCatalog: controlPlane},
+			eval:    reader,
+			method:  "GET",
+			url:     tenantURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrActionUnresolved,
+		},
+		{
+			name:    "subscription catalog lookup fails",
+			cat:     errorCatalog{},
+			eval:    reader,
+			method:  "GET",
+			url:     subscriptionURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrCatalogUnavailable,
+		},
+		{
+			name:    "tenant catalog lookup fails",
+			cat:     errorCatalog{},
+			eval:    reader,
+			method:  "GET",
+			url:     tenantURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrCatalogUnavailable,
+		},
+		{
+			name:    "subscription read marked data-action",
+			cat:     dataPlane,
+			eval:    reader,
+			method:  "GET",
+			url:     subscriptionURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrDataPlaneNotSupported,
+		},
+		{
+			name:    "tenant read marked data-action",
+			cat:     dataPlane,
+			eval:    reader,
+			method:  "GET",
+			url:     tenantURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrDataPlaneNotSupported,
+		},
+		{
+			name:    "role excludes the subscription read",
+			cat:     controlPlane,
+			eval:    denySubscription,
+			method:  "GET",
+			url:     subscriptionURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrActionDenied,
+		},
+		{
+			name:    "role excludes the tenant read",
+			cat:     controlPlane,
+			eval:    denyTenant,
+			method:  "GET",
+			url:     tenantURL,
+			service: "Microsoft.Resources",
+			wantErr: ErrActionDenied,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := NewProvider(tc.cat, tc.eval, "Reader")
+			err := p.AuthorizeAction(context.Background(), providerView(t, tc.method, tc.url), azArgs(t, tc.service))
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("AuthorizeAction err = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("AuthorizeAction allowed case errored: %v", err)
+			}
+		})
+	}
+}

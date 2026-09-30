@@ -112,6 +112,33 @@ func TestDeriveAction(t *testing.T) {
 			wantFull: "Microsoft.Compute/virtualMachines/read",
 		},
 		{
+			name: "subscription single-provider GET → Microsoft.Resources read",
+			v: deriveView(
+				t,
+				"GET",
+				"https://management.azure.com/subscriptions/s/providers/Microsoft.ContainerService?api-version=2021-04-01",
+			),
+			wantFull: "Microsoft.Resources/subscriptions/providers/read",
+		},
+		{
+			name: "tenant single-provider GET → Microsoft.Resources read",
+			v: deriveView(
+				t,
+				"GET",
+				"https://management.azure.com/Providers/Microsoft.Compute?api-version=2021-04-01",
+			),
+			wantFull: "Microsoft.Resources/providers/read",
+		},
+		{
+			name: "mixed-case provider segment keeps the resource-tail action",
+			v: deriveView(
+				t,
+				"GET",
+				"https://management.azure.com/Subscriptions/s/Providers/Microsoft.Compute/virtualMachines?api-version=2023-03-01",
+			),
+			wantFull: "Microsoft.Compute/virtualMachines/read",
+		},
+		{
 			name: "PUT → write",
 			v: deriveView(
 				t,
@@ -372,6 +399,12 @@ func TestDeriveAction_emptySegmentRejected(t *testing.T) {
 		"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/virtualMachines//extensions/e",
 		// Empty segment in a provider-less path.
 		"https://management.azure.com/subscriptions//resourceGroups",
+		// Empty segment on the subscription single-provider route.
+		"https://management.azure.com/subscriptions/s/providers//Microsoft.ContainerService",
+		// Empty segment on the tenant single-provider route.
+		"https://management.azure.com/providers//Microsoft.Compute",
+		// Empty segment in the subscription id of a single-provider read.
+		"https://management.azure.com/subscriptions//s/providers/Microsoft.Security",
 	}
 	for _, u := range cases {
 		t.Run(u, func(t *testing.T) {
@@ -397,6 +430,22 @@ func TestDeriveAction_nonCanonicalPathRejected(t *testing.T) {
 			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/./virtualMachines/vm",
 		},
 		{"percent-encoded slash", "https://management.azure.com/subscriptions/s%2fresourceGroups"},
+		{
+			"dot segment on subscription single-provider",
+			"https://management.azure.com/subscriptions/s/providers/./Microsoft.ContainerService",
+		},
+		{
+			"dot-dot segment on tenant single-provider",
+			"https://management.azure.com/providers/../Microsoft.Compute",
+		},
+		{
+			"percent-encoded slash on subscription single-provider",
+			"https://management.azure.com/subscriptions/s/providers/Microsoft.Compute%2FvirtualMachines",
+		},
+		{
+			"percent-encoded slash on tenant single-provider",
+			"https://management.azure.com/providers/Microsoft.Security%2Fread",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -446,6 +495,18 @@ func TestProviderLessAction_routeTable(t *testing.T) {
 		},
 		{"https://management.azure.com/subscriptions/s/locations", "Microsoft.Resources/subscriptions/locations/read"},
 		{"https://management.azure.com/subscriptions/s/providers", "Microsoft.Resources/subscriptions/providers/read"},
+		{
+			"https://management.azure.com/subscriptions/sub/providers/Microsoft.ContainerService?api-version=2021-04-01",
+			"Microsoft.Resources/subscriptions/providers/read",
+		},
+		{
+			"https://management.azure.com/subscriptions/sub/Providers/Microsoft.Compute?api-version=2020-10-01",
+			"Microsoft.Resources/subscriptions/providers/read",
+		},
+		{
+			"https://management.azure.com/Subscriptions/sub/providers/MiCrOsOfT.sEcUrItY?api-version=2019-05-10",
+			"Microsoft.Resources/subscriptions/providers/read",
+		},
 		{"https://management.azure.com/subscriptions/s/tagNames", "Microsoft.Resources/subscriptions/tagNames/read"},
 		{"https://management.azure.com/subscriptions/s/resources", "Microsoft.Resources/subscriptions/resources/read"},
 		{
@@ -454,6 +515,14 @@ func TestProviderLessAction_routeTable(t *testing.T) {
 		},
 		{"https://management.azure.com/tenants", "Microsoft.Resources/tenants/read"},
 		{"https://management.azure.com/providers", "Microsoft.Resources/providers/read"},
+		{
+			"https://management.azure.com/providers/Microsoft.ContainerRegistry?api-version=2021-04-01",
+			"Microsoft.Resources/providers/read",
+		},
+		{
+			"https://management.azure.com/Providers/Microsoft.KeyVault?api-version=2022-07-01",
+			"Microsoft.Resources/providers/read",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.url, func(t *testing.T) {
@@ -478,6 +547,101 @@ func TestProviderLessAction_failsClosed(t *testing.T) {
 		{"bare resourcegroups (not a real route)", "GET", "https://management.azure.com/resourcegroups"},
 		{"bare locations (not a real route)", "GET", "https://management.azure.com/locations"},
 		{"non-GET method", "POST", "https://management.azure.com/subscriptions/s/resourceGroups"},
+		{
+			name:   "POST subscription register",
+			method: "POST",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.ContainerService/register?api-version=2021-04-01",
+		},
+		{
+			name:   "POST subscription unregister",
+			method: "POST",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/unregister?api-version=2021-04-01",
+		},
+		{
+			name:   "POST tenant register",
+			method: "POST",
+			url:    "https://management.azure.com/providers/Microsoft.Security/register?api-version=2021-04-01",
+		},
+		{
+			name:   "POST tenant unregister",
+			method: "POST",
+			url:    "https://management.azure.com/providers/Microsoft.Network/unregister?api-version=2021-04-01",
+		},
+		{
+			name:   "POST subscription single-provider",
+			method: "POST",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.ContainerService?api-version=2021-04-01",
+		},
+		{
+			name:   "PUT subscription single-provider",
+			method: "PUT",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.ContainerService",
+		},
+		{
+			name:   "PATCH subscription single-provider",
+			method: "PATCH",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute",
+		},
+		{
+			name:   "DELETE subscription single-provider",
+			method: "DELETE",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.Security",
+		},
+		{
+			name:   "HEAD subscription single-provider",
+			method: "HEAD",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.ContainerRegistry",
+		},
+		{
+			name:   "POST tenant single-provider",
+			method: "POST",
+			url:    "https://management.azure.com/providers/Microsoft.Compute?api-version=2021-04-01",
+		},
+		{
+			name:   "PUT tenant single-provider",
+			method: "PUT",
+			url:    "https://management.azure.com/providers/Microsoft.Security",
+		},
+		{
+			name:   "PATCH tenant single-provider",
+			method: "PATCH",
+			url:    "https://management.azure.com/providers/Microsoft.KeyVault",
+		},
+		{
+			name:   "DELETE tenant single-provider",
+			method: "DELETE",
+			url:    "https://management.azure.com/providers/Microsoft.Network",
+		},
+		{
+			name:   "HEAD tenant single-provider",
+			method: "HEAD",
+			url:    "https://management.azure.com/providers/Microsoft.ContainerService",
+		},
+		{
+			name:   "resource-group single-provider scope",
+			method: "GET",
+			url:    "https://management.azure.com/subscriptions/s/resourceGroups/rg/providers/Microsoft.Compute",
+		},
+		{
+			name:   "tenants single-provider scope",
+			method: "GET",
+			url:    "https://management.azure.com/tenants/t/providers/Microsoft.Compute",
+		},
+		{
+			name:   "subscription single-provider unknown child",
+			method: "GET",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/widgets",
+		},
+		{
+			name:   "tenant single-provider unknown child",
+			method: "GET",
+			url:    "https://management.azure.com/providers/Microsoft.Compute/widgets",
+		},
+		{
+			name:   "subscription single-provider two unknown segments",
+			method: "GET",
+			url:    "https://management.azure.com/subscriptions/s/providers/Microsoft.Compute/widgets/w",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -610,6 +774,14 @@ func TestProviderLessAction_emittedActionsValidateAgainstCatalog(t *testing.T) {
 		},
 		{"https://management.azure.com/subscriptions/s/locations", "Microsoft.Resources/subscriptions/locations/read"},
 		{"https://management.azure.com/subscriptions/s/providers", "Microsoft.Resources/subscriptions/providers/read"},
+		{
+			"https://management.azure.com/subscriptions/s/Providers/Microsoft.ContainerService?api-version=2021-04-01",
+			"Microsoft.Resources/subscriptions/providers/read",
+		},
+		{
+			"https://management.azure.com/Providers/Microsoft.Security?api-version=2022-01-01",
+			"Microsoft.Resources/providers/read",
+		},
 		{"https://management.azure.com/subscriptions/s/tagNames", "Microsoft.Resources/subscriptions/tagNames/read"},
 		{"https://management.azure.com/subscriptions/s/resources", "Microsoft.Resources/subscriptions/resources/read"},
 		{

@@ -56,8 +56,10 @@ var pollSegments = map[string]bool{"operations": true, "operationstatuses": true
 const typeNameStride = 2
 
 // DeriveAction resolves v to exactly one candidate RBAC Action, deny-on-ambiguity.
-// Pure modulo the injected Catalog port. The service is never read from the claim -
-// the namespace comes from the URL path (the last /providers/ segment).
+// Pure modulo the injected Catalog port. The service is never read from the claim.
+// When a resource tail follows the last /providers/{namespace}, that namespace is
+// the service; a final namespace with no resource segment is a provider-less
+// Microsoft.Resources read.
 func DeriveAction(ctx context.Context, v authreq.View, cat Catalog) (Action, error) {
 	method := strings.ToUpper(v.Method)
 	segs := splitPath(v.Path)
@@ -89,7 +91,10 @@ func DeriveAction(ctx context.Context, v authreq.View, cat Catalog) (Action, err
 }
 
 // resolveNamespace returns the segment after the LAST /providers/ and the
-// segments that follow it. ok=false signals a provider-less root.
+// segments that follow it. ok=false signals a provider-less path: no
+// /providers/ segment, a bare provider list, or a final namespace with no
+// resource segment after it (the single-provider read). A non-empty resource
+// tail keeps the last-/providers/ selection.
 func resolveNamespace(segs []string) (string, []string, bool) {
 	last := -1
 	for i, s := range segs {
@@ -97,7 +102,9 @@ func resolveNamespace(segs []string) (string, []string, bool) {
 			last = i
 		}
 	}
-	if last < 0 || last+1 >= len(segs) {
+	// last+1 is the namespace. Without a resource segment at last+2 the path is
+	// provider-less rather than a service-namespace resource read.
+	if last < 0 || last+2 >= len(segs) {
 		return "", nil, false
 	}
 	return segs[last+1], segs[last+2:], true
@@ -111,11 +118,13 @@ type providerLessRoute struct {
 	resource string
 }
 
-// providerLessRoutes is the exact set of GET routes addressed by the bare ARM
-// hierarchy (no /providers/{namespace}/ segment). Every entry emits a
-// Microsoft.Resources read; everything else fails closed. Template literals are
-// lowercase (matchTemplate compares case-insensitively); resource is the
-// canonical-cased Action resource-type path.
+// providerLessRoutes is the exact set of GET routes with no resource segment
+// after the last /providers/{namespace}. A bare provider list and a
+// single-provider read (subscriptions/{}/providers/{} and providers/{}) are both
+// provider-less and emit a Microsoft.Resources read; a non-empty resource tail
+// is selected by resolveNamespace instead and is not in this table. Everything
+// else fails closed. Template literals are lowercase (matchTemplate compares
+// case-insensitively); resource is the canonical-cased Action resource-type path.
 //
 //nolint:gochecknoglobals // stateless provider-less ARM route table, the documented exception.
 var providerLessRoutes = []providerLessRoute{
@@ -125,18 +134,22 @@ var providerLessRoutes = []providerLessRoute{
 	{[]string{segSubscriptions, "{}", segResourceGroups, "{}"}, "subscriptions/resourceGroups"},
 	{[]string{segSubscriptions, "{}", "locations"}, "subscriptions/locations"},
 	{[]string{segSubscriptions, "{}", segProviders}, "subscriptions/providers"},
+	{[]string{segSubscriptions, "{}", segProviders, "{}"}, "subscriptions/providers"},
 	{[]string{segSubscriptions, "{}", "tagnames"}, "subscriptions/tagNames"},
 	{[]string{segSubscriptions, "{}", "resources"}, "subscriptions/resources"},
 	{[]string{segSubscriptions, "{}", segResourceGroups, "{}", "resources"}, "subscriptions/resourceGroups/resources"},
 	{[]string{"tenants"}, "tenants"},
 	{[]string{segProviders}, "providers"},
+	{[]string{segProviders, "{}"}, "providers"},
 }
 
 // providerLessAction matches the request path against the exact provider-less GET
-// route table, emitting the documented Microsoft.Resources read. Non-GET, no
-// match, or a length/segment mismatch fails closed. managementGroups is reached
-// only via the provider-ful /providers/Microsoft.Management/managementGroups path,
-// so it is intentionally absent here.
+// route table, emitting the documented Microsoft.Resources read. A final
+// namespace with no resource segment is provider-less (the single-provider
+// read); a path with a resource tail is not. Non-GET, no match, or a
+// length/segment mismatch fails closed. managementGroups is reached only via
+// the provider-ful /providers/Microsoft.Management/managementGroups path, so it
+// is intentionally absent here.
 func providerLessAction(method string, segs []string) (Action, error) {
 	if method != http.MethodGet {
 		return Action{}, fmt.Errorf("%w: provider-less %s (only GET reads are mapped)", ErrActionUnresolved, method)
