@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.3](https://github.com/cynative/cynative/compare/v1.12.2...v1.12.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* accept Scoop's renamed install record in the scoop smoke ([#353](https://github.com/cynative/cynative/issues/353)) ([d957c11](https://github.com/cynative/cynative/commit/d957c11486df2cdd33d9404269e03cf0f729f8ec))
+
 ## [1.12.2](https://github.com/cynative/cynative/compare/v1.12.1...v1.12.2) (2026-09-30)
 
 
