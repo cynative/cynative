@@ -214,9 +214,19 @@ try {
     # bucket. Only a polluted local machine with a same-named app in another
     # bucket could violate this (the fresh runner has just main + cynative),
     # but green-lighting the wrong channel would defeat the smoke.
-    $installJsonPath = Join-Path $appDir 'current\install.json'
-    if (-not (Test-Path -LiteralPath $installJsonPath)) {
-        throw "install metadata missing: $installJsonPath"
+    #
+    # Scoop 0.6.0 renamed its install record from install.json to
+    # scoop-install.json (ScoopInstaller/Scoop#6732) so it no longer overwrites
+    # a file an app ships; readers fall back to the old name for older
+    # installs. Read the new name first and the old one second, so the smoke
+    # holds on both the runner's fresh Scoop and an older one.
+    $installJsonPath = $null
+    foreach ($name in @('scoop-install.json', 'install.json')) {
+        $candidate = Join-Path $appDir "current\$name"
+        if (Test-Path -LiteralPath $candidate) { $installJsonPath = $candidate; break }
+    }
+    if (-not $installJsonPath) {
+        throw "install metadata missing: neither scoop-install.json nor install.json under $(Join-Path $appDir 'current')"
     }
     $installRaw = Get-Content -LiteralPath $installJsonPath -Raw
     if ($installRaw -notmatch '^\s*\{') {
