@@ -76,8 +76,7 @@ func (t *apiReferenceTool) Info() *schema.ToolInfo { return t.info }
 func (t *apiReferenceTool) Run(ctx context.Context, argumentsInJSON string) (string, error) {
 	var args apiReferenceArgs
 	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-		//nolint:nilerr // a bad argument is a result the model can correct, never a Go error.
-		return rejected(ctx, "invalid arguments: "+err.Error()), nil
+		return rejected(ctx, "invalid arguments: "+err.Error()), nil //nolint:nilerr // a result, not a Go error.
 	}
 	if args.Operation == "" {
 		return rejected(ctx, "operation is required"), nil
@@ -127,8 +126,9 @@ func capped(out referenceOutput) string {
 		return s
 	}
 	ref := *out.Reference
-	ref.Inputs = slices.DeleteFunc(slices.Clone(ref.Inputs), func(in apiref.Input) bool { return !in.Required })
-	ref.InputsTruncated = true
+	kept := slices.DeleteFunc(slices.Clone(ref.Inputs), func(in apiref.Input) bool { return !in.Required })
+	ref.InputsTruncated = ref.InputsTruncated || len(kept) < len(ref.Inputs)
+	ref.Inputs = kept
 	out.Reference = &ref
 	if s = encode(out); len(s) <= apiref.MaxOutputBytes {
 		return s

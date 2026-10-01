@@ -351,6 +351,9 @@ func checkDescriptionStage(t *testing.T, _ *apiref.Reference, got string) {
 	if strings.Contains(got, `"description"`) || !strings.Contains(got, `"summary"`) {
 		t.Errorf("descriptions or summary wrong: %.200s", got)
 	}
+	if strings.Contains(got, `"inputs_truncated":true`) {
+		t.Errorf("inputs_truncated set though no optional input was dropped: %.200s", got)
+	}
 }
 
 func checkSummaryStage(t *testing.T, _ *apiref.Reference, got string) {
