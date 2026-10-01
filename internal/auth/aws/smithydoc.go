@@ -28,28 +28,41 @@ const (
 )
 
 const (
-	traitDocumentation = "smithy.api#documentation"
-	traitRequired      = "smithy.api#required"
-	traitHTTPLabel     = "smithy.api#httpLabel"
-	traitHTTPQuery     = "smithy.api#httpQuery"
-	traitHTTPHeader    = "smithy.api#httpHeader"
-	traitHTTPPayload   = "smithy.api#httpPayload"
-	traitXMLName       = "smithy.api#xmlName"
-	traitXMLFlattened  = "smithy.api#xmlFlattened"
-	traitJSONName      = "smithy.api#jsonName"
-	traitStreaming     = "smithy.api#streaming"
-	traitPaginated     = "smithy.api#paginated"
-	traitHTTP          = "smithy.api#http"
-	traitRuleSet       = "smithy.rules#endpointRuleSet"
+	traitDocumentation     = "smithy.api#documentation"
+	traitRequired          = "smithy.api#required"
+	traitHTTPLabel         = "smithy.api#httpLabel"
+	traitHTTPQuery         = "smithy.api#httpQuery"
+	traitHTTPHeader        = "smithy.api#httpHeader"
+	traitHTTPPayload       = "smithy.api#httpPayload"
+	traitHTTPQueryParams   = "smithy.api#httpQueryParams"
+	traitHTTPPrefixHeaders = "smithy.api#httpPrefixHeaders"
+	traitXMLName           = "smithy.api#xmlName"
+	traitXMLFlattened      = "smithy.api#xmlFlattened"
+	traitJSONName          = "smithy.api#jsonName"
+	traitStreaming         = "smithy.api#streaming"
+	traitPaginated         = "smithy.api#paginated"
+	traitHTTP              = "smithy.api#http"
+	traitRuleSet           = "smithy.rules#endpointRuleSet"
 )
 
 // Traits that bind a member to something other than the body, and the scalar types the renderer can fill.
 //
 //nolint:gochecknoglobals // immutable lookup tables.
 var (
-	specialInputTraits = []string{"smithy.api#httpQueryParams", "smithy.api#httpPrefixHeaders", traitHTTPPayload}
-	boundOutputTraits  = []string{traitHTTPHeader, "smithy.api#httpResponseCode", "smithy.api#httpPrefixHeaders"}
-	scalarTypes        = []string{"string", "enum", "integer", "long", "short", "byte", "boolean", "float", "double"}
+	specialInputTraits = []string{traitHTTPQueryParams, traitHTTPPrefixHeaders, traitHTTPPayload}
+	boundOutputTraits  = []string{traitHTTPHeader, "smithy.api#httpResponseCode", traitHTTPPrefixHeaders}
+	scalarTypes        = []string{
+		"string",
+		"enum",
+		"integer",
+		"intEnum",
+		"long",
+		"short",
+		"byte",
+		"boolean",
+		"float",
+		"double",
+	}
 )
 
 // docTarget is a Smithy shape reference.
@@ -341,6 +354,10 @@ func (m *DocModel) locate(name string, tr map[string]json.RawMessage) (apiref.Lo
 	switch q, h := traitName(tr[traitHTTPQuery]), traitName(tr[traitHTTPHeader]); {
 	case has(tr, traitHTTPLabel):
 		return apiref.LocationPath, name, special
+	case has(tr, traitHTTPQueryParams):
+		return apiref.LocationQuery, name, special
+	case has(tr, traitHTTPPrefixHeaders):
+		return apiref.LocationHeader, name, special
 	case q != "":
 		return apiref.LocationQuery, q, special
 	case h != "":
@@ -397,7 +414,8 @@ func (m *DocModel) response(ref *apiref.Reference, op docShape, name string) {
 	case len(body) == 0:
 		ref.Response = apiref.Response{Encoding: "none", Parse: "no modeled body fields; read the status and headers"}
 	case m.sm.Protocol == ProtocolRestXML || m.sm.Protocol == ProtocolAWSQuery:
-		ref.Response = apiref.Response{Encoding: encodingXML, Parse: m.xmlParse(op, out, body, name)}
+		st, names, root := m.responseDoc(op, out, body, name)
+		ref.Response = apiref.Response{Encoding: encodingXML, Parse: m.xmlParse(root, st, names)}
 	default:
 		ref.Response = apiref.Response{Encoding: "json", Parse: "JSON.parse(response.body)"}
 	}
@@ -417,19 +435,38 @@ func (m *DocModel) bodyMembers(out docShape) []string {
 	return body
 }
 
-// rawPayload names the first body member that is an unparsed payload, or "" when there is none.
+// rawPayload names the first body member that is an unparsed payload, or "" when there is none. A structure or
+// union payload is a document, not raw.
 func (m *DocModel) rawPayload(out docShape, body []string) string {
 	for _, name := range body {
 		mem := out.Members[name]
-		if has(mem.Traits, traitHTTPPayload) || has(m.shapes[mem.Target].Traits, traitStreaming) {
+		target := m.shapes[mem.Target]
+		document := target.Type == "structure" || target.Type == "union"
+		if has(target.Traits, traitStreaming) || (has(mem.Traits, traitHTTPPayload) && !document) {
 			return name
 		}
 	}
 	return ""
 }
 
-// xmlParse describes where the result element sits and how each list inside it parses.
-func (m *DocModel) xmlParse(op, out docShape, body []string, name string) string {
+// responseDoc finds the document the body carries: the output structure itself or, when a member is the
+// httpPayload, that member's target shape. It returns the shape, its body member names and the root element.
+func (m *DocModel) responseDoc(op, out docShape, body []string, name string) (docShape, []string, string) {
+	for _, n := range body {
+		mem := out.Members[n]
+		if !has(mem.Traits, traitHTTPPayload) {
+			continue
+		}
+		st := m.shapes[mem.Target]
+		root := traitName(mem.Traits[traitXMLName])
+		if root == "" {
+			root = traitName(st.Traits[traitXMLName])
+		}
+		if root == "" {
+			root = shortName(mem.Target)
+		}
+		return st, sortedMembers(st.Members), root
+	}
 	root := name + "Response." + name + "Result"
 	if m.sm.Protocol == ProtocolRestXML {
 		root = traitName(out.Traits[traitXMLName])
@@ -437,10 +474,15 @@ func (m *DocModel) xmlParse(op, out docShape, body []string, name string) string
 			root = shortName(op.Output.Target)
 		}
 	}
+	return out, body, root
+}
+
+// xmlParse describes where the result element sits and how each list inside it parses.
+func (m *DocModel) xmlParse(root string, st docShape, body []string) string {
 	var b strings.Builder
 	b.WriteString(xmlLeafGuidance + " Result element: " + root + ".")
 	for _, member := range body {
-		mem := out.Members[member]
+		mem := st.Members[member]
 		list := m.shapes[mem.Target]
 		if list.Type != typeList {
 			continue

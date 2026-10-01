@@ -497,10 +497,9 @@ func TestDocReference_PaginationMerge(t *testing.T) {
 
 	svc := `{"inputToken":"NextToken","outputToken":"NextToken","pageSize":"MaxResults"}`
 	cases := []struct {
-		name     string
-		model    string
-		want     apiref.Pagination
-		wantTrue bool
+		name  string
+		model string
+		want  apiref.Pagination
 	}{
 		{
 			"items from the operation",
@@ -512,24 +511,20 @@ func TestDocReference_PaginationMerge(t *testing.T) {
 				Items:       "Things",
 				PageSize:    "MaxResults",
 			},
-			true,
 		},
 		{
 			"no trait is unspecified", pageModel(svc, ""),
 			apiref.Pagination{Style: apiref.PaginationUnspecified},
-			true,
 		},
 		{
 			"operation overrides the input token", pageModel(svc, `{"inputToken":"Cursor"}`),
 			apiref.Pagination{
 				Style: "token", InputToken: "Cursor", OutputToken: "NextToken", PageSize: "MaxResults",
 			},
-			true,
 		},
 		{
 			"no service trait", pageModel("", `{"inputToken":"A","outputToken":"B"}`),
 			apiref.Pagination{Style: "token", InputToken: "A", OutputToken: "B"},
-			true,
 		},
 	}
 	for _, c := range cases {
@@ -593,5 +588,113 @@ func TestProtocolNameAndDocSupported(t *testing.T) {
 		if got := aws.DocSupported(c.p); got != c.supported {
 			t.Errorf("DocSupported(%d) = %v, want %v", c.p, got, c.supported)
 		}
+	}
+}
+
+func withDistShapes(model string) string {
+	return strings.Replace(model, `"ex#Str":`, distShapes+`,"ex#Str":`, 1)
+}
+
+const distShapes = `"ex#DistList":{"type":"structure","members":{"Items":{"target":"ex#ItemList"}}},` +
+	`"ex#ItemList":{"type":"list","member":{"target":"smithy.api#String","traits":{"smithy.api#xmlName":"Item"}}},` +
+	`"ex#Doc":{"type":"document"}`
+
+func TestDocReference_Payloads(t *testing.T) {
+	t.Parallel()
+
+	payload := func(target string) string {
+		return `"Dist":{"target":"` + target + `","traits":{"smithy.api#httpPayload":{}}}`
+	}
+	cases := []struct {
+		name         string
+		model        string
+		wantEncoding string
+		wantParse    []string
+		wantFound    bool
+	}{
+		{
+			"restXml structure payload",
+			withDistShapes(exModel("aws.protocols#restXml", "/op", "", payload("ex#DistList"))),
+			"xml",
+			[]string{"Result element: DistList.", "List Items: Items.Item"},
+			true,
+		},
+		{
+			"restXml payload member xmlName wins",
+			withDistShapes(exModel("aws.protocols#restXml", "/op", "", strings.Replace(payload("ex#DistList"),
+				`"traits":{`, `"traits":{"smithy.api#xmlName":"Root",`, 1))),
+			"xml",
+			[]string{"Result element: Root."},
+			true,
+		},
+		{
+			"restXml target xmlName",
+			strings.Replace(withDistShapes(exModel("aws.protocols#restXml", "/op", "", payload("ex#DistList"))),
+				`"ex#DistList":{"type":"structure",`,
+				`"ex#DistList":{"type":"structure","traits":{"smithy.api#xmlName":"Dist"},`, 1),
+			"xml",
+			[]string{"Result element: Dist."},
+			true,
+		},
+		{
+			"restJson1 structure payload",
+			withDistShapes(exModel("aws.protocols#restJson1", "/op", "", payload("ex#DistList"))),
+			"json",
+			[]string{"JSON.parse(response.body)"},
+			true,
+		},
+		{
+			"string payload is raw",
+			restJSONModel("", payload("ex#Str")),
+			"raw", nil, false,
+		},
+		{
+			"document payload is raw",
+			withDistShapes(restJSONModel("", payload("ex#Doc"))),
+			"raw", nil, false,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			ref := exRef(t, c.model)
+			if ref.Response.Encoding != c.wantEncoding ||
+				(apiref.OutcomeOf(ref) == apiref.OutcomeFound) != c.wantFound {
+				t.Fatalf("response %+v gaps %q", ref.Response, ref.Gaps)
+			}
+			for _, want := range c.wantParse {
+				if !strings.Contains(ref.Response.Parse, want) {
+					t.Errorf("parse missing %q: %s", want, ref.Response.Parse)
+				}
+			}
+		})
+	}
+}
+
+func TestDocReference_BoundMaps(t *testing.T) {
+	t.Parallel()
+
+	ref := exRef(t, restJSONModel(`"Q":{"target":"ex#Str","traits":{"smithy.api#required":{},`+
+		`"smithy.api#httpQueryParams":{}}},"H":{"target":"ex#Str","traits":{"smithy.api#required":{},`+
+		`"smithy.api#httpPrefixHeaders":"x-meta-"}}`, ""))
+	q, _ := inputNamed(ref, "Q")
+	h, _ := inputNamed(ref, "H")
+	if q.Location != apiref.LocationQuery || q.Renderable || h.Location != apiref.LocationHeader || h.Renderable {
+		t.Errorf("Q = %+v, H = %+v", q, h)
+	}
+	if ref.BodyEncoding != apiref.BodyNone || len(ref.FixedHeaders) != 0 {
+		t.Errorf("body %q headers %+v", ref.BodyEncoding, ref.FixedHeaders)
+	}
+}
+
+func TestDocReference_IntEnumInput(t *testing.T) {
+	t.Parallel()
+
+	model := strings.Replace(restJSONModel(`"E":{"target":"ex#Level","traits":{"smithy.api#required":{}}}`, ""),
+		`"ex#Str":`, `"ex#Level":{"type":"intEnum"},"ex#Str":`, 1)
+	in, _ := inputNamed(exRef(t, model), "E")
+	if in.Type != "intEnum" || !in.Renderable {
+		t.Errorf("E = %+v", in)
 	}
 }
