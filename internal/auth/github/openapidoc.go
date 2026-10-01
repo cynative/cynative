@@ -70,15 +70,15 @@ type OperationDocs struct {
 	Ops     map[string]OperationDoc `json:"o"`
 }
 
+// docRawParam keeps every field except $ref untyped, so one parameter with an odd value (a non-string
+// description, say) degrades only that field instead of rejecting the whole document.
 type docRawParam struct {
 	Ref         string `json:"$ref"`
-	Name        string `json:"name"`
-	In          string `json:"in"`
-	Required    bool   `json:"required"`
-	Description string `json:"description"`
-	Schema      struct {
-		Type any `json:"type"`
-	} `json:"schema"`
+	Name        any    `json:"name"`
+	In          any    `json:"in"`
+	Required    any    `json:"required"`
+	Description any    `json:"description"`
+	Schema      any    `json:"schema"`
 }
 
 type docRawProp struct {
@@ -205,18 +205,30 @@ func resolveParams(doc *docRawDoc, in []docRawParam) []DocParam {
 			}
 		}
 		out = append(out, DocParam{
-			Name:        p.Name,
-			In:          p.In,
-			Type:        typeName(p.Schema.Type),
-			Required:    p.Required,
-			Description: apiref.StripMarkup(p.Description, apiref.MaxInputDescription),
+			Name:        text(p.Name),
+			In:          text(p.In),
+			Type:        typeName(schemaType(p.Schema)),
+			Required:    p.Required == true,
+			Description: apiref.StripMarkup(text(p.Description), apiref.MaxInputDescription),
 		})
 	}
 	return out
 }
 
+// text returns v when it is a string and "" otherwise.
+func text(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// schemaType returns the "type" of a parameter schema, or nil when the schema is not an object.
+func schemaType(schema any) any {
+	m, _ := schema.(map[string]any)
+	return m["type"]
+}
+
 func typeName(t any) string {
-	if s, _ := t.(string); s != "" {
+	if s := text(t); s != "" {
 		return s
 	}
 	return docUnknownType

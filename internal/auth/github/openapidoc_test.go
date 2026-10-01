@@ -275,6 +275,26 @@ func TestDocsDistill_MalformedInlineSchemaOnlyAffectsItsOperation(t *testing.T) 
 	}
 }
 
+func TestDocsDistill_OddParameterValuesDegradeOnlyThatField(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(t, synthHead+`"/x":{"get":{"operationId":"x/get","parameters":[
+		{"name":"a","in":"query","required":true,"description":7,"schema":{"type":"string"}},
+		{"name":"b","in":"query","description":"fine","schema":"oops"},
+		{"name":5,"in":["q"],"required":"yes","schema":null}]}}}}`)
+	res := d.Reference(apiref.Query{Operation: "x/get"})
+	if res.Outcome != apiref.OutcomeFound {
+		t.Fatalf("res = %+v", res)
+	}
+	a, ok := inputNamed(res.Reference, "a")
+	if !ok || a.Description != "" || !a.Required || a.Type != "string" {
+		t.Errorf("a = %+v", a)
+	}
+	b, ok := inputNamed(res.Reference, "b")
+	if !ok || b.Description != "fine" || b.Type != "unknown" || b.Required {
+		t.Errorf("b = %+v", b)
+	}
+}
+
 func TestDocsDistill_MalformedUnreferencedSchemaIsIgnored(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(t, synthHead+`"/x":{"get":{"operationId":"x/get"}}},

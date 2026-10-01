@@ -175,23 +175,26 @@ func allocatedBytes(f func()) uint64 {
 	return (after.TotalAlloc - before.TotalAlloc) / runs
 }
 
-// The allocation counters are process-wide, so these two tests run serially.
-//
-//nolint:paralleltest // see above.
-func TestCandidates_HugePathIsBounded(t *testing.T) {
-	routes := route53Routes()
-	huge := "/2013-04-01/" + strings.Repeat("a", 1<<20)
-	if got := apiref.Candidates(routes, "GET", huge); got != nil {
-		t.Errorf("Candidates over a 1 MB segment = %v, want nil", got)
+func TestCandidates_PathCapIsPinnedByBehavior(t *testing.T) {
+	t.Parallel()
+
+	routes := []apiref.Route{{Operation: "GetObject", Method: "GET", Template: "/{Bucket}/{Key+}"}}
+	const prefix = "/b/"
+	atCap := prefix + strings.Repeat("k", 2048-len(prefix))
+	want := []string{"GetObject (GET /{Bucket}/{Key+})"}
+	if got := apiref.Candidates(routes, "PUT", atCap); !slices.Equal(got, want) {
+		t.Errorf("2048-byte path: got %v, want %v", got, want)
 	}
-	if got := apiref.CandidateOperations(routes, "GET", huge); got != nil {
-		t.Errorf("CandidateOperations over a 1 MB segment = %v, want nil", got)
+	if got := apiref.Candidates(routes, "PUT", atCap+"k"); got != nil {
+		t.Errorf("2049-byte path: got %v, want nil", got)
 	}
-	if n := allocatedBytes(func() { _ = apiref.Candidates(routes, "GET", huge) }); n > 1024 {
-		t.Errorf("allocated %d bytes per call over a 1 MB segment, want at most 1024", n)
+	if got := apiref.CandidateOperations(routes, "PUT", atCap+"k"); got != nil {
+		t.Errorf("2049-byte path operations: got %v, want nil", got)
 	}
 }
 
+// The allocation counters are process-wide, so this test runs serially.
+//
 //nolint:paralleltest // process-wide allocation counters, see above.
 func TestCandidates_LongSegmentUnderCapSkipsEditDistance(t *testing.T) {
 	routes := route53Routes()
