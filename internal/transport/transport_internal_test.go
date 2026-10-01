@@ -1856,7 +1856,8 @@ func TestExecute_UnmatchedDenialIsExplained(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a denial")
 	}
-	if !strings.HasPrefix(err.Error(), `GET "/`) || !strings.Contains(err.Error(), "api_reference with") {
+	const wantPrefix = `auth: authorize action for provider unmatcheddoc: gate matched nothing. GET "/`
+	if !strings.HasPrefix(err.Error(), wantPrefix) || !strings.Contains(err.Error(), "api_reference with") {
 		t.Errorf("error text not explained: %v", err)
 	}
 	if !errors.Is(err, errUnmatchedGate) {

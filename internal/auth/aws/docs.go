@@ -217,7 +217,12 @@ func (d *Documenter) Hint(ctx context.Context, v authreq.View, service string) a
 			routes = append(routes, apiref.Route{Operation: name, Method: op.HTTPMethod, Template: op.URITemplate})
 		}
 	}
-	h := apiref.Hint{Candidates: apiref.Candidates(routes, v.Method, v.EscapedPath)}
+	h := apiref.Hint{
+		Candidates: apiref.Candidates(routes, v.Method, v.EscapedPath),
+		NoReference: !slices.ContainsFunc(models, func(sm *ServiceModel) bool {
+			return DocSupported(sm.Protocol)
+		}),
+	}
 	if ops := apiref.CandidateOperations(routes, v.Method, v.EscapedPath); len(ops) == 1 {
 		h.Operation = ops[0]
 	}

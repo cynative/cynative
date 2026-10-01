@@ -194,4 +194,7 @@ func (r *Reference) Shape() string {
 type Hint struct {
 	Candidates []string
 	Operation  string
+	// NoReference is set when no model for the service can be described by
+	// api_reference, so the message must not tell the model to call it.
+	NoReference bool
 }

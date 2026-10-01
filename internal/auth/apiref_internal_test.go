@@ -131,15 +131,26 @@ func TestExplainUnmatched_Message(t *testing.T) {
 	}}
 	view := authreq.View{Method: "GET", EscapedPath: "/2013-04-01/hostedzones"}
 	got := ExplainUnmatched(t.Context(), "aws", view, []Provider{doc}, unmatched("route53"))
-	want := `GET "/2013-04-01/hostedzones" on aws/route53 matched no operation in the cached API metadata. ` +
+	want := `aws_hardening: could not resolve IAM action for operation: ` +
+		`no candidate serves the request for "route53". ` +
+		`GET "/2013-04-01/hostedzones" on aws/route53 matched no operation in the cached API metadata. ` +
 		`The gate stopped before attaching credentials or sending anything; this says nothing about the ` +
 		`principal's permissions. Check the request shape against the operation reference. ` +
 		`Candidates: ListHostedZones (GET /2013-04-01/hostedzone). For an operation's request template ` +
-		`call api_reference with {"connector":"aws","operation":"ListHostedZones","service":"route53"}. ` +
-		`(gate detail: "aws_hardening: could not resolve IAM action for operation: ` +
-		`no candidate serves the request for \"route53\"")`
+		`call api_reference with {"connector":"aws","operation":"ListHostedZones","service":"route53"}.`
 	if got.Error() != want {
 		t.Errorf("got  %s\nwant %s", got.Error(), want)
+	}
+}
+
+func TestExplainUnmatched_NoReferenceOmitsLookup(t *testing.T) {
+	t.Parallel()
+	doc := &fakeDocumenter{name: "aws", hint: apiref.Hint{NoReference: true}}
+	view := authreq.View{Method: "POST", EscapedPath: "/"}
+	msg := ExplainUnmatched(t.Context(), "aws", view, []Provider{doc}, unmatched("ec2")).Error()
+	if strings.Contains(msg, "api_reference") || !strings.HasSuffix(msg, "against the operation reference.") ||
+		!strings.Contains(msg, `POST "/" on aws/ec2 matched no operation`) {
+		t.Errorf("msg = %s", msg)
 	}
 }
 
@@ -162,7 +173,8 @@ func TestExplainUnmatched_EmptyHintAndService(t *testing.T) {
 	um := &authreq.UnmatchedRequestError{Err: errors.New("no op")}
 	got := ExplainUnmatched(t.Context(), "github", authreq.View{Method: "POST", EscapedPath: "/x"}, []Provider{doc}, um)
 	msg := got.Error()
-	if !strings.Contains(msg, `on github matched no operation`) || strings.Contains(msg, "Candidates:") ||
+	if !strings.HasPrefix(msg, "no op. POST ") || !strings.Contains(msg, `on github matched no operation`) ||
+		strings.Contains(msg, "Candidates:") ||
 		!strings.Contains(msg, `{"connector":"github","operation":"<OperationName>"}`) {
 		t.Errorf("msg = %s", msg)
 	}

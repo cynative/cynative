@@ -448,6 +448,18 @@ func TestDocumenterHint(t *testing.T) {
 	}
 }
 
+func TestDocumenterHint_NoReference(t *testing.T) {
+	t.Parallel()
+
+	for service, want := range map[string]bool{"ec2x": true, "route53": false, "iam": false} {
+		d := aws.NewDocumenter(hintSource(t))
+		h := d.Hint(t.Context(), hintView(t, "GET", "https://"+service+".amazonaws.com/zzz/yyy", nil, ""), service)
+		if h.NoReference != want {
+			t.Errorf("%s: NoReference = %v, want %v", service, h.NoReference, want)
+		}
+	}
+}
+
 func TestDocumenterHint_RawModelFailure(t *testing.T) {
 	t.Parallel()
 

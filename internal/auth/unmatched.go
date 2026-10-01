@@ -92,13 +92,18 @@ func formatUnmatched(connector, service string, v authreq.View, h apiref.Hint, e
 	if len(h.Candidates) > 0 {
 		cand = " Candidates: " + strings.Join(h.Candidates, "; ") + "."
 	}
+	var tmpl string
+	if !h.NoReference {
+		tmpl = fmt.Sprintf(" For an operation's request template call api_reference with %s.", marshalLookup(lookup))
+	}
 
-	return fmt.Sprintf("%s %q on %s matched no operation in the cached API metadata. The gate stopped before "+
-		"attaching credentials or sending anything; this says nothing about the principal's permissions. "+
-		"Check the request shape against the operation reference.%s For an operation's request template "+
-		"call api_reference with %s. (gate detail: %q)",
-		v.Method, apiref.Truncate(v.EscapedPath, apiref.MaxPathEcho), target, cand, marshalLookup(lookup),
-		apiref.Truncate(err.Error(), apiref.MaxGateDetail))
+	// The gate text leads, unquoted, so a matcher anchored on the gate's own
+	// prefix (the release-gate parsers) still sees it first.
+	return fmt.Sprintf("%s. %s %q on %s matched no operation in the cached API metadata. The gate stopped "+
+		"before attaching credentials or sending anything; this says nothing about the principal's "+
+		"permissions. Check the request shape against the operation reference.%s%s",
+		apiref.Truncate(err.Error(), apiref.MaxGateDetail), v.Method,
+		apiref.Truncate(v.EscapedPath, apiref.MaxPathEcho), target, cand, tmpl)
 }
 
 // marshalLookup renders the api_reference arguments as compact JSON with sorted keys.
