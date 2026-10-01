@@ -510,3 +510,24 @@ func TestDocsHint(t *testing.T) {
 		t.Errorf("hint = %+v", h)
 	}
 }
+
+func TestDocsHint_MultiSegmentTail(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(t, synthHead+`"/repos/{owner}/{repo}/contents/{path}":{"get":{"operationId":"repos/get-content",
+	"parameters":[{"name":"owner","in":"path","required":true,"schema":{"type":"string"}},
+	{"name":"path","in":"path","required":true,"x-multi-segment":true,"schema":{"type":"string"}}],
+	"responses":{"200":{"description":"ok"}}}},
+	"/repos/{owner}/{repo}/tags/{tag}":{"get":{"operationId":"repos/get-tag",
+	"responses":{"200":{"description":"ok"}}}}}}`)
+	if !slices.Equal(d.MultiSegment, []string{"path"}) {
+		t.Fatalf("MultiSegment = %v", d.MultiSegment)
+	}
+	h := d.Hint(ghView(t, "PUT", "https://api.github.com/repos/o/r/contents/a/b/c"))
+	want := []string{"repos/get-content (GET /repos/{owner}/{repo}/contents/{path+})"}
+	if !slices.Equal(h.Candidates, want) || h.Operation != "repos/get-content" {
+		t.Errorf("hint = %+v", h)
+	}
+	if none := d.Hint(ghView(t, "PUT", "https://api.github.com/repos/o/r/tags/a/b")); len(none.Candidates) != 0 {
+		t.Errorf("single-segment tail matched several segments: %+v", none)
+	}
+}

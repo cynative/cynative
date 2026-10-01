@@ -68,6 +68,8 @@ type OperationDocs struct {
 	Version string                  `json:"v"`
 	SHA256  string                  `json:"h"`
 	Ops     map[string]OperationDoc `json:"o"`
+	// MultiSegment lists, sorted, the path parameter names the gate treats as catch-alls (x-multi-segment).
+	MultiSegment []string `json:"x,omitempty"`
 }
 
 // docRawParam keeps every field except $ref untyped, so one parameter with an odd value (a non-string
@@ -162,6 +164,12 @@ func DistillDocs(raw []byte) (*OperationDocs, error) {
 			out.Ops[op.OperationID] = distillOp(&doc, method, path, item.Parameters, op)
 		}
 	}
+	var generic any
+	_ = json.Unmarshal(raw, &generic) // the typed decode above already accepted these bytes.
+	for name := range collectMultiSegment(generic) {
+		out.MultiSegment = append(out.MultiSegment, name)
+	}
+	slices.Sort(out.MultiSegment)
 	if err := AdmitDocs(out); err != nil {
 		return nil, err
 	}
@@ -502,11 +510,23 @@ func docInput(p DocParam, loc apiref.Location) apiref.Input {
 func (d *OperationDocs) Hint(v authreq.View) apiref.Hint {
 	routes := make([]apiref.Route, 0, len(d.Ops))
 	for id, op := range d.Ops {
-		routes = append(routes, apiref.Route{Operation: id, Method: op.Method, Template: op.Path})
+		routes = append(routes, apiref.Route{Operation: id, Method: op.Method, Template: d.hintTemplate(op.Path)})
 	}
 	h := apiref.Hint{Candidates: apiref.Candidates(routes, v.Method, v.EscapedPath)}
 	if ops := apiref.CandidateOperations(routes, v.Method, v.EscapedPath); len(ops) == 1 {
 		h.Operation = ops[0]
 	}
 	return h
+}
+
+// hintTemplate rewrites a trailing {name} whose parameter is multi-segment to {name+}, so the matcher treats it as
+// the catch-all the gate does.
+func (d *OperationDocs) hintTemplate(path string) string {
+	i := strings.LastIndex(path, "/")
+	last := path[i+1:]
+	name, ok := strings.CutSuffix(strings.TrimPrefix(last, "{"), "}")
+	if !ok || !strings.HasPrefix(last, "{") || !slices.Contains(d.MultiSegment, name) {
+		return path
+	}
+	return path[:i+1] + "{" + name + "+}"
 }
