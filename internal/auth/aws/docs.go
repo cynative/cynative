@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
 
 	"github.com/cynative/cynative/internal/apiref"
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // ModelSource is the archive surface documentation reads.
@@ -61,7 +63,8 @@ func (d *Documenter) Reference(ctx context.Context, q apiref.Query) apiref.Resul
 	if !DocSupported(m.Protocol()) {
 		return apiref.Result{
 			Outcome: apiref.OutcomeUnsupported,
-			Reason:  "protocol " + ProtocolName(m.Protocol()) + " is not supported by api_reference",
+			Reason: apiref.Truncate(
+				"protocol "+ProtocolName(m.Protocol())+" is not supported by api_reference", apiref.MaxReason),
 		}
 	}
 	ref := m.Reference(q.Service, hit.dir, hit.name)
@@ -81,7 +84,8 @@ func (d *Documenter) resolveModels(ctx context.Context, q apiref.Query) ([]*Serv
 		if errors.Is(err, ErrUnsupportedService) {
 			return nil, apiref.Result{
 				Outcome: apiref.OutcomeNotFound,
-				Reason:  fmt.Sprintf("no AWS model answers on endpoint prefix %q", q.Service),
+				Reason: apiref.Truncate(
+					fmt.Sprintf("no AWS model answers on endpoint prefix %q", q.Service), apiref.MaxReason),
 			}, false
 		}
 		return nil, unavailable(err), false
@@ -102,7 +106,8 @@ func (d *Documenter) resolveModels(ctx context.Context, q apiref.Query) ([]*Serv
 		}
 		return nil, apiref.Result{
 			Outcome: apiref.OutcomeNotFound,
-			Reason:  fmt.Sprintf("model %q does not serve %q", q.Model, q.Service),
+			Reason: apiref.Truncate(
+				fmt.Sprintf("model %q does not serve %q", q.Model, q.Service), apiref.MaxReason),
 			Choices: choices(dirs),
 		}, false
 	}
@@ -154,7 +159,8 @@ func findOperation(q apiref.Query, models []*ServiceModel, entries []*docEntry) 
 		}
 		return docHit{}, apiref.Result{
 			Outcome: apiref.OutcomeNotFound,
-			Reason:  fmt.Sprintf("no operation %q in %s", q.Operation, strings.Join(dirs, ", ")),
+			Reason: apiref.Truncate(
+				fmt.Sprintf("no operation %q in %s", q.Operation, strings.Join(dirs, ", ")), apiref.MaxReason),
 		}, false
 	case 1:
 		return hits[0], apiref.Result{}, true
@@ -174,13 +180,13 @@ func ambiguous(hits []docHit) apiref.Result {
 	if len(dirs) > 1 {
 		return apiref.Result{
 			Outcome: apiref.OutcomeAmbiguous,
-			Reason:  `pass "model" to choose`,
+			Reason:  apiref.Truncate(`pass "model" to choose`, apiref.MaxReason),
 			Choices: choices(dirs),
 		}
 	}
 	return apiref.Result{
 		Outcome: apiref.OutcomeAmbiguous,
-		Reason:  "several operations differ only by case",
+		Reason:  apiref.Truncate("several operations differ only by case", apiref.MaxReason),
 		Choices: choices(names),
 	}
 }
@@ -196,4 +202,78 @@ func choices(in []string) []string {
 		out[i] = apiref.Truncate(c, apiref.MaxChoice)
 	}
 	return out
+}
+
+// Hint suggests a fix for a request the gate matched to no operation of service. It reads only the
+// models the gate just resolved.
+func (d *Documenter) Hint(ctx context.Context, v authreq.View, service string) apiref.Hint {
+	models, err := d.src.Resolve(ctx, service)
+	if err != nil {
+		return apiref.Hint{}
+	}
+	if name, viaTarget := requestedName(v); name != "" {
+		lines := d.protocolCandidates(ctx, models, service, name, viaTarget)
+		if lines = apiref.Bound(lines); lines != nil {
+			h := apiref.Hint{Candidates: lines}
+			if len(lines) == 1 {
+				h.Operation = name
+			}
+			return h
+		}
+	}
+	var routes []apiref.Route
+	for _, sm := range models {
+		if sm.Protocol != ProtocolRestXML && sm.Protocol != ProtocolRestJSON1 {
+			continue
+		}
+		for name, op := range sm.Operations {
+			routes = append(routes, apiref.Route{Operation: name, Method: op.HTTPMethod, Template: op.URITemplate})
+		}
+	}
+	h := apiref.Hint{Candidates: apiref.Candidates(routes, v.Method, v.EscapedPath)}
+	if ops := apiref.CandidateOperations(routes, v.Method, v.EscapedPath); len(ops) == 1 {
+		h.Operation = ops[0]
+	}
+	return h
+}
+
+// requestedName returns the operation name a request carries: the X-Amz-Target suffix, else the Action
+// parameter of the query or form body.
+func requestedName(v authreq.View) (string, bool) {
+	if target := v.Header.Get("X-Amz-Target"); target != "" {
+		return target[strings.LastIndex(target, ".")+1:], true
+	}
+	if q, err := url.ParseQuery(v.RawQuery); err == nil && q.Get("Action") != "" {
+		return q.Get("Action"), false
+	}
+	if f, err := url.ParseQuery(v.Body); err == nil {
+		return f.Get("Action"), false
+	}
+	return "", false
+}
+
+// protocolCandidates lists, for each model that defines name under a protocol the request did not speak, how
+// the operation is actually called.
+func (d *Documenter) protocolCandidates(
+	ctx context.Context, models []*ServiceModel, service, name string, viaTarget bool,
+) []string {
+	var lines []string
+	for _, sm := range models {
+		if _, ok := sm.Operations[name]; !ok || !DocSupported(sm.Protocol) {
+			continue
+		}
+		spoke := sm.Protocol == ProtocolAWSQuery
+		if viaTarget {
+			spoke = sm.Protocol == ProtocolAWSJSON10 || sm.Protocol == ProtocolAWSJSON11
+		}
+		if spoke {
+			continue
+		}
+		e, err := d.docModel(ctx, sm.Dir)
+		if err != nil {
+			continue
+		}
+		lines = append(lines, service+" uses "+e.model.Reference(service, sm.Dir, name).Shape())
+	}
+	return lines
 }

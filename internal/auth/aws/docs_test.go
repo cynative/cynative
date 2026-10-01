@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/apiref"
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/aws"
 )
 
@@ -282,9 +286,165 @@ func TestDocumenter_SchemaChangeDrivesGuidance(t *testing.T) {
 	if res.Reference == nil || res.Reference.PathTemplate != "/2013-04-01/hostedzonez" {
 		t.Fatalf("result %+v", res)
 	}
-	other := aws.NewDocumenter(route53Source(t)).Reference(
+	other := aws.NewDocumenter(f).Reference(
 		t.Context(), apiref.Query{Service: "route53", Operation: "CreateHostedZone"})
 	if other.Reference == nil || other.Reference.PathTemplate != "/2013-04-01/hostedzone" {
 		t.Errorf("CreateHostedZone path %+v", other.Reference)
+	}
+}
+
+func TestDocumenter_ReasonsAreBounded(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("x", 600)
+	d := aws.NewDocumenter(route53Source(t))
+	for name, q := range map[string]apiref.Query{
+		"operation": {Service: "route53", Operation: long},
+		"service":   {Service: long, Operation: "X"},
+		"model":     {Service: "route53", Model: long, Operation: "X"},
+	} {
+		res := d.Reference(t.Context(), q)
+		if res.Outcome != apiref.OutcomeNotFound || utf8.RuneCountInString(res.Reason) > apiref.MaxReason {
+			t.Errorf("%s: outcome %q, reason length %d", name, res.Outcome, utf8.RuneCountInString(res.Reason))
+		}
+	}
+}
+
+func hintView(t *testing.T, method, rawURL string, hdr http.Header, body string) authreq.View {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), method, rawURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maps.Copy(req.Header, hdr)
+	return authreq.NewView(req, body)
+}
+
+func hintSource(t *testing.T) *fakeSource {
+	t.Helper()
+	f := route53Source(t)
+	iam := fixtureBytes(t, "iam.json")
+	f.addModel(t, "iam", "iam", iam)
+	r53 := fixtureBytes(t, "route-53.json")
+	f.addModel(t, "email", "ses", r53)
+	f.addModel(t, "email", "sesv2", r53)
+	f.addModel(t, "ec2x", "ec2x", []byte(exModel("aws.protocols#ec2Query", "/", "", "")))
+	for i := 1; i <= apiref.MaxCandidates+1; i++ {
+		raw := strings.Replace(exModel("aws.protocols#awsQuery", "/", "", ""), "2020-01-01",
+			fmt.Sprintf("200%d-01-01", i), 1)
+		f.addModel(t, "multi", fmt.Sprintf("m%d", i), []byte(raw))
+	}
+	return f
+}
+
+func TestDocumenterHint(t *testing.T) {
+	t.Parallel()
+
+	jsonTarget := func(target string) http.Header {
+		return http.Header{"X-Amz-Target": {target}, "Content-Type": {"application/x-amz-json-1.1"}}
+	}
+	form := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}
+	cases := []struct {
+		name    string
+		method  string
+		url     string
+		hdr     http.Header
+		body    string
+		service string
+		want    []string // substrings, one per candidate.
+		op      string
+		also    []string // further substrings of the first candidate.
+	}{
+		{
+			name: "route53 plural path", method: "GET", url: "https://route53.amazonaws.com/2013-04-01/hostedzones",
+			service: "route53", want: []string{"ListHostedZones (GET /2013-04-01/hostedzone)"}, op: "ListHostedZones",
+		},
+		{
+			name: "iam as json", method: "POST", url: "https://iam.amazonaws.com/",
+			hdr: jsonTarget("AWSIdentityManagementV20100508.ListRoles"), body: "{}", service: "iam",
+			want: []string{"iam uses awsQuery: POST /"}, op: "ListRoles",
+			also: []string{"Action=ListRoles&Version=2010-05-08", "responses are xml"},
+		},
+		{
+			name: "action in query on a rest service", method: "GET",
+			url: "https://route53.amazonaws.com/?Action=ListHostedZones", service: "route53",
+			want: []string{"route53 uses restXml: GET /2013-04-01/hostedzone"}, op: "ListHostedZones",
+		},
+		{
+			name: "action in form body", method: "POST", url: "https://route53.amazonaws.com/", hdr: form,
+			body: "Action=ListHostedZones", service: "route53",
+			want: []string{"route53 uses restXml: GET /2013-04-01/hostedzone"}, op: "ListHostedZones",
+		},
+		{
+			name: "action on awsQuery is no mismatch", method: "POST", url: "https://iam.amazonaws.com/", hdr: form,
+			body: "Action=ListRoles", service: "iam",
+		},
+		{
+			name: "target on awsJson is no mismatch", method: "POST", url: "https://multi.amazonaws.com/",
+			hdr: jsonTarget("Svc.Op"), service: "ec2x",
+		},
+		{name: "nothing close", method: "GET", url: "https://route53.amazonaws.com/zzz/yyy/xxx", service: "route53"},
+		{
+			name:    "two models merge",
+			method:  "GET",
+			url:     "https://email.us-east-1.amazonaws.com/2013-04-01/hostedzones",
+			service: "email",
+			want:    []string{"ListHostedZones (GET /2013-04-01/hostedzone)"},
+			op:      "ListHostedZones",
+		},
+		{
+			name: "ec2Query skipped", method: "POST", url: "https://ec2x.amazonaws.com/", hdr: jsonTarget("Svc.Op"),
+			service: "ec2x",
+		},
+		{
+			name: "protocol overflow", method: "POST", url: "https://multi.amazonaws.com/", hdr: jsonTarget("Svc.Op"),
+			service: "multi",
+		},
+		{
+			name: "target op absent", method: "POST", url: "https://iam.amazonaws.com/", hdr: jsonTarget("Svc.Nope"),
+			service: "iam",
+		},
+		{
+			name: "unparsable form", method: "POST", url: "https://route53.amazonaws.com/", hdr: form,
+			body: "%zz", service: "route53",
+		},
+		{
+			name: "unparsable query", method: "GET", url: "https://route53.amazonaws.com/?Action=%zz",
+			service: "route53",
+		},
+		{name: "unknown service", method: "GET", url: "https://nope.amazonaws.com/", service: "nope"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := aws.NewDocumenter(hintSource(t))
+			h := d.Hint(t.Context(), hintView(t, c.method, c.url, c.hdr, c.body), c.service)
+			if len(h.Candidates) != len(c.want) || h.Operation != c.op {
+				t.Fatalf("hint = %+v", h)
+			}
+			for i, w := range c.want {
+				if !strings.Contains(h.Candidates[i], w) {
+					t.Errorf("candidate %q lacks %q", h.Candidates[i], w)
+				}
+			}
+			for _, w := range c.also {
+				if !strings.Contains(h.Candidates[0], w) {
+					t.Errorf("candidate %q lacks %q", h.Candidates[0], w)
+				}
+			}
+		})
+	}
+}
+
+func TestDocumenterHint_RawModelFailure(t *testing.T) {
+	t.Parallel()
+
+	f := hintSource(t)
+	f.rawErr = aws.ErrSmithyUnavailable
+	h := aws.NewDocumenter(f).Hint(t.Context(), hintView(t, "POST", "https://iam.amazonaws.com/",
+		http.Header{"X-Amz-Target": {"Svc.ListRoles"}}, "{}"), "iam")
+	if len(h.Candidates) != 0 || h.Operation != "" {
+		t.Errorf("hint = %+v", h)
 	}
 }

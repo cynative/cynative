@@ -187,3 +187,11 @@ func (r *Reference) Shape() string {
 	b.WriteString("; responses are " + r.Response.Encoding)
 	return b.String()
 }
+
+// Hint is a cheap fix suggestion for a request a gate matched to no operation.
+// Candidates are human-readable, at most MaxCandidates; Operation is set when
+// exactly one operation is suggested.
+type Hint struct {
+	Candidates []string
+	Operation  string
+}
