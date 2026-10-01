@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/netip"
 	"sync"
-	"sync/atomic"
 
 	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -26,6 +25,40 @@ const githubDownloadHostsNote = " Also authorizes the GitHub download hosts code
 	"api.github.com answers tarball/asset downloads with a redirect there — redirects are not followed, " +
 	"so request the Location URL explicitly."
 
+// hintLatch remembers that the denial path failed to load docs. Hint records
+// the epoch before loading; a failure latches only if no successful load
+// (Reference) reset the latch since then.
+type hintLatch struct {
+	mu     sync.Mutex
+	epoch  uint64
+	failed bool
+}
+
+// begin returns the current epoch and whether the latch is set.
+func (l *hintLatch) begin() (uint64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.epoch, l.failed
+}
+
+// fail sets the latch only if no reset happened since begin returned epoch.
+func (l *hintLatch) fail(epoch uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.epoch == epoch {
+		l.failed = true
+	}
+}
+
+// reset clears the latch and invalidates every earlier epoch.
+func (l *hintLatch) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.epoch++
+	l.failed = false
+}
+
 type githubProvider struct {
 	token    string
 	exposure exposure.Exposure
@@ -37,9 +70,9 @@ type githubProvider struct {
 	hintMu sync.Mutex
 	// hintDocsFailed latches once a Hint-path docs load fails with a live
 	// context, so the error path does not re-download the document on every
-	// denied request. Reference clears it once it loads the docs, so it is
-	// atomic; the Hint path's check-load-set sequence still runs under hintMu.
-	hintDocsFailed atomic.Bool
+	// denied request. Reference resets it once it loads the docs; the epoch
+	// orders that reset against a Hint failure that was already in flight.
+	hintDocsFailed hintLatch
 }
 
 var (
@@ -331,7 +364,7 @@ func (p *githubProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 		}
 	}
 
-	p.hintDocsFailed.Store(false)
+	p.hintDocsFailed.reset()
 
 	return d.Reference(q)
 }
@@ -340,14 +373,17 @@ func (p *githubProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 func (p *githubProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
 	p.hintMu.Lock()
 	defer p.hintMu.Unlock()
-	if p.hintDocsFailed.Load() {
+	epoch, failed := p.hintDocsFailed.begin()
+	if failed {
 		return apiref.Hint{}
 	}
 	d := p.loadDocs(ctx)
 	if d == nil {
 		// A cancelled denial says nothing about the docs, so it must not
 		// disable hints for the process.
-		p.hintDocsFailed.Store(ctx.Err() == nil)
+		if ctx.Err() == nil {
+			p.hintDocsFailed.fail(epoch)
+		}
 
 		return apiref.Hint{}
 	}
