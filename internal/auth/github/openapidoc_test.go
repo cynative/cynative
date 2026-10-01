@@ -243,6 +243,38 @@ func TestDocsReference_OptionalObjectBodyWithoutRequiredIsSilent(t *testing.T) {
 	}
 }
 
+func TestDocsDistill_MalformedInlineSchemaOnlyAffectsItsOperation(t *testing.T) {
+	t.Parallel()
+	const bad = `{"type":"object","required":"oops","properties":{"a":{"type":"string"}}}`
+	d := synthDocs(t, synthHead+`
+	"/req":{"post":{"operationId":"req/post",
+		"requestBody":{"required":true,"content":{"application/json":{"schema":`+bad+`}}}}},
+	"/opt":{"post":{"operationId":"opt/post",
+		"requestBody":{"content":{"application/json":{"schema":`+bad+`}}}}},
+	"/propdesc":{"post":{"operationId":"propdesc/post",
+		"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object",
+		"required":["a"],"properties":{"a":{"type":"string","description":7}}}}}}}},
+	"/good":{"post":{"operationId":"good/post",
+		"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object",
+		"required":["a"],"properties":{"a":{"type":"string"}}}}}}}}}}`)
+	for _, id := range []string{"req/post", "propdesc/post"} {
+		res := d.Reference(apiref.Query{Operation: id})
+		if res.Outcome != apiref.OutcomeIncomplete ||
+			!slices.Contains(res.Reference.Gaps, "request body is not a JSON object the template can render") {
+			t.Errorf("%s: res = %+v", id, res)
+		}
+	}
+	res := d.Reference(apiref.Query{Operation: "opt/post"})
+	if res.Outcome != apiref.OutcomeFound ||
+		!slices.Contains(res.Reference.Limitations, "optional request body is not rendered") {
+		t.Errorf("opt/post: res = %+v", res)
+	}
+	if res := d.Reference(apiref.Query{Operation: "good/post"}); res.Outcome != apiref.OutcomeFound ||
+		res.Reference.BodyEncoding != apiref.BodyJSON {
+		t.Errorf("good/post: res = %+v", res)
+	}
+}
+
 func TestDocsDistill_MalformedUnreferencedSchemaIsIgnored(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(t, synthHead+`"/x":{"get":{"operationId":"x/get"}}},

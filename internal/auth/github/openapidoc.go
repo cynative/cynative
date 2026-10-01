@@ -96,11 +96,13 @@ type docRawSchema struct {
 	Properties map[string]docRawProp `json:"properties"`
 }
 
+// docRawBody holds each media type's schema undecoded: an inline schema is decoded only when its operation's
+// body is rendered, so one malformed schema cannot reject the whole document.
 type docRawBody struct {
 	Ref      string `json:"$ref"`
 	Required bool   `json:"required"`
 	Content  map[string]struct {
-		Schema docRawSchema `json:"schema"`
+		Schema json.RawMessage `json:"schema"`
 	} `json:"content"`
 }
 
@@ -241,7 +243,10 @@ func bodyFields(doc *docRawDoc, rb *docRawBody) ([]DocParam, bool) {
 	if rb.Ref != "" || !hasJSON {
 		return nil, false
 	}
-	schema := media.Schema
+	var schema docRawSchema
+	if json.Unmarshal(media.Schema, &schema) != nil {
+		return nil, false
+	}
 	if schema.Ref != "" {
 		var ok bool
 		if schema, ok = doc.schema(schema.Ref); !ok {
