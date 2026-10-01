@@ -55,6 +55,7 @@ embedded Bifrost SDK, one provider per run. `docs/project/architecture.md` has t
 ## Tests
 
 - Every test and subtest calls `t.Parallel()` (`paralleltest`; exempt are `*_shell_test.go` and the entry-point tests that mutate `os.Args` under `//nolint:paralleltest`). The suite runs under `-race -shuffle=on`, so tests share no mutable state and assume no ordering.
+- A test that measures allocation through process-wide `runtime.MemStats` or `testing.AllocsPerRun` cannot run in parallel and is the only other `//nolint:paralleltest` exemption.
 - Layout: `foo_test.go` is external `package foo_test` (`testpackage` enforces it), `foo_internal_test.go` is in-package, `export_test.go` exposes `With*` options, small constructors and `// test export` aliases, `*_mock_test.go` is moq output, `*_fuzz_test.go` or `*_fuzz_internal_test.go` guards a parser on the trust boundary.
 - Never prove a transport-error branch by closing an `httptest` server and dialing its freed port: another listener can rebind it, and any non-200 reply satisfies a bare `err != nil` through the status branch, so the suite stays green and only the coverage gate notices. Use a fake `RoundTripper` and assert with `errors.Is` on a sentinel.
 - Never pin a `select` branch with a test that leaves two arms ready: Go picks uniformly, so the test passes on either arm and only the coverage gate notices, on the runs where the coin lands wrong (#326). Make every competing arm permanently unready (hold the semaphore slot for the whole run, so the send can never proceed) and assert what the branch did, not that it ran.
@@ -92,8 +93,8 @@ The spine is cmd -> cli -> agent -> tools -> transport -> auth. `newDeps` in `in
 - `about.go`, `agents.go` (module root): `go:embed` of `README.md` and `agents/`; at the root because embed cannot reach a parent directory.
 - `internal/cli`: cobra commands (root, `doctor`, `agents`), the composition root, exit codes, signal handling.
 - `internal/agent`: the research loop, `write_todos`/`task`/`verify_findings`, untrusted fencing, halt conditions.
-- `internal/apiref`: connector-neutral operation reference types and the hint matcher behind `api_reference`; stdlib only.
 - `internal/agentcatalog`: named markdown agents for `--agent`; user tier plus embedded built-ins; closed frontmatter schema.
+- `internal/apiref`: connector-neutral operation reference types and the hint matcher behind `api_reference`; stdlib only.
 - `internal/schema`: provider-agnostic message and tool types; pure leaf.
 - `internal/llm`: Bifrost adapter behind `schema.ChatModel`; derived provider catalog; env-var resolution.
 - `internal/tools`: the I/O tools `http_request` and `code_execution`, plus the approval decorator.
