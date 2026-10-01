@@ -30,11 +30,15 @@ func StripMarkup(s string, maxRunes int) string {
 }
 
 // Truncate cuts s to at most maxRunes runes, replacing the tail with an
-// ellipsis when it cuts. maxRunes must exceed the ellipsis length.
+// ellipsis when it cuts. When maxRunes is below the ellipsis length the first
+// max(maxRunes, 0) runes are returned with no ellipsis.
 func Truncate(s string, maxRunes int) string {
 	if utf8.RuneCountInString(s) <= maxRunes {
 		return s
 	}
 	runes := []rune(s)
+	if maxRunes < len(ellipsis) {
+		return string(runes[:max(maxRunes, 0)])
+	}
 	return string(runes[:maxRunes-len(ellipsis)]) + ellipsis
 }

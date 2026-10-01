@@ -164,12 +164,11 @@ func withinEditDistance(a, b string) bool {
 // editDistance is the Levenshtein distance between a and b, by rune.
 func editDistance(a, b string) int {
 	ra, rb := []rune(a), []rune(b)
-	prev := make([]int, len(rb)+1)
+	prev, cur := make([]int, len(rb)+1), make([]int, len(rb)+1)
 	for j := range prev {
 		prev[j] = j
 	}
 	for i := 1; i <= len(ra); i++ {
-		cur := make([]int, len(rb)+1)
 		cur[0] = i
 		for j := 1; j <= len(rb); j++ {
 			cost := 1
@@ -178,7 +177,7 @@ func editDistance(a, b string) int {
 			}
 			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
 		}
-		prev = cur
+		prev, cur = cur, prev
 	}
 	return prev[len(rb)]
 }

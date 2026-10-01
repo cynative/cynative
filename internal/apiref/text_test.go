@@ -41,3 +41,16 @@ func TestTruncate(t *testing.T) {
 		t.Errorf("Truncate short = %q", got)
 	}
 }
+
+func TestTruncate_BelowEllipsisLength(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		max  int
+		want string
+	}{{-1, ""}, {0, ""}, {1, "日"}, {2, "日本"}, {3, "..."}}
+	for _, tc := range cases {
+		if got := apiref.Truncate("日本語テキスト", tc.max); got != tc.want {
+			t.Errorf("Truncate(max=%d) = %q, want %q", tc.max, got, tc.want)
+		}
+	}
+}
