@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
-	"sync/atomic"
+	"sync"
 
 	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -31,10 +31,13 @@ type githubProvider struct {
 	tables   *cache.TTLCache[githubhardening.Table]
 	docs     *cache.TTLCache[githubhardening.OperationDocs]
 	errOut   io.Writer
-	// hintDocsFailed latches once a Hint-path docs load fails, so the error path
-	// does not re-download the document on every denied request. Reference does
-	// not read it.
-	hintDocsFailed atomic.Bool
+	// hintMu serializes the Hint path's latch check, docs load and latch set, so
+	// concurrent denials queue behind the first load instead of each retrying it.
+	hintMu sync.Mutex
+	// hintDocsFailed latches once a Hint-path docs load fails with a live
+	// context, so the error path does not re-download the document on every
+	// denied request. Guarded by hintMu; Reference does not read it.
+	hintDocsFailed bool
 }
 
 var (
@@ -331,12 +334,16 @@ func (p *githubProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 
 // Hint suggests operations for a request the gate matched to none.
 func (p *githubProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
-	if p.hintDocsFailed.Load() {
+	p.hintMu.Lock()
+	defer p.hintMu.Unlock()
+	if p.hintDocsFailed {
 		return apiref.Hint{}
 	}
 	d := p.loadDocs(ctx)
 	if d == nil {
-		p.hintDocsFailed.Store(true)
+		// A cancelled denial says nothing about the docs, so it must not
+		// disable hints for the process.
+		p.hintDocsFailed = ctx.Err() == nil
 
 		return apiref.Hint{}
 	}
