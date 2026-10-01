@@ -698,3 +698,14 @@ func TestDocReference_IntEnumInput(t *testing.T) {
 		t.Errorf("E = %+v", in)
 	}
 }
+
+func TestDocReference_UnsupportedProtocolHasNoWireForm(t *testing.T) {
+	t.Parallel()
+
+	// Reference is only called for supported protocols; an unsupported one must still yield no wire form
+	// rather than a guessed one.
+	ref := exRef(t, exModel("aws.protocols#ec2Query", "/", "", ""))
+	if ref.Method != "" || ref.PathTemplate != "" || ref.BodyEncoding != apiref.BodyNone || len(ref.FixedHeaders) != 0 {
+		t.Errorf("ref = %+v", ref)
+	}
+}
