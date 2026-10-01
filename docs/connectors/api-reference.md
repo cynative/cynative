@@ -100,7 +100,7 @@ The message starts with the gate's own error text, including the `auth: authoriz
 
 The message is text only. It never changes what the gate allows or denies, never rewrites or retries the request, and the original gate error stays reachable through `errors.Is`. It appears only when the request matched nothing. Policy denials, unmapped IAM actions, metadata failures, and requests where no model matched but some candidate model for the prefix uses an unsupported protocol keep their original text. The vendor descriptions are never included.
 
-Because the hint reads the GitHub docs cache, the first unmatched GitHub request on a cold docs cache costs one fetch on the error path, unless the gate's table was downloaded in this process, in which case its bytes were already handed to the docs cache. If that load fails, the error path does not try it again for the rest of the process, so later denials carry no candidates. An `api_reference` call still tries the cache each time it is asked. The metadata can also be stale: a request the cache does not know may still be valid on the server.
+Because the hint reads the GitHub docs cache, the first unmatched GitHub request on a cold docs cache costs one fetch on the error path, unless the gate's table was downloaded in this process, in which case its bytes were already handed to the docs cache. If that load fails, the error path does not try it again, so later denials carry no candidates, until an `api_reference` call loads the docs successfully. That call tries the cache each time it is asked and re-enables the error path when it succeeds. The metadata can also be stale: a request the cache does not know may still be valid on the server.
 
 ## Limits
 

@@ -407,6 +407,37 @@ func TestGithubProvider_HintTriesAFailingDocsLoadOnce(t *testing.T) {
 	})
 }
 
+func TestGithubProvider_ReferenceSuccessClearsHintLatch(t *testing.T) {
+	t.Parallel()
+	raw := docsFixture(t)
+	um := &authreq.UnmatchedRequestError{Err: errors.New("x")}
+	view := authreq.View{Method: "DELETE", Hostname: "api.github.com", Path: "/repos/o/r", EscapedPath: "/repos/o/r"}
+	var fetches atomic.Int32
+	p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
+	p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
+		if fetches.Add(1) == 1 {
+			return nil, errors.New("offline")
+		}
+
+		return raw, nil
+	})
+
+	if h := p.Hint(t.Context(), view, um); len(h.Candidates) != 0 {
+		t.Fatalf("hint on a failing fetch = %+v", h)
+	}
+	if res := p.Reference(t.Context(), apiref.Query{Operation: "repos/get"}); res.Outcome != apiref.OutcomeFound {
+		t.Fatalf("reference = %+v", res)
+	}
+	before := fetches.Load()
+	h := p.Hint(t.Context(), view, um)
+	if !slices.Contains(h.Candidates, "repos/get (GET /repos/{owner}/{repo})") {
+		t.Errorf("hint after a successful reference = %+v", h)
+	}
+	if got := fetches.Load(); got != before {
+		t.Errorf("hint fetched %d more times, want 0", got-before)
+	}
+}
+
 func TestProviderDescriptions_NameAPIReference(t *testing.T) {
 	t.Parallel()
 	for _, p := range []Provider{
