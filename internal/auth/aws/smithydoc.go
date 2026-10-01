@@ -31,6 +31,8 @@ const (
 	traitDocumentation     = "smithy.api#documentation"
 	traitRequired          = "smithy.api#required"
 	traitHTTPLabel         = "smithy.api#httpLabel"
+	traitHostLabel         = "smithy.api#hostLabel"
+	traitEndpoint          = "smithy.api#endpoint"
 	traitHTTPQuery         = "smithy.api#httpQuery"
 	traitHTTPHeader        = "smithy.api#httpHeader"
 	traitHTTPPayload       = "smithy.api#httpPayload"
@@ -225,22 +227,57 @@ func (m *DocModel) Reference(service, dir, name string) *apiref.Reference {
 		AuthArgs:   map[string]string{"service": m.sm.SigningName},
 		Source:     apiref.Source{Name: "aws/api-models-aws", Version: m.svc.Version},
 	}
-	m.endpoint(ref)
+	m.endpoint(ref, op)
 	m.request(ref, op, name)
 	m.response(ref, op, name)
 	ref.Pagination = m.pagination(op)
 	return ref
 }
 
-// endpoint prefers the literal global endpoint in the ruleset and otherwise falls back to the regional form.
-func (m *DocModel) endpoint(ref *apiref.Reference) {
-	global := "https://" + m.sm.EndpointPrefix + ".amazonaws.com"
-	if slices.Contains(m.urls, global) {
-		ref.Endpoint = global
-		return
+// endpoint prefers the regional form when the ruleset templates the region into this service's host, and uses
+// the literal global URL only when it has no such template (IAM, Route 53). An operation's hostPrefix goes before
+// the host.
+func (m *DocModel) endpoint(ref *apiref.Reference, op docShape) {
+	prefix := m.sm.EndpointPrefix
+	global := "https://" + prefix + ".amazonaws.com"
+	regionalTemplate := "https://" + prefix + ".{Region}."
+	host := prefix + ".amazonaws.com"
+	if slices.ContainsFunc(m.urls, func(u string) bool { return strings.HasPrefix(u, regionalTemplate) }) ||
+		!slices.Contains(m.urls, global) {
+		host = prefix + ".<region>.amazonaws.com"
+		ref.Limitations = append(ref.Limitations, regionalLimit)
 	}
-	ref.Endpoint = "https://" + m.sm.EndpointPrefix + ".<region>.amazonaws.com"
-	ref.Limitations = append(ref.Limitations, regionalLimit)
+	ref.Endpoint = "https://" + m.hostPrefix(op) + host
+}
+
+// hostPrefix renders the operation's smithy.api#endpoint hostPrefix, replacing each {Label} with <Label>, or
+// <Label:unrendered> when that input is not a renderable scalar.
+func (m *DocModel) hostPrefix(op docShape) string {
+	var ep struct {
+		HostPrefix string `json:"hostPrefix"`
+	}
+	_ = json.Unmarshal(op.Traits[traitEndpoint], &ep) // a malformed trait leaves the prefix empty.
+	members := m.shapes[op.Input.Target].Members
+	var b strings.Builder
+	rest := ep.HostPrefix
+	for {
+		before, after, found := strings.Cut(rest, "{")
+		b.WriteString(before)
+		if !found {
+			return b.String()
+		}
+		label, tail, closed := strings.Cut(after, "}")
+		if !closed {
+			return b.String() + "{" + after
+		}
+		mem, ok := members[label]
+		if ok && has(mem.Traits, traitHostLabel) && m.input(label, mem).Renderable {
+			b.WriteString("<" + label + ">")
+		} else {
+			b.WriteString("<" + label + ":unrendered>")
+		}
+		rest = tail
+	}
 }
 
 // request fills the method, path, fixed parts and inputs.

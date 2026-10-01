@@ -489,7 +489,9 @@ func pageModel(svcTrait, opTrait string) string {
 	"ex#Op":{"type":"operation","input":{"target":"ex#OpIn"},"output":{"target":"ex#OpOut"},
 		"traits":{"smithy.api#http":{"method":"GET","uri":"/op"}` + op + `}},
 	"ex#OpIn":{"type":"structure","members":{}},
-	"ex#OpOut":{"type":"structure","members":{}}}}`
+	"ex#OpOut":{"type":"structure","members":{}},
+	"ex#IdList":{"type":"list","member":{"target":"smithy.api#String"}},
+	"ex#Str":{"type":"string"}}}`
 }
 
 func TestDocReference_PaginationMerge(t *testing.T) {
@@ -707,5 +709,87 @@ func TestDocReference_UnsupportedProtocolHasNoWireForm(t *testing.T) {
 	ref := exRef(t, exModel("aws.protocols#ec2Query", "/", "", ""))
 	if ref.Method != "" || ref.PathTemplate != "" || ref.BodyEncoding != apiref.BodyNone || len(ref.FixedHeaders) != 0 {
 		t.Errorf("ref = %+v", ref)
+	}
+}
+
+// endpointModel is service "ex" whose ruleset carries the given URLs and whose operation carries opTraits
+// (extra JSON members of the operation traits, with a leading comma).
+func endpointModel(urls []string, opTraits, inMembers string) string {
+	var rules []string
+	for _, u := range urls {
+		rules = append(rules, `{"endpoint":{"url":"`+u+`"}}`)
+	}
+	return `{"smithy":"2.0","shapes":{
+	"ex#Svc":{"type":"service","version":"2020-01-01","traits":{
+		"aws.api#service":{"sdkId":"Ex","endpointPrefix":"ex"},"aws.protocols#restXml":{},
+		"smithy.rules#endpointRuleSet":{"rules":[` + strings.Join(rules, ",") + `]}}},
+	"ex#Op":{"type":"operation","input":{"target":"ex#OpIn"},"output":{"target":"ex#OpOut"},
+		"traits":{"smithy.api#http":{"method":"GET","uri":"/op"}` + opTraits + `}},
+	"ex#OpIn":{"type":"structure","members":{` + inMembers + `}},
+	"ex#OpOut":{"type":"structure","members":{}},
+	"ex#IdList":{"type":"list","member":{"target":"smithy.api#String"}},
+	"ex#Str":{"type":"string"}}}`
+}
+
+func TestDocReference_EndpointPrefersRegionalTemplate(t *testing.T) {
+	t.Parallel()
+
+	both := []string{"https://ex.amazonaws.com", "https://ex.{Region}.{PartitionResult#dnsSuffix}"}
+	ref := exRef(t, endpointModel(both, "", ""))
+	if ref.Endpoint != "https://ex.<region>.amazonaws.com" {
+		t.Errorf("endpoint = %q", ref.Endpoint)
+	}
+	if !slices.ContainsFunc(ref.Limitations, func(s string) bool { return strings.Contains(s, "FIPS") }) {
+		t.Errorf("limitations = %q", ref.Limitations)
+	}
+
+	global := exRef(t, endpointModel([]string{"https://ex.amazonaws.com"}, "", ""))
+	if global.Endpoint != "https://ex.amazonaws.com" || len(global.Limitations) != 0 {
+		t.Errorf("global = %q %q", global.Endpoint, global.Limitations)
+	}
+}
+
+func TestDocReference_HostPrefix(t *testing.T) {
+	t.Parallel()
+
+	urls := []string{"https://ex.{Region}.amazonaws.com"}
+	acct := `"AccountId":{"target":"ex#Str","traits":{"smithy.api#hostLabel":{},"smithy.api#required":{},` +
+		`"smithy.api#httpHeader":"x-amz-account-id"}}`
+	cases := []struct {
+		name, traits, members, want string
+	}{
+		{"none", "", acct, "https://ex.<region>.amazonaws.com"},
+		{
+			"rendered", `,"smithy.api#endpoint":{"hostPrefix":"{AccountId}."}`, acct,
+			"https://<AccountId>.ex.<region>.amazonaws.com",
+		},
+		{
+			"unrendered", `,"smithy.api#endpoint":{"hostPrefix":"{AccountId}."}`,
+			`"AccountId":{"target":"ex#IdList","traits":{"smithy.api#hostLabel":{}}}`,
+			"https://<AccountId:unrendered>.ex.<region>.amazonaws.com",
+		},
+		{
+			"undeclared label and literal", `,"smithy.api#endpoint":{"hostPrefix":"pre-{Nope}.x"}`, "",
+			"https://pre-<Nope:unrendered>.xex.<region>.amazonaws.com",
+		},
+		{
+			"unclosed brace", `,"smithy.api#endpoint":{"hostPrefix":"a{b"}`, "",
+			"https://a{bex.<region>.amazonaws.com",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			ref := exRef(t, endpointModel(urls, tc.traits, tc.members))
+			if ref.Endpoint != tc.want {
+				t.Errorf("endpoint = %q, want %q", ref.Endpoint, tc.want)
+			}
+		})
+	}
+
+	ref := exRef(t, endpointModel(urls, `,"smithy.api#endpoint":{"hostPrefix":"{AccountId}."}`, acct))
+	if in, ok := inputNamed(ref, "AccountId"); !ok || in.Location != apiref.LocationHeader {
+		t.Errorf("AccountId input = %+v, %v", in, ok)
 	}
 }
