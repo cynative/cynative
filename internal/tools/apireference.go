@@ -70,6 +70,10 @@ func NewAPIReferenceTool(providers []auth.Provider) schema.InvokableTool {
 }
 
 // Info returns the tool's schema.
+// UngatedIO marks the tool as an I/O tool registered without the approval
+// decorator, so the agent audits it as ungated with redacted arguments.
+func (t *apiReferenceTool) UngatedIO() {}
+
 func (t *apiReferenceTool) Info() *schema.ToolInfo { return t.info }
 
 // Run looks up the operation. Every outcome is a result string, never a Go error.

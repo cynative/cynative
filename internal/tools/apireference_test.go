@@ -477,3 +477,11 @@ func TestAPIReference_NeverReturnsGoError(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIReferenceTool_IsUngatedIO(t *testing.T) {
+	t.Parallel()
+
+	if _, ok := tools.NewAPIReferenceTool(nil).(interface{ UngatedIO() }); !ok {
+		t.Fatal("api_reference must implement UngatedIO so the agent audits it as ungated")
+	}
+}
