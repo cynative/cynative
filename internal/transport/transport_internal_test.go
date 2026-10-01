@@ -31,6 +31,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/authtest"
@@ -1812,6 +1813,58 @@ func (p *denyingActionProvider) AuthorizesAddr(
 	_ context.Context, _ netip.Addr, _ authreq.ProviderArgs,
 ) (bool, error) {
 	return true, nil
+}
+
+var errUnmatchedGate = errors.New("gate matched nothing")
+
+// unmatchedDocProvider fails AuthorizeAction with an unmatched-request error and
+// documents operations, so Execute rewrites the error text.
+type unmatchedDocProvider struct{ denyingActionProvider }
+
+func (p *unmatchedDocProvider) Name() string { return "unmatcheddoc" }
+
+func (p *unmatchedDocProvider) AuthorizeAction(_ context.Context, _ authreq.View, _ authreq.ProviderArgs) error {
+	return &authreq.UnmatchedRequestError{Service: "svc", Err: errUnmatchedGate}
+}
+
+func (p *unmatchedDocProvider) Reference(context.Context, apiref.Query) apiref.Result {
+	return apiref.Result{Outcome: apiref.OutcomeNotFound}
+}
+
+func (p *unmatchedDocProvider) Hint(
+	context.Context, authreq.View, *authreq.UnmatchedRequestError,
+) apiref.Hint {
+	return apiref.Hint{}
+}
+
+func TestExecute_UnmatchedDenialIsExplained(t *testing.T) {
+	t.Parallel()
+
+	srv, providers := newTLSTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	loopback, ok := providers[0].(*authtest.LoopbackProvider)
+	if !ok {
+		t.Fatalf("expected LoopbackProvider, got %T", providers[0])
+	}
+	var calls []string
+	prov := &unmatchedDocProvider{denyingActionProvider{caCert: loopback.CACert, calls: &calls}}
+	args := fmt.Sprintf(`{"method":"GET","url":%q,"auth_provider":"unmatcheddoc","headers":[],"body":""}`,
+		srv.URL+"/x")
+
+	_, _, err := NewClient().Execute(t.Context(), args, []auth.Provider{prov})
+	if err == nil {
+		t.Fatal("expected a denial")
+	}
+	if !strings.HasPrefix(err.Error(), `GET "/`) || !strings.Contains(err.Error(), "api_reference with") {
+		t.Errorf("error text not explained: %v", err)
+	}
+	if !errors.Is(err, errUnmatchedGate) {
+		t.Errorf("errors.Is lost the gate sentinel: %v", err)
+	}
+	if slices.Contains(calls, "inject") {
+		t.Errorf("inject ran after a denial: %v", calls)
+	}
 }
 
 // TestExecute_AWSTieDenialStopsBeforeInject runs the real AWS hardening gate

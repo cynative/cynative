@@ -405,10 +405,15 @@ func (d *registrationDeps) githubOutcome(
 
 	exposure := githubhardening.BuildExposure(ghCfg.Permissions)
 	posture, warn := githubPosture(exposure, ghCfg.Permissions)
-	tables := cache.NewTableCache(ghCfg.Config, newGithubOpenAPIFetcher(d.egress),
+	handoff := &openAPIHandoff{}
+	fetch := newGithubOpenAPIFetcher(d.egress)
+	tables := cache.NewTableCache(ghCfg.Config, handoff.record(fetch),
 		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
 		githubhardening.UnmarshalTable, githubhardening.AdmitTable)
 	gh := newGithubProvider(token, exposure, tables)
+	gh.docs = cache.NewNamedCache(ghCfg.Config, "docs", handoff.take(fetch),
+		githubhardening.DistillDocs, (*githubhardening.OperationDocs).Serialize,
+		githubhardening.UnmarshalDocs, githubhardening.AdmitDocs)
 	gh.errOut = os.Stderr
 
 	return connectorOutcome{

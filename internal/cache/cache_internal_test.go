@@ -341,3 +341,22 @@ func TestNewTableCache_UnmarshalErrorFailsClosed(t *testing.T) {
 		t.Fatalf("Get with unmarshal-error cached blob = %+v, want nil", got)
 	}
 }
+
+func TestNewNamedCache_UsesNamedFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	c := NewNamedCache(Config{Dir: dir, TTL: time.Hour, Clock: time.Now}, "docs",
+		func(context.Context) ([]byte, error) { return []byte("x"), nil },
+		func(b []byte) (*string, error) { s := string(b); return &s, nil },
+		func(s *string) []byte { return []byte(*s) },
+		func(b []byte) (*string, error) { s := string(b); return &s, nil },
+		func(*string) error { return nil })
+	if got := c.Get(context.Background()); got == nil || *got != "x" {
+		t.Fatalf("got %v", got)
+	}
+	for _, f := range []string{"docs.json", "docs.meta"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("%s not written: %v", f, err)
+		}
+	}
+}

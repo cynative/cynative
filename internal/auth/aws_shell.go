@@ -77,6 +77,7 @@ func buildHardenedAWSProvider(
 	// Build the provider with a nil closure first, then assign one that
 	// captures p so it can populate the provider's fields on first call.
 	p := newAWSProvider(cfg, nil)
+	p.docs = awshardening.NewDocumenter(archive)
 	p.doLazyResolve = func(ctx context.Context) error {
 		actionProvider, err := awshardening.LazyResolve(ctx, deps)
 		if err != nil {
