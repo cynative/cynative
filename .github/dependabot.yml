@@ -53,6 +53,16 @@ updates:
       # happens.
       - dependency-name: "github.com/alecthomas/go-check-sumtype"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # predeclared v0.3.0 removed the exported IgnoreFlag and QualifiedFlag
+      # constants that golangci-lint (v2.14.0, the latest release) still
+      # references, so forcing the bump on this indirect module breaks
+      # `go tool golangci-lint`. Patch updates stay allowed; minor is ignored
+      # too because Dependabot classifies 0.2 -> 0.3 positionally as
+      # semver-minor. Once golangci-lint itself requires >= v0.3.0 the module
+      # graph will follow without Dependabot's help. Drop this entry when that
+      # happens.
+      - dependency-name: "github.com/nishanths/predeclared"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # go-msix v1 is a breaking API rewrite (Builder became an interface,
       # Build takes a context, the Manifest/Identity/Resource types were
       # removed) that goreleaser's nfpm (v2.47.0, the latest release) still
