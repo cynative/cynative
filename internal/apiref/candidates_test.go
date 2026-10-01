@@ -111,3 +111,51 @@ func TestCandidateOperations(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestCandidates_GreedyWithSuffix(t *testing.T) {
+	t.Parallel()
+
+	routes := []apiref.Route{{Operation: "GetPolicy", Method: "GET", Template: "/{Name+}/policy"}}
+	cases := []struct {
+		name string
+		path string
+		want []string
+	}{
+		{"suffix matches", "/a/b/policy", []string{"GetPolicy (GET /{Name+}/policy)"}},
+		{"suffix differs", "/a/b/other", nil},
+		{"greedy needs a segment", "/policy", nil},
+		{"single empty segment", "//policy", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := apiref.Candidates(routes, "PUT", c.path)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("Candidates(PUT %s) = %q, want %q", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCandidates_WrongMethodBeatsNearMiss(t *testing.T) {
+	t.Parallel()
+
+	routes := []apiref.Route{
+		{Operation: "Near", Method: "GET", Template: "/x/aa"},
+		{Operation: "Exact", Method: "POST", Template: "/x/a"},
+	}
+	got := apiref.Candidates(routes, "GET", "/x/a")
+	if !slices.Equal(got, []string{"Exact (POST /x/a)"}) {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestCandidates_EditDistanceByRune(t *testing.T) {
+	t.Parallel()
+
+	routes := []apiref.Route{{Operation: "A", Method: "GET", Template: "/x/\u00e9\u00e9\u00e9"}}
+	got := apiref.Candidates(routes, "GET", "/x/e\u00e9e")
+	if !slices.Equal(got, []string{"A (GET /x/\u00e9\u00e9\u00e9)"}) {
+		t.Errorf("got %q", got)
+	}
+}

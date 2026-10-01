@@ -87,13 +87,29 @@ func isGreedy(seg string) bool { return isLabel(seg) && strings.HasSuffix(seg, "
 func matches(tpl, segs []string) bool {
 	for i, t := range tpl {
 		if isGreedy(t) {
-			return len(segs) > i
+			return matchGreedy(tpl[i+1:], segs, i)
 		}
 		if i >= len(segs) || !segMatches(t, segs[i]) {
 			return false
 		}
 	}
 	return len(tpl) == len(segs)
+}
+
+// matchGreedy matches a greedy label starting at path index i, followed by the
+// template segments in suffix. The label takes every segment the suffix leaves
+// and needs at least one; a single empty segment does not count, as in the gate.
+func matchGreedy(suffix, segs []string, i int) bool {
+	end := len(segs) - len(suffix)
+	if end <= i || (end == i+1 && segs[i] == "") {
+		return false
+	}
+	for j, t := range suffix {
+		if !segMatches(t, segs[end+j]) {
+			return false
+		}
+	}
+	return true
 }
 
 func segMatches(t, s string) bool {
