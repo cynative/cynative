@@ -1,7 +1,9 @@
 package apiref_test
 
 import (
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cynative/cynative/internal/apiref"
@@ -157,5 +159,50 @@ func TestCandidates_EditDistanceByRune(t *testing.T) {
 	got := apiref.Candidates(routes, "GET", "/x/e\u00e9e")
 	if !slices.Equal(got, []string{"A (GET /x/\u00e9\u00e9\u00e9)"}) {
 		t.Errorf("got %q", got)
+	}
+}
+
+// allocatedBytes reports the heap bytes one call of f allocates, averaged over a few runs. It reads
+// process-wide counters, so callers run serially.
+func allocatedBytes(f func()) uint64 {
+	const runs = 5
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range runs {
+		f()
+	}
+	runtime.ReadMemStats(&after)
+	return (after.TotalAlloc - before.TotalAlloc) / runs
+}
+
+// The allocation counters are process-wide, so these two tests run serially.
+//
+//nolint:paralleltest // see above.
+func TestCandidates_HugePathIsBounded(t *testing.T) {
+	routes := route53Routes()
+	huge := "/2013-04-01/" + strings.Repeat("a", 1<<20)
+	if got := apiref.Candidates(routes, "GET", huge); got != nil {
+		t.Errorf("Candidates over a 1 MB segment = %v, want nil", got)
+	}
+	if got := apiref.CandidateOperations(routes, "GET", huge); got != nil {
+		t.Errorf("CandidateOperations over a 1 MB segment = %v, want nil", got)
+	}
+	if n := allocatedBytes(func() { _ = apiref.Candidates(routes, "GET", huge) }); n > 1024 {
+		t.Errorf("allocated %d bytes per call over a 1 MB segment, want at most 1024", n)
+	}
+}
+
+//nolint:paralleltest // process-wide allocation counters, see above.
+func TestCandidates_LongSegmentUnderCapSkipsEditDistance(t *testing.T) {
+	routes := route53Routes()
+	long := "/2013-04-01/" + strings.Repeat("a", 2000)
+	if got := apiref.Candidates(routes, "GET", long); got != nil {
+		t.Errorf("Candidates = %v, want nil", got)
+	}
+	if n := allocatedBytes(func() { _ = apiref.Candidates(routes, "GET", long) }); n > 4096 {
+		t.Errorf("allocated %d bytes per call over a 2000-byte segment, want at most 4096", n)
+	}
+	if got := apiref.Candidates(routes, "GET", "/2013-04-01/hostedzones"); len(got) != 1 {
+		t.Errorf("near miss under the caps = %v, want one candidate", got)
 	}
 }

@@ -3,11 +3,17 @@ package apiref
 import (
 	"slices"
 	"strings"
+	"unicode/utf8"
 )
 
 // maxEditDistance is the largest edit distance between a request's literal
 // segment and a template's that still counts as a near miss.
 const maxEditDistance = 2
+
+// maxHintPathBytes is the longest escaped request path a hint will inspect.
+// The path is model-supplied, so a longer one yields no candidates rather than
+// work proportional to its length for every route.
+const maxHintPathBytes = 2048
 
 // Route is one documented operation's method and path template, as a
 // candidate source for hints. Templates use {Label} for one segment and
@@ -52,6 +58,9 @@ func Bound(out []string) []string {
 }
 
 func candidateRoutes(routes []Route, method, escapedPath string) []Route {
+	if len(escapedPath) > maxHintPathBytes {
+		return nil
+	}
 	segs := splitPath(escapedPath)
 	var other, near []Route
 	for _, r := range routes {
@@ -133,12 +142,23 @@ func nearMiss(tpl, segs []string) bool {
 		if segMatches(t, segs[i]) {
 			continue
 		}
-		if isLabel(t) || editDistance(t, segs[i]) > maxEditDistance {
+		if isLabel(t) || !withinEditDistance(t, segs[i]) {
 			return false
 		}
 		misses++
 	}
 	return misses == 1
+}
+
+// withinEditDistance reports whether a and b differ by at most maxEditDistance
+// edits. It rejects on rune counts first, so the quadratic work only runs on
+// strings of nearly the same length.
+func withinEditDistance(a, b string) bool {
+	ca, cb := utf8.RuneCountInString(a), utf8.RuneCountInString(b)
+	if ca-cb > maxEditDistance || cb-ca > maxEditDistance {
+		return false
+	}
+	return editDistance(a, b) <= maxEditDistance
 }
 
 // editDistance is the Levenshtein distance between a and b, by rune.
