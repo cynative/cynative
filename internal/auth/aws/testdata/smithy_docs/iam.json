@@ -1,0 +1,776 @@
+{
+ "shapes": {
+  "com.amazonaws.iam#AWSIdentityManagementV20100508": {
+   "operations": [
+    {
+     "target": "com.amazonaws.iam#ListRoles"
+    },
+    {
+     "target": "com.amazonaws.iam#GetRole"
+    },
+    {
+     "target": "com.amazonaws.iam#DeleteRole"
+    }
+   ],
+   "traits": {
+    "aws.api#service": {
+     "arnNamespace": "iam",
+     "cloudFormationName": "IAM",
+     "cloudTrailEventSource": "iam.amazonaws.com",
+     "endpointPrefix": "iam",
+     "sdkId": "IAM"
+    },
+    "aws.auth#sigv4": {
+     "name": "iam"
+    },
+    "aws.protocols#awsQuery": {},
+    "smithy.api#title": "AWS Identity and Access Management",
+    "smithy.rules#endpointRuleSet": {
+     "rules": [
+      {
+       "endpoint": {
+        "url": "https://iam-fips.amazonaws.com"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.amazonaws.com.cn"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.amazonaws.eu"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.api.amazonwebservices.com.cn"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.api.amazonwebservices.eu"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.api.aws.hci.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.api.aws.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.api.aws.scloud"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.api.cloud-aws.adc-e.uk"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.cloud.adc-e.uk"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.csp.hci.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.global.api.aws"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.us-iso-east-1.c2s.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.us-isob-east-1.sc2s.sgov.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.{PartitionResult#implicitGlobalRegion}.{PartitionResult#dnsSuffix}"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam-fips.{PartitionResult#implicitGlobalRegion}.{PartitionResult#dualStackDnsSuffix}"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.amazonaws.com"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.api.aws.hci.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.api.aws.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.api.aws.scloud"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.api.cloud-aws.adc-e.uk"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.cn-north-1.amazonaws.com.cn"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.eu-isoe-west-1.cloud.adc-e.uk"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.eusc-de-east-1.amazonaws.eu"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.global.api.amazonwebservices.com.cn"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.global.api.amazonwebservices.eu"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.global.api.aws"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.us-gov.amazonaws.com"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.us-gov.api.aws"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.us-iso-east-1.c2s.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.us-isob-east-1.sc2s.sgov.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.us-isof-south-1.csp.hci.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.{PartitionResult#implicitGlobalRegion}.{PartitionResult#dnsSuffix}"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://iam.{PartitionResult#implicitGlobalRegion}.{PartitionResult#dualStackDnsSuffix}"
+       }
+      }
+     ]
+    }
+   },
+   "type": "service",
+   "version": "2010-05-08"
+  },
+  "com.amazonaws.iam#AttachedPermissionsBoundary": {
+   "members": {
+    "PermissionsBoundaryArn": {
+     "target": "com.amazonaws.iam#arnType",
+     "traits": {
+      "smithy.api#documentation": "<p> The ARN of the policy used to set the permissions boundary for the user or role.</p>"
+     }
+    },
+    "PermissionsBoundaryType": {
+     "target": "com.amazonaws.iam#PermissionsBoundaryAttachmentType",
+     "traits": {
+      "smithy.api#documentation": "<p> The permissions boundary usage type that indicates what type of IAM resource is used\n         as the permissions boundary for an entity. This data type can only have a value of\n            <code>Policy</code>.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains information about an attached permissions boundary.</p>\n         <p>An attached permissions boundary is a managed policy that has been attached to a user or\n         role to set the permissions boundary.</p>\n         <p>For more information about permissions boundaries, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html\">Permissions boundaries for IAM\n            identities </a> in the <i>IAM User Guide</i>.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#DeleteRole": {
+   "errors": [
+    {
+     "target": "com.amazonaws.iam#ConcurrentModificationException"
+    },
+    {
+     "target": "com.amazonaws.iam#DeleteConflictException"
+    },
+    {
+     "target": "com.amazonaws.iam#LimitExceededException"
+    },
+    {
+     "target": "com.amazonaws.iam#NoSuchEntityException"
+    },
+    {
+     "target": "com.amazonaws.iam#ServiceFailureException"
+    },
+    {
+     "target": "com.amazonaws.iam#UnmodifiableEntityException"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.iam#DeleteRoleRequest"
+   },
+   "output": {
+    "target": "smithy.api#Unit"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Deletes the specified role. Unlike the Amazon Web Services Management Console, when you delete a role\n            programmatically, you must delete the items attached to the role manually, or the\n            deletion fails. For more information, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_manage_delete.html#roles-managingrole-deleting-cli\">Deleting an IAM role</a>. Before attempting to delete a role, remove the\n            following attached items: </p>\n         <ul>\n            <li>\n               <p>Inline policies (<a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_DeleteRolePolicy.html\">DeleteRolePolicy</a>)</p>\n            </li>\n            <li>\n               <p>Attached managed policies (<a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_DetachRolePolicy.html\">DetachRolePolicy</a>)</p>\n            </li>\n            <li>\n               <p>Instance profile (<a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_RemoveRoleFromInstanceProfile.html\">RemoveRoleFromInstanceProfile</a>)</p>\n            </li>\n            <li>\n               <p>Optional \u2013 Delete instance profile after detaching from role for\n                    resource clean up (<a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_DeleteInstanceProfile.html\">DeleteInstanceProfile</a>)</p>\n            </li>\n         </ul>\n         <important>\n            <p>Make sure that you do not have any Amazon EC2 instances running with the role you are\n                about to delete. Deleting a role or instance profile that is associated with a\n                running instance will break any applications running on the instance.</p>\n         </important>",
+    "smithy.api#examples": [
+     {
+      "documentation": "The following command removes the role named Test-Role.",
+      "input": {
+       "RoleName": "Test-Role"
+      },
+      "title": "To delete an IAM role"
+     }
+    ]
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.iam#DeleteRoleRequest": {
+   "members": {
+    "RoleName": {
+     "target": "com.amazonaws.iam#roleNameType",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the role to delete.</p>\n         <p>This parameter allows (through its <a href=\"http://wikipedia.org/wiki/regex\">regex pattern</a>) a string of characters consisting of upper and lowercase alphanumeric \n    characters with no spaces. You can also include any of the following characters: _+=,.@-</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#GetRole": {
+   "errors": [
+    {
+     "target": "com.amazonaws.iam#NoSuchEntityException"
+    },
+    {
+     "target": "com.amazonaws.iam#ServiceFailureException"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.iam#GetRoleRequest"
+   },
+   "output": {
+    "target": "com.amazonaws.iam#GetRoleResponse"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Retrieves information about the specified role, including the role's path, GUID, ARN,\n            and the role's trust policy that grants permission to assume the role. For more\n            information about roles, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html\">IAM roles</a> in the\n                <i>IAM User Guide</i>.</p>\n         <note>\n            <p>Policies returned by this operation are URL-encoded compliant \n    with <a href=\"https://tools.ietf.org/html/rfc3986\">RFC 3986</a>. You can use a URL \n    decoding method to convert the policy back to plain JSON text. For example, if you use Java, you \n    can use the <code>decode</code> method of the <code>java.net.URLDecoder</code> utility class in \n    the Java SDK. Other languages and SDKs provide similar functionality, and some SDKs do this decoding \n    automatically.</p>\n         </note>",
+    "smithy.api#examples": [
+     {
+      "documentation": "The following command gets information about the role named Test-Role.",
+      "input": {
+       "RoleName": "Test-Role"
+      },
+      "output": {
+       "Role": {
+        "Arn": "arn:aws:iam::123456789012:role/Test-Role",
+        "AssumeRolePolicyDocument": "<URL-encoded-JSON>",
+        "CreateDate": "2013-04-18T05:01:58Z",
+        "MaxSessionDuration": 3600,
+        "Path": "/",
+        "RoleId": "AROADBQP57FF2AEXAMPLE",
+        "RoleLastUsed": {
+         "LastUsedDate": "2019-11-18T05:01:58Z",
+         "Region": "us-east-1"
+        },
+        "RoleName": "Test-Role"
+       }
+      },
+      "title": "To get information about an IAM role"
+     }
+    ],
+    "smithy.api#suppress": [
+     "WaitableTraitInvalidErrorType"
+    ],
+    "smithy.waiters#waitable": {
+     "RoleExists": {
+      "acceptors": [
+       {
+        "matcher": {
+         "success": true
+        },
+        "state": "success"
+       },
+       {
+        "matcher": {
+         "errorType": "NoSuchEntity"
+        },
+        "state": "retry"
+       }
+      ],
+      "minDelay": 1
+     }
+    }
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.iam#GetRoleRequest": {
+   "members": {
+    "RoleName": {
+     "target": "com.amazonaws.iam#roleNameType",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the IAM role to get information about.</p>\n         <p>This parameter allows (through its <a href=\"http://wikipedia.org/wiki/regex\">regex pattern</a>) a string of characters consisting of upper and lowercase alphanumeric \n    characters with no spaces. You can also include any of the following characters: _+=,.@-</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#GetRoleResponse": {
+   "members": {
+    "Role": {
+     "target": "com.amazonaws.iam#Role",
+     "traits": {
+      "smithy.api#documentation": "<p>A structure containing details about the IAM role.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains the response to a successful <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetRole.html\">GetRole</a> request. </p>",
+    "smithy.api#output": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#ListRoles": {
+   "errors": [
+    {
+     "target": "com.amazonaws.iam#ServiceFailureException"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.iam#ListRolesRequest"
+   },
+   "output": {
+    "target": "com.amazonaws.iam#ListRolesResponse"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Lists the IAM roles that have the specified path prefix. If there are none, the\n            operation returns an empty list. For more information about roles, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html\">IAM roles</a> in the\n                <i>IAM User Guide</i>.</p>\n         <note>\n            <p>IAM resource-listing operations return a subset of the available \n   attributes for the resource. This operation does not return the following attributes, even though they are an attribute of the returned object:</p>\n            <ul>\n               <li>\n                  <p>PermissionsBoundary</p>\n               </li>\n               <li>\n                  <p>RoleLastUsed</p>\n               </li>\n               <li>\n                  <p>Tags</p>\n               </li>\n            </ul>\n            <p>To view all of the information for a role, see <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetRole.html\">GetRole</a>.</p>\n         </note>\n         <p>You can paginate the results using the <code>MaxItems</code> and <code>Marker</code>\n            parameters.</p>",
+    "smithy.api#paginated": {
+     "inputToken": "Marker",
+     "items": "Roles",
+     "outputToken": "Marker",
+     "pageSize": "MaxItems"
+    }
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.iam#ListRolesRequest": {
+   "members": {
+    "Marker": {
+     "target": "com.amazonaws.iam#markerType",
+     "traits": {
+      "smithy.api#documentation": "<p>Use this parameter only when paginating results and only after \n    you receive a response indicating that the results are truncated. Set it to the value of the\n    <code>Marker</code> element in the response that you received to indicate where the next call \n    should start.</p>"
+     }
+    },
+    "MaxItems": {
+     "target": "com.amazonaws.iam#maxItemsType",
+     "traits": {
+      "smithy.api#documentation": "<p>Use this only when paginating results to indicate the \n    maximum number of items you want in the response. If additional items exist beyond the maximum \n    you specify, the <code>IsTruncated</code> response element is <code>true</code>.</p>\n         <p>If you do not include this parameter, the number of items defaults to 100. Note that\n    IAM might return fewer results, even when there are more results available. In that case, the\n    <code>IsTruncated</code> response element returns <code>true</code>, and <code>Marker</code> \n    contains a value to include in the subsequent call that tells the service where to continue \n    from.</p>"
+     }
+    },
+    "PathPrefix": {
+     "target": "com.amazonaws.iam#pathPrefixType",
+     "traits": {
+      "smithy.api#documentation": "<p> The path prefix for filtering the results. For example, the prefix\n                <code>/application_abc/component_xyz/</code> gets all roles whose path starts with\n                <code>/application_abc/component_xyz/</code>.</p>\n         <p>This parameter is optional. If it is not included, it defaults to a slash (/), listing\n            all roles. This parameter allows (through its <a href=\"http://wikipedia.org/wiki/regex\">regex pattern</a>) a string of characters consisting \n    of either a forward slash (/) by itself or a string that must begin and end with forward slashes.\n    In addition, it can contain any ASCII character from the ! (<code>\\u0021</code>) through the DEL character (<code>\\u007F</code>), including \n    most punctuation characters, digits, and upper and lowercased letters.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#ListRolesResponse": {
+   "members": {
+    "IsTruncated": {
+     "target": "com.amazonaws.iam#booleanType",
+     "traits": {
+      "smithy.api#default": false,
+      "smithy.api#documentation": "<p>A flag that indicates whether there are more items to return. If your \n    results were truncated, you can make a subsequent pagination request using the <code>Marker</code>\n    request parameter to retrieve more items. Note that IAM might return fewer than the \n    <code>MaxItems</code> number of results even when there are more results available. We recommend \n    that you check <code>IsTruncated</code> after every call to ensure that you receive all your \n    results.</p>"
+     }
+    },
+    "Marker": {
+     "target": "com.amazonaws.iam#responseMarkerType",
+     "traits": {
+      "smithy.api#documentation": "<p>When <code>IsTruncated</code> is <code>true</code>, this element\n    is present and contains the value to use for the <code>Marker</code> parameter in a subsequent \n    pagination request.</p>"
+     }
+    },
+    "Roles": {
+     "target": "com.amazonaws.iam#roleListType",
+     "traits": {
+      "smithy.api#documentation": "<p>A list of roles.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains the response to a successful <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_ListRoles.html\">ListRoles</a> request. </p>",
+    "smithy.api#output": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#PermissionsBoundaryAttachmentType": {
+   "members": {
+    "Policy": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "PermissionsBoundaryPolicy"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.iam#Role": {
+   "members": {
+    "Arn": {
+     "target": "com.amazonaws.iam#arnType",
+     "traits": {
+      "smithy.api#documentation": "<p> The Amazon Resource Name (ARN) specifying the role. For more information about ARNs and\n         how to use them in policies, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/Using_Identifiers.html\">IAM identifiers</a> in the\n            <i>IAM User Guide</i> guide. </p>",
+      "smithy.api#required": {}
+     }
+    },
+    "AssumeRolePolicyDocument": {
+     "target": "com.amazonaws.iam#policyDocumentType",
+     "traits": {
+      "smithy.api#documentation": "<p>The policy that grants an entity permission to assume the role.</p>"
+     }
+    },
+    "CreateDate": {
+     "target": "com.amazonaws.iam#dateType",
+     "traits": {
+      "smithy.api#documentation": "<p>The date and time, in <a href=\"http://www.iso.org/iso/iso8601\">ISO 8601 date-time\n            format</a>, when the role was created.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Description": {
+     "target": "com.amazonaws.iam#roleDescriptionType",
+     "traits": {
+      "smithy.api#documentation": "<p>A description of the role that you provide.</p>"
+     }
+    },
+    "MaxSessionDuration": {
+     "target": "com.amazonaws.iam#roleMaxSessionDurationType",
+     "traits": {
+      "smithy.api#documentation": "<p>The maximum session duration (in seconds) for the specified role. Anyone who uses the\n         CLI, or API to assume the role can specify the duration using the optional\n            <code>DurationSeconds</code> API parameter or <code>duration-seconds</code> CLI\n         parameter.</p>"
+     }
+    },
+    "Path": {
+     "target": "com.amazonaws.iam#pathType",
+     "traits": {
+      "smithy.api#documentation": "<p> The path to the role. For more information about paths, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/Using_Identifiers.html\">IAM identifiers</a> in the\n            <i>IAM User Guide</i>. </p>",
+      "smithy.api#required": {}
+     }
+    },
+    "PermissionsBoundary": {
+     "target": "com.amazonaws.iam#AttachedPermissionsBoundary",
+     "traits": {
+      "smithy.api#documentation": "<p>The ARN of the policy used to set the permissions boundary for the role.</p>\n         <p>For more information about permissions boundaries, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html\">Permissions boundaries for IAM\n            identities </a> in the <i>IAM User Guide</i>.</p>"
+     }
+    },
+    "RoleId": {
+     "target": "com.amazonaws.iam#idType",
+     "traits": {
+      "smithy.api#documentation": "<p> The stable and unique string identifying the role. For more information about IDs, see\n            <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/Using_Identifiers.html\">IAM\n            identifiers</a> in the <i>IAM User Guide</i>. </p>",
+      "smithy.api#required": {}
+     }
+    },
+    "RoleLastUsed": {
+     "target": "com.amazonaws.iam#RoleLastUsed",
+     "traits": {
+      "smithy.api#documentation": "<p>Contains information about the last time that an IAM role was used. This includes the\n         date and time and the Region in which the role was last used. Activity is only reported for\n         the trailing 400 days. This period can be shorter if your Region began supporting these\n         features within the last year. The role might have been used more than 400 days ago. For\n         more information, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_access-advisor.html#access-advisor_tracking-period\">Regions where data is tracked</a> in the <i>IAM user\n         Guide</i>.</p>"
+     }
+    },
+    "RoleName": {
+     "target": "com.amazonaws.iam#roleNameType",
+     "traits": {
+      "smithy.api#documentation": "<p>The friendly name that identifies the role.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "SourceRoleTemplate": {
+     "target": "com.amazonaws.iam#SourceRoleTemplate",
+     "traits": {
+      "smithy.api#documentation": "<p>Contains information about the role template that this role was created from. This\n         member is present only for roles created with <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_AcquireRole.html\">AcquireRole</a>.</p>"
+     }
+    },
+    "Tags": {
+     "target": "com.amazonaws.iam#tagListType",
+     "traits": {
+      "smithy.api#documentation": "<p>A list of tags that are attached to the role. For more information about tagging, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/id_tags.html\">Tagging IAM resources</a> in the\n      <i>IAM User Guide</i>.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains information about an IAM role. This structure is returned as a response\n         element in several API operations that interact with roles.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#RoleLastUsed": {
+   "members": {
+    "LastUsedDate": {
+     "target": "com.amazonaws.iam#dateType",
+     "traits": {
+      "smithy.api#documentation": "<p>The date and time, in\u00a0<a href=\"http://www.iso.org/iso/iso8601\">ISO 8601 date-time\n            format</a> that the role was last used.</p>\n         <p>This field is null if the role has not been used within the IAM tracking period. For\n         more information about the tracking period, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_access-advisor.html#access-advisor_tracking-period\">Regions where data is tracked</a> in the <i>IAM User Guide</i>.\n      </p>"
+     }
+    },
+    "Region": {
+     "target": "com.amazonaws.iam#stringType",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the Amazon Web Services Region in which the role was last used.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains information about the last time that an IAM role was used. This includes the\n         date and time and the Region in which the role was last used. Activity is only reported for\n         the trailing 400 days. This period can be shorter if your Region began supporting these\n         features within the last year. The role might have been used more than 400 days ago. For\n         more information, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_access-advisor.html#access-advisor_tracking-period\">Regions where data is tracked</a> in the <i>IAM user\n         Guide</i>.</p>\n         <p>This data type is returned as a response element in the <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetRole.html\">GetRole</a> and <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_GetAccountAuthorizationDetails.html\">GetAccountAuthorizationDetails</a> operations.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#SourceRoleTemplate": {
+   "members": {
+    "TemplateArn": {
+     "target": "com.amazonaws.iam#arnType",
+     "traits": {
+      "smithy.api#documentation": "<p>The Amazon Resource Name (ARN) of the role template that the role was created\n         from.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "TemplateMinorVersion": {
+     "target": "com.amazonaws.iam#integerType",
+     "traits": {
+      "smithy.api#documentation": "<p>The minor version of the role template that was used to create the role.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains information about the role template that a role was created from.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#Tag": {
+   "members": {
+    "Key": {
+     "target": "com.amazonaws.iam#tagKeyType",
+     "traits": {
+      "smithy.api#documentation": "<p>The key name that can be used to look up or retrieve the associated value. For example,\n        <code>Department</code> or <code>Cost Center</code> are common choices.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Value": {
+     "target": "com.amazonaws.iam#tagValueType",
+     "traits": {
+      "smithy.api#documentation": "<p>The value associated with this tag. For example, tags with a key name of\n        <code>Department</code> could have values such as <code>Human Resources</code>,\n        <code>Accounting</code>, and <code>Support</code>. Tags with a key name of <code>Cost\n        Center</code> might have values that consist of the number associated with the different\n      cost centers in your company. Typically, many resources have tags with the same key name but\n      with different values.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A structure that represents user-provided metadata that can be associated with an IAM\n      resource. For more information about tagging, see <a href=\"https://docs.aws.amazon.com/IAM/latest/UserGuide/id_tags.html\">Tagging IAM resources</a> in the\n      <i>IAM User Guide</i>.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.iam#arnType": {
+   "traits": {
+    "smithy.api#documentation": "<p>The Amazon Resource Name (ARN). ARNs are unique identifiers for Amazon Web Services resources.</p>\n         <p>For more information about ARNs, go to <a href=\"https://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html\">Amazon Resource Names (ARNs)</a> in\n         the <i>Amazon Web Services General Reference</i>. </p>",
+    "smithy.api#length": {
+     "max": 2048,
+     "min": 20
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#booleanType": {
+   "traits": {
+    "smithy.api#default": false
+   },
+   "type": "boolean"
+  },
+  "com.amazonaws.iam#dateType": {
+   "type": "timestamp"
+  },
+  "com.amazonaws.iam#idType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 128,
+     "min": 16
+    },
+    "smithy.api#pattern": "^[\\w]+$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#integerType": {
+   "type": "integer"
+  },
+  "com.amazonaws.iam#markerType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 320,
+     "min": 1
+    },
+    "smithy.api#pattern": "^[\\u0020-\\u00FF]+$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#maxItemsType": {
+   "traits": {
+    "smithy.api#range": {
+     "max": 1000,
+     "min": 1
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.iam#pathPrefixType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 512,
+     "min": 1
+    },
+    "smithy.api#pattern": "^\\u002F[\\u0021-\\u007F]*$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#pathType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 512,
+     "min": 1
+    },
+    "smithy.api#pattern": "^(\\u002F)|(\\u002F[\\u0021-\\u007E]+\\u002F)$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#policyDocumentType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 131072,
+     "min": 1
+    },
+    "smithy.api#pattern": "^[\\u0009\\u000A\\u000D\\u0020-\\u00FF]+$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#responseMarkerType": {
+   "type": "string"
+  },
+  "com.amazonaws.iam#roleDescriptionType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 1000,
+     "min": 0
+    },
+    "smithy.api#pattern": "^[\\u0009\\u000A\\u000D\\u0020-\\u007E\\u00A1-\\u00FF]*$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#roleListType": {
+   "member": {
+    "target": "com.amazonaws.iam#Role"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains a list of IAM roles.</p>\n         <p>This data type is used as a response element in the <a href=\"https://docs.aws.amazon.com/IAM/latest/APIReference/API_ListRoles.html\">ListRoles</a> operation.</p>"
+   },
+   "type": "list"
+  },
+  "com.amazonaws.iam#roleMaxSessionDurationType": {
+   "traits": {
+    "smithy.api#range": {
+     "max": 43200,
+     "min": 3600
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.iam#roleNameType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 1
+    },
+    "smithy.api#pattern": "^[\\w+=,.@-]+$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#stringType": {
+   "type": "string"
+  },
+  "com.amazonaws.iam#tagKeyType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 128,
+     "min": 1
+    },
+    "smithy.api#pattern": "^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.iam#tagListType": {
+   "member": {
+    "target": "com.amazonaws.iam#Tag"
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 50,
+     "min": 0
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.iam#tagValueType": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 256,
+     "min": 0
+    },
+    "smithy.api#pattern": "^[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*$"
+   },
+   "type": "string"
+  }
+ },
+ "smithy": "2.0"
+}

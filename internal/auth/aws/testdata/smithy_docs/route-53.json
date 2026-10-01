@@ -1,0 +1,2295 @@
+{
+ "shapes": {
+  "com.amazonaws.route53#AWSDnsV20130401": {
+   "operations": [
+    {
+     "target": "com.amazonaws.route53#ListHostedZones"
+    },
+    {
+     "target": "com.amazonaws.route53#CreateHostedZone"
+    },
+    {
+     "target": "com.amazonaws.route53#GetHostedZone"
+    },
+    {
+     "target": "com.amazonaws.route53#ListHealthChecks"
+    }
+   ],
+   "traits": {
+    "aws.api#service": {
+     "arnNamespace": "route53",
+     "cloudFormationName": "Route53",
+     "cloudTrailEventSource": "route53.amazonaws.com",
+     "docId": "route53-2013-04-01",
+     "endpointPrefix": "route53",
+     "sdkId": "Route 53"
+    },
+    "aws.auth#sigv4": {
+     "name": "route53"
+    },
+    "aws.protocols#restXml": {},
+    "smithy.api#title": "Amazon Route 53",
+    "smithy.rules#endpointRuleSet": {
+     "rules": [
+      {
+       "endpoint": {
+        "url": "https://route53-fips.amazonaws.com"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53-fips.global.api.aws"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53-fips.{PartitionResult#dnsSuffix}"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53-fips.{PartitionResult#dualStackDnsSuffix}"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.amazonaws.com"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.amazonaws.com.cn"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.amazonaws.eu"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.c2s.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.cloud.adc-e.uk"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.csp.hci.ic.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.global.api.amazonwebservices.com.cn"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.global.api.amazonwebservices.eu"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.global.api.aws"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.sc2s.sgov.gov"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.us-gov.amazonaws.com"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.us-gov.api.aws"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.{PartitionResult#dnsSuffix}"
+       }
+      },
+      {
+       "endpoint": {
+        "url": "https://route53.{PartitionResult#dualStackDnsSuffix}"
+       }
+      }
+     ]
+    }
+   },
+   "type": "service",
+   "version": "2013-04-01"
+  },
+  "com.amazonaws.route53#AcceleratedRecoveryStatus": {
+   "members": {
+    "DISABLED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "DISABLED"
+     }
+    },
+    "DISABLE_FAILED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "DISABLE_FAILED"
+     }
+    },
+    "DISABLING": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "DISABLING"
+     }
+    },
+    "DISABLING_HOSTED_ZONE_LOCKED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "DISABLING_HOSTED_ZONE_LOCKED"
+     }
+    },
+    "ENABLED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ENABLED"
+     }
+    },
+    "ENABLE_FAILED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ENABLE_FAILED"
+     }
+    },
+    "ENABLING": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ENABLING"
+     }
+    },
+    "ENABLING_HOSTED_ZONE_LOCKED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ENABLING_HOSTED_ZONE_LOCKED"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#AlarmIdentifier": {
+   "members": {
+    "Name": {
+     "target": "com.amazonaws.route53#AlarmName",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the CloudWatch alarm that you want Amazon Route 53 health checkers to use\n\t\t\tto determine whether this health check is healthy.</p>\n         <note>\n            <p>Route 53 supports CloudWatch alarms with the following features:</p>\n            <ul>\n               <li>\n                  <p>Standard-resolution metrics. High-resolution metrics aren't supported. For\n\t\t\t\t\t\tmore information, see <a href=\"https://docs.aws.amazon.com/AmazonCloudWatch/latest/DeveloperGuide/publishingMetrics.html#high-resolution-metrics\">High-Resolution Metrics</a> in the <i>Amazon CloudWatch User\n\t\t\t\t\t\t\tGuide</i>.</p>\n               </li>\n               <li>\n                  <p>Statistics: Average, Minimum, Maximum, Sum, and SampleCount. Extended\n\t\t\t\t\t\tstatistics aren't supported.</p>\n               </li>\n            </ul>\n         </note>",
+      "smithy.api#required": {}
+     }
+    },
+    "Region": {
+     "target": "com.amazonaws.route53#CloudWatchRegion",
+     "traits": {
+      "smithy.api#documentation": "<p>For the CloudWatch alarm that you want Route 53 health checkers to use to determine\n\t\t\twhether this health check is healthy, the region that the alarm was created in.</p>\n         <p>For the current list of CloudWatch regions, see <a href=\"https://docs.aws.amazon.com/general/latest/gr/cw_region.html\">Amazon CloudWatch endpoints and\n\t\t\t\tquotas</a> in the <i>Amazon Web Services General\n\t\t\tReference</i>.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that identifies the CloudWatch alarm that you want Amazon Route 53\n\t\t\thealth checkers to use to determine whether the specified health check is\n\t\t\thealthy.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#AlarmName": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 256,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#ChangeInfo": {
+   "members": {
+    "Comment": {
+     "target": "com.amazonaws.route53#ResourceDescription",
+     "traits": {
+      "smithy.api#documentation": "<p>A comment you can provide.</p>"
+     }
+    },
+    "Id": {
+     "target": "com.amazonaws.route53#ResourceId",
+     "traits": {
+      "smithy.api#documentation": "<p>This element contains an ID that you use when performing a <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_GetChange.html\">GetChange</a> action to get\n\t\t\tdetailed information about the change.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Status": {
+     "target": "com.amazonaws.route53#ChangeStatus",
+     "traits": {
+      "smithy.api#documentation": "<p>The current state of the request. <code>PENDING</code> indicates that this request has\n\t\t\tnot yet been applied to all Amazon Route 53 DNS servers.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "SubmittedAt": {
+     "target": "com.amazonaws.route53#TimeStamp",
+     "traits": {
+      "smithy.api#documentation": "<p>The date and time that the change request was submitted in <a href=\"https://en.wikipedia.org/wiki/ISO_8601\">ISO 8601 format</a> and Coordinated\n\t\t\tUniversal Time (UTC). For example, the value <code>2017-03-27T17:48:16.751Z</code>\n\t\t\trepresents March 27, 2017 at 17:48:16.751 UTC.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that describes change information about changes made to your hosted\n\t\t\tzone.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#ChangeStatus": {
+   "members": {
+    "INSYNC": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "INSYNC"
+     }
+    },
+    "PENDING": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "PENDING"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#ChildHealthCheckList": {
+   "member": {
+    "target": "com.amazonaws.route53#HealthCheckId",
+    "traits": {
+     "smithy.api#xmlName": "ChildHealthCheck"
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 256,
+     "min": 0
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.route53#CloudWatchAlarmConfiguration": {
+   "members": {
+    "ComparisonOperator": {
+     "target": "com.amazonaws.route53#ComparisonOperator",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the arithmetic operation\n\t\t\tthat is used for the comparison.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Dimensions": {
+     "target": "com.amazonaws.route53#DimensionList",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, a complex type that\n\t\t\tcontains information about the dimensions for the metric. For information, see <a href=\"https://docs.aws.amazon.com/AmazonCloudWatch/latest/DeveloperGuide/CW_Support_For_AWS.html\">Amazon\n\t\t\t\tCloudWatch Namespaces, Dimensions, and Metrics Reference</a> in the\n\t\t\t\t<i>Amazon CloudWatch User Guide</i>.</p>"
+     }
+    },
+    "EvaluationPeriods": {
+     "target": "com.amazonaws.route53#EvaluationPeriods",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the number of periods\n\t\t\tthat the metric is compared to the threshold.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "MetricName": {
+     "target": "com.amazonaws.route53#MetricName",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the CloudWatch metric that the alarm is associated with.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Namespace": {
+     "target": "com.amazonaws.route53#Namespace",
+     "traits": {
+      "smithy.api#documentation": "<p>The namespace of the metric that the alarm is associated with. For more information,\n\t\t\tsee <a href=\"https://docs.aws.amazon.com/AmazonCloudWatch/latest/DeveloperGuide/CW_Support_For_AWS.html\">Amazon\n\t\t\t\tCloudWatch Namespaces, Dimensions, and Metrics Reference</a> in the\n\t\t\t\t<i>Amazon CloudWatch User Guide</i>.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Period": {
+     "target": "com.amazonaws.route53#Period",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the duration of one\n\t\t\tevaluation period in seconds.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Statistic": {
+     "target": "com.amazonaws.route53#Statistic",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the statistic that is\n\t\t\tapplied to the metric.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Threshold": {
+     "target": "com.amazonaws.route53#Threshold",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the value the metric is\n\t\t\tcompared with.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains information about the CloudWatch alarm that Amazon Route\n\t\t\t53 is monitoring for this health check.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#CloudWatchRegion": {
+   "members": {
+    "af_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "af-south-1"
+     }
+    },
+    "ap_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-east-1"
+     }
+    },
+    "ap_east_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-east-2"
+     }
+    },
+    "ap_northeast_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-1"
+     }
+    },
+    "ap_northeast_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-2"
+     }
+    },
+    "ap_northeast_3": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-3"
+     }
+    },
+    "ap_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-south-1"
+     }
+    },
+    "ap_south_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-south-2"
+     }
+    },
+    "ap_southeast_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-1"
+     }
+    },
+    "ap_southeast_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-2"
+     }
+    },
+    "ap_southeast_3": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-3"
+     }
+    },
+    "ap_southeast_4": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-4"
+     }
+    },
+    "ap_southeast_5": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-5"
+     }
+    },
+    "ap_southeast_6": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-6"
+     }
+    },
+    "ap_southeast_7": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-7"
+     }
+    },
+    "ca_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ca-central-1"
+     }
+    },
+    "ca_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ca-west-1"
+     }
+    },
+    "cn_north_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "cn-north-1"
+     }
+    },
+    "cn_northwest_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "cn-northwest-1"
+     }
+    },
+    "eu_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-central-1"
+     }
+    },
+    "eu_central_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-central-2"
+     }
+    },
+    "eu_isoe_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-isoe-west-1"
+     }
+    },
+    "eu_north_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-north-1"
+     }
+    },
+    "eu_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-south-1"
+     }
+    },
+    "eu_south_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-south-2"
+     }
+    },
+    "eu_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-1"
+     }
+    },
+    "eu_west_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-2"
+     }
+    },
+    "eu_west_3": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-3"
+     }
+    },
+    "eusc_de_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eusc-de-east-1"
+     }
+    },
+    "il_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "il-central-1"
+     }
+    },
+    "me_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "me-central-1"
+     }
+    },
+    "me_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "me-south-1"
+     }
+    },
+    "mx_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "mx-central-1"
+     }
+    },
+    "sa_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "sa-east-1"
+     }
+    },
+    "us_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-east-1"
+     }
+    },
+    "us_east_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-east-2"
+     }
+    },
+    "us_gov_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-gov-east-1"
+     }
+    },
+    "us_gov_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-gov-west-1"
+     }
+    },
+    "us_iso_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-iso-east-1"
+     }
+    },
+    "us_iso_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-iso-west-1"
+     }
+    },
+    "us_isob_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isob-east-1"
+     }
+    },
+    "us_isob_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isob-west-1"
+     }
+    },
+    "us_isof_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isof-east-1"
+     }
+    },
+    "us_isof_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isof-south-1"
+     }
+    },
+    "us_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-west-1"
+     }
+    },
+    "us_west_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-west-2"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 1
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#ComparisonOperator": {
+   "members": {
+    "GreaterThanOrEqualToThreshold": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "GreaterThanOrEqualToThreshold"
+     }
+    },
+    "GreaterThanThreshold": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "GreaterThanThreshold"
+     }
+    },
+    "LessThanOrEqualToThreshold": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "LessThanOrEqualToThreshold"
+     }
+    },
+    "LessThanThreshold": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "LessThanThreshold"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#CreateHostedZone": {
+   "errors": [
+    {
+     "target": "com.amazonaws.route53#ConflictingDomainExists"
+    },
+    {
+     "target": "com.amazonaws.route53#DelegationSetNotAvailable"
+    },
+    {
+     "target": "com.amazonaws.route53#DelegationSetNotReusable"
+    },
+    {
+     "target": "com.amazonaws.route53#HostedZoneAlreadyExists"
+    },
+    {
+     "target": "com.amazonaws.route53#InvalidDomainName"
+    },
+    {
+     "target": "com.amazonaws.route53#InvalidInput"
+    },
+    {
+     "target": "com.amazonaws.route53#InvalidVPCId"
+    },
+    {
+     "target": "com.amazonaws.route53#NoSuchDelegationSet"
+    },
+    {
+     "target": "com.amazonaws.route53#TooManyHostedZones"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.route53#CreateHostedZoneRequest"
+   },
+   "output": {
+    "target": "com.amazonaws.route53#CreateHostedZoneResponse"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Creates a new public or private hosted zone. You create records in a public hosted\n\t\t\tzone to define how you want to route traffic on the internet for a domain, such as\n\t\t\texample.com, and its subdomains (apex.example.com, acme.example.com). You create records\n\t\t\tin a private hosted zone to define how you want to route traffic for a domain and its\n\t\t\tsubdomains within one or more Amazon Virtual Private Clouds (Amazon VPCs). </p>\n         <important>\n            <p>You can't convert a public hosted zone to a private hosted zone or vice versa.\n\t\t\t\tInstead, you must create a new hosted zone with the same name and create new\n\t\t\t\tresource record sets.</p>\n         </important>\n         <p>For more information about charges for hosted zones, see <a href=\"http://aws.amazon.com/route53/pricing/\">Amazon Route\u00a053 Pricing</a>.</p>\n         <p>Note the following:</p>\n         <ul>\n            <li>\n               <p>You can't create a hosted zone for a top-level domain (TLD) such as\n\t\t\t\t\t.com.</p>\n            </li>\n            <li>\n               <p>For public hosted zones, Route 53 automatically creates a default SOA record\n\t\t\t\t\tand four NS records for the zone. For more information about SOA and NS records,\n\t\t\t\t\tsee <a href=\"https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/SOA-NSrecords.html\">NS and SOA Records\n\t\t\t\t\t\tthat Route\u00a053 Creates for a Hosted Zone</a> in the\n\t\t\t\t\t\t<i>Amazon Route 53 Developer Guide</i>.</p>\n               <p>If you want to use the same name servers for multiple public hosted zones, you\n\t\t\t\t\tcan optionally associate a reusable delegation set with the hosted zone. See the\n\t\t\t\t\t\t<code>DelegationSetId</code> element.</p>\n            </li>\n            <li>\n               <p>If your domain is registered with a registrar other than Route\u00a053,\n\t\t\t\t\tyou must update the name servers with your registrar to make Route 53 the DNS\n\t\t\t\t\tservice for the domain. For more information, see <a href=\"https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/MigratingDNS.html\">Migrating DNS Service\n\t\t\t\t\t\tfor an Existing Domain to Amazon Route\u00a053</a> in the\n\t\t\t\t\t\t<i>Amazon Route 53 Developer Guide</i>. </p>\n            </li>\n         </ul>\n         <p>When you submit a <code>CreateHostedZone</code> request, the initial status of the\n\t\t\thosted zone is <code>PENDING</code>. For public hosted zones, this means that the NS and\n\t\t\tSOA records are not yet available on all Route\u00a053 DNS servers. When the NS and\n\t\t\tSOA records are available, the status of the zone changes to <code>INSYNC</code>.</p>\n         <p>The <code>CreateHostedZone</code> request requires the caller to have an\n\t\t\t\t<code>ec2:DescribeVpcs</code> permission.</p>\n         <note>\n            <p>When creating private hosted zones, the Amazon VPC must belong to the same\n\t\t\t\tpartition where the hosted zone is created. A partition is a group of Amazon Web Services Regions. Each Amazon Web Services account is scoped to one\n\t\t\t\tpartition.</p>\n            <p>The following are the supported partitions:</p>\n            <ul>\n               <li>\n                  <p>\n                     <code>aws</code> - Amazon Web Services Regions</p>\n               </li>\n               <li>\n                  <p>\n                     <code>aws-cn</code> - China Regions</p>\n               </li>\n               <li>\n                  <p>\n                     <code>aws-us-gov</code> - Amazon Web Services GovCloud (US) Region</p>\n               </li>\n            </ul>\n            <p>For more information, see <a href=\"https://docs.aws.amazon.com/general/latest/gr/aws-arns-and-namespaces.html\">Access Management</a>\n\t\t\t\tin the <i>Amazon Web Services General Reference</i>.</p>\n         </note>",
+    "smithy.api#http": {
+     "code": 201,
+     "method": "POST",
+     "uri": "/2013-04-01/hostedzone"
+    }
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.route53#CreateHostedZoneRequest": {
+   "members": {
+    "CallerReference": {
+     "target": "com.amazonaws.route53#Nonce",
+     "traits": {
+      "smithy.api#documentation": "<p>A unique string that identifies the request and that allows failed\n\t\t\t\t<code>CreateHostedZone</code> requests to be retried without the risk of executing\n\t\t\tthe operation twice. You must use a unique <code>CallerReference</code> string every\n\t\t\ttime you submit a <code>CreateHostedZone</code> request. <code>CallerReference</code>\n\t\t\tcan be any unique string, for example, a date/time stamp.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "DelegationSetId": {
+     "target": "com.amazonaws.route53#ResourceId",
+     "traits": {
+      "smithy.api#documentation": "<p>If you want to associate a reusable delegation set with this hosted zone, the ID that\n\t\t\t\tAmazon Route\u00a053 assigned to the reusable delegation set when you created it.\n\t\t\tFor more information about reusable delegation sets, see <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_CreateReusableDelegationSet.html\">CreateReusableDelegationSet</a>.</p>\n         <p>If you are using a reusable delegation set to create a public hosted zone for a subdomain,\n\t\t\tmake sure that the parent hosted zone doesn't use one or more of the same name servers.\n\t\t\tIf you have overlapping nameservers, the operation will cause a\n\t\t\t\t<code>ConflictingDomainsExist</code> error.</p>"
+     }
+    },
+    "HostedZoneConfig": {
+     "target": "com.amazonaws.route53#HostedZoneConfig",
+     "traits": {
+      "smithy.api#documentation": "<p>(Optional) A complex type that contains the following optional values:</p>\n         <ul>\n            <li>\n               <p>For public and private hosted zones, an optional comment</p>\n            </li>\n            <li>\n               <p>For private hosted zones, an optional <code>PrivateZone</code> element</p>\n            </li>\n         </ul>\n         <p>If you don't specify a comment or the <code>PrivateZone</code> element, omit\n\t\t\t\t<code>HostedZoneConfig</code> and the other elements.</p>"
+     }
+    },
+    "Name": {
+     "target": "com.amazonaws.route53#DNSName",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the domain. Specify a fully qualified domain name, for example,\n\t\t\t\t<i>www.example.com</i>. The trailing dot is optional; Amazon Route\u00a053 assumes that the domain name is fully qualified. This means that\n\t\t\t\tRoute\u00a053 treats <i>www.example.com</i> (without a trailing\n\t\t\tdot) and <i>www.example.com.</i> (with a trailing dot) as\n\t\t\tidentical.</p>\n         <p>If you're creating a public hosted zone, this is the name you have registered with\n\t\t\tyour DNS registrar. If your domain name is registered with a registrar other than\n\t\t\t\tRoute\u00a053, change the name servers for your domain to the set of\n\t\t\t\t<code>NameServers</code> that <code>CreateHostedZone</code> returns in\n\t\t\t\t<code>DelegationSet</code>.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "VPC": {
+     "target": "com.amazonaws.route53#VPC",
+     "traits": {
+      "smithy.api#documentation": "<p>(Private hosted zones only) A complex type that contains information about the Amazon\n\t\t\tVPC that you're associating with this hosted zone.</p>\n         <p>You can specify only one Amazon VPC when you create a private hosted zone. If you are\n\t\t\tassociating a VPC with a hosted zone with this request, the paramaters\n\t\t\t\t<code>VPCId</code> and <code>VPCRegion</code> are also required.</p>\n         <p>To associate additional Amazon VPCs with the hosted zone, use <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_AssociateVPCWithHostedZone.html\">AssociateVPCWithHostedZone</a> after you create a hosted zone.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains information about the request to create a public or\n\t\t\tprivate hosted zone.</p>",
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#CreateHostedZoneResponse": {
+   "members": {
+    "ChangeInfo": {
+     "target": "com.amazonaws.route53#ChangeInfo",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains information about the <code>CreateHostedZone</code>\n\t\t\trequest.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "DelegationSet": {
+     "target": "com.amazonaws.route53#DelegationSet",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that describes the name servers for this hosted zone.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "HostedZone": {
+     "target": "com.amazonaws.route53#HostedZone",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains general information about the hosted zone.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Location": {
+     "target": "com.amazonaws.route53#ResourceURI",
+     "traits": {
+      "smithy.api#documentation": "<p>The unique URL representing the new hosted zone.</p>",
+      "smithy.api#httpHeader": "Location",
+      "smithy.api#required": {}
+     }
+    },
+    "VPC": {
+     "target": "com.amazonaws.route53#VPC",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains information about an Amazon VPC that you associated with\n\t\t\tthis hosted zone.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type containing the response information for the hosted zone.</p>",
+    "smithy.api#output": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#DNSName": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 1024,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#DelegationSet": {
+   "members": {
+    "CallerReference": {
+     "target": "com.amazonaws.route53#Nonce",
+     "traits": {
+      "smithy.api#documentation": "<p>The value that you specified for <code>CallerReference</code> when you created the\n\t\t\treusable delegation set.</p>"
+     }
+    },
+    "Id": {
+     "target": "com.amazonaws.route53#ResourceId",
+     "traits": {
+      "smithy.api#documentation": "<p>The ID that Amazon Route 53 assigns to a reusable delegation set.</p>"
+     }
+    },
+    "NameServers": {
+     "target": "com.amazonaws.route53#DelegationSetNameServers",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains a list of the authoritative name servers for a hosted\n\t\t\tzone or for a reusable delegation set.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that lists the name servers in a delegation set, as well as the\n\t\t\t\t<code>CallerReference</code> and the <code>ID</code> for the delegation set.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#DelegationSetNameServers": {
+   "member": {
+    "target": "com.amazonaws.route53#DNSName",
+    "traits": {
+     "smithy.api#xmlName": "NameServer"
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "min": 1
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.route53#Dimension": {
+   "members": {
+    "Name": {
+     "target": "com.amazonaws.route53#DimensionField",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the name of one\n\t\t\tdimension.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Value": {
+     "target": "com.amazonaws.route53#DimensionField",
+     "traits": {
+      "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, the value of one\n\t\t\tdimension.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>For the metric that the CloudWatch alarm is associated with, a complex type that\n\t\t\tcontains information about one dimension.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#DimensionField": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#DimensionList": {
+   "member": {
+    "target": "com.amazonaws.route53#Dimension",
+    "traits": {
+     "smithy.api#xmlName": "Dimension"
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 10,
+     "min": 0
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.route53#Disabled": {
+   "type": "boolean"
+  },
+  "com.amazonaws.route53#EnableSNI": {
+   "type": "boolean"
+  },
+  "com.amazonaws.route53#EvaluationPeriods": {
+   "traits": {
+    "smithy.api#range": {
+     "min": 1
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.route53#FailureReason": {
+   "type": "string"
+  },
+  "com.amazonaws.route53#FailureThreshold": {
+   "traits": {
+    "smithy.api#range": {
+     "max": 10,
+     "min": 1
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.route53#FullyQualifiedDomainName": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#GetHostedZone": {
+   "errors": [
+    {
+     "target": "com.amazonaws.route53#InvalidInput"
+    },
+    {
+     "target": "com.amazonaws.route53#NoSuchHostedZone"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.route53#GetHostedZoneRequest"
+   },
+   "output": {
+    "target": "com.amazonaws.route53#GetHostedZoneResponse"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Gets information about a specified hosted zone including the four name servers\n\t\t\tassigned to the hosted zone.</p>\n         <p>\n            <code></code> returns the VPCs associated with the specified hosted zone and does not reflect the VPC\n\t\t\tassociations by Route 53 Profiles. To get the associations to a Profile, call the <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_route53profiles_ListProfileAssociations.html\">ListProfileAssociations</a> API.</p>",
+    "smithy.api#examples": [
+     {
+      "documentation": "The following example gets information about the Z3M3LMPEXAMPLE hosted zone.",
+      "input": {
+       "Id": "Z3M3LMPEXAMPLE"
+      },
+      "output": {
+       "DelegationSet": {
+        "NameServers": [
+         "ns-2048.awsdns-64.com",
+         "ns-2049.awsdns-65.net",
+         "ns-2050.awsdns-66.org",
+         "ns-2051.awsdns-67.co.uk"
+        ]
+       },
+       "HostedZone": {
+        "CallerReference": "C741617D-04E4-F8DE-B9D7-0D150FC61C2E",
+        "Config": {
+         "PrivateZone": false
+        },
+        "Id": "/hostedzone/Z3M3LMPEXAMPLE",
+        "Name": "myawsbucket.com.",
+        "ResourceRecordSetCount": 8
+       }
+      },
+      "title": "To get information about a hosted zone"
+     }
+    ],
+    "smithy.api#http": {
+     "code": 200,
+     "method": "GET",
+     "uri": "/2013-04-01/hostedzone/{Id}"
+    },
+    "smithy.test#smokeTests": [
+     {
+      "expect": {
+       "failure": {}
+      },
+      "id": "GetHostedZoneFailure",
+      "params": {
+       "Id": "fake-zone"
+      },
+      "vendorParams": {
+       "region": "us-east-1"
+      },
+      "vendorParamsShape": "aws.test#AwsVendorParams"
+     }
+    ]
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.route53#GetHostedZoneRequest": {
+   "members": {
+    "Id": {
+     "target": "com.amazonaws.route53#ResourceId",
+     "traits": {
+      "smithy.api#documentation": "<p>The ID of the hosted zone that you want to get information about.</p>",
+      "smithy.api#httpLabel": {},
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A request to get information about a specified hosted zone. </p>",
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#GetHostedZoneResponse": {
+   "members": {
+    "DelegationSet": {
+     "target": "com.amazonaws.route53#DelegationSet",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that lists the Amazon Route 53 name servers for the specified hosted\n\t\t\tzone.</p>"
+     }
+    },
+    "HostedZone": {
+     "target": "com.amazonaws.route53#HostedZone",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains general information about the specified hosted\n\t\t\tzone.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "VPCs": {
+     "target": "com.amazonaws.route53#VPCs",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains information about the VPCs that are associated with the\n\t\t\tspecified hosted zone.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contain the response to a <code>GetHostedZone</code>\n\t\t\trequest.</p>",
+    "smithy.api#output": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HealthCheck": {
+   "members": {
+    "CallerReference": {
+     "target": "com.amazonaws.route53#HealthCheckNonce",
+     "traits": {
+      "smithy.api#documentation": "<p>A unique string that you specified when you created the health check.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "CloudWatchAlarmConfiguration": {
+     "target": "com.amazonaws.route53#CloudWatchAlarmConfiguration",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains information about the CloudWatch alarm that Amazon Route\n\t\t\t53 is monitoring for this health check.</p>"
+     }
+    },
+    "HealthCheckConfig": {
+     "target": "com.amazonaws.route53#HealthCheckConfig",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains detailed information about one health check.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "HealthCheckVersion": {
+     "target": "com.amazonaws.route53#HealthCheckVersion",
+     "traits": {
+      "smithy.api#documentation": "<p>The version of the health check. You can optionally pass this value in a call to\n\t\t\t\t<code>UpdateHealthCheck</code> to prevent overwriting another change to the health\n\t\t\tcheck.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Id": {
+     "target": "com.amazonaws.route53#HealthCheckId",
+     "traits": {
+      "smithy.api#documentation": "<p>The identifier that Amazon Route 53 assigned to the health check when you created it.\n\t\t\tWhen you add or update a resource record set, you use this value to specify which health\n\t\t\tcheck to use. The value can be up to 64 characters long. </p>",
+      "smithy.api#required": {}
+     }
+    },
+    "LinkedService": {
+     "target": "com.amazonaws.route53#LinkedService",
+     "traits": {
+      "smithy.api#documentation": "<p>If the health check was created by another service, the service that created the\n\t\t\thealth check. When a health check is created by another service, you can't edit or\n\t\t\tdelete it using Amazon Route 53. </p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains information about one health check that is associated\n\t\t\twith the current Amazon Web Services account.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HealthCheckConfig": {
+   "members": {
+    "AlarmIdentifier": {
+     "target": "com.amazonaws.route53#AlarmIdentifier",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that identifies the CloudWatch alarm that you want Amazon Route 53\n\t\t\thealth checkers to use to determine whether the specified health check is\n\t\t\thealthy.</p>"
+     }
+    },
+    "ChildHealthChecks": {
+     "target": "com.amazonaws.route53#ChildHealthCheckList",
+     "traits": {
+      "smithy.api#documentation": "<p>(CALCULATED Health Checks Only) A complex type that contains one\n\t\t\t\t<code>ChildHealthCheck</code> element for each health check that you want to\n\t\t\tassociate with a <code>CALCULATED</code> health check.</p>"
+     }
+    },
+    "Disabled": {
+     "target": "com.amazonaws.route53#Disabled",
+     "traits": {
+      "smithy.api#documentation": "<p>Stops Route 53 from performing health checks. When you disable a health check, here's\n\t\t\twhat happens:</p>\n         <ul>\n            <li>\n               <p>\n                  <b>Health checks that check the health of\n\t\t\t\t\t\tendpoints:</b> Route 53 stops submitting requests to your\n\t\t\t\t\tapplication, server, or other resource.</p>\n            </li>\n            <li>\n               <p>\n                  <b>Calculated health checks:</b> Route 53 stops\n\t\t\t\t\taggregating the status of the referenced health checks.</p>\n            </li>\n            <li>\n               <p>\n                  <b>Health checks that monitor CloudWatch alarms:</b>\n\t\t\t\t\tRoute 53 stops monitoring the corresponding CloudWatch metrics.</p>\n            </li>\n         </ul>\n         <p>After you disable a health check, Route 53 considers the status of the health check to\n\t\t\talways be healthy. If you configured DNS failover, Route 53 continues to route traffic\n\t\t\tto the corresponding resources. If you want to stop routing traffic to a resource,\n\t\t\tchange the value of <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_UpdateHealthCheck.html#Route53-UpdateHealthCheck-request-Inverted\">Inverted</a>. </p>\n         <p>Charges for a health check still apply when the health check is disabled. For more\n\t\t\tinformation, see <a href=\"http://aws.amazon.com/route53/pricing/\">Amazon Route 53\n\t\t\t\tPricing</a>.</p>"
+     }
+    },
+    "EnableSNI": {
+     "target": "com.amazonaws.route53#EnableSNI",
+     "traits": {
+      "smithy.api#documentation": "<p>Specify whether you want Amazon Route 53 to send the value of\n\t\t\t\t<code>FullyQualifiedDomainName</code> to the endpoint in the\n\t\t\t\t<code>client_hello</code> message during TLS negotiation. This allows the endpoint\n\t\t\tto respond to <code>HTTPS</code> health check requests with the applicable SSL/TLS\n\t\t\tcertificate.</p>\n         <p>Some endpoints require that <code>HTTPS</code> requests include the host name in the\n\t\t\t\t<code>client_hello</code> message. If you don't enable SNI, the status of the health\n\t\t\tcheck will be <code>SSL alert handshake_failure</code>. A health check can also have\n\t\t\tthat status for other reasons. If SNI is enabled and you're still getting the error,\n\t\t\tcheck the SSL/TLS configuration on your endpoint and confirm that your certificate is\n\t\t\tvalid.</p>\n         <p>The SSL/TLS certificate on your endpoint includes a domain name in the <code>Common\n\t\t\t\tName</code> field and possibly several more in the <code>Subject Alternative\n\t\t\t\tNames</code> field. One of the domain names in the certificate should match the\n\t\t\tvalue that you specify for <code>FullyQualifiedDomainName</code>. If the endpoint\n\t\t\tresponds to the <code>client_hello</code> message with a certificate that does not\n\t\t\tinclude the domain name that you specified in <code>FullyQualifiedDomainName</code>, a\n\t\t\thealth checker will retry the handshake. In the second attempt, the health checker will\n\t\t\tomit <code>FullyQualifiedDomainName</code> from the <code>client_hello</code>\n\t\t\tmessage.</p>"
+     }
+    },
+    "FailureThreshold": {
+     "target": "com.amazonaws.route53#FailureThreshold",
+     "traits": {
+      "smithy.api#documentation": "<p>The number of consecutive health checks that an endpoint must pass or fail for Amazon\n\t\t\tRoute 53 to change the current status of the endpoint from unhealthy to healthy or vice\n\t\t\tversa. For more information, see <a href=\"https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover-determining-health-of-endpoints.html\">How Amazon Route 53 Determines Whether an Endpoint Is Healthy</a> in the\n\t\t\t\t<i>Amazon Route 53 Developer Guide</i>.</p>\n         <p>\n            <code>FailureThreshold</code> is not supported when you specify a value for\n\t\t\t<code>Type</code> of <code>RECOVERY_CONTROL</code>.</p>\n         <p>Otherwise, if you don't specify a value for <code>FailureThreshold</code>, the default value is\n\t\t\tthree health checks.</p>"
+     }
+    },
+    "FullyQualifiedDomainName": {
+     "target": "com.amazonaws.route53#FullyQualifiedDomainName",
+     "traits": {
+      "smithy.api#documentation": "<p>Amazon Route 53 behavior depends on whether you specify a value for\n\t\t\t\t<code>IPAddress</code>.</p>\n         <p>\n            <b>If you specify a value for</b>\n            <code>IPAddress</code>:</p>\n         <p>Amazon Route 53 sends health check requests to the specified IPv4 or IPv6 address and\n\t\t\tpasses the value of <code>FullyQualifiedDomainName</code> in the <code>Host</code>\n\t\t\theader for all health checks except TCP health checks. This is typically the fully\n\t\t\tqualified DNS name of the endpoint on which you want Route 53 to perform health\n\t\t\tchecks.</p>\n         <p>When Route 53 checks the health of an endpoint, here is how it constructs the\n\t\t\t\t<code>Host</code> header:</p>\n         <ul>\n            <li>\n               <p>If you specify a value of <code>80</code> for <code>Port</code> and\n\t\t\t\t\t\t<code>HTTP</code> or <code>HTTP_STR_MATCH</code> for <code>Type</code>,\n\t\t\t\t\tRoute 53 passes the value of <code>FullyQualifiedDomainName</code> to the\n\t\t\t\t\tendpoint in the Host header. </p>\n            </li>\n            <li>\n               <p>If you specify a value of <code>443</code> for <code>Port</code> and\n\t\t\t\t\t\t<code>HTTPS</code> or <code>HTTPS_STR_MATCH</code> for <code>Type</code>,\n\t\t\t\t\tRoute 53 passes the value of <code>FullyQualifiedDomainName</code> to the\n\t\t\t\t\tendpoint in the <code>Host</code> header.</p>\n            </li>\n            <li>\n               <p>If you specify another value for <code>Port</code> and any value except\n\t\t\t\t\t\t<code>TCP</code> for <code>Type</code>, Route 53 passes\n\t\t\t\t\t\t<code>FullyQualifiedDomainName:Port</code> to the endpoint in the\n\t\t\t\t\t\t<code>Host</code> header.</p>\n            </li>\n         </ul>\n         <p>If you don't specify a value for <code>FullyQualifiedDomainName</code>, Route 53\n\t\t\tsubstitutes the value of <code>IPAddress</code> in the <code>Host</code> header in each\n\t\t\tof the preceding cases.</p>\n         <p>\n            <b>If you don't specify a value for</b>\n            <code>IPAddress</code>:</p>\n         <p>Route 53 sends a DNS request to the domain that you specify for\n\t\t\t\t<code>FullyQualifiedDomainName</code> at the interval that you specify for\n\t\t\t\t<code>RequestInterval</code>. Using an IPv4 address that DNS returns, Route 53 then\n\t\t\tchecks the health of the endpoint.</p>\n         <note>\n            <p>If you don't specify a value for <code>IPAddress</code>, Route 53 uses only IPv4\n\t\t\t\tto send health checks to the endpoint. If there's no resource record set with a type\n\t\t\t\tof A for the name that you specify for <code>FullyQualifiedDomainName</code>, the\n\t\t\t\thealth check fails with a \"DNS resolution failed\" error.</p>\n         </note>\n         <p>If you want to check the health of weighted, latency, or failover resource record sets\n\t\t\tand you choose to specify the endpoint only by <code>FullyQualifiedDomainName</code>, we\n\t\t\trecommend that you create a separate health check for each endpoint. For example, create\n\t\t\ta health check for each HTTP server that is serving content for www.example.com. For the\n\t\t\tvalue of <code>FullyQualifiedDomainName</code>, specify the domain name of the server\n\t\t\t(such as us-east-2-www.example.com), not the name of the resource record sets\n\t\t\t(www.example.com).</p>\n         <important>\n            <p>In this configuration, if you create a health check for which the value of\n\t\t\t\t\t<code>FullyQualifiedDomainName</code> matches the name of the resource record\n\t\t\t\tsets and you then associate the health check with those resource record sets, health\n\t\t\t\tcheck results will be unpredictable.</p>\n         </important>\n         <p>In addition, if the value that you specify for <code>Type</code> is <code>HTTP</code>,\n\t\t\t\t<code>HTTPS</code>, <code>HTTP_STR_MATCH</code>, or <code>HTTPS_STR_MATCH</code>,\n\t\t\tRoute 53 passes the value of <code>FullyQualifiedDomainName</code> in the\n\t\t\t\t<code>Host</code> header, as it does when you specify a value for\n\t\t\t\t<code>IPAddress</code>. If the value of <code>Type</code> is <code>TCP</code>, Route\n\t\t\t53 doesn't pass a <code>Host</code> header.</p>"
+     }
+    },
+    "HealthThreshold": {
+     "target": "com.amazonaws.route53#HealthThreshold",
+     "traits": {
+      "smithy.api#documentation": "<p>The number of child health checks that are associated with a <code>CALCULATED</code>\n\t\t\thealth check that Amazon Route 53 must consider healthy for the <code>CALCULATED</code>\n\t\t\thealth check to be considered healthy. To specify the child health checks that you want\n\t\t\tto associate with a <code>CALCULATED</code> health check, use the <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_UpdateHealthCheck.html#Route53-UpdateHealthCheck-request-ChildHealthChecks\">ChildHealthChecks</a> element.</p>\n         <p>Note the following:</p>\n         <ul>\n            <li>\n               <p>If you specify a number greater than the number of child health checks, Route\n\t\t\t\t\t53 always considers this health check to be unhealthy.</p>\n            </li>\n            <li>\n               <p>If you specify <code>0</code>, Route 53 always considers this health check to\n\t\t\t\t\tbe healthy.</p>\n            </li>\n         </ul>"
+     }
+    },
+    "IPAddress": {
+     "target": "com.amazonaws.route53#IPAddress",
+     "traits": {
+      "smithy.api#documentation": "<p>The IPv4 or IPv6 IP address of the endpoint that you want Amazon Route 53 to perform\n\t\t\thealth checks on. If you don't specify a value for <code>IPAddress</code>, Route 53\n\t\t\tsends a DNS request to resolve the domain name that you specify in\n\t\t\t\t<code>FullyQualifiedDomainName</code> at the interval that you specify in\n\t\t\t\t<code>RequestInterval</code>. Using an IP address returned by DNS, Route 53 then\n\t\t\tchecks the health of the endpoint.</p>\n         <p>Use one of the following formats for the value of <code>IPAddress</code>: </p>\n         <ul>\n            <li>\n               <p>\n                  <b>IPv4 address</b>: four values between 0 and 255,\n\t\t\t\t\tseparated by periods (.), for example, <code>192.0.2.44</code>.</p>\n            </li>\n            <li>\n               <p>\n                  <b>IPv6 address</b>: eight groups of four\n\t\t\t\t\thexadecimal values, separated by colons (:), for example,\n\t\t\t\t\t\t<code>2001:0db8:85a3:0000:0000:abcd:0001:2345</code>. You can also shorten\n\t\t\t\t\tIPv6 addresses as described in RFC 5952, for example,\n\t\t\t\t\t\t<code>2001:db8:85a3::abcd:1:2345</code>.</p>\n            </li>\n         </ul>\n         <p>If the endpoint is an EC2 instance, we recommend that you create an Elastic IP\n\t\t\taddress, associate it with your EC2 instance, and specify the Elastic IP address for\n\t\t\t\t<code>IPAddress</code>. This ensures that the IP address of your instance will never\n\t\t\tchange.</p>\n         <p>For more information, see <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_UpdateHealthCheck.html#Route53-UpdateHealthCheck-request-FullyQualifiedDomainName\">FullyQualifiedDomainName</a>. </p>\n         <p>Constraints: Route 53 can't check the health of endpoints for which the IP address is\n\t\t\tin local, private, non-routable, or multicast ranges. For more information about IP\n\t\t\taddresses for which you can't create health checks, see the following documents:</p>\n         <ul>\n            <li>\n               <p>\n                  <a href=\"https://tools.ietf.org/html/rfc5735\">RFC 5735, Special Use IPv4\n\t\t\t\t\t\tAddresses</a>\n               </p>\n            </li>\n            <li>\n               <p>\n                  <a href=\"https://tools.ietf.org/html/rfc6598\">RFC 6598, IANA-Reserved IPv4\n\t\t\t\t\t\tPrefix for Shared Address Space</a>\n               </p>\n            </li>\n            <li>\n               <p>\n                  <a href=\"https://tools.ietf.org/html/rfc5156\">RFC 5156, Special-Use IPv6\n\t\t\t\t\t\tAddresses</a>\n               </p>\n            </li>\n         </ul>\n         <p>When the value of <code>Type</code> is <code>CALCULATED</code> or\n\t\t\t\t<code>CLOUDWATCH_METRIC</code>, omit <code>IPAddress</code>.</p>"
+     }
+    },
+    "InsufficientDataHealthStatus": {
+     "target": "com.amazonaws.route53#InsufficientDataHealthStatus",
+     "traits": {
+      "smithy.api#documentation": "<p>When CloudWatch has insufficient data about the metric to determine the alarm state,\n\t\t\tthe status that you want Amazon Route 53 to assign to the health check:</p>\n         <ul>\n            <li>\n               <p>\n                  <code>Healthy</code>: Route 53 considers the health check to be\n\t\t\t\t\thealthy.</p>\n            </li>\n            <li>\n               <p>\n                  <code>Unhealthy</code>: Route 53 considers the health check to be\n\t\t\t\t\tunhealthy.</p>\n            </li>\n            <li>\n               <p>\n                  <code>LastKnownStatus</code>: Route 53 uses the status of the health check\n\t\t\t\t\tfrom the last time that CloudWatch had sufficient data to determine the alarm\n\t\t\t\t\tstate. For new health checks that have no last known status, the default status\n\t\t\t\t\tfor the health check is healthy.</p>\n            </li>\n         </ul>"
+     }
+    },
+    "Inverted": {
+     "target": "com.amazonaws.route53#Inverted",
+     "traits": {
+      "smithy.api#documentation": "<p>Specify whether you want Amazon Route 53 to invert the status of a health check, for\n\t\t\texample, to consider a health check unhealthy when it otherwise would be considered\n\t\t\thealthy.</p>"
+     }
+    },
+    "MeasureLatency": {
+     "target": "com.amazonaws.route53#MeasureLatency",
+     "traits": {
+      "smithy.api#documentation": "<p>Specify whether you want Amazon Route 53 to measure the latency between health\n\t\t\tcheckers in multiple Amazon Web Services regions and your endpoint, and to display\n\t\t\tCloudWatch latency graphs on the <b>Health Checks</b> page in\n\t\t\tthe Route 53 console.</p>\n         <p>\n            <code>MeasureLatency</code> is not supported when you specify a value for\n\t\t\t<code>Type</code> of <code>RECOVERY_CONTROL</code>.</p>\n         <important>\n            <p>You can't change the value of <code>MeasureLatency</code> after you create a\n\t\t\t\thealth check.</p>\n         </important>"
+     }
+    },
+    "Port": {
+     "target": "com.amazonaws.route53#Port",
+     "traits": {
+      "smithy.api#documentation": "<p>The port on the endpoint that you want Amazon Route 53 to perform health checks\n\t\t\ton.</p>\n         <note>\n            <p>Don't specify a value for <code>Port</code> when you specify a value for\n\t\t\t\t\t<code>Type</code> of <code>CLOUDWATCH_METRIC</code> or\n\t\t\t\t<code>CALCULATED</code>.</p>\n         </note>"
+     }
+    },
+    "Regions": {
+     "target": "com.amazonaws.route53#HealthCheckRegionList",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains one <code>Region</code> element for each region from\n\t\t\twhich you want Amazon Route 53 health checkers to check the specified endpoint.</p>\n         <p>If you don't specify any regions, Route 53 health checkers automatically performs\n\t\t\tchecks from all of the regions that are listed under <b>Valid\n\t\t\t\tValues</b>.</p>\n         <p>If you update a health check to remove a region that has been performing health\n\t\t\tchecks, Route 53 will briefly continue to perform checks from that region to ensure that\n\t\t\tsome health checkers are always checking the endpoint (for example, if you replace three\n\t\t\tregions with four different regions). </p>"
+     }
+    },
+    "RequestInterval": {
+     "target": "com.amazonaws.route53#RequestInterval",
+     "traits": {
+      "smithy.api#documentation": "<p>The number of seconds between the time that Amazon Route 53 gets a response from your\n\t\t\tendpoint and the time that it sends the next health check request. Each Route 53 health\n\t\t\tchecker makes requests at this interval.</p>\n         <p>\n            <code>RequestInterval</code> is not supported when you specify a value for\n\t\t\t<code>Type</code> of <code>RECOVERY_CONTROL</code>.</p>\n         <important>\n            <p>You can't change the value of <code>RequestInterval</code> after you create a\n\t\t\t\thealth check.</p>\n         </important>\n         <p>If you don't specify a value for <code>RequestInterval</code>, the default value is\n\t\t\t\t<code>30</code> seconds.</p>"
+     }
+    },
+    "ResourcePath": {
+     "target": "com.amazonaws.route53#ResourcePath",
+     "traits": {
+      "smithy.api#documentation": "<p>The path, if any, that you want Amazon Route 53 to request when performing health\n\t\t\tchecks. The path can be any value for which your endpoint will return an HTTP status\n\t\t\tcode of 2xx or 3xx when the endpoint is healthy, for example, the file\n\t\t\t/docs/route53-health-check.html. You can also include query string parameters, for\n\t\t\texample, <code>/welcome.html?language=jp&login=y</code>. </p>"
+     }
+    },
+    "RoutingControlArn": {
+     "target": "com.amazonaws.route53#RoutingControlArn",
+     "traits": {
+      "smithy.api#documentation": "<p>The Amazon Resource Name (ARN) for the Route 53 Application Recovery Controller\n\t\t\trouting control.</p>\n         <p>For more information about Route 53 Application Recovery Controller, see <a href=\"https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route-53-recovery.html\">Route 53 Application Recovery Controller Developer Guide.</a>.</p>"
+     }
+    },
+    "SearchString": {
+     "target": "com.amazonaws.route53#SearchString",
+     "traits": {
+      "smithy.api#documentation": "<p>If the value of Type is <code>HTTP_STR_MATCH</code> or <code>HTTPS_STR_MATCH</code>,\n\t\t\tthe string that you want Amazon Route 53 to search for in the response body from the\n\t\t\tspecified resource. If the string appears in the response body, Route 53 considers the\n\t\t\tresource healthy.</p>\n         <p>Route 53 considers case when searching for <code>SearchString</code> in the response\n\t\t\tbody. </p>"
+     }
+    },
+    "Type": {
+     "target": "com.amazonaws.route53#HealthCheckType",
+     "traits": {
+      "smithy.api#documentation": "<p>The type of health check that you want to create, which indicates how Amazon Route 53\n\t\t\tdetermines whether an endpoint is healthy.</p>\n         <important>\n            <p>You can't change the value of <code>Type</code> after you create a health\n\t\t\t\tcheck.</p>\n         </important>\n         <p>You can create the following types of health checks:</p>\n         <ul>\n            <li>\n               <p>\n                  <b>HTTP</b>: Route 53 tries to establish a TCP\n\t\t\t\t\tconnection. If successful, Route 53 submits an HTTP request and waits for an\n\t\t\t\t\tHTTP status code of 200 or greater and less than 400.</p>\n            </li>\n            <li>\n               <p>\n                  <b>HTTPS</b>: Route 53 tries to establish a TCP\n\t\t\t\t\tconnection. If successful, Route 53 submits an HTTPS request and waits for an\n\t\t\t\t\tHTTP status code of 200 or greater and less than 400.</p>\n               <important>\n                  <p>If you specify <code>HTTPS</code> for the value of <code>Type</code>, the endpoint must\n\t\t\t\t\t\tsupport TLS v1.0, v1.1, or v1.2.</p>\n               </important>\n            </li>\n            <li>\n               <p>\n                  <b>HTTP_STR_MATCH</b>: Route 53 tries to establish a\n\t\t\t\t\tTCP connection. If successful, Route 53 submits an HTTP request and searches the\n\t\t\t\t\tfirst 5,120 bytes of the response body for the string that you specify in\n\t\t\t\t\t\t<code>SearchString</code>.</p>\n            </li>\n            <li>\n               <p>\n                  <b>HTTPS_STR_MATCH</b>: Route 53 tries to establish\n\t\t\t\t\ta TCP connection. If successful, Route 53 submits an <code>HTTPS</code> request\n\t\t\t\t\tand searches the first 5,120 bytes of the response body for the string that you\n\t\t\t\t\tspecify in <code>SearchString</code>.</p>\n            </li>\n            <li>\n               <p>\n                  <b>TCP</b>: Route 53 tries to establish a TCP\n\t\t\t\t\tconnection.</p>\n            </li>\n            <li>\n               <p>\n                  <b>CLOUDWATCH_METRIC</b>: The health check is\n\t\t\t\t\tassociated with a CloudWatch alarm. If the state of the alarm is\n\t\t\t\t\t<code>OK</code>, the health check is considered healthy. If the state is\n\t\t\t\t\t\t<code>ALARM</code>, the health check is considered unhealthy. If CloudWatch\n\t\t\t\t\tdoesn't have sufficient data to determine whether the state is <code>OK</code>\n\t\t\t\t\tor <code>ALARM</code>, the health check status depends on the setting for\n\t\t\t\t\t\t<code>InsufficientDataHealthStatus</code>: <code>Healthy</code>,\n\t\t\t\t\t\t<code>Unhealthy</code>, or <code>LastKnownStatus</code>. </p>\n            </li>\n            <li>\n               <p>\n                  <b>CALCULATED</b>: For health checks that monitor\n\t\t\t\t\tthe status of other health checks, Route 53 adds up the number of health checks\n\t\t\t\t\tthat Route 53 health checkers consider to be healthy and compares that number\n\t\t\t\t\twith the value of <code>HealthThreshold</code>. </p>\n            </li>\n            <li>\n               <p>\n                  <b>RECOVERY_CONTROL</b>: The health check is associated with a\n\t\t\t\t\tRoute53 Application Recovery Controller routing control. If the routing control\n\t\t\t\t\tstate is <code>ON</code>, the health check is considered healthy. If the state\n\t\t\t\t\tis <code>OFF</code>, the health check is considered unhealthy. </p>\n            </li>\n         </ul>\n         <p>For more information, see <a href=\"https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover-determining-health-of-endpoints.html\">How Route 53 Determines Whether an Endpoint Is Healthy</a> in the\n\t\t\t\t<i>Amazon Route 53 Developer Guide</i>.</p>",
+      "smithy.api#required": {}
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains information about the health check.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HealthCheckId": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#HealthCheckNonce": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#HealthCheckRegion": {
+   "members": {
+    "ap_northeast_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-1"
+     }
+    },
+    "ap_southeast_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-1"
+     }
+    },
+    "ap_southeast_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-2"
+     }
+    },
+    "eu_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-1"
+     }
+    },
+    "sa_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "sa-east-1"
+     }
+    },
+    "us_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-east-1"
+     }
+    },
+    "us_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-west-1"
+     }
+    },
+    "us_west_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-west-2"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 1
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#HealthCheckRegionList": {
+   "member": {
+    "target": "com.amazonaws.route53#HealthCheckRegion",
+    "traits": {
+     "smithy.api#xmlName": "Region"
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 3
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.route53#HealthCheckType": {
+   "members": {
+    "CALCULATED": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "CALCULATED"
+     }
+    },
+    "CLOUDWATCH_METRIC": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "CLOUDWATCH_METRIC"
+     }
+    },
+    "HTTP": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "HTTP"
+     }
+    },
+    "HTTPS": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "HTTPS"
+     }
+    },
+    "HTTPS_STR_MATCH": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "HTTPS_STR_MATCH"
+     }
+    },
+    "HTTP_STR_MATCH": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "HTTP_STR_MATCH"
+     }
+    },
+    "RECOVERY_CONTROL": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "RECOVERY_CONTROL"
+     }
+    },
+    "TCP": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "TCP"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#HealthCheckVersion": {
+   "traits": {
+    "smithy.api#range": {
+     "min": 1
+    }
+   },
+   "type": "long"
+  },
+  "com.amazonaws.route53#HealthChecks": {
+   "member": {
+    "target": "com.amazonaws.route53#HealthCheck",
+    "traits": {
+     "smithy.api#xmlName": "HealthCheck"
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.route53#HealthThreshold": {
+   "traits": {
+    "smithy.api#range": {
+     "max": 256,
+     "min": 0
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.route53#HostedZone": {
+   "members": {
+    "CallerReference": {
+     "target": "com.amazonaws.route53#Nonce",
+     "traits": {
+      "smithy.api#documentation": "<p>The value that you specified for <code>CallerReference</code> when you created the\n\t\t\thosted zone.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Config": {
+     "target": "com.amazonaws.route53#HostedZoneConfig",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that includes the <code>Comment</code> and <code>PrivateZone</code>\n\t\t\telements. If you omitted the <code>HostedZoneConfig</code> and <code>Comment</code>\n\t\t\telements from the request, the <code>Config</code> and <code>Comment</code> elements\n\t\t\tdon't appear in the response.</p>"
+     }
+    },
+    "Features": {
+     "target": "com.amazonaws.route53#HostedZoneFeatures",
+     "traits": {
+      "smithy.api#documentation": "<p>The features configuration for the hosted zone, including accelerated recovery settings and status information.</p>"
+     }
+    },
+    "Id": {
+     "target": "com.amazonaws.route53#ResourceId",
+     "traits": {
+      "smithy.api#documentation": "<p>The ID that Amazon Route 53 assigned to the hosted zone when you created it.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "LinkedService": {
+     "target": "com.amazonaws.route53#LinkedService",
+     "traits": {
+      "smithy.api#documentation": "<p>If the hosted zone was created by another service, the service that created the hosted\n\t\t\tzone. When a hosted zone is created by another service, you can't edit or delete it\n\t\t\tusing Route 53. </p>"
+     }
+    },
+    "Name": {
+     "target": "com.amazonaws.route53#DNSName",
+     "traits": {
+      "smithy.api#documentation": "<p>The name of the domain. For public hosted zones, this is the name that you have\n\t\t\tregistered with your DNS registrar.</p>\n         <p>For information about how to specify characters other than <code>a-z</code>,\n\t\t\t\t<code>0-9</code>, and <code>-</code> (hyphen) and how to specify internationalized\n\t\t\tdomain names, see <a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_CreateHostedZone.html\">CreateHostedZone</a>.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "ResourceRecordSetCount": {
+     "target": "com.amazonaws.route53#HostedZoneRRSetCount",
+     "traits": {
+      "smithy.api#documentation": "<p>The number of resource record sets in the hosted zone.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains general information about the hosted zone.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HostedZoneConfig": {
+   "members": {
+    "Comment": {
+     "target": "com.amazonaws.route53#ResourceDescription",
+     "traits": {
+      "smithy.api#documentation": "<p>Any comments that you want to include about the hosted zone.</p>"
+     }
+    },
+    "PrivateZone": {
+     "target": "com.amazonaws.route53#IsPrivateZone",
+     "traits": {
+      "smithy.api#default": false,
+      "smithy.api#documentation": "<p>A value that indicates whether this is a private hosted zone.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains an optional comment about your hosted zone. If you don't\n\t\t\twant to specify a comment, omit both the <code>HostedZoneConfig</code> and\n\t\t\t\t<code>Comment</code> elements.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HostedZoneFailureReasons": {
+   "members": {
+    "AcceleratedRecovery": {
+     "target": "com.amazonaws.route53#FailureReason",
+     "traits": {
+      "smithy.api#documentation": "<p>The reason why accelerated recovery failed to be enabled or disabled for the hosted zone, if applicable.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Contains information about why certain features failed to be enabled or configured for the hosted zone.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HostedZoneFeatures": {
+   "members": {
+    "AcceleratedRecoveryStatus": {
+     "target": "com.amazonaws.route53#AcceleratedRecoveryStatus",
+     "traits": {
+      "smithy.api#documentation": "<p>The current status of accelerated recovery for the hosted zone.</p>"
+     }
+    },
+    "FailureReasons": {
+     "target": "com.amazonaws.route53#HostedZoneFailureReasons",
+     "traits": {
+      "smithy.api#documentation": "<p>Information about any failures that occurred when attempting to enable or configure features for the hosted zone.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Represents the features configuration for a hosted zone, including the status of various features and any associated failure reasons.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#HostedZoneRRSetCount": {
+   "type": "long"
+  },
+  "com.amazonaws.route53#HostedZoneType": {
+   "members": {
+    "PRIVATE_HOSTED_ZONE": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "PrivateHostedZone"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#HostedZones": {
+   "member": {
+    "target": "com.amazonaws.route53#HostedZone",
+    "traits": {
+     "smithy.api#xmlName": "HostedZone"
+    }
+   },
+   "type": "list"
+  },
+  "com.amazonaws.route53#IPAddress": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 45,
+     "min": 0
+    },
+    "smithy.api#pattern": "^(^((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))$|^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$)$"
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#InsufficientDataHealthStatus": {
+   "members": {
+    "Healthy": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "Healthy"
+     }
+    },
+    "LastKnownStatus": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "LastKnownStatus"
+     }
+    },
+    "Unhealthy": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "Unhealthy"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#Inverted": {
+   "type": "boolean"
+  },
+  "com.amazonaws.route53#IsPrivateZone": {
+   "traits": {
+    "smithy.api#default": false
+   },
+   "type": "boolean"
+  },
+  "com.amazonaws.route53#LinkedService": {
+   "members": {
+    "Description": {
+     "target": "com.amazonaws.route53#ResourceDescription",
+     "traits": {
+      "smithy.api#documentation": "<p>If the health check or hosted zone was created by another service, an optional\n\t\t\tdescription that can be provided by the other service. When a resource is created by\n\t\t\tanother service, you can't edit or delete it using Amazon Route 53. </p>"
+     }
+    },
+    "ServicePrincipal": {
+     "target": "com.amazonaws.route53#ServicePrincipal",
+     "traits": {
+      "smithy.api#documentation": "<p>If the health check or hosted zone was created by another service, the service that\n\t\t\tcreated the resource. When a resource is created by another service, you can't edit or\n\t\t\tdelete it using Amazon Route 53. </p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>If a health check or hosted zone was created by another service,\n\t\t\t\t<code>LinkedService</code> is a complex type that describes the service that created\n\t\t\tthe resource. When a resource is created by another service, you can't edit or delete it\n\t\t\tusing Amazon Route 53. </p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#ListHealthChecks": {
+   "errors": [
+    {
+     "target": "com.amazonaws.route53#IncompatibleVersion"
+    },
+    {
+     "target": "com.amazonaws.route53#InvalidInput"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.route53#ListHealthChecksRequest"
+   },
+   "output": {
+    "target": "com.amazonaws.route53#ListHealthChecksResponse"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Retrieve a list of the health checks that are associated with the current Amazon Web Services account. </p>",
+    "smithy.api#http": {
+     "code": 200,
+     "method": "GET",
+     "uri": "/2013-04-01/healthcheck"
+    },
+    "smithy.api#paginated": {
+     "inputToken": "Marker",
+     "items": "HealthChecks",
+     "outputToken": "NextMarker",
+     "pageSize": "MaxItems"
+    }
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.route53#ListHealthChecksRequest": {
+   "members": {
+    "Marker": {
+     "target": "com.amazonaws.route53#PageMarker",
+     "traits": {
+      "smithy.api#documentation": "<p>If the value of <code>IsTruncated</code> in the previous response was\n\t\t\t\t<code>true</code>, you have more health checks. To get another group, submit another\n\t\t\t\t<code>ListHealthChecks</code> request. </p>\n         <p>For the value of <code>marker</code>, specify the value of <code>NextMarker</code>\n\t\t\tfrom the previous response, which is the ID of the first health check that Amazon Route\n\t\t\t53 will return if you submit another request.</p>\n         <p>If the value of <code>IsTruncated</code> in the previous response was\n\t\t\t\t<code>false</code>, there are no more health checks to get.</p>",
+      "smithy.api#httpQuery": "marker"
+     }
+    },
+    "MaxItems": {
+     "target": "smithy.api#Integer",
+     "traits": {
+      "smithy.api#documentation": "<p>The maximum number of health checks that you want <code>ListHealthChecks</code> to\n\t\t\treturn in response to the current request. Amazon Route 53 returns a maximum of 1000\n\t\t\titems. If you set <code>MaxItems</code> to a value greater than 1000, Route 53 returns\n\t\t\tonly the first 1000 health checks. </p>",
+      "smithy.api#httpQuery": "maxitems"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A request to retrieve a list of the health checks that are associated with the current\n\t\t\t\tAmazon Web Services account.</p>",
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#ListHealthChecksResponse": {
+   "members": {
+    "HealthChecks": {
+     "target": "com.amazonaws.route53#HealthChecks",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains one <code>HealthCheck</code> element for each health\n\t\t\tcheck that is associated with the current Amazon Web Services account.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "IsTruncated": {
+     "target": "com.amazonaws.route53#PageTruncated",
+     "traits": {
+      "smithy.api#default": false,
+      "smithy.api#documentation": "<p>A flag that indicates whether there are more health checks to be listed. If the\n\t\t\tresponse was truncated, you can get the next group of health checks by submitting\n\t\t\tanother <code>ListHealthChecks</code> request and specifying the value of\n\t\t\t\t<code>NextMarker</code> in the <code>marker</code> parameter.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Marker": {
+     "target": "com.amazonaws.route53#PageMarker",
+     "traits": {
+      "smithy.api#documentation": "<p>For the second and subsequent calls to <code>ListHealthChecks</code>,\n\t\t\t\t<code>Marker</code> is the value that you specified for the <code>marker</code>\n\t\t\tparameter in the previous request.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "MaxItems": {
+     "target": "smithy.api#Integer",
+     "traits": {
+      "smithy.api#documentation": "<p>The value that you specified for the <code>maxitems</code> parameter in the call to\n\t\t\t\t<code>ListHealthChecks</code> that produced the current response.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "NextMarker": {
+     "target": "com.amazonaws.route53#PageMarker",
+     "traits": {
+      "smithy.api#documentation": "<p>If <code>IsTruncated</code> is <code>true</code>, the value of <code>NextMarker</code>\n\t\t\tidentifies the first health check that Amazon Route 53 returns if you submit another\n\t\t\t\t<code>ListHealthChecks</code> request and specify the value of\n\t\t\t\t<code>NextMarker</code> in the <code>marker</code> parameter.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A complex type that contains the response to a <code>ListHealthChecks</code>\n\t\t\trequest.</p>",
+    "smithy.api#output": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#ListHostedZones": {
+   "errors": [
+    {
+     "target": "com.amazonaws.route53#DelegationSetNotReusable"
+    },
+    {
+     "target": "com.amazonaws.route53#InvalidInput"
+    },
+    {
+     "target": "com.amazonaws.route53#NoSuchDelegationSet"
+    }
+   ],
+   "input": {
+    "target": "com.amazonaws.route53#ListHostedZonesRequest"
+   },
+   "output": {
+    "target": "com.amazonaws.route53#ListHostedZonesResponse"
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>Retrieves a list of the public and private hosted zones that are associated with the\n\t\t\tcurrent Amazon Web Services account. The response includes a <code>HostedZones</code>\n\t\t\tchild element for each hosted zone.</p>\n         <p>Amazon Route 53 returns a maximum of 100 items in each response. If you have a lot of\n\t\t\thosted zones, you can use the <code>maxitems</code> parameter to list them in groups of\n\t\t\tup to 100.</p>",
+    "smithy.api#http": {
+     "code": 200,
+     "method": "GET",
+     "uri": "/2013-04-01/hostedzone"
+    },
+    "smithy.api#paginated": {
+     "inputToken": "Marker",
+     "items": "HostedZones",
+     "outputToken": "NextMarker",
+     "pageSize": "MaxItems"
+    },
+    "smithy.test#smokeTests": [
+     {
+      "expect": {
+       "success": {}
+      },
+      "id": "ListHostedZonesSuccess",
+      "params": {},
+      "vendorParams": {
+       "region": "us-east-1"
+      },
+      "vendorParamsShape": "aws.test#AwsVendorParams"
+     }
+    ]
+   },
+   "type": "operation"
+  },
+  "com.amazonaws.route53#ListHostedZonesRequest": {
+   "members": {
+    "DelegationSetId": {
+     "target": "com.amazonaws.route53#ResourceId",
+     "traits": {
+      "smithy.api#documentation": "<p>If you're using reusable delegation sets and you want to list all of the hosted zones\n\t\t\tthat are associated with a reusable delegation set, specify the ID of that reusable\n\t\t\tdelegation set. </p>",
+      "smithy.api#httpQuery": "delegationsetid"
+     }
+    },
+    "HostedZoneType": {
+     "target": "com.amazonaws.route53#HostedZoneType",
+     "traits": {
+      "smithy.api#documentation": "<p>\n\t\t\t(Optional) Specifies if the hosted zone is private.\n\t\t</p>",
+      "smithy.api#httpQuery": "hostedzonetype"
+     }
+    },
+    "Marker": {
+     "target": "com.amazonaws.route53#PageMarker",
+     "traits": {
+      "smithy.api#documentation": "<p>If the value of <code>IsTruncated</code> in the previous response was\n\t\t\t\t<code>true</code>, you have more hosted zones. To get more hosted zones, submit\n\t\t\tanother <code>ListHostedZones</code> request. </p>\n         <p>For the value of <code>marker</code>, specify the value of <code>NextMarker</code>\n\t\t\tfrom the previous response, which is the ID of the first hosted zone that Amazon Route\n\t\t\t53 will return if you submit another request.</p>\n         <p>If the value of <code>IsTruncated</code> in the previous response was\n\t\t\t\t<code>false</code>, there are no more hosted zones to get.</p>",
+      "smithy.api#httpQuery": "marker"
+     }
+    },
+    "MaxItems": {
+     "target": "smithy.api#Integer",
+     "traits": {
+      "smithy.api#documentation": "<p>(Optional) The maximum number of hosted zones that you want Amazon Route 53 to return.\n\t\t\tIf you have more than <code>maxitems</code> hosted zones, the value of\n\t\t\t\t<code>IsTruncated</code> in the response is <code>true</code>, and the value of\n\t\t\t\t<code>NextMarker</code> is the hosted zone ID of the first hosted zone that Route 53\n\t\t\twill return if you submit another request.</p>",
+      "smithy.api#httpQuery": "maxitems"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>A request to retrieve a list of the public and private hosted zones that are\n\t\t\tassociated with the current Amazon Web Services account.</p>",
+    "smithy.api#input": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#ListHostedZonesResponse": {
+   "members": {
+    "HostedZones": {
+     "target": "com.amazonaws.route53#HostedZones",
+     "traits": {
+      "smithy.api#documentation": "<p>A complex type that contains general information about the hosted zone.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "IsTruncated": {
+     "target": "com.amazonaws.route53#PageTruncated",
+     "traits": {
+      "smithy.api#default": false,
+      "smithy.api#documentation": "<p>A flag indicating whether there are more hosted zones to be listed. If the response\n\t\t\twas truncated, you can get more hosted zones by submitting another\n\t\t\t\t<code>ListHostedZones</code> request and specifying the value of\n\t\t\t\t<code>NextMarker</code> in the <code>marker</code> parameter.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "Marker": {
+     "target": "com.amazonaws.route53#PageMarker",
+     "traits": {
+      "smithy.api#documentation": "<p>For the second and subsequent calls to <code>ListHostedZones</code>,\n\t\t\t\t<code>Marker</code> is the value that you specified for the <code>marker</code>\n\t\t\tparameter in the request that produced the current response.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "MaxItems": {
+     "target": "smithy.api#Integer",
+     "traits": {
+      "smithy.api#documentation": "<p>The value that you specified for the <code>maxitems</code> parameter in the call to\n\t\t\t\t<code>ListHostedZones</code> that produced the current response.</p>",
+      "smithy.api#required": {}
+     }
+    },
+    "NextMarker": {
+     "target": "com.amazonaws.route53#PageMarker",
+     "traits": {
+      "smithy.api#documentation": "<p>If <code>IsTruncated</code> is <code>true</code>, the value of <code>NextMarker</code>\n\t\t\tidentifies the first hosted zone in the next group of hosted zones. Submit another\n\t\t\t\t<code>ListHostedZones</code> request, and specify the value of\n\t\t\t\t<code>NextMarker</code> from the response in the <code>marker</code>\n\t\t\tparameter.</p>\n         <p>This element is present only if <code>IsTruncated</code> is <code>true</code>.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#output": {}
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#MeasureLatency": {
+   "type": "boolean"
+  },
+  "com.amazonaws.route53#MetricName": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#Namespace": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#Nonce": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 128,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#PageMarker": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#PageTruncated": {
+   "traits": {
+    "smithy.api#default": false
+   },
+   "type": "boolean"
+  },
+  "com.amazonaws.route53#Period": {
+   "traits": {
+    "smithy.api#range": {
+     "min": 60
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.route53#Port": {
+   "traits": {
+    "smithy.api#range": {
+     "max": 65535,
+     "min": 1
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.route53#RequestInterval": {
+   "traits": {
+    "smithy.api#range": {
+     "max": 30,
+     "min": 10
+    }
+   },
+   "type": "integer"
+  },
+  "com.amazonaws.route53#ResourceDescription": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 256,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#ResourceId": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 32,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#ResourcePath": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#ResourceURI": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 1024,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#RoutingControlArn": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 1
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#SearchString": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 255,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#ServicePrincipal": {
+   "traits": {
+    "smithy.api#length": {
+     "max": 128,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#Statistic": {
+   "members": {
+    "Average": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "Average"
+     }
+    },
+    "Maximum": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "Maximum"
+     }
+    },
+    "Minimum": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "Minimum"
+     }
+    },
+    "SampleCount": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "SampleCount"
+     }
+    },
+    "Sum": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "Sum"
+     }
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#Threshold": {
+   "type": "double"
+  },
+  "com.amazonaws.route53#TimeStamp": {
+   "type": "timestamp"
+  },
+  "com.amazonaws.route53#VPC": {
+   "members": {
+    "VPCId": {
+     "target": "com.amazonaws.route53#VPCId"
+    },
+    "VPCRegion": {
+     "target": "com.amazonaws.route53#VPCRegion",
+     "traits": {
+      "smithy.api#documentation": "<p>(Private hosted zones only) The region that an Amazon VPC was created\n\t\t\tin.</p>"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>(Private hosted zones only) A complex type that contains information about an Amazon VPC.</p>\n         <p>If you associate a private hosted zone with an Amazon VPC when you make a\n\t\t\t\t<a href=\"https://docs.aws.amazon.com/Route53/latest/APIReference/API_CreateHostedZone.html\">CreateHostedZone</a>\n\t\t\trequest, the following parameters are also required.</p>"
+   },
+   "type": "structure"
+  },
+  "com.amazonaws.route53#VPCId": {
+   "traits": {
+    "smithy.api#documentation": "<p>(Private hosted zones only) The ID of an Amazon VPC. </p>",
+    "smithy.api#length": {
+     "max": 1024,
+     "min": 0
+    }
+   },
+   "type": "string"
+  },
+  "com.amazonaws.route53#VPCRegion": {
+   "members": {
+    "af_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "af-south-1"
+     }
+    },
+    "ap_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-east-1"
+     }
+    },
+    "ap_east_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-east-2"
+     }
+    },
+    "ap_northeast_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-1"
+     }
+    },
+    "ap_northeast_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-2"
+     }
+    },
+    "ap_northeast_3": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-northeast-3"
+     }
+    },
+    "ap_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-south-1"
+     }
+    },
+    "ap_south_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-south-2"
+     }
+    },
+    "ap_southeast_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-1"
+     }
+    },
+    "ap_southeast_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-2"
+     }
+    },
+    "ap_southeast_3": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-3"
+     }
+    },
+    "ap_southeast_4": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-4"
+     }
+    },
+    "ap_southeast_5": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-5"
+     }
+    },
+    "ap_southeast_6": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-6"
+     }
+    },
+    "ap_southeast_7": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ap-southeast-7"
+     }
+    },
+    "ca_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ca-central-1"
+     }
+    },
+    "ca_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "ca-west-1"
+     }
+    },
+    "cn_north_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "cn-north-1"
+     }
+    },
+    "cn_northwest_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "cn-northwest-1"
+     }
+    },
+    "eu_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-central-1"
+     }
+    },
+    "eu_central_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-central-2"
+     }
+    },
+    "eu_isoe_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-isoe-west-1"
+     }
+    },
+    "eu_north_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-north-1"
+     }
+    },
+    "eu_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-south-1"
+     }
+    },
+    "eu_south_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-south-2"
+     }
+    },
+    "eu_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-1"
+     }
+    },
+    "eu_west_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-2"
+     }
+    },
+    "eu_west_3": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eu-west-3"
+     }
+    },
+    "eusc_de_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "eusc-de-east-1"
+     }
+    },
+    "il_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "il-central-1"
+     }
+    },
+    "me_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "me-central-1"
+     }
+    },
+    "me_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "me-south-1"
+     }
+    },
+    "mx_central_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "mx-central-1"
+     }
+    },
+    "sa_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "sa-east-1"
+     }
+    },
+    "us_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-east-1"
+     }
+    },
+    "us_east_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-east-2"
+     }
+    },
+    "us_gov_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-gov-east-1"
+     }
+    },
+    "us_gov_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-gov-west-1"
+     }
+    },
+    "us_iso_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-iso-east-1"
+     }
+    },
+    "us_iso_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-iso-west-1"
+     }
+    },
+    "us_isob_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isob-east-1"
+     }
+    },
+    "us_isob_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isob-west-1"
+     }
+    },
+    "us_isof_east_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isof-east-1"
+     }
+    },
+    "us_isof_south_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-isof-south-1"
+     }
+    },
+    "us_west_1": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-west-1"
+     }
+    },
+    "us_west_2": {
+     "target": "smithy.api#Unit",
+     "traits": {
+      "smithy.api#enumValue": "us-west-2"
+     }
+    }
+   },
+   "traits": {
+    "smithy.api#length": {
+     "max": 64,
+     "min": 1
+    }
+   },
+   "type": "enum"
+  },
+  "com.amazonaws.route53#VPCs": {
+   "member": {
+    "target": "com.amazonaws.route53#VPC",
+    "traits": {
+     "smithy.api#xmlName": "VPC"
+    }
+   },
+   "traits": {
+    "smithy.api#documentation": "<p>(Private hosted zones only) A list of <code>VPC</code> elements.</p>",
+    "smithy.api#length": {
+     "min": 1
+    }
+   },
+   "type": "list"
+  }
+ },
+ "smithy": "2.0"
+}
