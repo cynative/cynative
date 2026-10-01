@@ -108,7 +108,7 @@ func (d *Documenter) resolveModels(ctx context.Context, q apiref.Query) ([]*Serv
 			Outcome: apiref.OutcomeNotFound,
 			Reason: apiref.Truncate(
 				fmt.Sprintf("model %q does not serve %q", q.Model, q.Service), apiref.MaxReason),
-			Choices: choices(dirs),
+			Choices: apiref.Choices(dirs),
 		}, false
 	}
 	return kept, apiref.Result{}, true
@@ -181,27 +181,14 @@ func ambiguous(hits []docHit) apiref.Result {
 		return apiref.Result{
 			Outcome: apiref.OutcomeAmbiguous,
 			Reason:  apiref.Truncate(`pass "model" to choose`, apiref.MaxReason),
-			Choices: choices(dirs),
+			Choices: apiref.Choices(dirs),
 		}
 	}
 	return apiref.Result{
 		Outcome: apiref.OutcomeAmbiguous,
 		Reason:  apiref.Truncate("several operations differ only by case", apiref.MaxReason),
-		Choices: choices(names),
+		Choices: apiref.Choices(names),
 	}
-}
-
-// choices sorts, truncates and bounds a choice list.
-func choices(in []string) []string {
-	out := slices.Clone(in)
-	slices.Sort(out)
-	if len(out) > apiref.MaxChoices {
-		out = out[:apiref.MaxChoices]
-	}
-	for i, c := range out {
-		out[i] = apiref.Truncate(c, apiref.MaxChoice)
-	}
-	return out
 }
 
 // Hint suggests a fix for a request the gate matched to no operation of service. It reads only the

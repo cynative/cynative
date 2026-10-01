@@ -26,6 +26,7 @@ const (
 	docParamRefPrefix  = "#/components/parameters/"
 	docSchemaRefPrefix = "#/components/schemas/"
 	docJSONMedia       = "application/json"
+	docBodySkipped     = "optional request body is not rendered"
 	docBodyGap         = "request body is not a JSON object the template can render"
 	docVersionLimit    = "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
 	docLinkLimit       = `pagination is inferred from per_page/page parameters and a declared Link header; ` +
@@ -55,6 +56,8 @@ type OperationDoc struct {
 	BodyFields []DocParam `json:"b,omitempty"`
 	// BodyGap is non-empty when a required body is not a JSON object the template can render.
 	BodyGap string `json:"g,omitempty"`
+	// BodySkipped is set when an optional body is not a JSON object the template can render.
+	BodySkipped bool `json:"u,omitempty"`
 	// ResponseType is the first media type of the 200 (else first 2xx) response; "" when it has no content.
 	ResponseType string `json:"rt,omitempty"`
 	LinkPaged    bool   `json:"l,omitempty"`
@@ -131,8 +134,8 @@ type docRawDoc struct {
 	} `json:"info"`
 	Paths      map[string]docRawPathItem `json:"paths"`
 	Components struct {
-		Parameters map[string]docRawParam  `json:"parameters"`
-		Schemas    map[string]docRawSchema `json:"schemas"`
+		Parameters map[string]docRawParam     `json:"parameters"`
+		Schemas    map[string]json.RawMessage `json:"schemas"`
 	} `json:"components"`
 }
 
@@ -168,9 +171,19 @@ func distillOp(doc *docRawDoc, method, path string, shared []docRawParam, op *do
 		Method:  method,
 		Path:    path,
 		Summary: apiref.StripMarkup(op.Summary, apiref.MaxSummary),
-		Params:  resolveParams(doc, slices.Concat(shared, op.Parameters)),
+		Params:  mergeParams(resolveParams(doc, shared), resolveParams(doc, op.Parameters)),
 	}
-	d.BodyFields, d.BodyGap = distillBody(doc, op.RequestBody)
+	if rb := op.RequestBody; rb != nil {
+		fields, ok := bodyFields(doc, rb)
+		switch {
+		case ok:
+			d.BodyFields = fields
+		case rb.Required:
+			d.BodyGap = docBodyGap
+		default:
+			d.BodySkipped = true
+		}
+	}
 	d.ResponseType = responseType(op.Responses)
 	d.LinkPaged = linkPaged(d.Params, op.Responses)
 	return d
@@ -206,32 +219,36 @@ func typeName(t any) string {
 	return docUnknownType
 }
 
-// distillBody returns the required body properties, or a gap when the body is not a JSON object.
-func distillBody(doc *docRawDoc, rb *docRawBody) ([]DocParam, string) {
-	if rb == nil {
-		return nil, ""
+// mergeParams lets an operation-level parameter replace a path-level one with the same name and location.
+func mergeParams(shared, own []DocParam) []DocParam {
+	out := slices.Clone(shared)
+	for _, p := range own {
+		i := slices.IndexFunc(out, func(q DocParam) bool { return q.Name == p.Name && q.In == p.In })
+		if i < 0 {
+			out = append(out, p)
+			continue
+		}
+		out[i] = p
 	}
+	return out
+}
+
+// bodyFields returns the required properties of a JSON object body. ok is false when the body is not one the
+// template can render.
+func bodyFields(doc *docRawDoc, rb *docRawBody) ([]DocParam, bool) {
 	media, hasJSON := rb.Content[docJSONMedia]
-	switch {
-	case rb.Ref != "":
-		return nil, docBodyGap
-	case !hasJSON && rb.Required:
-		return nil, docBodyGap
-	case !hasJSON:
-		return nil, ""
+	if rb.Ref != "" || !hasJSON {
+		return nil, false
 	}
 	schema := media.Schema
 	if schema.Ref != "" {
-		name, ok := strings.CutPrefix(schema.Ref, docSchemaRefPrefix)
-		if !ok {
-			return nil, docBodyGap
-		}
-		if schema, ok = doc.Components.Schemas[name]; !ok {
-			return nil, docBodyGap
+		var ok bool
+		if schema, ok = doc.schema(schema.Ref); !ok {
+			return nil, false
 		}
 	}
 	if schema.Type != "object" {
-		return nil, docBodyGap
+		return nil, false
 	}
 	names := slices.Clone(schema.Required)
 	slices.Sort(names)
@@ -246,7 +263,22 @@ func distillBody(doc *docRawDoc, rb *docRawBody) ([]DocParam, string) {
 			Description: apiref.StripMarkup(prop.Description, apiref.MaxInputDescription),
 		})
 	}
-	return fields, ""
+	return fields, true
+}
+
+// schema decodes the component schema ref names, and only that one, so a malformed schema nothing references
+// cannot reject the document.
+func (d *docRawDoc) schema(ref string) (docRawSchema, bool) {
+	var s docRawSchema
+	name, ok := strings.CutPrefix(ref, docSchemaRefPrefix)
+	if !ok {
+		return s, false
+	}
+	raw, ok := d.Components.Schemas[name]
+	if !ok {
+		return s, false
+	}
+	return s, json.Unmarshal(raw, &s) == nil
 }
 
 func bodyType(p docRawProp) string {
@@ -342,25 +374,12 @@ func (d *OperationDocs) Reference(q apiref.Query) apiref.Result {
 			return apiref.Result{
 				Outcome: apiref.OutcomeAmbiguous,
 				Reason:  apiref.Truncate("several operations differ only by case", apiref.MaxReason),
-				Choices: docChoices(folded),
+				Choices: apiref.Choices(folded),
 			}
 		}
 	}
 	ref := d.build(id, d.Ops[id])
 	return apiref.Result{Outcome: apiref.OutcomeOf(ref), Reference: ref}
-}
-
-// docChoices sorts, truncates and bounds a choice list.
-func docChoices(in []string) []string {
-	out := slices.Clone(in)
-	slices.Sort(out)
-	if len(out) > apiref.MaxChoices {
-		out = out[:apiref.MaxChoices]
-	}
-	for i, c := range out {
-		out[i] = apiref.Truncate(c, apiref.MaxChoice)
-	}
-	return out
 }
 
 func (d *OperationDocs) build(id string, op OperationDoc) *apiref.Reference {
@@ -391,6 +410,9 @@ func (d *OperationDocs) build(id string, op OperationDoc) *apiref.Reference {
 	}
 	if op.BodyGap != "" {
 		ref.Gaps = append(ref.Gaps, op.BodyGap)
+	}
+	if op.BodySkipped {
+		ref.Limitations = append(ref.Limitations, docBodySkipped)
 	}
 	docInputs(ref, op)
 	return ref

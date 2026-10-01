@@ -176,16 +176,20 @@ func TestDocsReference_BodyGaps(t *testing.T) {
 	const gap = "request body is not a JSON object the template can render"
 	cases := map[string]string{
 		"text/plain required": `"requestBody":{"required":true,"content":{"text/plain":{}}}`,
-		"ref body":            `"requestBody":{"$ref":"#/components/requestBodies/X"}`,
-		"non-object":          `"requestBody":{"content":{"application/json":{"schema":{"type":"array"}}}}`,
-		"missing schema ref": `"requestBody":{"content":{"application/json":{"schema":` +
+		"ref body":            `"requestBody":{"required":true,"$ref":"#/components/requestBodies/X"}`,
+		"non-object":          `"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"array"}}}}`,
+		"missing schema ref": `"requestBody":{"required":true,"content":{"application/json":{"schema":` +
 			`{"$ref":"#/components/schemas/Nope"}}}}`,
-		"foreign schema ref": `"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/other/Nope"}}}}`,
+		"foreign schema ref": `"requestBody":{"required":true,"content":{"application/json":{"schema":` +
+			`{"$ref":"#/other/Nope"}}}}`,
+		"malformed schema ref": `"requestBody":{"required":true,"content":{"application/json":{"schema":` +
+			`{"$ref":"#/components/schemas/Bad"}}}}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			d := synthDocs(t, synthHead+`"/x":{"post":{"operationId":"x/post",`+body+`}}}}`)
+			d := synthDocs(t, synthHead+`"/x":{"post":{"operationId":"x/post",`+body+`}}},
+			"components":{"schemas":{"Bad":{"required":"oops"}}}}`)
 			res := d.Reference(apiref.Query{Operation: "x/post"})
 			in, ok := inputNamed(res.Reference, "body")
 			if res.Outcome != apiref.OutcomeIncomplete || !ok || in.Renderable || !in.Required ||
@@ -199,13 +203,70 @@ func TestDocsReference_BodyGaps(t *testing.T) {
 	}
 }
 
-func TestDocsReference_OptionalNonJSONBodyIsNoGap(t *testing.T) {
+func TestDocsReference_OptionalUnrenderedBodyIsNoGap(t *testing.T) {
+	t.Parallel()
+	const limit = "optional request body is not rendered"
+	cases := map[string]string{
+		"text/plain":     `"requestBody":{"content":{"text/plain":{}}}`,
+		"ref body":       `"requestBody":{"$ref":"#/components/requestBodies/X"}`,
+		"non-object":     `"requestBody":{"content":{"application/json":{"schema":{"type":"array"}}}}`,
+		"untyped schema": `"requestBody":{"content":{"application/json":{"schema":{"description":"d"}}}}`,
+		"malformed ref":  `"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Bad"}}}}`,
+		"missing ref":    `"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Nope"}}}}`,
+		"explicit false": `"requestBody":{"required":false,"content":{"application/json":{"schema":{"type":"array"}}}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			d := synthDocs(t, synthHead+`"/x":{"get":{"operationId":"x/get",`+body+`}}},
+			"components":{"schemas":{"Bad":{"required":"oops"}}}}`)
+			res := d.Reference(apiref.Query{Operation: "x/get"})
+			if res.Outcome != apiref.OutcomeFound || len(res.Reference.Inputs) != 0 || len(res.Reference.Gaps) != 0 ||
+				!slices.Contains(res.Reference.Limitations, limit) || res.Reference.BodyEncoding != apiref.BodyNone {
+				t.Errorf("res = %+v", res)
+			}
+		})
+	}
+}
+
+func TestDocsReference_OptionalObjectBodyWithoutRequiredIsSilent(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(t, synthHead+`"/x":{"post":{"operationId":"x/post",
-	"requestBody":{"content":{"text/plain":{}}}}}}}`)
+	"requestBody":{"content":{"application/json":{"schema":{"type":"object","properties":{"a":{"type":"string"}}}}}}}}}}`)
 	res := d.Reference(apiref.Query{Operation: "x/post"})
-	if res.Outcome != apiref.OutcomeFound || len(res.Reference.Inputs) != 0 {
+	if res.Outcome != apiref.OutcomeFound || len(res.Reference.Limitations) != 1 {
 		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestDocsDistill_MalformedUnreferencedSchemaIsIgnored(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(t, synthHead+`"/x":{"get":{"operationId":"x/get"}}},
+	"components":{"schemas":{"Bad":{"required":"oops"}}}}`)
+	if res := d.Reference(apiref.Query{Operation: "x/get"}); res.Outcome != apiref.OutcomeFound {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestDocsReference_OperationParamOverridesPathParam(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(
+		t,
+		synthHead+`"/x":{"parameters":[{"name":"q","in":"query","description":"path","schema":{"type":"string"}},
+	{"name":"keep","in":"query","schema":{"type":"string"}}],
+	"get":{"operationId":"x/get","parameters":[{"name":"q","in":"query","schema":{"type":"integer"}},
+	{"name":"q","in":"header","schema":{"type":"string"}}]}}}}`,
+	)
+	ref := d.Reference(apiref.Query{Operation: "x/get"}).Reference
+	var qs []apiref.Input
+	for _, in := range ref.Inputs {
+		if in.Name == "q" && in.Location == apiref.LocationQuery {
+			qs = append(qs, in)
+		}
+	}
+	if len(qs) != 1 || qs[0].Type != "integer" || qs[0].Description != "" || len(ref.Inputs) != 3 ||
+		ref.Inputs[0].Name != "q" {
+		t.Errorf("inputs = %+v", ref.Inputs)
 	}
 }
 
