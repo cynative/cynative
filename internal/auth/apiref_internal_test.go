@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -342,6 +343,31 @@ func TestGithubProvider_ReferenceAndHint(t *testing.T) {
 		})
 		check(t, p, true)
 	})
+}
+
+func TestGithubProvider_HintTriesAFailingDocsLoadOnce(t *testing.T) {
+	t.Parallel()
+	um := &authreq.UnmatchedRequestError{Err: errors.New("x")}
+	view := authreq.View{Method: "DELETE", Hostname: "api.github.com", Path: "/repos/o/r", EscapedPath: "/repos/o/r"}
+	var fetches atomic.Int32
+	p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
+	p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
+		fetches.Add(1)
+
+		return nil, errors.New("offline")
+	})
+	for range 2 {
+		if h := p.Hint(t.Context(), view, um); len(h.Candidates) != 0 {
+			t.Errorf("hint = %+v", h)
+		}
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Errorf("two hints fetched %d times, want 1", n)
+	}
+	res := p.Reference(t.Context(), apiref.Query{Operation: "repos/get"})
+	if res.Outcome != apiref.OutcomeUnavailable || fetches.Load() != 2 {
+		t.Errorf("reference did not try the cache again: res=%+v fetches=%d", res, fetches.Load())
+	}
 }
 
 func TestProviderDescriptions_NameAPIReference(t *testing.T) {

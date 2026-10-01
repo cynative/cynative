@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
+	"sync/atomic"
 
 	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -30,6 +31,10 @@ type githubProvider struct {
 	tables   *cache.TTLCache[githubhardening.Table]
 	docs     *cache.TTLCache[githubhardening.OperationDocs]
 	errOut   io.Writer
+	// hintDocsFailed latches once a Hint-path docs load fails, so the error path
+	// does not re-download the document on every denied request. Reference does
+	// not read it.
+	hintDocsFailed atomic.Bool
 }
 
 var (
@@ -326,8 +331,13 @@ func (p *githubProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 
 // Hint suggests operations for a request the gate matched to none.
 func (p *githubProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
+	if p.hintDocsFailed.Load() {
+		return apiref.Hint{}
+	}
 	d := p.loadDocs(ctx)
 	if d == nil {
+		p.hintDocsFailed.Store(true)
+
 		return apiref.Hint{}
 	}
 
