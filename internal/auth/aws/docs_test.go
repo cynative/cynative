@@ -328,6 +328,7 @@ func hintSource(t *testing.T) *fakeSource {
 	r53 := fixtureBytes(t, "route-53.json")
 	f.addModel(t, "email", "ses", r53)
 	f.addModel(t, "email", "sesv2", r53)
+	f.addModel(t, "jsonsvc", "jsonsvc", []byte(exModel("aws.protocols#awsJson1_1", "/", "", "")))
 	f.addModel(t, "ec2x", "ec2x", []byte(exModel("aws.protocols#ec2Query", "/", "", "")))
 	for i := 1; i <= apiref.MaxCandidates+1; i++ {
 		raw := strings.Replace(exModel("aws.protocols#awsQuery", "/", "", ""), "2020-01-01",
@@ -381,7 +382,17 @@ func TestDocumenterHint(t *testing.T) {
 		},
 		{
 			name: "target on awsJson is no mismatch", method: "POST", url: "https://multi.amazonaws.com/",
-			hdr: jsonTarget("Svc.Op"), service: "ec2x",
+			hdr: jsonTarget("Svc.Op"), service: "jsonsvc",
+		},
+		{
+			name: "action on awsJson", method: "GET", url: "https://jsonsvc.amazonaws.com/?Action=Op",
+			service: "jsonsvc", want: []string{"jsonsvc uses awsJson1_1: "}, op: "Op",
+		},
+		{
+			name: "target wins over action", method: "POST", url: "https://iam.amazonaws.com/?Action=ListUsers",
+			hdr: jsonTarget("Svc.ListRoles"), service: "iam",
+			want: []string{"iam uses awsQuery: POST /"}, op: "ListRoles",
+			also: []string{"Action=ListRoles&Version=2010-05-08"},
 		},
 		{name: "nothing close", method: "GET", url: "https://route53.amazonaws.com/zzz/yyy/xxx", service: "route53"},
 		{
