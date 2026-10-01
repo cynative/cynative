@@ -295,11 +295,20 @@ func TestAPIReferenceContract_IAMXMLGuidance(t *testing.T) {
 
 	_, out, _ := runRef(t, []auth.Provider{&stubAWS{docs: awsDocumenter(t, "iam", "iam.json", "iam")}},
 		`{"connector":"aws","service":"iam","operation":"ListRoles"}`)
-	parse, _ := out.Reference["response"].(map[string]any)["parse"].(string)
-	for _, want := range []string{"xml.parse", "ListRolesResult", "Roles", "member"} {
+	resp, ok := out.Reference["response"].(map[string]any)
+	if !ok {
+		t.Fatalf("reference has no response object: %+v", out.Reference)
+	}
+	parse, _ := resp["parse"].(string)
+	for _, want := range []string{"xml.parse", "ListRolesResult", "Roles", "member", "IsTruncated === 'true'"} {
 		if !strings.Contains(parse, want) {
 			t.Errorf("Response.Parse %q lacks %q", parse, want)
 		}
+	}
+
+	pg, ok := out.Reference["pagination"].(map[string]any)
+	if !ok || pg["input_token"] != "Marker" || pg["output_token"] != "Marker" {
+		t.Errorf("pagination = %+v, want Marker as input and output token", out.Reference["pagination"])
 	}
 
 	const (

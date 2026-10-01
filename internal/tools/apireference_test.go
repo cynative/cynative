@@ -356,6 +356,13 @@ func checkDescriptionStage(t *testing.T, _ *apiref.Reference, got string) {
 	}
 }
 
+func checkPresetTruncatedStage(t *testing.T, _ *apiref.Reference, got string) {
+	t.Helper()
+	if !strings.Contains(got, `"inputs_truncated":true`) {
+		t.Errorf("the provider's inputs_truncated was lost: %.200s", got)
+	}
+}
+
 func checkSummaryStage(t *testing.T, _ *apiref.Reference, got string) {
 	t.Helper()
 	if strings.Contains(got, `"summary"`) {
@@ -382,6 +389,7 @@ func TestAPIReference_CapStages(t *testing.T) {
 	}{
 		{"optional", bigRef(2, 40, 300, 10), checkOptionalStage},
 		{"description", bigRef(30, 0, 300, 10), checkDescriptionStage},
+		{"preset flag", presetTruncated(bigRef(30, 0, 300, 10)), checkPresetTruncatedStage},
 		{"summary", bigRef(2, 0, 10, 9000), checkSummaryStage},
 		{"minimal", bigRef(400, 0, 10, 10), checkMinimalStage},
 	}
@@ -392,7 +400,7 @@ func TestAPIReference_CapStages(t *testing.T) {
 			if len(full) <= apiref.MaxOutputBytes {
 				t.Fatalf("precondition: uncapped output is %d bytes", len(full))
 			}
-			inputs, summary := len(c.ref.Inputs), c.ref.Summary
+			inputs, summary, flag := len(c.ref.Inputs), c.ref.Summary, c.ref.InputsTruncated
 			desc := c.ref.Inputs[0].Description
 			p := &docProvider{name: "aws", res: apiref.Result{Outcome: apiref.OutcomeFound, Reference: c.ref}}
 			got, _, _ := runRef(t, []auth.Provider{p}, `{"connector":"aws","operation":"Op"}`)
@@ -401,11 +409,18 @@ func TestAPIReference_CapStages(t *testing.T) {
 			}
 			c.check(t, c.ref, got)
 			if len(c.ref.Inputs) != inputs || c.ref.Summary != summary || c.ref.Inputs[0].Description != desc ||
-				c.ref.InputsTruncated {
+				c.ref.InputsTruncated != flag {
 				t.Error("the provider's reference was modified")
 			}
 		})
 	}
+}
+
+// presetTruncated marks a reference the way a provider that already dropped inputs would.
+func presetTruncated(ref *apiref.Reference) *apiref.Reference {
+	ref.InputsTruncated = true
+
+	return ref
 }
 
 // referenceForSize marshals a result the way the tool would before any cap.
