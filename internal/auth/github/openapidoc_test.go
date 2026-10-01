@@ -137,7 +137,7 @@ const synthHead = `{"info":{"version":"9"},"paths":{`
 func TestDocsReference_RefBodySchema(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(t, synthHead+`"/things":{"post":{"operationId":"things/create","summary":"<b>Make</b> one",
-	"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}},
+	"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}},
 	"responses":{"204":{"description":"none"}}}}},
 	"components":{"schemas":{"Thing":{"type":"object","required":["name","size","tags","ghost"],
 	"properties":{"name":{"type":"string","description":"The <i>name</i>"},"size":{"type":"integer"},
@@ -163,7 +163,7 @@ func TestDocsReference_RefBodySchema(t *testing.T) {
 func TestDocsReference_RefBodySchemaFound(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(t, synthHead+`"/things":{"post":{"operationId":"things/create",
-	"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}}}}},
+	"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}}}}},
 	"components":{"schemas":{"Thing":{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}}}}`)
 	res := d.Reference(apiref.Query{Operation: "things/create"})
 	if _, ok := inputNamed(res.Reference, "name"); !ok || res.Outcome != apiref.OutcomeFound {
@@ -213,6 +213,10 @@ func TestDocsReference_OptionalUnrenderedBodyIsNoGap(t *testing.T) {
 		"untyped schema": `"requestBody":{"content":{"application/json":{"schema":{"description":"d"}}}}`,
 		"malformed ref":  `"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Bad"}}}}`,
 		"missing ref":    `"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Nope"}}}}`,
+		"object with required scalar": `"requestBody":{"content":{"application/json":{"schema":{"type":"object",` +
+			`"required":["a"],"properties":{"a":{"type":"string"}}}}}}`,
+		"object with required non-scalar": `"requestBody":{"content":{"application/json":{"schema":{"type":"object",` +
+			`"required":["a"],"properties":{"a":{"type":"array"}}}}}}`,
 		"explicit false": `"requestBody":{"required":false,"content":{"application/json":{"schema":{"type":"array"}}}}`,
 	}
 	for name, body := range cases {

@@ -176,11 +176,12 @@ func distillOp(doc *docRawDoc, method, path string, shared []docRawParam, op *do
 	if rb := op.RequestBody; rb != nil {
 		fields, ok := bodyFields(doc, rb)
 		switch {
-		case ok:
+		case rb.Required && ok:
 			d.BodyFields = fields
 		case rb.Required:
 			d.BodyGap = docBodyGap
-		default:
+		case !ok || len(fields) > 0:
+			// An optional body never adds inputs or gaps; the template omits it.
 			d.BodySkipped = true
 		}
 	}
