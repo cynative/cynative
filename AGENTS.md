@@ -50,7 +50,7 @@ embedded Bifrost SDK, one provider per run. `docs/project/architecture.md` has t
 - Ports and adapters: anything that touches the outside world (cloud SDKs, os, filesystem, network, stdio, term, the Bifrost client, the sobek runtime) is a constructor-injected interface or func field defaulted to the real implementation. Tests swap it through a `With*` option in `export_test.go`, never by reassigning a package var. Multi-method ports get moq mocks. A `json.Marshal` whose error path no test can reach is either passed in as a func, the way `codeDescription` in `internal/tools/codeexec.go` takes it, or has its error discarded under a comment saying why it cannot fail, as `internal/tools/httptool.go` does.
 - Every `//nolint` is `//nolint:<linter> // reason`. nolintlint rejects a bare marker and a missing reason, except for `funlen`, `gocognit` and `golines`, where it allows the omission; write the reason anyway. The `//nolint:exhaustruct`, `//nolint:lll` and `//nolint:errchkjson` markers in the tree are inert (those linters are commented out), so do not add new ones.
 - Errors wrap with `%w`. Sentinels are named `ErrX` and error types `XError` (`errname` enforces it).
-- `internal/schema` imports only the standard library and `github.com/invopop/jsonschema`, pinned by the depguard rule `schema-pure-leaf` and `TestPackageIsPureLeaf`. `internal/auth/authreq`, `internal/auth/exposure`, `internal/auth/cloudauth`, `internal/cache`, `internal/interrupt` and `internal/redact` are leaves by convention: never import another internal package from them.
+- `internal/schema` imports only the standard library and `github.com/invopop/jsonschema`, pinned by the depguard rule `schema-pure-leaf` and `TestPackageIsPureLeaf`. `internal/auth/authreq`, `internal/auth/exposure`, `internal/auth/cloudauth`, `internal/apiref`, `internal/cache`, `internal/interrupt` and `internal/redact` are leaves by convention: never import another internal package from them.
 
 ## Tests
 
@@ -92,6 +92,7 @@ The spine is cmd -> cli -> agent -> tools -> transport -> auth. `newDeps` in `in
 - `about.go`, `agents.go` (module root): `go:embed` of `README.md` and `agents/`; at the root because embed cannot reach a parent directory.
 - `internal/cli`: cobra commands (root, `doctor`, `agents`), the composition root, exit codes, signal handling.
 - `internal/agent`: the research loop, `write_todos`/`task`/`verify_findings`, untrusted fencing, halt conditions.
+- `internal/apiref`: connector-neutral operation reference types and the hint matcher behind `api_reference`; stdlib only.
 - `internal/agentcatalog`: named markdown agents for `--agent`; user tier plus embedded built-ins; closed frontmatter schema.
 - `internal/schema`: provider-agnostic message and tool types; pure leaf.
 - `internal/llm`: Bifrost adapter behind `schema.ChatModel`; derived provider catalog; env-var resolution.

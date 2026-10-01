@@ -269,9 +269,9 @@ func TestDocsDistill_MalformedInlineSchemaOnlyAffectsItsOperation(t *testing.T) 
 		!slices.Contains(res.Reference.Limitations, "optional request body is not rendered") {
 		t.Errorf("opt/post: res = %+v", res)
 	}
-	if res := d.Reference(apiref.Query{Operation: "good/post"}); res.Outcome != apiref.OutcomeFound ||
-		res.Reference.BodyEncoding != apiref.BodyJSON {
-		t.Errorf("good/post: res = %+v", res)
+	if good := d.Reference(apiref.Query{Operation: "good/post"}); good.Outcome != apiref.OutcomeFound ||
+		good.Reference.BodyEncoding != apiref.BodyJSON {
+		t.Errorf("good/post: res = %+v", good)
 	}
 }
 

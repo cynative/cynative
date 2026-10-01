@@ -638,11 +638,10 @@ func (d *deps) buildProviders(
 // extraTools counts the tools added after the primitives: code_execution and api_reference.
 const extraTools = 2
 
-// buildToolSet builds the tool set: approval-wrapped http_request and code_execution,
-// plus the unwrapped api_reference lookup,
-// from the given providers, egress policy, config, flags, verbose writer, and audit
-// sink. egress goes to http_request, which is where a model request picks its
-// route.
+// buildToolSet builds the tool set from the given providers, egress policy, config,
+// flags, verbose writer, and audit sink: approval-wrapped http_request and
+// code_execution, plus the unwrapped api_reference lookup.
+// egress goes to http_request, which is where a model request picks its route.
 func (d *deps) buildToolSet(
 	providers []auth.Provider,
 	egress *auth.Egress,

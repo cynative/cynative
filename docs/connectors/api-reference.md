@@ -30,11 +30,11 @@ At most 25 optional inputs are listed, and `inputs_truncated` is set when more w
 
 ## Outcomes
 
-The outcome is one of the following. When more than one applies, the first in this list wins.
+The tool checks the arguments before any lookup: invalid arguments or an empty `operation` answer `not_found` without consulting a connector. Past that, the outcome is one of the following, and when more than one applies the first in this list wins.
 
 1. `unsupported`: the connector is not configured in this session, or it has no reference support (every connector other than `aws` and `github`).
 2. `unavailable`: the metadata could not be loaded or parsed. For AWS the reason is the load error text truncated to 500 characters. For GitHub it is a fixed message. This is never reported as `not_found`.
-3. `not_found`: no model for the AWS endpoint prefix, a `model` that does not belong to the prefix (the choices list the valid ones), no operation by that name, or invalid arguments or an empty `operation`.
+3. `not_found`: no model for the AWS endpoint prefix, a `model` that does not belong to the prefix (the choices list the valid ones), or no operation by that name.
 4. `ambiguous`: several models for the prefix define the operation and no `model` was given, or the case-insensitive match hits several names. At most 5 choices are returned.
 5. `unsupported`: the operation was found in a model whose protocol the tool cannot describe (`ec2Query`).
 6. `incomplete`: the operation has a blocking gap, listed in `gaps`.
@@ -93,14 +93,14 @@ Both sources are cached on disk. With a warm cache, lookups work without network
 When the AWS or GitHub action gate finds that a request matches no operation in its metadata, `http_request` returns an explanatory error in place of the bare gate text. For example, a Route53 request to `/2013-04-01/hostedzones` produces:
 
 ```
-GET "/2013-04-01/hostedzones" on aws/route53 matched no operation in the cached API metadata. The gate stopped before attaching credentials or sending anything; this says nothing about the principal's permissions. Check the request shape against the operation reference. Candidates: ListHostedZones (GET /2013-04-01/hostedzone). For an operation's request template call api_reference with {"connector":"aws","operation":"ListHostedZones","service":"route53"}. (gate detail: "aws_hardening: could not resolve IAM action for operation: no candidate serves the request for \"route53\"")
+aws_hardening: could not resolve IAM action for operation: no candidate serves the request for "route53". GET "/2013-04-01/hostedzones" on aws/route53 matched no operation in the cached API metadata. The gate stopped before attaching credentials or sending anything; this says nothing about the principal's permissions. Check the request shape against the operation reference. Candidates: ListHostedZones (GET /2013-04-01/hostedzone). For an operation's request template call api_reference with {"connector":"aws","operation":"ListHostedZones","service":"route53"}.
 ```
 
-The message echoes only the method and a truncated, escaped path (200 characters), and the gate detail is truncated to 300 characters. It names at most 3 candidates, found by three cheap rules: the request used another protocol's shape for an operation the service defines (AWS), the path matches under another method (AWS REST, GitHub), or the path is a near miss with one segment within edit distance 2 (AWS REST, GitHub). With more than 3 candidates it shows none. When exactly one operation is suggested, its name fills the `api_reference` call.
+The message starts with the gate's own text, so anything that matches the gate's error by prefix still does. It then echoes only the method and a truncated, escaped path (200 characters), and the gate text is truncated to 300 characters. When the service has no model that `api_reference` can describe (for example `ec2`, whose `ec2Query` protocol answers `unsupported`), the final sentence that points at `api_reference` is left out and the rest stays. It names at most 3 candidates, found by three cheap rules: the request used another protocol's shape for an operation the service defines (AWS), the path matches under another method (AWS REST, GitHub), or the path is a near miss with one segment within edit distance 2 (AWS REST, GitHub). With more than 3 candidates it shows none. When exactly one operation is suggested, its name fills the `api_reference` call.
 
 The message is text only. It never changes what the gate allows or denies, never rewrites or retries the request, and the original gate error stays reachable through `errors.Is`. It appears only when the request matched nothing. Policy denials, unmapped IAM actions, metadata failures, and requests where no model matched but some candidate model for the prefix uses an unsupported protocol keep their original text. The vendor descriptions are never included.
 
-Because the hint reads the GitHub docs cache, the first unmatched GitHub request on a cold docs cache costs one fetch on the error path, unless the gate's table was downloaded in this process, in which case its bytes were already handed to the docs cache. The metadata can also be stale: a request the cache does not know may still be valid on the server.
+Because the hint reads the GitHub docs cache, the first unmatched GitHub request on a cold docs cache costs one fetch on the error path, unless the gate's table was downloaded in this process, in which case its bytes were already handed to the docs cache. If that load fails, the error path does not try it again for the rest of the process, so later denials carry no candidates. An `api_reference` call still tries the cache each time it is asked. The metadata can also be stale: a request the cache does not know may still be valid on the server.
 
 ## Limits
 
