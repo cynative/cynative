@@ -14,3 +14,8 @@ var ErrActionUnresolved = errors.New("aws_hardening: could not resolve IAM actio
 // for a request host cannot be resolved from the model archive (no candidate
 // serves the host's endpoint prefix, or candidates disagree).
 var ErrSigningNameUnresolved = errors.New("aws_hardening: could not resolve SigV4 signing name")
+
+// ErrUnsupportedProtocol is wrapped (with ErrClassifierUnknownOp) when a model's
+// protocol is one the classifier cannot route. Such a failure is a support gap,
+// not an unmatched request, so the provider does not mark it unmatched.
+var ErrUnsupportedProtocol = errors.New("aws_hardening: unsupported service protocol")
