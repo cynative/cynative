@@ -38,7 +38,7 @@ func idCache(dir, name string, fetch func(context.Context) ([]byte, error)) *cac
 
 func TestOpenAPIHandoff_TableThenDocsFetchesOnce(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{}
 	table, docs := h.record(f.fetch), h.take(f.fetch)
 	if _, err := table(t.Context()); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestOpenAPIHandoff_TableThenDocsFetchesOnce(t *testing.T) {
 
 func TestOpenAPIHandoff_DocsFirstFetchesTwice(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{}
 	table, docs := h.record(f.fetch), h.take(f.fetch)
 	if _, err := docs(t.Context()); err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestOpenAPIHandoff_DocsFirstFetchesTwice(t *testing.T) {
 
 func TestOpenAPIHandoff_SlotIsOneShot(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{}
 	table, docs := h.record(f.fetch), h.take(f.fetch)
 	for _, fn := range []func(context.Context) ([]byte, error){table, docs, docs} {
 		if _, err := fn(t.Context()); err != nil {
@@ -80,7 +80,7 @@ func TestOpenAPIHandoff_SlotIsOneShot(t *testing.T) {
 
 func TestOpenAPIHandoff_ErrorsAreNotRecorded(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{failFirst: true}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{failFirst: true}
 	table, docs := h.record(f.fetch), h.take(f.fetch)
 	if _, err := table(t.Context()); !errors.Is(err, errHandoffFetch) {
 		t.Fatalf("err = %v", err)
@@ -92,7 +92,7 @@ func TestOpenAPIHandoff_ErrorsAreNotRecorded(t *testing.T) {
 
 func TestOpenAPIHandoff_TableAlwaysFetches(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{}
 	table := h.record(f.fetch)
 	for range 2 {
 		if _, err := table(t.Context()); err != nil {
@@ -106,7 +106,7 @@ func TestOpenAPIHandoff_TableAlwaysFetches(t *testing.T) {
 
 func TestOpenAPIHandoff_TableRecovery(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{failFirst: true}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{failFirst: true}
 	dir := t.TempDir()
 	tableCache := idCache(dir, "table", h.record(f.fetch))
 	docsCache := idCache(dir, "docs", h.take(f.fetch))
@@ -123,7 +123,7 @@ func TestOpenAPIHandoff_TableRecovery(t *testing.T) {
 
 func TestOpenAPIHandoff_DocsFirstRecovery(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{failFirst: true}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{failFirst: true}
 	dir := t.TempDir()
 	tableCache := idCache(dir, "table", h.record(f.fetch))
 	docsCache := idCache(dir, "docs", h.take(f.fetch))
@@ -140,7 +140,7 @@ func TestOpenAPIHandoff_DocsFirstRecovery(t *testing.T) {
 
 func TestOpenAPIHandoff_ConcurrentColdStart(t *testing.T) {
 	t.Parallel()
-	h, f := &openAPIHandoff{}, &countedFetch{}
+	h, f := newOpenAPIHandoff(time.Now, time.Hour), &countedFetch{}
 	dir := t.TempDir()
 	tableCache := idCache(dir, "table", h.record(f.fetch))
 	docsCache := idCache(dir, "docs", h.take(f.fetch))
@@ -155,5 +155,35 @@ func TestOpenAPIHandoff_ConcurrentColdStart(t *testing.T) {
 	}
 	if n := f.calls.Load(); n < 1 || n > 2 {
 		t.Errorf("calls = %d, want 1 or 2", n)
+	}
+}
+
+func TestOpenAPIHandoff_ExpiresStaleBytes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		age       time.Duration
+		wantCalls int32
+	}{
+		{"fresh bytes are served", time.Hour, 1},
+		{"stale bytes are discarded and refetched", time.Hour + time.Nanosecond, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			now := time.Unix(1_000_000, 0)
+			h, f := newOpenAPIHandoff(func() time.Time { return now }, time.Hour), &countedFetch{}
+			table, docs := h.record(f.fetch), h.take(f.fetch)
+			if _, err := table(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(tc.age)
+			if got, err := docs(t.Context()); err != nil || string(got) != "doc" {
+				t.Fatalf("got %q %v", got, err)
+			}
+			if f.calls.Load() != tc.wantCalls {
+				t.Errorf("calls = %d, want %d", f.calls.Load(), tc.wantCalls)
+			}
+		})
 	}
 }

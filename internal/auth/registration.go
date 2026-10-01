@@ -405,7 +405,7 @@ func (d *registrationDeps) githubOutcome(
 
 	exposure := githubhardening.BuildExposure(ghCfg.Permissions)
 	posture, warn := githubPosture(exposure, ghCfg.Permissions)
-	handoff := &openAPIHandoff{}
+	handoff := newOpenAPIHandoff(ghCfg.Config.Clock, ghCfg.Config.TTL)
 	fetch := newGithubOpenAPIFetcher(d.egress)
 	tables := cache.NewTableCache(ghCfg.Config, handoff.record(fetch),
 		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
