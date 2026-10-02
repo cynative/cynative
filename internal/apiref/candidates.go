@@ -46,12 +46,15 @@ func CandidateOperations(routes []Route, method, escapedPath string) []string {
 	return Bound(out)
 }
 
-// Bound sorts and deduplicates candidate lines and returns nil when there are
-// none or more than MaxCandidates. Candidates and connector-specific hint
+// Bound sorts and deduplicates candidate lines, truncates each to MaxChoice
+// runes, and returns nil when there are none or more than MaxCandidates. Candidates and connector-specific hint
 // rules share it.
 func Bound(out []string) []string {
 	slices.Sort(out)
 	out = slices.Compact(out)
+	for i, line := range out {
+		out[i] = Truncate(line, MaxChoice)
+	}
 	if len(out) == 0 || len(out) > MaxCandidates {
 		return nil
 	}

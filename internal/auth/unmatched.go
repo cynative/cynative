@@ -80,7 +80,7 @@ func formatUnmatched(connector, service string, v authreq.View, h apiref.Hint, e
 	if service != "" {
 		target += "/" + service
 	}
-	op := h.Operation
+	op := apiref.Truncate(h.Operation, apiref.MaxChoice)
 	if op == "" {
 		op = "<OperationName>"
 	}

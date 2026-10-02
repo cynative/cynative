@@ -105,6 +105,21 @@ func TestBound(t *testing.T) {
 	}
 }
 
+func TestBound_TruncatesLines(t *testing.T) {
+	t.Parallel()
+
+	got := apiref.Bound([]string{strings.Repeat("é", 5000)})
+	if len(got) != 1 || len([]rune(got[0])) > apiref.MaxChoice {
+		t.Errorf("line not bounded: %d candidates", len(got))
+	}
+	long := apiref.Candidates([]apiref.Route{
+		{Operation: strings.Repeat("o", 5000), Method: "POST", Template: "/a"},
+	}, "GET", "/a")
+	if len(long) != 1 || len([]rune(long[0])) > apiref.MaxChoice {
+		t.Errorf("candidate not bounded: %d", len(long))
+	}
+}
+
 func TestCandidateOperations(t *testing.T) {
 	t.Parallel()
 

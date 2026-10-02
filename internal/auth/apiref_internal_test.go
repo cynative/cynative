@@ -213,6 +213,18 @@ func TestExplainUnmatched_BoundsMethod(t *testing.T) {
 	}
 }
 
+func TestExplainUnmatched_BoundsOperation(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("o", 5000)
+	doc := &fakeDocumenter{name: "github", hint: apiref.Hint{Operation: long, Candidates: []string{"a"}}}
+	um := &authreq.UnmatchedRequestError{Err: errors.New("x")}
+	msg := ExplainUnmatched(t.Context(), "github", authreq.View{Method: "GET", EscapedPath: "/a"},
+		[]Provider{doc}, um).Error()
+	if strings.Contains(msg, strings.Repeat("o", apiref.MaxChoice+1)) || len(msg) > 2000 {
+		t.Errorf("operation not bounded: %d bytes", len(msg))
+	}
+}
+
 // docsSource is a ModelSource over the route-53 fixture.
 type docsSource struct{ raw []byte }
 
