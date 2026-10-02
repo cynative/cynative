@@ -233,6 +233,18 @@ func TestDocsReference_OptionalUnrenderedBodyIsNoGap(t *testing.T) {
 	}
 }
 
+func TestDocsReference_RequiredBodyWithoutRequiredFieldsIsJSON(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(t, synthHead+`"/x":{"post":{"operationId":"x/post",
+	"requestBody":{"required":true,"content":{"application/json":{"schema":{"type":"object",`+
+		`"properties":{"a":{"type":"string"}}}}}}}}}}`)
+	ref := d.Reference(apiref.Query{Operation: "x/post"}).Reference
+	hasType := slices.Contains(ref.FixedHeaders, apiref.Param{Key: "Content-Type", Value: "application/json"})
+	if ref.BodyEncoding != apiref.BodyJSON || !hasType || len(ref.Inputs) != 0 {
+		t.Errorf("ref = %+v", ref)
+	}
+}
+
 func TestDocsReference_OptionalObjectBodyWithoutRequiredIsSilent(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(t, synthHead+`"/x":{"post":{"operationId":"x/post",
@@ -384,12 +396,17 @@ func TestDocsReference_ResponseTypes(t *testing.T) {
 	"201":{"content":{"text/zeta":{},"text/alpha":{}}},"302":{"content":{"a/b":{}}}}}},
 	"/empty200":{"get":{"operationId":"empty/get","responses":{"200":{"description":"x"},
 	"202":{"content":{"application/json":{}}}}}},
+	"/both":{"get":{"operationId":"both/get","responses":{"200":{"description":"x"},
+	"201":{"content":{"application/json":{}}}}}},
+	"/only201":{"get":{"operationId":"only201/get","responses":{"201":{"content":{"application/json":{}}}}}},
 	"/nothing":{"get":{"operationId":"nothing/get","responses":{"404":{"content":{"a/b":{}}}}}},
 	"/bare":{"get":{"operationId":"bare/get"}}}}`)
 	cases := map[string][2]string{
 		"scim/get":    {"json", "JSON.parse(response.body)"},
 		"created/get": {"text/alpha", "the body is text/alpha text, not JSON; read response.body as a string"},
-		"empty/get":   {"json", "JSON.parse(response.body)"},
+		"empty/get":   {"none", "no response body; read the status and headers"},
+		"both/get":    {"none", "no response body; read the status and headers"},
+		"only201/get": {"json", "JSON.parse(response.body)"},
 		"nothing/get": {"none", "no response body; read the status and headers"},
 		"bare/get":    {"none", "no response body; read the status and headers"},
 	}

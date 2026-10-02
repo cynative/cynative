@@ -54,6 +54,8 @@ type OperationDoc struct {
 	Params  []DocParam `json:"a,omitempty"`
 	// BodyFields are the required top-level JSON body properties; Type is "unknown" when not a plain scalar.
 	BodyFields []DocParam `json:"b,omitempty"`
+	// BodyRequired is set when a required body is a renderable JSON object, even one with no required fields.
+	BodyRequired bool `json:"q,omitempty"`
 	// BodyGap is non-empty when a required body is not a JSON object the template can render.
 	BodyGap string `json:"g,omitempty"`
 	// BodySkipped is set when an optional body is not a JSON object the template can render.
@@ -188,6 +190,7 @@ func distillOp(doc *docRawDoc, method, path string, shared []docRawParam, op *do
 		switch {
 		case rb.Required && ok:
 			d.BodyFields = fields
+			d.BodyRequired = true
 		case rb.Required:
 			d.BodyGap = docBodyGap
 		case !ok || len(fields) > 0:
@@ -325,7 +328,8 @@ func isScalar(t string) bool {
 	return false
 }
 
-// responseType is the first media type of the 200 response, else of the first 2xx response with content.
+// responseType is the first media type of the 200 response (empty when it has no content), else of the first
+// 2xx response with content.
 func responseType(resp map[string]docRawResponse) string {
 	var codes []string
 	for code := range resp {
@@ -334,16 +338,26 @@ func responseType(resp map[string]docRawResponse) string {
 		}
 	}
 	slices.Sort(codes)
-	for _, code := range append([]string{docOKStatus}, codes...) {
-		var types []string
-		for mt := range resp[code].Content {
-			types = append(types, mt)
-		}
-		if len(types) > 0 {
-			return slices.Min(types)
+	if r, ok := resp[docOKStatus]; ok {
+		return firstMedia(r)
+	}
+	for _, code := range codes {
+		if mt := firstMedia(resp[code]); mt != "" {
+			return mt
 		}
 	}
 	return ""
+}
+
+func firstMedia(r docRawResponse) string {
+	var types []string
+	for mt := range r.Content {
+		types = append(types, mt)
+	}
+	if len(types) == 0 {
+		return ""
+	}
+	return slices.Min(types)
 }
 
 func linkPaged(params []DocParam, resp map[string]docRawResponse) bool {
@@ -430,7 +444,7 @@ func (d *OperationDocs) build(id string, op OperationDoc) *apiref.Reference {
 		ref.Pagination = apiref.Pagination{Style: "link-header", InputToken: docPage, PageSize: docPerPage}
 		ref.Limitations = append(ref.Limitations, docLinkLimit)
 	}
-	if len(op.BodyFields) > 0 {
+	if op.BodyRequired || len(op.BodyFields) > 0 {
 		ref.BodyEncoding = apiref.BodyJSON
 		ref.FixedHeaders = append(ref.FixedHeaders, apiref.Param{Key: "Content-Type", Value: docJSONMedia})
 	}
