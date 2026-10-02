@@ -540,11 +540,34 @@ func TestDocsHint_MultiSegmentTail(t *testing.T) {
 		t.Fatalf("MultiSegment = %v", d.MultiSegment)
 	}
 	h := d.Hint(ghView(t, "PUT", "https://api.github.com/repos/o/r/contents/a/b/c"))
-	want := []string{"repos/get-content (GET /repos/{owner}/{repo}/contents/{path+})"}
+	want := []string{"repos/get-content (GET /repos/{owner}/{repo}/contents/{path*})"}
 	if !slices.Equal(h.Candidates, want) || h.Operation != "repos/get-content" {
 		t.Errorf("hint = %+v", h)
 	}
 	if none := d.Hint(ghView(t, "PUT", "https://api.github.com/repos/o/r/tags/a/b")); len(none.Candidates) != 0 {
 		t.Errorf("single-segment tail matched several segments: %+v", none)
+	}
+}
+
+func TestDocsHint_HeadAndOptionsReadAsGet(t *testing.T) {
+	t.Parallel()
+	d := fixtureDocs(t)
+	for _, m := range []string{"HEAD", "OPTIONS", "head", " Options "} {
+		h := d.Hint(ghView(t, m, "https://api.github.com/repo/o/r"))
+		if !slices.Equal(h.Candidates, []string{"repos/get (GET /repos/{owner}/{repo})"}) {
+			t.Errorf("%q: hint = %+v", m, h)
+		}
+	}
+}
+
+func TestDocsHint_CatchAllTakesZeroSegments(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(t, synthHead+`"/repos/{owner}/{repo}/contents/{path}":{"get":{"operationId":"repos/get-content",
+	"parameters":[{"name":"path","in":"path","required":true,"x-multi-segment":true,"schema":{"type":"string"}}],
+	"responses":{"200":{"description":"ok"}}}}}}`)
+	h := d.Hint(ghView(t, "PUT", "https://api.github.com/repos/o/r/contents"))
+	want := []string{"repos/get-content (GET /repos/{owner}/{repo}/contents/{path*})"}
+	if !slices.Equal(h.Candidates, want) {
+		t.Errorf("hint = %+v", h)
 	}
 }

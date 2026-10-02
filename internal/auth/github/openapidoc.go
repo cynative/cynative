@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -526,15 +527,20 @@ func (d *OperationDocs) Hint(v authreq.View) apiref.Hint {
 	for id, op := range d.Ops {
 		routes = append(routes, apiref.Route{Operation: id, Method: op.Method, Template: d.hintTemplate(op.Path)})
 	}
-	h := apiref.Hint{Candidates: apiref.Candidates(routes, v.Method, v.EscapedPath)}
-	if ops := apiref.CandidateOperations(routes, v.Method, v.EscapedPath); len(ops) == 1 {
+	method := strings.ToUpper(strings.TrimSpace(v.Method))
+	// The gate looks HEAD and OPTIONS up as GET, so the hint does too.
+	if method == http.MethodHead || method == http.MethodOptions {
+		method = http.MethodGet
+	}
+	h := apiref.Hint{Candidates: apiref.Candidates(routes, method, v.EscapedPath)}
+	if ops := apiref.CandidateOperations(routes, method, v.EscapedPath); len(ops) == 1 {
 		h.Operation = ops[0]
 	}
 	return h
 }
 
-// hintTemplate rewrites a trailing {name} whose parameter is multi-segment to {name+}, so the matcher treats it as
-// the catch-all the gate does.
+// hintTemplate rewrites a trailing {name} whose parameter is multi-segment to {name*}, so the matcher treats it as
+// the catch-all the gate does, which takes zero or more segments.
 func (d *OperationDocs) hintTemplate(path string) string {
 	i := strings.LastIndex(path, "/")
 	last := path[i+1:]
@@ -542,5 +548,5 @@ func (d *OperationDocs) hintTemplate(path string) string {
 	if !ok || !strings.HasPrefix(last, "{") || !slices.Contains(d.MultiSegment, name) {
 		return path
 	}
-	return path[:i+1] + "{" + name + "+}"
+	return path[:i+1] + "{" + name + "*}"
 }
