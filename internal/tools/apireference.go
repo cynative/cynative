@@ -239,6 +239,32 @@ func buildURL(ref *apiref.Reference) string {
 	return u
 }
 
+// bareTypes are the input types whose JSON placeholder is unquoted, so the substituted value stays a number or
+// boolean.
+//
+//nolint:gochecknoglobals // immutable lookup table.
+var bareTypes = map[string]bool{
+	"integer": true, "long": true, "short": true, "byte": true, "float": true, "double": true,
+	"intEnum": true, "number": true, "boolean": true,
+}
+
+// jsonBody renders the required members as a JSON object with keys sorted: a string-typed input gets a quoted
+// placeholder, a numeric or boolean one a bare placeholder, and an unrenderable one a quoted marker.
+func jsonBody(ref *apiref.Reference, req []apiref.Input) string {
+	sorted := slices.Clone(req)
+	slices.SortStableFunc(sorted, func(a, b apiref.Input) int { return strings.Compare(a.WireName, b.WireName) })
+	members := make([]string, 0, len(sorted))
+	for _, in := range sorted {
+		holder := placeholder(ref, in.Name)
+		if !bareTypes[in.Type] || !in.Renderable {
+			holder = encode(holder)
+		}
+		members = append(members, encode(in.WireName)+":"+holder)
+	}
+
+	return "{" + strings.Join(members, ",") + "}"
+}
+
 func buildBody(ref *apiref.Reference) string {
 	req := requiredAt(ref, apiref.LocationBody)
 	switch ref.BodyEncoding {
@@ -250,12 +276,7 @@ func buildBody(ref *apiref.Reference) string {
 
 		return strings.Join(pairs, "&")
 	case apiref.BodyJSON:
-		obj := make(map[string]string, len(req))
-		for _, in := range req {
-			obj[in.WireName] = placeholder(ref, in.Name)
-		}
-
-		return encode(obj)
+		return jsonBody(ref, req)
 	case apiref.BodyNone:
 	}
 	// No encoding: required body members have no wire form, so list their placeholders.

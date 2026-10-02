@@ -238,6 +238,36 @@ func TestAPIReference_UnrenderedPlaceholder(t *testing.T) {
 	}
 }
 
+func TestAPIReference_JSONBodyPlaceholderTypes(t *testing.T) {
+	t.Parallel()
+
+	in := func(name, typ string, renderable bool) apiref.Input {
+		return apiref.Input{
+			Name:       name,
+			WireName:   name,
+			Location:   apiref.LocationBody,
+			Required:   true,
+			Type:       typ,
+			Renderable: renderable,
+		}
+	}
+	ref := &apiref.Reference{
+		Connector: "aws", Operation: "Op", Method: "POST", PathTemplate: "/x",
+		Endpoint: "https://ex.amazonaws.com", BodyEncoding: apiref.BodyJSON,
+		Inputs: []apiref.Input{
+			in("Name", "string", true), in("Count", "integer", true), in("On", "boolean", true),
+			in("Mode", "enum", true), in("Lost", "integer", false), in("a<b", "double", true),
+		},
+	}
+	p := &docProvider{name: "aws", res: apiref.Result{Outcome: apiref.OutcomeFound, Reference: ref}}
+	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"aws","operation":"Op"}`)
+	want := `{"Count":<Count>,"Lost":"<Lost:unrendered>","Mode":"<Mode>","Name":"<Name>","On":<On>,` +
+		`"a<b":<a<b>}`
+	if got := templateArgs(t, out).Body; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+}
+
 func TestAPIReference_Outcomes(t *testing.T) {
 	t.Parallel()
 
