@@ -17,7 +17,8 @@ const maxHintPathBytes = 2048
 
 // Route is one documented operation's method and path template, as a
 // candidate source for hints. Templates use {Label} for one segment and
-// {Label+} for a greedy tail; a "?" and anything after it is ignored.
+// {Label+} for a greedy span of one or more segments, {Label*} for a greedy
+// span of zero or more; a "?" and anything after it is ignored.
 type Route struct{ Operation, Method, Template string }
 
 // Candidates returns at most MaxCandidates "Name (METHOD /template)" strings:
@@ -91,12 +92,16 @@ func splitPath(p string) []string {
 
 func isLabel(seg string) bool { return strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") }
 
-func isGreedy(seg string) bool { return isLabel(seg) && strings.HasSuffix(seg, "+}") }
+func isGreedy(seg string) bool {
+	return isLabel(seg) && (strings.HasSuffix(seg, "+}") || isZeroOrMore(seg))
+}
+
+func isZeroOrMore(seg string) bool { return isLabel(seg) && strings.HasSuffix(seg, "*}") }
 
 func matches(tpl, segs []string) bool {
 	for i, t := range tpl {
 		if isGreedy(t) {
-			return matchGreedy(tpl[i+1:], segs, i)
+			return matchGreedy(tpl[i+1:], segs, i, isZeroOrMore(t))
 		}
 		if i >= len(segs) || !segMatches(t, segs[i]) {
 			return false
@@ -107,10 +112,11 @@ func matches(tpl, segs []string) bool {
 
 // matchGreedy matches a greedy label starting at path index i, followed by the
 // template segments in suffix. The label takes every segment the suffix leaves
-// and needs at least one; a single empty segment does not count, as in the gate.
-func matchGreedy(suffix, segs []string, i int) bool {
+// and needs at least one unless zeroOK; a single empty segment does not count
+// as one, as in the gate.
+func matchGreedy(suffix, segs []string, i int, zeroOK bool) bool {
 	end := len(segs) - len(suffix)
-	if end <= i || (end == i+1 && segs[i] == "") {
+	if end < i || (!zeroOK && (end == i || (end == i+1 && segs[i] == ""))) {
 		return false
 	}
 	for j, t := range suffix {

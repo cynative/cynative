@@ -209,3 +209,26 @@ func TestCandidates_LongSegmentUnderCapSkipsEditDistance(t *testing.T) {
 		t.Errorf("near miss under the caps = %v, want one candidate", got)
 	}
 }
+
+func TestCandidates_ZeroOrMoreTail(t *testing.T) {
+	t.Parallel()
+
+	star := []apiref.Route{{Operation: "GetR", Method: "GET", Template: "/r/{p*}"}}
+	for _, path := range []string{"/r", "/r/a", "/r/a/b"} {
+		if got := apiref.Candidates(star, "PUT", path); !slices.Equal(got, []string{"GetR (GET /r/{p*})"}) {
+			t.Errorf("%s: got %q", path, got)
+		}
+	}
+	for _, path := range []string{"/", "/x/a"} {
+		if got := apiref.Candidates(star, "PUT", path); got != nil {
+			t.Errorf("%s: got %q", path, got)
+		}
+	}
+	if got := apiref.Candidates(star, "GET", "/rr"); got != nil {
+		t.Errorf("a star label must not be a near miss: %q", got)
+	}
+	plus := []apiref.Route{{Operation: "GetR", Method: "GET", Template: "/r/{p+}"}}
+	if got := apiref.Candidates(plus, "PUT", "/r"); got != nil {
+		t.Errorf("plus matched zero segments: %q", got)
+	}
+}
