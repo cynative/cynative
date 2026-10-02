@@ -519,6 +519,20 @@ func TestAPIReference_PlaceholdersKeyedByLocation(t *testing.T) {
 	}
 }
 
+func TestAPIReference_PathLabelWithoutInputFallsBack(t *testing.T) {
+	t.Parallel()
+
+	ref := &apiref.Reference{
+		Connector: "aws", Operation: "Op", Method: "GET", PathTemplate: "/op/{Id}",
+		Endpoint: "https://ex.amazonaws.com", BodyEncoding: apiref.BodyNone,
+	}
+	p := &docProvider{name: "aws", res: apiref.Result{Outcome: apiref.OutcomeIncomplete, Reference: ref}}
+	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"aws","operation":"Op"}`)
+	if got := templateArgs(t, out).URL; got != "https://ex.amazonaws.com/op/<Id>" {
+		t.Errorf("url = %q", got)
+	}
+}
+
 func TestAPIReference_NeverReturnsGoError(t *testing.T) {
 	t.Parallel()
 
