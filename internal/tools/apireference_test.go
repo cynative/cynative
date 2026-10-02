@@ -497,6 +497,28 @@ func TestAPIReference_RenderingBranches(t *testing.T) {
 	}
 }
 
+func TestAPIReference_PlaceholdersKeyedByLocation(t *testing.T) {
+	t.Parallel()
+
+	ref := &apiref.Reference{
+		Connector: "aws", Operation: "Op", Method: "POST", PathTemplate: "/op/{id}",
+		Endpoint: "https://ex.amazonaws.com", BodyEncoding: apiref.BodyJSON,
+		Inputs: []apiref.Input{
+			{Name: "id", WireName: "id", Location: apiref.LocationPath, Required: true, Renderable: true},
+			{Name: "id", WireName: "id", Location: apiref.LocationBody, Required: true, Type: "string"},
+			{Name: "q", WireName: "q", Location: apiref.LocationQuery, Required: true, Renderable: true},
+			{Name: "q", WireName: "q", Location: apiref.LocationHeader, Required: true},
+		},
+	}
+	p := &docProvider{name: "aws", res: apiref.Result{Outcome: apiref.OutcomeIncomplete, Reference: ref}}
+	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"aws","operation":"Op"}`)
+	args := templateArgs(t, out)
+	if args.URL != "https://ex.amazonaws.com/op/<id>?q=<q>" || args.Body != `{"id":"<id:unrendered>"}` ||
+		!hasHeader(args, "q", "<q:unrendered>") {
+		t.Errorf("args = %+v", args)
+	}
+}
+
 func TestAPIReference_NeverReturnsGoError(t *testing.T) {
 	t.Parallel()
 

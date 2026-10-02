@@ -158,10 +158,19 @@ func capped(out referenceOutput) string {
 }
 
 // placeholder names an input, marking one the reference could not render.
-func placeholder(ref *apiref.Reference, name string) string {
+func placeholder(in apiref.Input) string {
+	if !in.Renderable {
+		return "<" + in.Name + ":unrendered>"
+	}
+
+	return "<" + in.Name + ">"
+}
+
+// pathPlaceholder names a path label, marking it when the path input of that name could not be rendered.
+func pathPlaceholder(ref *apiref.Reference, name string) string {
 	for _, in := range ref.Inputs {
-		if in.Name == name && !in.Renderable {
-			return "<" + name + ":unrendered>"
+		if in.Location == apiref.LocationPath && in.Name == name {
+			return placeholder(in)
 		}
 	}
 
@@ -204,7 +213,7 @@ func buildTemplate(ref *apiref.Reference) map[string]any {
 		headers = append(headers, map[string]string{"key": h.Key, "value": h.Value})
 	}
 	for _, in := range requiredAt(ref, apiref.LocationHeader) {
-		headers = append(headers, map[string]string{"key": in.WireName, "value": placeholder(ref, in.Name)})
+		headers = append(headers, map[string]string{"key": in.WireName, "value": placeholder(in)})
 	}
 	if len(headers) > 0 {
 		tpl["headers"] = headers
@@ -224,12 +233,12 @@ func buildURL(ref *apiref.Reference) string {
 	for i, s := range segs {
 		if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
 			name := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(s, "{"), "}"), "+")
-			segs[i] = placeholder(ref, name)
+			segs[i] = pathPlaceholder(ref, name)
 		}
 	}
 	query := paramPairs(ref.FixedQuery)
 	for _, in := range requiredAt(ref, apiref.LocationQuery) {
-		query = append(query, in.WireName+"="+placeholder(ref, in.Name))
+		query = append(query, in.WireName+"="+placeholder(in))
 	}
 	u := ref.Endpoint + strings.Join(segs, "/")
 	if len(query) > 0 {
@@ -250,12 +259,12 @@ var bareTypes = map[string]bool{
 
 // jsonBody renders the required members as a JSON object with keys sorted: a string-typed input gets a quoted
 // placeholder, a numeric or boolean one a bare placeholder, and an unrenderable one a quoted marker.
-func jsonBody(ref *apiref.Reference, req []apiref.Input) string {
+func jsonBody(req []apiref.Input) string {
 	sorted := slices.Clone(req)
 	slices.SortStableFunc(sorted, func(a, b apiref.Input) int { return strings.Compare(a.WireName, b.WireName) })
 	members := make([]string, 0, len(sorted))
 	for _, in := range sorted {
-		holder := placeholder(ref, in.Name)
+		holder := placeholder(in)
 		if !bareTypes[in.Type] || !in.Renderable {
 			holder = encode(holder)
 		}
@@ -271,18 +280,18 @@ func buildBody(ref *apiref.Reference) string {
 	case apiref.BodyForm:
 		pairs := paramPairs(ref.FixedForm)
 		for _, in := range req {
-			pairs = append(pairs, in.WireName+"="+placeholder(ref, in.Name))
+			pairs = append(pairs, in.WireName+"="+placeholder(in))
 		}
 
 		return strings.Join(pairs, "&")
 	case apiref.BodyJSON:
-		return jsonBody(ref, req)
+		return jsonBody(req)
 	case apiref.BodyNone:
 	}
 	// No encoding: required body members have no wire form, so list their placeholders.
 	holders := make([]string, 0, len(req))
 	for _, in := range req {
-		holders = append(holders, placeholder(ref, in.Name))
+		holders = append(holders, placeholder(in))
 	}
 
 	return strings.Join(holders, " ")
