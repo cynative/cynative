@@ -31,6 +31,9 @@ const (
 	MaxInputDescription = 200
 	// MaxPathEcho bounds an echoed request path.
 	MaxPathEcho = 200
+	// MaxMethodEcho bounds an echoed request method. A method is any valid
+	// token, so it is model-controlled.
+	MaxMethodEcho = 16
 	// MaxGateDetail bounds the gate detail in a diagnostic.
 	MaxGateDetail = 300
 	// MaxReason bounds a result reason.

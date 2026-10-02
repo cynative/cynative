@@ -200,6 +200,19 @@ func TestExplainUnmatched_TruncatesAndEscapes(t *testing.T) {
 	}
 }
 
+func TestExplainUnmatched_BoundsMethod(t *testing.T) {
+	t.Parallel()
+	doc := &fakeDocumenter{name: "github"}
+	um := &authreq.UnmatchedRequestError{Err: errors.New("x")}
+	method := strings.Repeat("M", 1000)
+	msg := ExplainUnmatched(t.Context(), "github", authreq.View{Method: method, EscapedPath: "/a"},
+		[]Provider{doc}, um).Error()
+	if strings.Contains(msg, strings.Repeat("M", apiref.MaxMethodEcho+1)) ||
+		!strings.Contains(msg, "matched no operation in the cached API metadata") {
+		t.Errorf("method not bounded: %d bytes", len(msg))
+	}
+}
+
 // docsSource is a ModelSource over the route-53 fixture.
 type docsSource struct{ raw []byte }
 

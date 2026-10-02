@@ -102,7 +102,7 @@ func formatUnmatched(connector, service string, v authreq.View, h apiref.Hint, e
 	return fmt.Sprintf("%s. %s %q on %s matched no operation in the cached API metadata. The gate stopped "+
 		"before attaching credentials or sending anything; this says nothing about the principal's "+
 		"permissions. Check the request shape against the operation reference.%s%s",
-		apiref.Truncate(err.Error(), apiref.MaxGateDetail), v.Method,
+		apiref.Truncate(err.Error(), apiref.MaxGateDetail), apiref.Truncate(v.Method, apiref.MaxMethodEcho),
 		apiref.Truncate(v.EscapedPath, apiref.MaxPathEcho), target, cand, tmpl)
 }
 
