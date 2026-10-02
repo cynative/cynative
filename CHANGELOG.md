@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.12.4](https://github.com/cynative/cynative/compare/v1.12.3...v1.12.4) (2026-10-02)
+
+
+### Bug Fixes
+
+* classify Azure single-provider reads ([#355](https://github.com/cynative/cynative/issues/355)) ([976a605](https://github.com/cynative/cynative/commit/976a60568fe4c4bd91b88f7161f0700932b25e26)), closes [#305](https://github.com/cynative/cynative/issues/305)
+
+
+### Dependencies
+
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager from 0.4.10 to 0.4.11 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/aws/aws-sdk-go-v2/service/eks from 1.101.0 to 1.102.0 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/Azure/azure-sdk-for-go/sdk/azcore from 1.23.1 to 1.23.2 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/AzureAD/microsoft-authentication-library-for-go from 1.10.0 to 1.10.1 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/blacktop/go-macho from 1.1.291 to 1.1.292 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/docker/cli from 29.8.1+incompatible to 29.8.2+incompatible ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/go-playground/locales from 0.14.1 to 0.14.2 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/golangci/golines from 0.15.0 to 0.16.0 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/pb33f/go-yaml from 0.1.0 to 0.1.1 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/prometheus/common from 0.71.0 to 0.72.0 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/uudashr/iface from 1.5.1 to 1.5.2 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#356](https://github.com/cynative/cynative/issues/356)) ([637ee5d](https://github.com/cynative/cynative/commit/637ee5d5ccf96e63f22a4b765c224b4edbabef62))
+
 ## [1.12.3](https://github.com/cynative/cynative/compare/v1.12.2...v1.12.3) (2026-09-30)
 
 
