@@ -29,6 +29,7 @@ const (
 	docJSONMedia       = "application/json"
 	docBodySkipped     = "optional request body is not rendered"
 	docBodyGap         = "request body is not a JSON object the template can render"
+	docServerGap       = "operation is served from %s, which the github connector does not authorize"
 	docVersionLimit    = "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
 	docLinkLimit       = `pagination is inferred from per_page/page parameters and a declared Link header; ` +
 		`follow rel="next" in the Link response header`
@@ -64,6 +65,8 @@ type OperationDoc struct {
 	// ResponseType is the first media type of the 200 (else first 2xx) response; "" when it has no content.
 	ResponseType string `json:"rt,omitempty"`
 	LinkPaged    bool   `json:"l,omitempty"`
+	// Server is the operation's own server URL (operation level over path level), "" when it uses the default.
+	Server string `json:"sv,omitempty"`
 }
 
 // OperationDocs is the distilled documentation of every operation, keyed by operation ID.
@@ -116,7 +119,12 @@ type docRawResponse struct {
 	Headers map[string]json.RawMessage `json:"headers"`
 }
 
+type docRawServer struct {
+	URL string `json:"url"`
+}
+
 type docRawOp struct {
+	Servers     []docRawServer            `json:"servers"`
 	OperationID string                    `json:"operationId"`
 	Summary     string                    `json:"summary"`
 	Parameters  []docRawParam             `json:"parameters"`
@@ -125,14 +133,15 @@ type docRawOp struct {
 }
 
 type docRawPathItem struct {
-	Parameters []docRawParam `json:"parameters"`
-	Get        *docRawOp     `json:"get"`
-	Head       *docRawOp     `json:"head"`
-	Post       *docRawOp     `json:"post"`
-	Put        *docRawOp     `json:"put"`
-	Patch      *docRawOp     `json:"patch"`
-	Delete     *docRawOp     `json:"delete"`
-	Options    *docRawOp     `json:"options"`
+	Servers    []docRawServer `json:"servers"`
+	Parameters []docRawParam  `json:"parameters"`
+	Get        *docRawOp      `json:"get"`
+	Head       *docRawOp      `json:"head"`
+	Post       *docRawOp      `json:"post"`
+	Put        *docRawOp      `json:"put"`
+	Patch      *docRawOp      `json:"patch"`
+	Delete     *docRawOp      `json:"delete"`
+	Options    *docRawOp      `json:"options"`
 }
 
 type docRawDoc struct {
@@ -164,7 +173,7 @@ func DistillDocs(raw []byte) (*OperationDocs, error) {
 			if op == nil || op.OperationID == "" {
 				continue
 			}
-			out.Ops[op.OperationID] = distillOp(&doc, method, path, item.Parameters, op)
+			out.Ops[op.OperationID] = distillOp(&doc, method, path, &item, op)
 		}
 	}
 	var generic any
@@ -179,13 +188,14 @@ func DistillDocs(raw []byte) (*OperationDocs, error) {
 	return out, nil
 }
 
-func distillOp(doc *docRawDoc, method, path string, shared []docRawParam, op *docRawOp) OperationDoc {
+func distillOp(doc *docRawDoc, method, path string, item *docRawPathItem, op *docRawOp) OperationDoc {
 	d := OperationDoc{
 		Method:  method,
 		Path:    path,
 		Summary: apiref.StripMarkup(op.Summary, apiref.MaxSummary),
-		Params:  mergeParams(resolveParams(doc, shared), resolveParams(doc, op.Parameters)),
+		Params:  mergeParams(resolveParams(doc, item.Parameters), resolveParams(doc, op.Parameters)),
 	}
+	d.Server = serverURL(op.Servers, item.Servers)
 	if rb := op.RequestBody; rb != nil {
 		fields, ok := bodyFields(doc, rb)
 		switch {
@@ -202,6 +212,18 @@ func distillOp(doc *docRawDoc, method, path string, shared []docRawParam, op *do
 	d.ResponseType = responseType(op.Responses)
 	d.LinkPaged = linkPaged(d.Params, op.Responses)
 	return d
+}
+
+// serverURL is the first server URL of the operation, else of the path item, with no trailing slash.
+func serverURL(own, shared []docRawServer) string {
+	servers := own
+	if len(servers) == 0 {
+		servers = shared
+	}
+	if len(servers) == 0 {
+		return ""
+	}
+	return strings.TrimRight(servers[0].URL, "/")
 }
 
 func resolveParams(doc *docRawDoc, in []docRawParam) []DocParam {
@@ -448,6 +470,10 @@ func (d *OperationDocs) build(id string, op OperationDoc) *apiref.Reference {
 	if op.BodyRequired || len(op.BodyFields) > 0 {
 		ref.BodyEncoding = apiref.BodyJSON
 		ref.FixedHeaders = append(ref.FixedHeaders, apiref.Param{Key: "Content-Type", Value: docJSONMedia})
+	}
+	if op.Server != "" {
+		ref.Endpoint = op.Server
+		ref.Gaps = append(ref.Gaps, fmt.Sprintf(docServerGap, op.Server))
 	}
 	if op.BodyGap != "" {
 		ref.Gaps = append(ref.Gaps, op.BodyGap)

@@ -571,3 +571,34 @@ func TestDocsHint_CatchAllTakesZeroSegments(t *testing.T) {
 		t.Errorf("hint = %+v", h)
 	}
 }
+
+func TestDocsReference_ServerOverride(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(
+		t,
+		synthHead+`"/p":{"servers":[{"url":"https://path.example/"}],
+	"get":{"operationId":"p/get"},
+	"post":{"operationId":"p/post","servers":[{"url":"https://op.example/{v}/"}]}},
+	"/n":{"get":{"operationId":"n/get","servers":[]}}}}`,
+	)
+	cases := []struct{ op, endpoint string }{
+		{"p/get", "https://path.example"},
+		{"p/post", "https://op.example/{v}"},
+	}
+	for _, c := range cases {
+		t.Run(c.op, func(t *testing.T) {
+			t.Parallel()
+			res := d.Reference(apiref.Query{Operation: c.op})
+			want := "operation is served from " + c.endpoint + ", which the github connector does not authorize"
+			if res.Outcome != apiref.OutcomeIncomplete || res.Reference.Endpoint != c.endpoint ||
+				!slices.Equal(res.Reference.Gaps, []string{want}) {
+				t.Errorf("endpoint %q gaps %q outcome %q", res.Reference.Endpoint, res.Reference.Gaps, res.Outcome)
+			}
+		})
+	}
+	res := d.Reference(apiref.Query{Operation: "n/get"})
+	if res.Outcome != apiref.OutcomeFound || res.Reference.Endpoint != "https://api.github.com" ||
+		len(res.Reference.Gaps) != 0 {
+		t.Errorf("default endpoint: %+v", res)
+	}
+}
