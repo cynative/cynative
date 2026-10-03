@@ -19,6 +19,11 @@ const (
 	defaultListItem   = "member"
 	regionalLimit     = "endpoint is the standard regional form; other partitions, FIPS and dual-stack " +
 		"endpoints are not covered"
+	// callerEndpointMark is how a service's documentation says the caller must supply the endpoint, as the
+	// API Gateway Management API does with https://{api-id}.execute-api.{region}.amazonaws.com/{stage}.
+	callerEndpointMark = "explicitly set the sdk's endpoint"
+	callerEndpointGap  = "endpoint is the model's default host, but the service documentation says the caller " +
+		"must supply its own: "
 	normalizeListJS = "x == null ? [] : [].concat(x)"
 	xmlLeafGuidance = "Parse with xml.parse(response.body) inside code_execution. Every leaf is a string " +
 		"(compare IsTruncated === 'true', never its truthiness)."
@@ -236,7 +241,7 @@ func (m *DocModel) Reference(service, dir, name string) *apiref.Reference {
 
 // endpoint prefers the regional form when the ruleset templates the region into this service's host, and uses
 // the literal global URL only when it has no such template (IAM, Route 53). An operation's hostPrefix goes before
-// the host.
+// the host. A service whose documentation says the caller must set the endpoint gets a gap quoting it.
 func (m *DocModel) endpoint(ref *apiref.Reference, op docShape) {
 	prefix := m.sm.EndpointPrefix
 	global := "https://" + prefix + ".amazonaws.com"
@@ -248,6 +253,10 @@ func (m *DocModel) endpoint(ref *apiref.Reference, op docShape) {
 		ref.Limitations = append(ref.Limitations, regionalLimit)
 	}
 	ref.Endpoint = "https://" + m.hostPrefix(op) + host
+	doc := apiref.StripMarkup(traitName(m.svc.Traits[traitDocumentation]), apiref.MaxSummary)
+	if strings.Contains(strings.ToLower(doc), callerEndpointMark) {
+		ref.Gaps = append(ref.Gaps, callerEndpointGap+doc)
+	}
 }
 
 // hostPrefix renders the operation's smithy.api#endpoint hostPrefix, replacing each {Label} with <Label>, or
