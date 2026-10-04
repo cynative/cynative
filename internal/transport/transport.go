@@ -264,7 +264,7 @@ func (c *Client) do(
 	}
 
 	if actionErr := auth.AuthorizeAction(ctx, args.AuthProvider, v, providers, rawArgs); actionErr != nil {
-		return nil, 0, noop, actionErr
+		return nil, 0, noop, auth.ExplainUnmatched(ctx, args.AuthProvider, v, providers, actionErr)
 	}
 
 	if authErr := auth.Inject(req, args.AuthProvider, providers, rawArgs); authErr != nil {

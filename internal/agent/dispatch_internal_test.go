@@ -423,3 +423,58 @@ func TestRun_AbortsWhenAuditAttemptFails(t *testing.T) {
 		t.Fatalf("run should abort fail-closed with ErrLog, got %v", err)
 	}
 }
+
+// ungatedStub is an I/O tool registered without the approval decorator.
+type ungatedStub struct{ stubTool }
+
+func (ungatedStub) UngatedIO() {}
+
+func TestDispatch_UngatedIO_AuditedUngatedWithRedactedArgs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ok", func(t *testing.T) {
+		t.Parallel()
+
+		ret, recs := dispatchUngated(t, stubTool{name: "api_reference", out: "DOCS", err: nil})
+		if ret != WrapUntrustedForTest("api_reference", "DOCS") {
+			t.Errorf("ret not fenced: %q", ret)
+		}
+		assertUngatedRecords(t, recs, audit.OutcomeOK, "DOCS")
+	})
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+
+		_, recs := dispatchUngated(t, stubTool{name: "api_reference", out: "", err: errors.New("boom")})
+		assertUngatedRecords(t, recs, audit.OutcomeError, `Error executing tool "api_reference": boom`)
+	})
+}
+
+func dispatchUngated(t *testing.T, tool stubTool) (string, []audit.Record) {
+	t.Helper()
+
+	sink := &recordingSink{} //nolint:exhaustruct // failOn/failErr zero-init means never-fail.
+	a := auditAgent(sink, map[string]schema.InvokableTool{"api_reference": ungatedStub{tool}})
+	rs := &runState{depth: 0, out: io.Discard, runID: "R"}
+	ret, _, err := a.dispatch(context.Background(), rs, dispatchTC("api_reference", `{"q":"secret"}`))
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	return ret, sink.recs
+}
+
+func assertUngatedRecords(t *testing.T, recs []audit.Record, outcome, result string) {
+	t.Helper()
+
+	if len(recs) != 2 {
+		t.Fatalf("want 2 records, got %d", len(recs))
+	}
+	for _, r := range recs {
+		if !r.RedactArgs {
+			t.Errorf("ungated I/O record must set RedactArgs: %+v", r)
+		}
+	}
+	if r := recs[1]; r.Decision != audit.DecisionUngated || r.Outcome != outcome || r.Result != result {
+		t.Errorf("result record: %+v", r)
+	}
+}

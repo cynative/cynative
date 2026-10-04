@@ -103,9 +103,14 @@ type fakeUI struct {
 	llmStatuses    []ui.LLMStatus
 	primeCalls     int
 	order          []string
+	approvalCalls  int
 }
 
-func (u *fakeUI) PromptToolApproval(_, _, _ string, _ bool) tools.Decision { return tools.ApproveOnce }
+func (u *fakeUI) PromptToolApproval(_, _, _ string, _ bool) tools.Decision {
+	u.approvalCalls++
+
+	return tools.ApproveOnce
+}
 
 // RenderFooter records each footer call (label + stats) in order so tests can assert
 // per-turn ("turn") vs once-per-session ("session") rendering.
@@ -2376,5 +2381,61 @@ func TestRunResearch_AuditCloseFailureWinsOverNoAnswer(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "audit log close") {
 		t.Errorf("err = %v, want the audit-close failure surfaced", err)
+	}
+}
+
+func TestBuildToolSet_RegistersAPIReferenceWithoutApproval(t *testing.T) {
+	t.Parallel()
+
+	d := testDeps()
+	fui := &fakeUI{} //nolint:exhaustruct // empty script
+	d.ui = fui
+	var inner []schema.InvokableTool
+	d.newCodeExecutionTool = func(
+		primitives []schema.InvokableTool,
+		verbose io.Writer,
+		maxConcurrency int,
+		sink audit.Sink,
+	) (schema.InvokableTool, error) {
+		inner = primitives
+
+		return tools.NewCodeExecutionTool(primitives, verbose, maxConcurrency, sink)
+	}
+
+	set, err := d.buildToolSet(nil, auth.NoProxy(), validCfg(), researchFlags{}, io.Discard, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	byName := map[string]schema.InvokableTool{}
+	for _, tl := range set {
+		byName[tl.Info().Name] = tl
+	}
+	for _, name := range []string{"http_request", "code_execution", "api_reference"} {
+		if byName[name] == nil {
+			t.Fatalf("tool %q missing from %v", name, byName)
+		}
+	}
+
+	if len(inner) != 1 || inner[0].Info().Name != "http_request" {
+		t.Fatalf("code_execution primitives = %v, want only http_request", inner)
+	}
+
+	out, err := byName["api_reference"].Run(context.Background(), `{"connector":"nope","operation":"X"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "unsupported") {
+		t.Fatalf("api_reference output = %q, want an unsupported result", out)
+	}
+	if fui.approvalCalls != 0 {
+		t.Fatalf("api_reference prompted %d times, want 0", fui.approvalCalls)
+	}
+
+	// The wrapped tools still prompt.
+	_, err = byName["http_request"].Run(context.Background(), `{}`)
+	t.Logf("http_request: %v", err)
+	if fui.approvalCalls != 1 {
+		t.Fatalf("http_request approval calls = %d, want 1 (still wrapped)", fui.approvalCalls)
 	}
 }

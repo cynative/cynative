@@ -78,6 +78,7 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 
 	var required []string
 	matched := 0
+	unsupported := false
 	for _, model := range models {
 		if !strings.EqualFold(model.EndpointPrefix, parsed.Service) {
 			continue // defensive: index/parse drift.
@@ -87,6 +88,9 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 			// Every classifier error means this candidate does not serve the
 			// operation (ClassifyOperation only ever wraps ErrClassifierUnknownOp),
 			// so skip it; the matched==0 guard below fails closed if none serve.
+			// An unsupported protocol is remembered so the denial is not
+			// reported as an unmatched request.
+			unsupported = unsupported || errors.Is(opErr, ErrUnsupportedProtocol)
 			continue
 		}
 		matched++
@@ -97,7 +101,11 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 		required = appendUnique(required, actions...)
 	}
 	if matched == 0 {
-		return fmt.Errorf("%w: no candidate serves the request for %q", ErrActionUnresolved, parsed.Service)
+		noMatch := fmt.Errorf("%w: no candidate serves the request for %q", ErrActionUnresolved, parsed.Service)
+		if unsupported {
+			return noMatch
+		}
+		return &authreq.UnmatchedRequestError{Service: parsed.Service, Err: noMatch}
 	}
 
 	allowed, err := p.evaluator.AllowedAll(ctx, required)

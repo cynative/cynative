@@ -536,3 +536,35 @@ func TestModelArchive_NamespaceShadowed(t *testing.T) {
 		t.Errorf("noarn NamespaceShadowed = %v, want false (empty ARN namespace)", noarn[0].NamespaceShadowed)
 	}
 }
+
+func TestModelArchive_RawModel(t *testing.T) {
+	t.Parallel()
+	tgz := s3TarGz(t)
+	a := newArchive(t, func(context.Context) ([]byte, error) { return tgz, nil }, fixedClock(time.Now()))
+
+	raw, sha, err := a.RawModel(context.Background(), "s3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != awsh.ModelJSONForTest("S3", "s3", "s3", "restXml") || sha != shaHex(tgz) {
+		t.Errorf("raw %d bytes, sha %q", len(raw), sha)
+	}
+	if _, _, unknownErr := a.RawModel(
+		context.Background(),
+		"nope",
+	); !errors.Is(
+		unknownErr,
+		awsh.ErrUnsupportedService,
+	) {
+		t.Errorf("unknown dir: %v", unknownErr)
+	}
+}
+
+func TestModelArchive_RawModel_LoadFailure(t *testing.T) {
+	t.Parallel()
+	errDown := errors.New("down")
+	a := newArchive(t, func(context.Context) ([]byte, error) { return nil, errDown }, fixedClock(time.Now()))
+	if _, _, err := a.RawModel(context.Background(), "s3"); !errors.Is(err, awsh.ErrSmithyUnavailable) {
+		t.Errorf("got %v", err)
+	}
+}

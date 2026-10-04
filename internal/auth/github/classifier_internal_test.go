@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 )
 
@@ -116,5 +117,19 @@ func TestClassifyRequest_HEAD_OPTIONS(t *testing.T) {
 				t.Fatalf("category=%q, want %q", got.Route.Category, c.wantCat)
 			}
 		})
+	}
+}
+
+func TestClassifyRequest_NoTemplateIsUnmatched(t *testing.T) {
+	t.Parallel()
+	tbl := classTable(t)
+	_, err := ClassifyRequest(tbl, "GET", "/no/such/route")
+	var um *authreq.UnmatchedRequestError
+	if !errors.As(err, &um) || !errors.Is(err, ErrUnclassifiable) {
+		t.Fatalf("got %v", err)
+	}
+	_, err = ClassifyRequest(tbl, "BREW", "/user")
+	if errors.As(err, &um) || !errors.Is(err, ErrUnclassifiable) {
+		t.Fatalf("an unrecognized method is not an unmatched route: %v", err)
 	}
 }

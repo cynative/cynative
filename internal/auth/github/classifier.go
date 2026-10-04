@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 )
 
@@ -60,7 +61,7 @@ func ClassifyRequest(t *Table, method, path string) (Access, error) {
 	}
 	route, ok := t.Lookup(lookupMethod, path)
 	if !ok {
-		return Access{}, fmt.Errorf("%w: %s %s", ErrUnclassifiable, method, path)
+		return Access{}, &authreq.UnmatchedRequestError{Err: fmt.Errorf("%w: %s %s", ErrUnclassifiable, method, path)}
 	}
 	return Access{Route: route, Level: lvl}, nil
 }

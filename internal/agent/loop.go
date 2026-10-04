@@ -599,9 +599,15 @@ func (a *Agent) approvalShown(name string) bool {
 		return false
 	}
 	_, scoped := t.(runScopedTool)
+	_, ungated := t.(ungatedIOTool)
 
-	return !scoped
+	return !scoped && !ungated
 }
+
+// ungatedIOTool is implemented by I/O tools registered without the approval
+// decorator (api_reference): they run through invokeIO for fencing and failure
+// accounting, but no operator approved them.
+type ungatedIOTool interface{ UngatedIO() }
 
 // audited logs rec when a sink is configured; a nil sink is a no-op.
 func (a *Agent) audited(rec audit.Record) error {
@@ -680,6 +686,11 @@ func (a *Agent) invokeIO(
 	stop := a.cancelOnInterrupt(cancel, interruptPollInterval)
 	defer stop()
 
+	label := func() string { return decisionLabel(dec) }
+	if _, ungated := t.(ungatedIOTool); ungated {
+		label = func() string { return audit.DecisionUngated }
+	}
+
 	out, err := t.Run(ctx, tc.Arguments)
 	if err != nil {
 		if errors.Is(err, audit.ErrLog) {
@@ -688,11 +699,11 @@ func (a *Agent) invokeIO(
 		msg := fmt.Sprintf("Error executing tool %q: %v", tc.Name, err)
 
 		return msg, callOutcome{
-			decision: decisionLabel(dec), outcome: audit.OutcomeError, result: msg, route: rt.Value(),
+			decision: label(), outcome: audit.OutcomeError, result: msg, route: rt.Value(),
 		}, nil
 	}
 
-	decision := decisionLabel(dec)
+	decision := label()
 	// An I/O tool reports execution failures as a result string with a nil error
 	// (so the model can self-correct); fail.Failed() surfaces that for the audit
 	// outcome. A denial takes precedence.
