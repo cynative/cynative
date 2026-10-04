@@ -589,7 +589,7 @@ func TestDocsReference_ServerOverride(t *testing.T) {
 		t.Run(c.op, func(t *testing.T) {
 			t.Parallel()
 			res := d.Reference(apiref.Query{Operation: c.op})
-			want := "operation is served from " + c.endpoint + ", which the github connector does not authorize"
+			want := "operation is served from " + c.endpoint + ", not from the github connector's API host https://api.github.com"
 			if res.Outcome != apiref.OutcomeIncomplete || res.Reference.Endpoint != c.endpoint ||
 				!slices.Equal(res.Reference.Gaps, []string{want}) {
 				t.Errorf("endpoint %q gaps %q outcome %q", res.Reference.Endpoint, res.Reference.Gaps, res.Outcome)
@@ -609,7 +609,8 @@ func TestDocsReference_DocumentAndDefaultServers(t *testing.T) {
 	"paths":{"/r":{"get":{"operationId":"r/get"},
 	"post":{"operationId":"r/post","servers":[{"url":"https://api.github.com/"}]}}}}`)
 	res := root.Reference(apiref.Query{Operation: "r/get"})
-	want := "operation is served from https://ghe.example/api/v3, which the github connector does not authorize"
+	want := "operation is served from https://ghe.example/api/v3, not from the github connector's API host " +
+		"https://api.github.com"
 	if res.Outcome != apiref.OutcomeIncomplete || res.Reference.Endpoint != "https://ghe.example/api/v3" ||
 		!slices.Equal(res.Reference.Gaps, []string{want}) {
 		t.Errorf("document server: %+v", res)

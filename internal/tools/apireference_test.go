@@ -169,7 +169,8 @@ func TestAPIReference_RendersIAMTemplate(t *testing.T) {
 	}
 	if !strings.Contains(out.Note, "percent-encode query and form values") ||
 		!strings.Contains(out.Note, "encode a path value segment by segment") ||
-		!strings.Contains(out.Note, "quotes included, with JSON.stringify(value)") {
+		!strings.Contains(out.Note, "quotes included, with JSON.stringify(value)") ||
+		!strings.Contains(out.Note, "under the wire_name and location its entry in inputs gives") {
 		t.Errorf("note = %q", out.Note)
 	}
 	args := templateArgs(t, out)

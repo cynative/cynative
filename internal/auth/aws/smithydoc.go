@@ -545,8 +545,10 @@ func (m *DocModel) xmlParse(root string, st docShape, body []string) string {
 			}
 			path += "." + item
 		}
-		b.WriteString(" List " + member + ": " + path + "; a single entry parses as an object and an absent " +
-			"list as undefined, normalize with " + normalizeListJS + ".")
+		b.WriteString(
+			" List " + member + ": " + path + "; a single entry parses as that entry rather than an array and an absent " +
+				"list as undefined, normalize with " + normalizeListJS + ".",
+		)
 	}
 	return b.String()
 }

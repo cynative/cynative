@@ -24,8 +24,9 @@ const (
 	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values " +
 		"(encodeURIComponent), encode a path value segment by segment and keep the '/' between segments, " +
 		"and in a JSON body replace a quoted string placeholder, quotes included, with JSON.stringify(value) and " +
-		"give numbers and booleans as bare JSON values. " +
-		"<Name:unrendered> marks an input this reference could not render; see gaps."
+		"give numbers and booleans as bare JSON values. Pagination fields name model members: send each one " +
+		"under the wire_name and location its entry in inputs gives. <Name:unrendered> marks an input this " +
+		"reference could not render. Check outcome and gaps even when no marker appears."
 	budgetLimitation = "reference exceeds the output budget"
 	// maxMinimalField bounds each identifier echoed in the minimal output.
 	maxMinimalField = 200

@@ -29,7 +29,7 @@ const (
 	docJSONMedia       = "application/json"
 	docBodySkipped     = "optional request body is not rendered"
 	docBodyGap         = "request body is not a JSON object the template can render"
-	docServerGap       = "operation is served from %s, which the github connector does not authorize"
+	docServerGap       = "operation is served from %s, not from the github connector's API host " + docEndpoint
 	docVersionLimit    = "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
 	docLinkLimit       = `pagination is inferred from per_page/page parameters and a declared Link header; ` +
 		`follow rel="next" in the Link response header`
