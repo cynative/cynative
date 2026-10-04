@@ -167,6 +167,9 @@ func TestAPIReference_RendersIAMTemplate(t *testing.T) {
 	if out.Outcome != "found" || fail.Failed() || fail.Progress() == 0 {
 		t.Fatalf("outcome %q progress %d: %s", out.Outcome, fail.Progress(), got)
 	}
+	if !strings.Contains(out.Note, "percent-encode query and form values") {
+		t.Errorf("note = %q", out.Note)
+	}
 	args := templateArgs(t, out)
 	if args.Method != http.MethodPost || args.URL != "https://iam.amazonaws.com/" || args.AuthProvider != "aws" ||
 		args.AWSAuth == nil || args.AWSAuth.Service != "iam" ||

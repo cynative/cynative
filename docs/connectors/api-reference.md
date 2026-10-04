@@ -24,7 +24,7 @@ The result is JSON, capped at 8192 bytes. A `found` or `incomplete` result conta
 
 - `reference`: the protocol, HTTP method and path template, API version, a summary (at most 600 characters), the endpoint, the inputs (name, wire name, location, required, type, description of at most 200 characters), the body encoding, how the response is encoded and parsed, pagination, the metadata source with its version and SHA-256, and any `gaps` and `limitations`.
 - `request_template`: an `http_request` argument object with `<Placeholder>` values. Only required inputs appear in it. Path inputs replace the label in the path, required query inputs join the URL, header inputs go to `headers`, and body inputs go to a form or JSON body with the matching `Content-Type`. For AWS the template carries the `aws_auth` block with the signing service name. Credentials and resource identifiers never appear.
-- `note`: a reminder to replace every placeholder. A required input the tool could not render appears as `<Name:unrendered>`, so an incomplete template never looks executable as it stands.
+- `note`: a reminder to replace every placeholder and to percent-encode the values that go into the query or a form body. A required input the tool could not render appears as `<Name:unrendered>`, so an incomplete template never looks executable as it stands.
 
 At most 25 optional inputs are listed, and `inputs_truncated` is set when more were dropped. If the output is over the cap, the tool drops optional inputs first, then input descriptions, then the summary. If it is still over, it returns a minimal `incomplete` result with the limitation `reference exceeds the output budget` and no template.
 
@@ -72,7 +72,7 @@ Pagination follows the model: an operation is paginated only if it carries `@pag
 
 ## GitHub
 
-The operation is the OpenAPI `operationId`. The template uses `https://api.github.com` plus the path with `<param>` placeholders, required query parameters, and `Accept: application/vnd.github+json`.
+The operation is the OpenAPI `operationId`. The template uses `https://api.github.com` plus the path with `<param>` placeholders, required query parameters, and `Accept: application/vnd.github+json`. An operation the spec serves from another host, such as `repos/upload-release-asset` on `uploads.github.com`, comes back `incomplete`, because the connector does not authorize that host.
 
 - The connector strips `X-GitHub-Api-Version`, so the server's default API version applies. The reference reports the document's `info.version` and says so as a limitation.
 - A required request body is rendered when it is `application/json` and its schema, after at most one local `$ref`, is an object. Its required properties become body inputs. A required property that is not a supported scalar gets the gap `required input <name> (<type> in body) cannot be rendered` (`issues/create` is an example) and the result is `incomplete`. A required body that is not JSON, is a `$ref`, or is not an object gets the gap `request body is not a JSON object the template can render`.

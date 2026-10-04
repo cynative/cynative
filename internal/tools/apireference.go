@@ -21,7 +21,8 @@ const apiReferenceDescription = "Look up one connector API operation by exact na
 	"to the connector. Supported: aws (restXml, restJson1, awsQuery, awsJson) and github."
 
 const (
-	apiReferenceNote = "Replace every <placeholder>; give numbers and booleans as JSON values in a JSON body. " +
+	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values (encodeURIComponent), " +
+		"and give numbers and booleans as JSON values in a JSON body. " +
 		"<Name:unrendered> marks an input this reference could not render; see gaps."
 	budgetLimitation = "reference exceeds the output budget"
 	// maxMinimalField bounds each identifier echoed in the minimal output.
