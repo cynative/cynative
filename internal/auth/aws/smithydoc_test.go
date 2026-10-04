@@ -651,9 +651,11 @@ func TestDocReference_Payloads(t *testing.T) {
 			"raw", nil, false,
 		},
 		{
-			"document payload is raw",
+			"document payload is json",
 			withDistShapes(restJSONModel("", payload("ex#Doc"))),
-			"raw", nil, false,
+			"json",
+			[]string{"JSON.parse(response.body)"},
+			true,
 		},
 	}
 	for _, c := range cases {
@@ -794,6 +796,9 @@ func TestDocReference_HostPrefix(t *testing.T) {
 	}
 }
 
+const callerEndpointGapText = "endpoint is the model's default host, but the service documentation says the " +
+	"caller must supply its own: "
+
 func TestDocReference_CallerEndpointGap(t *testing.T) {
 	t.Parallel()
 
@@ -803,10 +808,16 @@ func TestDocReference_CallerEndpointGap(t *testing.T) {
 		`"aws.protocols#restXml":{},`, `"aws.protocols#restXml":{},"smithy.api#documentation":"`+doc+`",`, 1,
 	)
 	ref := exRef(t, model)
-	want := "endpoint is the model's default host, but the service documentation says the caller must supply " +
-		"its own: To use it, you must explicitly set the SDK's endpoint to point to the endpoint of your deployed API."
+	want := callerEndpointGapText + "To use it, you must explicitly set the SDK's endpoint to point to the endpoint of your deployed API."
 	if apiref.OutcomeOf(ref) != apiref.OutcomeIncomplete || !slices.Equal(ref.Gaps, []string{want}) {
 		t.Errorf("gaps = %q", ref.Gaps)
+	}
+
+	long := strings.Replace(model, "<p>To use it", "<p>"+strings.Repeat("x ", apiref.MaxSummary)+"To use it", 1)
+	late := exRef(t, long).Gaps
+	if len(late) != 1 || !strings.HasSuffix(late[0], "...") ||
+		len([]rune(late[0])) != len([]rune(callerEndpointGapText))+apiref.MaxSummary {
+		t.Errorf("late gaps = %q", late)
 	}
 
 	plain := exRef(t, endpointModel([]string{"https://ex.{Region}.amazonaws.com"}, "", ""))

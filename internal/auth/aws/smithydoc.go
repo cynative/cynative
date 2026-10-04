@@ -3,6 +3,7 @@ package aws
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -253,9 +254,9 @@ func (m *DocModel) endpoint(ref *apiref.Reference, op docShape) {
 		ref.Limitations = append(ref.Limitations, regionalLimit)
 	}
 	ref.Endpoint = "https://" + m.hostPrefix(op) + host
-	doc := apiref.StripMarkup(traitName(m.svc.Traits[traitDocumentation]), apiref.MaxSummary)
+	doc := apiref.StripMarkup(traitName(m.svc.Traits[traitDocumentation]), math.MaxInt)
 	if strings.Contains(strings.ToLower(doc), callerEndpointMark) {
-		ref.Gaps = append(ref.Gaps, callerEndpointGap+doc)
+		ref.Gaps = append(ref.Gaps, callerEndpointGap+apiref.Truncate(doc, apiref.MaxSummary))
 	}
 }
 
@@ -481,13 +482,13 @@ func (m *DocModel) bodyMembers(out docShape) []string {
 	return body
 }
 
-// rawPayload names the first body member that is an unparsed payload, or "" when there is none. A structure or
-// union payload is a document, not raw.
+// rawPayload names the first body member that is an unparsed payload, or "" when there is none. A structure,
+// union or document payload is a document, not raw.
 func (m *DocModel) rawPayload(out docShape, body []string) string {
 	for _, name := range body {
 		mem := out.Members[name]
 		target := m.shapes[mem.Target]
-		document := target.Type == "structure" || target.Type == "union"
+		document := slices.Contains([]string{"structure", "union", "document"}, target.Type)
 		if has(target.Traits, traitStreaming) || (has(mem.Traits, traitHTTPPayload) && !document) {
 			return name
 		}
