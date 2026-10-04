@@ -657,6 +657,13 @@ func TestDocReference_Payloads(t *testing.T) {
 			[]string{"JSON.parse(response.body)"},
 			true,
 		},
+		{
+			"prelude document payload is json",
+			restJSONModel("", payload("smithy.api#Document")),
+			"json",
+			[]string{"JSON.parse(response.body)"},
+			true,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

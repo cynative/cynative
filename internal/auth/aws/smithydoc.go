@@ -488,7 +488,7 @@ func (m *DocModel) rawPayload(out docShape, body []string) string {
 	for _, name := range body {
 		mem := out.Members[name]
 		target := m.shapes[mem.Target]
-		document := slices.Contains([]string{"structure", "union", "document"}, target.Type)
+		document := slices.Contains([]string{"structure", "union", "document"}, m.typeOf(mem.Target))
 		if has(target.Traits, traitStreaming) || (has(mem.Traits, traitHTTPPayload) && !document) {
 			return name
 		}
