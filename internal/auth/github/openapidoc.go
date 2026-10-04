@@ -65,7 +65,7 @@ type OperationDoc struct {
 	// ResponseType is the first media type of the 200 (else first 2xx) response; "" when it has no content.
 	ResponseType string `json:"rt,omitempty"`
 	LinkPaged    bool   `json:"l,omitempty"`
-	// Server is the operation's own server URL (operation level over path level), "" when it uses the default.
+	// Server is the operation's server URL (operation over path item over document), "" when it is the default.
 	Server string `json:"sv,omitempty"`
 }
 
@@ -148,6 +148,7 @@ type docRawDoc struct {
 	Info struct {
 		Version string `json:"version"`
 	} `json:"info"`
+	Servers    []docRawServer            `json:"servers"`
 	Paths      map[string]docRawPathItem `json:"paths"`
 	Components struct {
 		Parameters map[string]docRawParam     `json:"parameters"`
@@ -195,7 +196,9 @@ func distillOp(doc *docRawDoc, method, path string, item *docRawPathItem, op *do
 		Summary: apiref.StripMarkup(op.Summary, apiref.MaxSummary),
 		Params:  mergeParams(resolveParams(doc, item.Parameters), resolveParams(doc, op.Parameters)),
 	}
-	d.Server = serverURL(op.Servers, item.Servers)
+	if server := serverURL(op.Servers, item.Servers, doc.Servers); server != docEndpoint {
+		d.Server = server
+	}
 	if rb := op.RequestBody; rb != nil {
 		fields, ok := bodyFields(doc, rb)
 		switch {
@@ -214,16 +217,15 @@ func distillOp(doc *docRawDoc, method, path string, item *docRawPathItem, op *do
 	return d
 }
 
-// serverURL is the first server URL of the operation, else of the path item, with no trailing slash.
-func serverURL(own, shared []docRawServer) string {
-	servers := own
-	if len(servers) == 0 {
-		servers = shared
+// serverURL is the first server URL of the first non-empty list, with no trailing slash, or docEndpoint when every
+// list is empty.
+func serverURL(lists ...[]docRawServer) string {
+	for _, servers := range lists {
+		if len(servers) > 0 {
+			return strings.TrimRight(servers[0].URL, "/")
+		}
 	}
-	if len(servers) == 0 {
-		return ""
-	}
-	return strings.TrimRight(servers[0].URL, "/")
+	return docEndpoint
 }
 
 func resolveParams(doc *docRawDoc, in []docRawParam) []DocParam {

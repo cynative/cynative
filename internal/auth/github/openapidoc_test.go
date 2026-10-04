@@ -602,3 +602,21 @@ func TestDocsReference_ServerOverride(t *testing.T) {
 		t.Errorf("default endpoint: %+v", res)
 	}
 }
+
+func TestDocsReference_DocumentAndDefaultServers(t *testing.T) {
+	t.Parallel()
+	root := synthDocs(t, `{"info":{"version":"9"},"servers":[{"url":"https://ghe.example/api/v3"}],
+	"paths":{"/r":{"get":{"operationId":"r/get"},
+	"post":{"operationId":"r/post","servers":[{"url":"https://api.github.com/"}]}}}}`)
+	res := root.Reference(apiref.Query{Operation: "r/get"})
+	want := "operation is served from https://ghe.example/api/v3, which the github connector does not authorize"
+	if res.Outcome != apiref.OutcomeIncomplete || res.Reference.Endpoint != "https://ghe.example/api/v3" ||
+		!slices.Equal(res.Reference.Gaps, []string{want}) {
+		t.Errorf("document server: %+v", res)
+	}
+	res = root.Reference(apiref.Query{Operation: "r/post"})
+	if res.Outcome != apiref.OutcomeFound || res.Reference.Endpoint != "https://api.github.com" ||
+		len(res.Reference.Gaps) != 0 {
+		t.Errorf("explicit default server: %+v", res)
+	}
+}
