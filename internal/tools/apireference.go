@@ -23,7 +23,8 @@ const apiReferenceDescription = "Look up one connector API operation by exact na
 const (
 	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values " +
 		"(encodeURIComponent), encode a path value segment by segment and keep the '/' between segments, " +
-		"and give numbers and booleans as JSON values in a JSON body. " +
+		"and in a JSON body replace a quoted string placeholder, quotes included, with JSON.stringify(value) and " +
+		"give numbers and booleans as bare JSON values. " +
 		"<Name:unrendered> marks an input this reference could not render; see gaps."
 	budgetLimitation = "reference exceeds the output budget"
 	// maxMinimalField bounds each identifier echoed in the minimal output.
