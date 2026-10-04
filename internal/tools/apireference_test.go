@@ -167,7 +167,8 @@ func TestAPIReference_RendersIAMTemplate(t *testing.T) {
 	if out.Outcome != "found" || fail.Failed() || fail.Progress() == 0 {
 		t.Fatalf("outcome %q progress %d: %s", out.Outcome, fail.Progress(), got)
 	}
-	if !strings.Contains(out.Note, "percent-encode query and form values") {
+	if !strings.Contains(out.Note, "percent-encode query and form values") ||
+		!strings.Contains(out.Note, "encode a path value segment by segment") {
 		t.Errorf("note = %q", out.Note)
 	}
 	args := templateArgs(t, out)
