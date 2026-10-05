@@ -408,3 +408,23 @@ func TestGithubProvider_AuthorizeAction_ShadowedDenialText(t *testing.T) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
+
+func TestGithubProvider_AuthorizeAction_DotSegmentsDenied(t *testing.T) {
+	t.Parallel()
+
+	const api = "https://api.github.com"
+	paths := []string{
+		"/repos/o/r/branches/x/../../../../../repos/o/r/secret-scanning/alerts",
+		"/repos/o/r/branches/x/%2e%2e/%2E%2e/%2e%2e/%2e%2e/%2e%2e/repos/o/r/secret-scanning/alerts",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), shadowFetch)
+			err := p.AuthorizeAction(context.Background(), actionView(t, http.MethodGet, api+path), noArgs())
+			if !errors.Is(err, githubhardening.ErrUnclassifiable) {
+				t.Fatalf("AuthorizeAction = %v, want ErrUnclassifiable", err)
+			}
+		})
+	}
+}

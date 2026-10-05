@@ -156,6 +156,9 @@ func TestClassifyRequest_ShadowedRoutesAllMethodsReadAsGet(t *testing.T) {
 		if want := []Route{{"branches", "branch-protection"}}; !slices.Equal(got.Routes, want) {
 			t.Errorf("%s: routes = %+v, want %+v", m, got.Routes, want)
 		}
+		if got.Level != exposure.LevelRead {
+			t.Errorf("%s: level = %v, want %v", m, got.Level, exposure.LevelRead)
+		}
 	}
 	got, tieErr := ClassifyRequest(tbl, http.MethodGet, "/user/codespaces/secrets/machines")
 	if tieErr != nil {
@@ -167,5 +170,43 @@ func TestClassifyRequest_ShadowedRoutesAllMethodsReadAsGet(t *testing.T) {
 	var unmatched *authreq.UnmatchedRequestError
 	if _, uErr := ClassifyRequest(tbl, http.MethodGet, "/b/x/"); !errors.As(uErr, &unmatched) {
 		t.Errorf("unmatched err = %v, want UnmatchedRequestError", uErr)
+	}
+}
+
+func TestClassifyRequest_DotSegmentsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	denied := []string{
+		"/repos/o/r/branches/x/../../../../../users/octocat",
+		"/repos/o/r/branches/x/%2e%2e/%2E%2e/%2e%2e/%2e%2e/%2e%2e/users/octocat",
+		"/repos/o/r/branches/x/./y",
+		"/repos/o/r/branches/x/.%2e/y",
+	}
+	for _, path := range denied {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			_, err := ClassifyRequest(tbl, http.MethodGet, path)
+			if !errors.Is(err, ErrUnclassifiable) {
+				t.Fatalf("ClassifyRequest(%q) err = %v, want ErrUnclassifiable", path, err)
+			}
+			var unmatched *authreq.UnmatchedRequestError
+			if errors.As(err, &unmatched) {
+				t.Fatalf("ClassifyRequest(%q) err = %v, a dot segment must not be an unmatched route", path, err)
+			}
+		})
+	}
+
+	for _, path := range []string{"/repos/o/r/contents/v1.2/a...b/file.go", "/repos/o/r/contents/.../x"} {
+		t.Run("dots inside a segment: "+path, func(t *testing.T) {
+			t.Parallel()
+			got, err := ClassifyRequest(tbl, http.MethodGet, path)
+			if err != nil {
+				t.Fatalf("ClassifyRequest(%q) err = %v, want nil", path, err)
+			}
+			if want := []Route{{"repos", "contents"}}; !slices.Equal(got.Routes, want) {
+				t.Fatalf("routes = %+v, want %+v", got.Routes, want)
+			}
+		})
 	}
 }

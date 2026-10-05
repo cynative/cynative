@@ -1,6 +1,7 @@
 package authreq
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 )
@@ -107,4 +108,20 @@ func pathSegments(p string) []string {
 	}
 
 	return strings.Split(strings.TrimPrefix(p, "/"), "/")
+}
+
+// HasDotSegment reports whether any segment of an escaped path is "." or ".." once percent-decoded, in any
+// case ("%2e%2E" included). GitHub and GitLab resolve such segments before they route a request, so a gate that
+// classifies the path as sent would authorize a different resource from the one the server serves. A segment
+// that only contains dots ("...", "v1.2") or holds an encoded slash ("a%2F..") names no parent and is not one.
+func HasDotSegment(escapedPath string) bool {
+	for seg := range strings.SplitSeq(escapedPath, "/") {
+		// A segment that fails to decode is not a dot segment: the gate rejects it elsewhere or it matches nothing.
+		decoded, err := url.PathUnescape(seg)
+		if err == nil && (decoded == "." || decoded == "..") {
+			return true
+		}
+	}
+
+	return false
 }

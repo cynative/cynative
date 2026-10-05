@@ -55,6 +55,12 @@ func ClassifyRequest(t *Table, method, path string) (Access, error) {
 		return Access{}, err
 	}
 
+	// GitHub resolves "." and ".." segments before it routes, so the path as sent can name a different operation
+	// from the one served. This is not an unmatched route, so it carries no api_reference hint.
+	if authreq.HasDotSegment(path) {
+		return Access{}, fmt.Errorf("%w: dot segment in %s %s", ErrUnclassifiable, method, path)
+	}
+
 	// HEAD and OPTIONS are read probes of the same resource a GET would return.
 	lookupMethod := method
 	if method == http.MethodHead || method == http.MethodOptions {
