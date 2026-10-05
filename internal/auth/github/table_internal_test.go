@@ -3,8 +3,8 @@ package github
 import (
 	"encoding/json"
 	"slices"
-	"strings"
 	"testing"
+	"time"
 )
 
 const miniOpenAPI = `{
@@ -478,14 +478,37 @@ func TestBest_KeepsOnlyTheTopRank(t *testing.T) {
 func TestMatchTemplate_BoundedOnLongPaths(t *testing.T) {
 	t.Parallel()
 
-	tbl := shadowTable(t)
-	// /a/{ref}/z/{path}/end against /a/z/z/.../z with no "end": every split is a candidate, and an unmemoized
-	// walk would take exponential time.
-	path := "/a" + strings.Repeat("/z", 5000)
-	if got := tbl.Lookup("GET", path); !slices.Equal(got, []Route{{"two", "greedy"}}) {
-		t.Fatalf("Lookup = %+v, want only the trailing catch-all", got)
+	names := []string{"p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"}
+	tbl := &Table{multiSegment: map[string]bool{}}
+	tmpl := []string{"a"}
+	for _, n := range names {
+		tbl.multiSegment[n] = true
+		tmpl = append(tmpl, "{"+n+"}")
 	}
-	if tbl.matchTemplate([]string{"a", "{ref}", "z", "{path}", "end"}, strings.Split(path[1:], "/")) {
-		t.Fatal("a path without the literal end matched")
+	tmpl = append(tmpl, "end")
+	req := append([]string{"a"}, slices.Repeat([]string{"z"}, 200)...)
+	// Without the memo the walk explores every way to split 200 segments among ten spans, which never finishes;
+	// with it the work is bounded by (template segments + 1) x (request segments + 1) states.
+	done := make(chan bool, 1)
+	go func() { done <- tbl.matchTemplate(tmpl, req) }()
+	select {
+	case got := <-done:
+		if got {
+			t.Fatal("a path without the literal end matched")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("matchTemplate did not return within 5s")
+	}
+}
+
+func TestMatchFixed(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	if tbl.matchTemplate([]string{"b", "{id}"}, []string{"b", "x", "y"}) {
+		t.Error("a longer request matched a fixed-length template")
+	}
+	if tbl.matchTemplate([]string{"c", "{id}", "lit"}, []string{"c", "1", "other"}) {
+		t.Error("a differing literal matched")
 	}
 }

@@ -42,10 +42,11 @@ func RequiredLevel(method, path string) (exposure.Level, error) {
 	return methodLevel(method, path)
 }
 
-// ClassifyRequest resolves a REST request to the routes it may run as and its required Level. It
-// derives the level (RequiredLevel) and looks the route up in the table — a route
-// absent from the table fails closed (ErrUnclassifiable). Secret-scanning routes
-// are protected by the admission guard and the secret-scanning:none baseline.
+// ClassifyRequest resolves a REST request to the routes it may run as and its
+// required Level. It derives the level (RequiredLevel) and looks the route set up
+// in the table; a request that matches no route fails closed (ErrUnclassifiable).
+// Secret-scanning routes are protected by the admission guard and the
+// secret-scanning:none baseline.
 func ClassifyRequest(t *Table, method, path string) (Access, error) {
 	method = strings.ToUpper(strings.TrimSpace(method))
 

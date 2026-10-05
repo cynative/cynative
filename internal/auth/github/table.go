@@ -239,9 +239,27 @@ func (t *Table) isMultiSegment(seg string) bool {
 // that is last takes whatever is left, nothing included, so the root contents
 // path matches.
 func (t *Table) matchTemplate(tmpl, req []string) bool {
+	if !slices.ContainsFunc(tmpl, t.isMultiSegment) {
+		return matchFixed(tmpl, req)
+	}
 	m := matcher{t: t, tmpl: tmpl, req: req, failed: make([]bool, (len(tmpl)+1)*(len(req)+1))}
 
 	return m.match(0, 0)
+}
+
+// matchFixed matches a template with no multi-segment param: the lengths must be
+// equal, a literal needs an equal segment and a param takes any one segment.
+func matchFixed(tmpl, req []string) bool {
+	if len(tmpl) != len(req) {
+		return false
+	}
+	for i, seg := range tmpl {
+		if !isParam(seg) && req[i] != seg {
+			return false
+		}
+	}
+
+	return true
 }
 
 // matcher walks (template index, request index) states. Every step moves at

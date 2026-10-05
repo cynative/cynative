@@ -18,7 +18,7 @@ const fuzzMiniOpenAPI = `{"components":{"parameters":{
   "/repos/{owner}/{repo}/secret-scanning/alerts": {"get": {"x-github": {"category":"secret-scanning","subcategory":"secret-scanning"}}},
   "/repos/{owner}/{repo}/branches/{branch}": {"get": {"x-github": {"category":"branches","subcategory":"branches"}}},
   "/repos/{owner}/{repo}/branches/{branch}/protection": {"get": {"x-github": {"category":"branches","subcategory":"branch-protection"}}},
-  "/repos/{owner}/{repo}/commits/{ref}/z/{path}/end": {"get": {"x-github": {"category":"two","subcategory":"greedy"}}}
+  "/repos/{owner}/{repo}/commits/{ref}/z/{path}/end": {"get": {"x-github": {"category":"two","subcategory":"suffix"}}}
 }}`
 
 //nolint:gochecknoglobals // fuzz table built once; immutable after DistillOpenAPI.

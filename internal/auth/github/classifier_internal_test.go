@@ -161,8 +161,8 @@ func TestClassifyRequest_ShadowedRoutesAllMethodsReadAsGet(t *testing.T) {
 	if tieErr != nil {
 		t.Fatalf("tie: %v", tieErr)
 	}
-	if len(got.Routes) != 2 {
-		t.Errorf("tie routes = %+v, want two", got.Routes)
+	if want := []Route{{"codespaces", "machines"}, {"codespaces", "secrets"}}; !slices.Equal(got.Routes, want) {
+		t.Errorf("tie routes = %+v, want %+v", got.Routes, want)
 	}
 	var unmatched *authreq.UnmatchedRequestError
 	if _, uErr := ClassifyRequest(tbl, http.MethodGet, "/b/x/"); !errors.As(uErr, &unmatched) {
