@@ -190,8 +190,7 @@ func TestClassifyRequest_DotSegmentsFailClosed(t *testing.T) {
 			if !errors.Is(err, ErrUnclassifiable) {
 				t.Fatalf("ClassifyRequest(%q) err = %v, want ErrUnclassifiable", path, err)
 			}
-			var unmatched *authreq.UnmatchedRequestError
-			if errors.As(err, &unmatched) {
+			if _, ok := errors.AsType[*authreq.UnmatchedRequestError](err); ok {
 				t.Fatalf("ClassifyRequest(%q) err = %v, a dot segment must not be an unmatched route", path, err)
 			}
 		})

@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -488,7 +489,8 @@ func TestMatchTemplate_BoundedOnLongPaths(t *testing.T) {
 	tmpl = append(tmpl, "end")
 	req := append([]string{"a"}, slices.Repeat([]string{"z"}, 200)...)
 	// Without the memo the walk explores every way to split 200 segments among ten spans, which never finishes;
-	// with it the work is bounded by (template segments + 1) x (request segments + 1) states.
+	// with it the work is bounded by (template segments + 1) x (request segments + 1) states. Lookup's segment cap
+	// bounds the recursion depth and the memo size the same way, so the product stays small in memory too.
 	done := make(chan bool, 1)
 	go func() { done <- tbl.matchTemplate(tmpl, req) }()
 	select {
@@ -510,5 +512,59 @@ func TestMatchFixed(t *testing.T) {
 	}
 	if tbl.matchTemplate([]string{"c", "{id}", "lit"}, []string{"c", "1", "other"}) {
 		t.Error("a differing literal matched")
+	}
+}
+
+func TestLookup_CapsPathSegments(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	prefix := []string{"repos", "o", "r", "contents"}
+	pathOf := func(n int) string {
+		return "/" + strings.Join(append(slices.Clone(prefix), slices.Repeat([]string{"x"}, n-len(prefix))...), "/")
+	}
+	atCap := tbl.Lookup("GET", pathOf(maxPathSegments))
+	if want := []Route{{"repos", "contents"}}; !slices.Equal(atCap, want) {
+		t.Errorf("Lookup at the cap = %+v, want %+v", atCap, want)
+	}
+	if got := tbl.Lookup("GET", pathOf(maxPathSegments+1)); got != nil {
+		t.Errorf("Lookup over the cap = %+v, want nil", got)
+	}
+}
+
+func TestMatchTemplate_RejectsPrefixMismatchBeforeWalking(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	tmpl := []string{"repos", "{owner}", "{repo}", "commits", "{ref}", "status"}
+	if tbl.matchTemplate(tmpl, []string{"repoz", "o", "r", "commits", "main", "status"}) {
+		t.Error("a differing first literal matched")
+	}
+	if tbl.matchTemplate(tmpl, []string{"repos", "o"}) {
+		t.Error("a request shorter than the fixed prefix matched")
+	}
+	if !tbl.matchTemplate(tmpl, []string{"repos", "o", "r", "commits", "main", "status"}) {
+		t.Error("a request with the fixed prefix did not match")
+	}
+}
+
+func TestLookup_DoubledTrailingSlashAddsNoReading(t *testing.T) {
+	t.Parallel()
+
+	tbl, err := DistillOpenAPI([]byte(`{
+  "components": {"parameters": {"ref": {"name": "ref", "x-multi-segment": true}}},
+  "paths": {
+    "/repos/{owner}/{repo}/commits/{ref}": {"get": {"x-github": {"category": "commits", "subcategory": "commits"}}},
+    "/repos/{owner}/{repo}/commits/{ref}/check-runs/{id}": {"get": {"x-github": {"category": "checks", "subcategory": "runs"}}}
+  }
+}`))
+	if err != nil {
+		t.Fatalf("DistillOpenAPI: %v", err)
+	}
+	// The escaped reading ends in an empty segment after an empty one, which GitHub keeps as part of the value, so the
+	// trimmed reading (check-runs/ + empty id) must not be offered.
+	got := tbl.Lookup("GET", "/repos/o/r/commits/main/check-runs//")
+	if want := []Route{{"commits", "commits"}}; !slices.Equal(got, want) {
+		t.Fatalf("Lookup = %+v, want %+v", got, want)
 	}
 }

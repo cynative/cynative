@@ -171,7 +171,8 @@ func TestAPIReference_RendersIAMTemplate(t *testing.T) {
 		!strings.Contains(out.Note, "a '/' inside a path value becomes %2F") ||
 		!strings.Contains(out.Note, "only a <Name+> path value spans segments") ||
 		!strings.Contains(out.Note, "quotes included, with JSON.stringify(value)") ||
-		!strings.Contains(out.Note, "under the wire_name and location its entry in inputs gives") {
+		!strings.Contains(out.Note, "under the wire_name and location its entry in inputs gives") ||
+		!strings.Contains(out.Note, "<Name+:unrendered>") {
 		t.Errorf("note = %q", out.Note)
 	}
 	args := templateArgs(t, out)

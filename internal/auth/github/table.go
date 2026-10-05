@@ -162,6 +162,10 @@ func sortTemplates(byMethod map[string][]Templ) {
 	}
 }
 
+// maxPathSegments is the longest path Lookup will classify. GitHub answers 414 well below it, so a longer path cannot
+// name an operation, and the cap bounds the matcher's recursion depth and the size of its memo.
+const maxPathSegments = 8192
+
 // splitPath splits a URL path on "/" with the leading slash dropped. An empty
 // path yields no segments.
 func splitPath(p string) []string {
@@ -190,6 +194,9 @@ func isParam(seg string) bool {
 func (t *Table) Lookup(method, path string) []Route {
 	tmpls := t.byMethod[strings.ToUpper(method)]
 	segs := splitPath(path)
+	if len(segs) > maxPathSegments {
+		return nil
+	}
 	routes := t.best(tmpls, segs)
 	if routes == nil {
 		return nil
@@ -242,9 +249,28 @@ func (t *Table) matchTemplate(tmpl, req []string) bool {
 	if !slices.ContainsFunc(tmpl, t.isMultiSegment) {
 		return matchFixed(tmpl, req)
 	}
+	if !t.prefixMatches(tmpl, req) {
+		return false
+	}
 	m := matcher{t: t, tmpl: tmpl, req: req, failed: make([]bool, (len(tmpl)+1)*(len(req)+1))}
 
 	return m.match(0, 0)
+}
+
+// prefixMatches reports whether req matches the segments of tmpl before its first multi-segment param under the rules
+// of matchFixed. It lets matchTemplate reject a request before it allocates the memo for a walk that cannot succeed.
+func (t *Table) prefixMatches(tmpl, req []string) bool {
+	prefix := tmpl[:slices.IndexFunc(tmpl, t.isMultiSegment)]
+	if len(req) < len(prefix) {
+		return false
+	}
+	for i, seg := range prefix {
+		if !isParam(seg) && req[i] != seg {
+			return false
+		}
+	}
+
+	return true
 }
 
 // matchFixed matches a template with no multi-segment param: the lengths must be
@@ -265,7 +291,8 @@ func matchFixed(tmpl, req []string) bool {
 // matcher walks (template index, request index) states. Every step moves at
 // least one index forward, and a state that failed is never explored again, so
 // the work is bounded by the number of states however many multi-segment
-// params the template has.
+// params the template has. Lookup caps the request at maxPathSegments, which
+// bounds the recursion depth and the memo, not only the number of states.
 type matcher struct {
 	t         *Table
 	tmpl, req []string
