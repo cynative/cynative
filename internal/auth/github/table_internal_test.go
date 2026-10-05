@@ -532,6 +532,15 @@ func TestLookup_CapsPathSegments(t *testing.T) {
 	}
 }
 
+func TestLookup_RejectsSeparatorFloodBeforeSplitting(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	if got := tbl.Lookup("GET", "/x"+strings.Repeat("/", 2*maxPathSegments)); got != nil {
+		t.Errorf("Lookup of a separator flood = %+v, want nil", got)
+	}
+}
+
 func TestMatchTemplate_RejectsPrefixMismatchBeforeWalking(t *testing.T) {
 	t.Parallel()
 

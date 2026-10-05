@@ -162,8 +162,8 @@ func sortTemplates(byMethod map[string][]Templ) {
 	}
 }
 
-// maxPathSegments is the longest path Lookup will classify. GitHub answers 414 well below it, so a longer path cannot
-// name an operation, and the cap bounds the matcher's recursion depth and the size of its memo.
+// maxPathSegments is the longest path Lookup will classify. GitHub answers 414 below it (at about 8000 segments), so
+// a longer path cannot name an operation, and the cap bounds the matcher's recursion depth and the size of its memo.
 const maxPathSegments = 8192
 
 // splitPath splits a URL path on "/" with the leading slash dropped. An empty
@@ -193,10 +193,12 @@ func isParam(seg string) bool {
 // the templates are stored in.
 func (t *Table) Lookup(method, path string) []Route {
 	tmpls := t.byMethod[strings.ToUpper(method)]
-	segs := splitPath(path)
-	if len(segs) > maxPathSegments {
+	// Count the separators first: splitting allocates every segment, and a path with more separators than the cap
+	// has more segments than the cap.
+	if strings.Count(path, "/") > maxPathSegments {
 		return nil
 	}
+	segs := splitPath(path)
 	routes := t.best(tmpls, segs)
 	if routes == nil {
 		return nil

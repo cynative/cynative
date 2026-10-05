@@ -27,7 +27,8 @@ const (
 		"and in a JSON body replace a quoted string placeholder, quotes included, with JSON.stringify(value) and " +
 		"give numbers and booleans as bare JSON values. Pagination fields name model members: send each one " +
 		"under the wire_name and location its entry in inputs gives. <Name:unrendered> (or " +
-		"<Name+:unrendered> for a greedy path label) marks an input this reference could not render. Check outcome and gaps even when no marker appears."
+		"<Name+:unrendered> for a greedy path label) marks an input this reference could not render. " +
+		"Check outcome and gaps even when no marker appears."
 	budgetLimitation = "reference exceeds the output budget"
 	// maxMinimalField bounds each identifier echoed in the minimal output.
 	maxMinimalField = 200
