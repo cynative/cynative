@@ -119,6 +119,13 @@ func TestDocumenter_Lookups(t *testing.T) {
 			want: apiref.OutcomeNotFound, reason: `no operation "NoSuchOp" in route-53`,
 		},
 		{
+			name: "missing service", src: route53Source,
+			q:    apiref.Query{Operation: "ListHostedZones"},
+			want: apiref.OutcomeNotFound,
+			reason: "service is required for aws: pass the endpoint prefix from the request host, such as route53 " +
+				"or iam",
+		},
+		{
 			name: "unknown prefix", src: route53Source,
 			q:    apiref.Query{Service: "nope", Operation: "X"},
 			want: apiref.OutcomeNotFound, reason: `no AWS model answers on endpoint prefix "nope"`,

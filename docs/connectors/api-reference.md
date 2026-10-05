@@ -34,7 +34,7 @@ The tool checks the arguments before any lookup: invalid arguments or an empty `
 
 1. `unsupported`: the connector is not configured in this session, or it has no reference support (every connector other than `aws` and `github`).
 2. `unavailable`: the metadata could not be loaded or parsed. For AWS the reason is the load error text truncated to 500 characters. For GitHub it is a fixed message. This is never reported as `not_found`.
-3. `not_found`: no model for the AWS endpoint prefix, a `model` that does not belong to the prefix (the choices list the valid ones), or no operation by that name.
+3. `not_found`: no AWS `service` (the reason says it is required and what to pass), no model for the AWS endpoint prefix, a `model` that does not belong to the prefix (the choices list the valid ones), or no operation by that name.
 4. `ambiguous`: several models for the prefix define the operation and no `model` was given, or the case-insensitive match hits several names. At most 5 choices are returned.
 5. `unsupported`: the operation was found in a model whose protocol the tool cannot describe (`ec2Query`).
 6. `incomplete`: the operation has a blocking gap, listed in `gaps`.

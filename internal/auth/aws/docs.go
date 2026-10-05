@@ -13,6 +13,10 @@ import (
 	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
+// missingServiceReason answers a lookup with no endpoint prefix, which would otherwise read as an unknown prefix "".
+const missingServiceReason = "service is required for aws: pass the endpoint prefix from the request host, " +
+	"such as route53 or iam"
+
 // ModelSource is the archive surface documentation reads.
 type ModelSource interface {
 	Resolve(ctx context.Context, prefix string) ([]*ServiceModel, error)
@@ -79,6 +83,9 @@ func unavailable(err error) apiref.Result {
 
 // resolveModels returns the models serving q.Service, narrowed by q.Model. ok is false when res already answers.
 func (d *Documenter) resolveModels(ctx context.Context, q apiref.Query) ([]*ServiceModel, apiref.Result, bool) {
+	if q.Service == "" {
+		return nil, apiref.Result{Outcome: apiref.OutcomeNotFound, Reason: missingServiceReason}, false
+	}
 	models, err := d.src.Resolve(ctx, q.Service)
 	if err != nil {
 		if errors.Is(err, ErrUnsupportedService) {
