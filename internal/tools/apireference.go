@@ -21,8 +21,9 @@ const apiReferenceDescription = "Look up one connector API operation by exact na
 	"to the connector. Supported: aws (restXml, restJson1, awsQuery, awsJson) and github."
 
 const (
-	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values " +
-		"(encodeURIComponent), encode a path value segment by segment and keep the '/' between segments, " +
+	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values and every path value " +
+		"(encodeURIComponent, so a '/' inside a path value becomes %2F); only a <Name+> path value spans " +
+		"segments: encode each segment and keep the '/' between them; " +
 		"and in a JSON body replace a quoted string placeholder, quotes included, with JSON.stringify(value) and " +
 		"give numbers and booleans as bare JSON values. Pagination fields name model members: send each one " +
 		"under the wire_name and location its entry in inputs gives. <Name:unrendered> marks an input this " +
@@ -170,15 +171,24 @@ func placeholder(in apiref.Input) string {
 	return "<" + in.Name + ">"
 }
 
-// pathPlaceholder names a path label, marking it when the path input of that name could not be rendered.
-func pathPlaceholder(ref *apiref.Reference, name string) string {
+// pathPlaceholder names a path label, keeping the '+' of a greedy label so the note can say its value spans
+// segments, and marking it when the first path input of that name could not be rendered.
+func pathPlaceholder(ref *apiref.Reference, name string, greedy bool) string {
+	label := name
+	if greedy {
+		label += "+"
+	}
 	for _, in := range ref.Inputs {
 		if in.Location == apiref.LocationPath && in.Name == name {
-			return placeholder(in)
+			if !in.Renderable {
+				return "<" + label + ":unrendered>"
+			}
+
+			break
 		}
 	}
 
-	return "<" + name + ">"
+	return "<" + label + ">"
 }
 
 // requiredAt lists the required inputs at a location.
@@ -236,8 +246,8 @@ func buildURL(ref *apiref.Reference) string {
 	segs := strings.Split(ref.PathTemplate, "/")
 	for i, s := range segs {
 		if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
-			name := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(s, "{"), "}"), "+")
-			segs[i] = pathPlaceholder(ref, name)
+			name, greedy := strings.CutSuffix(strings.TrimSuffix(strings.TrimPrefix(s, "{"), "}"), "+")
+			segs[i] = pathPlaceholder(ref, name, greedy)
 		}
 	}
 	query := paramPairs(ref.FixedQuery)
