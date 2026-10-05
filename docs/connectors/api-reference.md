@@ -44,7 +44,7 @@ A `found` or `incomplete` result counts as progress for the run's stuck-detectio
 
 ## AWS
 
-Supported protocols are restXml, restJson1, awsQuery, and awsJson1.0 and 1.1. `ec2Query` answers `unsupported`. A model whose protocol trait the parser does not recognize at all fails to load and answers `unavailable`.
+Supported protocols are `restXml`, `restJson1`, `awsQuery`, `awsJson1_0` and `awsJson1_1`, the names the reference reports in `protocol`. `ec2Query` answers `unsupported`. A model whose protocol trait the parser does not recognize at all fails to load and answers `unavailable`.
 
 Templates follow the service's own protocol:
 
