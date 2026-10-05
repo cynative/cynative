@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.13.0](https://github.com/cynative/cynative/compare/v1.12.3...v1.13.0) (2026-10-05)
+
+
+### Features
+
+* add api_reference lookup and actionable unmatched-request errors ([#360](https://github.com/cynative/cynative/issues/360)) ([4c72d19](https://github.com/cynative/cynative/commit/4c72d19e1e3abdd642c565043524050f27760afd))
+
+
+### Bug Fixes
+
+* classify Azure single-provider reads ([#355](https://github.com/cynative/cynative/issues/355)) ([976a605](https://github.com/cynative/cynative/commit/976a60568fe4c4bd91b88f7161f0700932b25e26)), closes [#305](https://github.com/cynative/cynative/issues/305)
+* close GitHub gate routing gaps and mark greedy api_reference path labels ([#364](https://github.com/cynative/cynative/issues/364)) ([4f20069](https://github.com/cynative/cynative/commit/4f200699bd637c0cb36efd012b23bb482f93cc7d))
+
+
+### Dependencies
+
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager from 0.4.10 to 0.4.11 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/aws/aws-sdk-go-v2/service/eks from 1.101.0 to 1.102.0 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/Azure/azure-sdk-for-go/sdk/azcore from 1.23.1 to 1.23.2 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/AzureAD/microsoft-authentication-library-for-go from 1.10.0 to 1.10.1 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/blacktop/go-macho from 1.1.291 to 1.1.292 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/dlclark/regexp2/v2 from 2.8.1 to 2.8.2 ([5ae6c97](https://github.com/cynative/cynative/commit/5ae6c97e9d19122fa523b1488e433c7554dbdf2e))
+* bump github.com/docker/cli from 29.8.1+incompatible to 29.8.2+incompatible ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/go-playground/locales from 0.14.1 to 0.14.2 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/golangci/golines from 0.15.0 to 0.16.0 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/pb33f/go-yaml from 0.1.0 to 0.1.1 ([7138ad7](https://github.com/cynative/cynative/commit/7138ad75ffa986f4541582d6b02472780c20da7e))
+* bump github.com/prometheus/common from 0.71.0 to 0.72.0 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump github.com/timonwong/loggercheck from 0.12.0 to 0.12.1 ([5ae6c97](https://github.com/cynative/cynative/commit/5ae6c97e9d19122fa523b1488e433c7554dbdf2e))
+* bump github.com/uudashr/iface from 1.5.1 to 1.5.2 ([ac616dd](https://github.com/cynative/cynative/commit/ac616ddfab29daae78273da8a0be9cfd513bbe74))
+* bump go.opentelemetry.io/contrib/detectors/gcp from 1.46.0 to 1.47.0 ([5ae6c97](https://github.com/cynative/cynative/commit/5ae6c97e9d19122fa523b1488e433c7554dbdf2e))
+* bump go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc from 0.71.0 to 0.72.0 ([5ae6c97](https://github.com/cynative/cynative/commit/5ae6c97e9d19122fa523b1488e433c7554dbdf2e))
+* bump go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp from 0.71.0 to 0.72.0 ([5ae6c97](https://github.com/cynative/cynative/commit/5ae6c97e9d19122fa523b1488e433c7554dbdf2e))
+* bump google.golang.org/genproto/googleapis/rpc from 0.0.0-20260921155816-b14227669459 to 0.0.0-20260928230214-8a89bd6388cc ([5ae6c97](https://github.com/cynative/cynative/commit/5ae6c97e9d19122fa523b1488e433c7554dbdf2e))
+* Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#356](https://github.com/cynative/cynative/issues/356)) ([637ee5d](https://github.com/cynative/cynative/commit/637ee5d5ccf96e63f22a4b765c224b4edbabef62))
+* Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#363](https://github.com/cynative/cynative/issues/363)) ([2dfac32](https://github.com/cynative/cynative/commit/2dfac320c8034e583ce3eb02c77c0bc7740816c7))
+
 ## [1.12.3](https://github.com/cynative/cynative/compare/v1.12.2...v1.12.3) (2026-09-30)
 
 
