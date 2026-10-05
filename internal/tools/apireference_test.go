@@ -167,10 +167,12 @@ func TestAPIReference_RendersIAMTemplate(t *testing.T) {
 	if out.Outcome != "found" || fail.Failed() || fail.Progress() == 0 {
 		t.Fatalf("outcome %q progress %d: %s", out.Outcome, fail.Progress(), got)
 	}
-	if !strings.Contains(out.Note, "percent-encode query and form values") ||
-		!strings.Contains(out.Note, "encode a path value segment by segment") ||
+	if !strings.Contains(out.Note, "percent-encode query and form values and every path value") ||
+		!strings.Contains(out.Note, "a '/' inside a path value becomes %2F") ||
+		!strings.Contains(out.Note, "only a <Name+> path value spans segments") ||
 		!strings.Contains(out.Note, "quotes included, with JSON.stringify(value)") ||
-		!strings.Contains(out.Note, "under the wire_name and location its entry in inputs gives") {
+		!strings.Contains(out.Note, "under the wire_name and location its entry in inputs gives") ||
+		!strings.Contains(out.Note, "<Name+:unrendered>") {
 		t.Errorf("note = %q", out.Note)
 	}
 	args := templateArgs(t, out)
@@ -536,6 +538,81 @@ func TestAPIReference_PathLabelWithoutInputFallsBack(t *testing.T) {
 	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"aws","operation":"Op"}`)
 	if got := templateArgs(t, out).URL; got != "https://ex.amazonaws.com/op/<Id>" {
 		t.Errorf("url = %q", got)
+	}
+}
+
+func TestAPIReference_GreedyPathLabels(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name, template string
+		inputs         []apiref.Input
+		want           string
+	}{
+		{
+			"ordinary and greedy", "/{Bucket}/{Key+}",
+			[]apiref.Input{
+				{Name: "Bucket", WireName: "Bucket", Location: apiref.LocationPath, Required: true, Renderable: true},
+				{Name: "Key", WireName: "Key", Location: apiref.LocationPath, Required: true, Renderable: true},
+			},
+			"https://ex.amazonaws.com/<Bucket>/<Key+>",
+		},
+		{"greedy without input", "/op/{Key+}", nil, "https://ex.amazonaws.com/op/<Key+>"},
+		{
+			"greedy unrendered", "/op/{Key+}",
+			[]apiref.Input{{Name: "Key", WireName: "Key", Location: apiref.LocationPath, Required: true}},
+			"https://ex.amazonaws.com/op/<Key+:unrendered>",
+		},
+		{
+			"first path input wins", "/op/{Key+}",
+			[]apiref.Input{
+				{Name: "Key", WireName: "Key", Location: apiref.LocationPath, Required: true, Renderable: true},
+				{Name: "Key", WireName: "Key", Location: apiref.LocationPath, Required: true},
+			},
+			"https://ex.amazonaws.com/op/<Key+>",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			ref := &apiref.Reference{
+				Connector: "aws", Operation: "Op", Method: "GET", PathTemplate: c.template,
+				Endpoint: "https://ex.amazonaws.com", BodyEncoding: apiref.BodyNone, Inputs: c.inputs,
+			}
+			p := &docProvider{name: "aws", res: apiref.Result{Outcome: apiref.OutcomeIncomplete, Reference: ref}}
+			_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"aws","operation":"Op"}`)
+			if got := templateArgs(t, out).URL; got != c.want {
+				t.Errorf("url = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestAPIReference_GitHubMultiSegmentLabelsStayUnmarked(t *testing.T) {
+	t.Parallel()
+
+	ref := &apiref.Reference{
+		Connector: "github", Operation: "repos/get-branch-protection", Method: "GET",
+		PathTemplate: "/repos/{owner}/{repo}/branches/{branch}/protection",
+		Endpoint:     "https://api.github.com", BodyEncoding: apiref.BodyNone,
+	}
+	p := &docProvider{name: "github", res: apiref.Result{Outcome: apiref.OutcomeFound, Reference: ref}}
+	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"github","operation":"repos/get-branch-protection"}`)
+	const want = "https://api.github.com/repos/<owner>/<repo>/branches/<branch>/protection"
+	if got := templateArgs(t, out).URL; got != want {
+		t.Errorf("url = %q", got)
+	}
+
+	ref = &apiref.Reference{
+		Connector: "github", Operation: "repos/get-content", Method: "GET",
+		PathTemplate: "/repos/{owner}/{repo}/contents/{path}",
+		Endpoint:     "https://api.github.com", BodyEncoding: apiref.BodyNone,
+	}
+	p = &docProvider{name: "github", res: apiref.Result{Outcome: apiref.OutcomeFound, Reference: ref}}
+	_, out, _ = runRef(t, []auth.Provider{p}, `{"connector":"github","operation":"repos/get-content"}`)
+	const wantTrailing = "https://api.github.com/repos/<owner>/<repo>/contents/<path>"
+	if got := templateArgs(t, out).URL; got != wantTrailing {
+		t.Errorf("trailing url = %q", got)
 	}
 }
 

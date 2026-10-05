@@ -86,3 +86,44 @@ func TestPathReadings(t *testing.T) {
 		})
 	}
 }
+
+func TestHasDotSegment(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/a/./b", true},
+		{"/a/../b", true},
+		{"/a/%2e%2e/b", true},
+		{"/a/%2E%2e/b", true},
+		{"/a/.%2e/b", true},
+		{"/a/%2e/b", true},
+		{"/..", true},
+		{"/a/..", true},
+		{"/a/..;x/b", true},
+		{"/a/..;/b", true},
+		{"/a/.;/b", true},
+		{"/a/%2e%2e;/b", true},
+		{"/a/..;a=b;c/b", true},
+		{"/a/..%3b/b", false},
+		{"/a/..%3B/b", false},
+		{"/a/v1;2/b", false},
+		{"/a/master;x/b", false},
+		{"/a/.../b", false},
+		{"/a/v1.2/b", false},
+		{"/a/a%2F..%2Fb/c", false},
+		{"/a/%2/b", false},
+		{"/", false},
+		{"", false},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			t.Parallel()
+			if got := authreq.HasDotSegment(c.path); got != c.want {
+				t.Fatalf("HasDotSegment(%q) = %v, want %v", c.path, got, c.want)
+			}
+		})
+	}
+}

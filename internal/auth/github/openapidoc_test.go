@@ -572,6 +572,25 @@ func TestDocsHint_CatchAllTakesZeroSegments(t *testing.T) {
 	}
 }
 
+func TestDocsHint_MidPathMultiSegment(t *testing.T) {
+	t.Parallel()
+	d := synthDocs(t, synthHead+`"/repos/{owner}/{repo}/branches/{branch}":{"get":{"operationId":"repos/get-branch",
+	"parameters":[{"name":"branch","in":"path","required":true,"x-multi-segment":true,"schema":{"type":"string"}}],
+	"responses":{"200":{"description":"ok"}}}},
+	"/repos/{owner}/{repo}/branches/{branch}/protection":{"get":{"operationId":"repos/get-branch-protection",
+	"parameters":[{"name":"branch","in":"path","required":true,"x-multi-segment":true,"schema":{"type":"string"}}],
+	"responses":{"200":{"description":"ok"}}}}}}`)
+	// A wrong method, so the hint lists the GET routes whose template matches the path.
+	h := d.Hint(ghView(t, "PUT", "https://api.github.com/repos/o/r/branches/feat/x/protection"))
+	want := []string{
+		"repos/get-branch (GET /repos/{owner}/{repo}/branches/{branch*})",
+		"repos/get-branch-protection (GET /repos/{owner}/{repo}/branches/{branch+}/protection)",
+	}
+	if !slices.Equal(h.Candidates, want) || h.Operation != "" {
+		t.Errorf("hint = %+v", h)
+	}
+}
+
 func TestDocsReference_ServerOverride(t *testing.T) {
 	t.Parallel()
 	d := synthDocs(

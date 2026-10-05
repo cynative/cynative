@@ -722,3 +722,24 @@ func TestValidateGitLabHosts(t *testing.T) {
 		})
 	}
 }
+
+func TestGitLabProvider_AuthorizeAction_DotSegmentsDenied(t *testing.T) {
+	t.Parallel()
+
+	paths := []string{
+		"/api/v4/projects/./issues",
+		"/api/v4/projects/%2e%2E/issues",
+		"/api/v4/projects/1/issues/..",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			p := newTestGitLabExposure(t, "gitlab.com", gitlabclass.BaselineExposure(), okGitLabFetch)
+			v := actionView(t, http.MethodGet, "https://gitlab.com"+path)
+			err := p.AuthorizeAction(context.Background(), v, noArgs())
+			if !errors.Is(err, gitlabclass.ErrUnclassifiable) {
+				t.Fatalf("AuthorizeAction = %v, want ErrUnclassifiable", err)
+			}
+		})
+	}
+}

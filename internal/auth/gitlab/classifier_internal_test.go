@@ -252,3 +252,39 @@ func checkClassifyResult(
 		)
 	}
 }
+
+func TestClassifyRequest_DotSegmentsFailClosed(t *testing.T) {
+	t.Parallel()
+
+	tbl, err := DistillOpenAPI([]byte(`openapi: "3.0.0"
+paths:
+  /api/v4/projects/{id}/issues:
+    get:
+      tags: ["Issues"]
+  /api/v4/projects/{id}/repository/files/{path}:
+    get:
+      tags: ["Repository files"]
+  /api/v4/projects/{id}/variables:
+    get:
+      tags: ["CI variables"]
+`))
+	if err != nil {
+		t.Fatalf("DistillOpenAPI: %v", err)
+	}
+
+	// Each path matches a permitted route as sent, and resolves to a different one on the server.
+	paths := []string{
+		"/api/v4/projects/1/repository/files/..",
+		"/api/v4/projects/1/repository/files/%2e%2E",
+		"/api/v4/projects/./issues",
+		"/api/v4/projects/.%2e/issues",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			if _, cErr := ClassifyRequest(tbl, http.MethodGet, path); !errors.Is(cErr, ErrUnclassifiable) {
+				t.Fatalf("ClassifyRequest(%q) err = %v, want ErrUnclassifiable", path, cErr)
+			}
+		})
+	}
+}

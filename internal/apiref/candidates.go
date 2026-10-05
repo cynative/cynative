@@ -116,7 +116,7 @@ func matches(tpl, segs []string) bool {
 // matchGreedy matches a greedy label starting at path index i, followed by the
 // template segments in suffix. The label takes every segment the suffix leaves
 // and needs at least one unless zeroOK; a single empty segment does not count
-// as one, as in the gate.
+// as one. The GitHub gate's mid-path spans do accept it; hints are advisory.
 func matchGreedy(suffix, segs []string, i int, zeroOK bool) bool {
 	end := len(segs) - len(suffix)
 	if end < i || (!zeroOK && (end == i || (end == i+1 && segs[i] == ""))) {

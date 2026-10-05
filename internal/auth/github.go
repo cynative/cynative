@@ -193,18 +193,22 @@ func (p *githubProvider) AuthorizeAction(ctx context.Context, v authreq.View, _ 
 		return err
 	}
 
-	// Use EscapedPath so a branch name like feature%2Ffoo stays as one segment and
-	// matches its template (decoded "/" would split into extra segments → no match).
+	// Use EscapedPath so a branch name like feature%2Ffoo stays one segment;
+	// a raw '/' in a multi-segment value spans segments in the table instead.
 	access, err := githubhardening.ClassifyRequest(table, v.Method, v.EscapedPath)
 	if err != nil {
 		return err
 	}
 
-	ceiling := githubhardening.Resolve(p.exposure, access.Route.Category, access.Route.Subcategory)
-	if !exposure.Allows(ceiling, access.Level) {
-		return fmt.Errorf("%w: %s %s needs %s on %q (ceiling %s)",
-			githubhardening.ErrExposureExceeded, v.Method, v.EscapedPath,
-			exposure.LevelName(access.Level), access.Route.Category, exposure.LevelName(ceiling))
+	// GitHub runs exactly one of the routes, and nothing in the request says
+	// which, so every route's ceiling has to allow the level.
+	for _, r := range access.Routes {
+		ceiling := githubhardening.Resolve(p.exposure, r.Category, r.Subcategory)
+		if !exposure.Allows(ceiling, access.Level) {
+			return fmt.Errorf("%w: %s %s needs %s on %q (ceiling %s)",
+				githubhardening.ErrExposureExceeded, v.Method, v.EscapedPath,
+				exposure.LevelName(access.Level), r.Category, exposure.LevelName(ceiling))
+		}
 	}
 	return nil
 }

@@ -1,6 +1,12 @@
 package github
 
-import "testing"
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+)
 
 const miniOpenAPI = `{
   "components": {
@@ -59,11 +65,11 @@ func TestDistillAndLookup(t *testing.T) {
 		{"GET", "/unknown/path", "", "", false},        // no template.
 	}
 	for _, c := range cases {
-		got, ok := tbl.Lookup(c.method, c.path)
-		if ok != c.wantOK {
-			t.Fatalf("Lookup(%q,%q) ok=%v, want %v", c.method, c.path, ok, c.wantOK)
+		got := tbl.Lookup(c.method, c.path)
+		if (len(got) > 0) != c.wantOK {
+			t.Fatalf("Lookup(%q,%q) = %+v, want match=%v", c.method, c.path, got, c.wantOK)
 		}
-		if ok && (got.Category != c.wantCat || got.Subcategory != c.wantSub) {
+		if c.wantOK && (one(t, got).Category != c.wantCat || one(t, got).Subcategory != c.wantSub) {
 			t.Fatalf("Lookup(%q,%q) = %+v, want {%s %s}", c.method, c.path, got, c.wantCat, c.wantSub)
 		}
 	}
@@ -81,9 +87,9 @@ func TestLiteralBeatsParam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DistillOpenAPI: %v", err)
 	}
-	got, ok := tbl.Lookup("GET", "/user/following")
-	if !ok || got.Subcategory != "followers" {
-		t.Fatalf("literal precedence: got %+v ok=%v, want followers", got, ok)
+	got := one(t, tbl.Lookup("GET", "/user/following"))
+	if got.Subcategory != "followers" {
+		t.Fatalf("literal precedence: got %+v, want followers", got)
 	}
 }
 
@@ -99,9 +105,9 @@ func TestMarshalRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalTable: %v", err)
 	}
-	got, ok := back.Lookup("GET", "/repos/o/r/contents/x/y")
-	if !ok || got.Category != "repos" || got.Subcategory != "contents" {
-		t.Fatalf("round-trip lookup = %+v ok=%v", got, ok)
+	got := one(t, back.Lookup("GET", "/repos/o/r/contents/x/y"))
+	if got.Category != "repos" || got.Subcategory != "contents" {
+		t.Fatalf("round-trip lookup = %+v", got)
 	}
 }
 
@@ -137,8 +143,8 @@ func TestDistill_skipsNonMethodKeyOnSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DistillOpenAPI: %v", err)
 	}
-	if r, ok := tbl.Lookup("GET", "/x"); !ok || r.Category != "meta" {
-		t.Fatalf("lookup = %+v ok=%v, want meta", r, ok)
+	if r := tbl.Lookup("GET", "/x"); len(r) != 1 || r[0].Category != "meta" {
+		t.Fatalf("lookup = %+v, want meta", r)
 	}
 }
 
@@ -222,9 +228,9 @@ func TestDistill_multiSegment_inlineArray(t *testing.T) {
 		t.Fatal("multiSegment[owner] = true, want false (no x-multi-segment)")
 	}
 	// tree_sha with an embedded slash classifies correctly.
-	got, ok := tbl.Lookup("GET", "/repos/o/r/git/trees/abc/def")
-	if !ok || got.Category != "git" {
-		t.Fatalf("inline-array param catch-all: got %+v ok=%v, want git/trees", got, ok)
+	got := one(t, tbl.Lookup("GET", "/repos/o/r/git/trees/abc/def"))
+	if got.Category != "git" {
+		t.Fatalf("inline-array param catch-all: got %+v, want git/trees", got)
 	}
 }
 
@@ -247,15 +253,15 @@ func TestDistill_multiSegment(t *testing.T) {
 	}
 
 	// compare/{basehead} — basehead value contains a slash (main...feature/foo).
-	got, ok := tbl.Lookup("GET", "/repos/o/r/compare/main...feature/foo")
-	if !ok || got.Category != "repos" || got.Subcategory != "commits" {
-		t.Fatalf("compare/basehead with slash: got %+v ok=%v, want repos/commits", got, ok)
+	got := one(t, tbl.Lookup("GET", "/repos/o/r/compare/main...feature/foo"))
+	if got.Category != "repos" || got.Subcategory != "commits" {
+		t.Fatalf("compare/basehead with slash: got %+v, want repos/commits", got)
 	}
 
 	// releases/tags/{tag} — tag value contains a slash (release/1.0).
-	got, ok = tbl.Lookup("GET", "/repos/o/r/releases/tags/release/1.0")
-	if !ok || got.Category != "repos" || got.Subcategory != "releases" {
-		t.Fatalf("releases/tags with slash: got %+v ok=%v, want repos/releases", got, ok)
+	got = one(t, tbl.Lookup("GET", "/repos/o/r/releases/tags/release/1.0"))
+	if got.Category != "repos" || got.Subcategory != "releases" {
+		t.Fatalf("releases/tags with slash: got %+v, want repos/releases", got)
 	}
 }
 
@@ -273,9 +279,9 @@ func TestMultiSegment_roundTrip(t *testing.T) {
 		t.Fatalf("UnmarshalTable: %v", err)
 	}
 	// After round-trip, compare/{basehead} with a slash still classifies.
-	got, ok := back.Lookup("GET", "/repos/o/r/compare/main...feature/foo")
-	if !ok || got.Subcategory != "commits" {
-		t.Fatalf("round-trip compare lookup = %+v ok=%v, want commits", got, ok)
+	got := one(t, back.Lookup("GET", "/repos/o/r/compare/main...feature/foo"))
+	if got.Subcategory != "commits" {
+		t.Fatalf("round-trip compare lookup = %+v, want commits", got)
 	}
 }
 
@@ -291,20 +297,283 @@ func TestCatchAll_zeroSegments(t *testing.T) {
 	}
 
 	// Root contents path with no trailing segment.
-	got, ok := tbl.Lookup("GET", "/repos/o/r/contents")
-	if !ok || got.Category != "repos" || got.Subcategory != "contents" {
-		t.Fatalf("zero-segment catch-all: got %+v ok=%v, want repos/contents", got, ok)
+	got := one(t, tbl.Lookup("GET", "/repos/o/r/contents"))
+	if got.Category != "repos" || got.Subcategory != "contents" {
+		t.Fatalf("zero-segment catch-all: got %+v, want repos/contents", got)
 	}
 
 	// Contents with a non-empty path still works.
-	got, ok = tbl.Lookup("GET", "/repos/o/r/contents/a/b.go")
-	if !ok || got.Category != "repos" || got.Subcategory != "contents" {
-		t.Fatalf("multi-segment catch-all: got %+v ok=%v, want repos/contents", got, ok)
+	got = one(t, tbl.Lookup("GET", "/repos/o/r/contents/a/b.go"))
+	if got.Category != "repos" || got.Subcategory != "contents" {
+		t.Fatalf("multi-segment catch-all: got %+v, want repos/contents", got)
 	}
 
 	// A genuinely unmatched short path is still rejected.
-	_, ok = tbl.Lookup("GET", "/repos/o")
-	if ok {
-		t.Fatal("short unmatched path must not match, got ok=true")
+	if got := tbl.Lookup("GET", "/repos/o"); got != nil {
+		t.Fatalf("short unmatched path must not match, got %+v", got)
+	}
+}
+
+// one returns the single route of a lookup, failing the test unless exactly one route came back.
+func one(t *testing.T, routes []Route) Route {
+	t.Helper()
+	if len(routes) != 1 {
+		t.Fatalf("routes = %+v, want exactly one", routes)
+	}
+
+	return routes[0]
+}
+
+const shadowOpenAPI = `{
+  "components": {"parameters": {
+    "branch": {"name": "branch", "x-multi-segment": true},
+    "ref": {"name": "ref", "x-multi-segment": true},
+    "path": {"name": "path", "x-multi-segment": true}
+  }},
+  "paths": {
+    "/repos/{owner}/{repo}/branches/{branch}": {"get": {"x-github": {"category": "branches", "subcategory": "branches"}}},
+    "/repos/{owner}/{repo}/branches/{branch}/protection": {"get": {"x-github": {"category": "branches", "subcategory": "branch-protection"}}},
+    "/repos/{owner}/{repo}/branches/{branch}/protection/restrictions/users": {"get": {"x-github": {"category": "branches", "subcategory": "branch-protection"}}},
+    "/repos/{owner}/{repo}/commits/{ref}": {"get": {"x-github": {"category": "commits", "subcategory": "commits"}}},
+    "/repos/{owner}/{repo}/commits/{ref}/check-runs": {"get": {"x-github": {"category": "checks", "subcategory": "runs"}}},
+    "/repos/{owner}/{repo}/commits/{ref}/status": {"get": {"x-github": {"category": "commits", "subcategory": "statuses"}}},
+    "/repos/{owner}/{repo}/contents/{path}": {"get": {"x-github": {"category": "repos", "subcategory": "contents"}}},
+    "/a/{ref}/{path}": {"get": {"x-github": {"category": "two", "subcategory": "greedy"}}},
+    "/a/{ref}/z/{path}/end": {"get": {"x-github": {"category": "two", "subcategory": "suffix"}}},
+    "/b/{id}": {"get": {"x-github": {"category": "b", "subcategory": "id"}}},
+    "/c/{id}/lit": {"get": {"x-github": {"category": "c", "subcategory": "lit"}}},
+    "/user/codespaces/secrets/{secret_name}": {"get": {"x-github": {"category": "codespaces", "subcategory": "secrets"}}},
+    "/user/codespaces/secrets/{other}": {"get": {"x-github": {"category": "codespaces", "subcategory": "secrets"}}},
+    "/user/codespaces/{codespace_name}/machines": {"get": {"x-github": {"category": "codespaces", "subcategory": "machines"}}}
+  }
+}`
+
+func shadowTable(t *testing.T) *Table {
+	t.Helper()
+	tbl, err := DistillOpenAPI([]byte(shadowOpenAPI))
+	if err != nil {
+		t.Fatalf("DistillOpenAPI: %v", err)
+	}
+
+	return tbl
+}
+
+func TestLookup_MultiSegmentSpans(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	cases := []struct {
+		path string
+		want []Route
+	}{
+		{"/repos/o/r/branches/main", []Route{{"branches", "branches"}}},
+		{"/repos/o/r/branches/feat/x", []Route{{"branches", "branches"}}},
+		{"/repos/o/r/branches/main/protection", []Route{{"branches", "branch-protection"}}},
+		{"/repos/o/r/branches/feat/x/protection", []Route{{"branches", "branch-protection"}}},
+		{"/repos/o/r/branches/feat%2Fx/protection", []Route{{"branches", "branch-protection"}}},
+		{"/repos/o/r/branches//protection", []Route{{"branches", "branch-protection"}}},
+		{"/repos/o/r/branches/main//protection", []Route{{"branches", "branch-protection"}}},
+		{"/repos/o/r/branches/main/protection/restrictions/users", []Route{{"branches", "branch-protection"}}},
+		{"/repos/o/r/commits/main/check-runs", []Route{{"checks", "runs"}}},
+		{"/repos/o/r/commits/feat/x/check-runs", []Route{{"checks", "runs"}}},
+		{"/repos/o/r/commits/main/status", []Route{{"commits", "statuses"}}},
+		{"/repos/o/r/contents", []Route{{"repos", "contents"}}},
+		{"/repos/o/r/contents/", []Route{{"repos", "contents"}}},
+		{"/repos/o/r/contents//", []Route{{"repos", "contents"}}},
+		{"/repos/o/r/contents/dir/", []Route{{"repos", "contents"}}},
+		{"/a/x", []Route{{"two", "greedy"}}},
+		{"/a/x/y/z", []Route{{"two", "greedy"}}},
+		{"/a/x/z/p/q/end", []Route{{"two", "suffix"}}},
+		{"/b/", []Route{{"b", "id"}}},
+		{"/", nil},
+		{"", nil},
+		{"/repos/o", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			t.Parallel()
+			if got := tbl.Lookup("GET", c.path); !slices.Equal(got, c.want) {
+				t.Errorf("Lookup(%q) = %+v, want %+v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+func TestLookup_TrailingSlashReading(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	cases := []struct {
+		path string
+		want []Route
+	}{
+		// One trailing slash: the escaped reading names the catch-all, the trimmed one the check runs.
+		{"/repos/o/r/commits/main/check-runs/", []Route{{"checks", "runs"}, {"commits", "commits"}}},
+		// Two trailing slashes get no extra reading.
+		{"/repos/o/r/commits/main/check-runs//", []Route{{"commits", "commits"}}},
+		// A literal-ended route with no catch-all above it stays unmatched: the extra reading never admits alone.
+		{"/c/1/lit/", nil},
+		// The same for a param-ended one.
+		{"/b/x/", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			t.Parallel()
+			if got := tbl.Lookup("GET", c.path); !slices.Equal(got, c.want) {
+				t.Errorf("Lookup(%q) = %+v, want %+v", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+func TestLookup_TiesReturnEveryFamilySorted(t *testing.T) {
+	t.Parallel()
+
+	// secrets/{secret_name} and secrets/{other} collapse to one pair; machines stays.
+	want := []Route{{"codespaces", "machines"}, {"codespaces", "secrets"}}
+	tbl := shadowTable(t)
+	if got := tbl.Lookup("GET", "/user/codespaces/secrets/machines"); !slices.Equal(got, want) {
+		t.Fatalf("Lookup = %+v, want %+v", got, want)
+	}
+	// The stored template order does not change the result.
+	w := tableWire{ByMethod: map[string][]Templ{"GET": nil}}
+	for _, tm := range slices.Backward(tbl.byMethod["GET"]) {
+		w.ByMethod["GET"] = append(w.ByMethod["GET"], tm)
+	}
+	blob, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	back, err := UnmarshalTable(blob)
+	if err != nil {
+		t.Fatalf("UnmarshalTable: %v", err)
+	}
+	if got := back.Lookup("GET", "/user/codespaces/secrets/machines"); !slices.Equal(got, want) {
+		t.Fatalf("reversed-order Lookup = %+v, want %+v", got, want)
+	}
+	cached, err := UnmarshalTable(tbl.Serialize())
+	if err != nil {
+		t.Fatalf("UnmarshalTable(Serialize): %v", err)
+	}
+	if got := cached.Lookup("GET", "/user/codespaces/secrets/machines"); !slices.Equal(got, want) {
+		t.Fatalf("round-trip Lookup = %+v, want %+v", got, want)
+	}
+}
+
+func TestBest_KeepsOnlyTheTopRank(t *testing.T) {
+	t.Parallel()
+
+	tbl := &Table{multiSegment: map[string]bool{}}
+	tmpls := []Templ{
+		{Segments: []string{"{a}", "{b}"}, Route: Route{"low", "one"}},
+		{Segments: []string{"{c}", "{d}"}, Route: Route{"low", "two"}},
+		{Segments: []string{"x", "{e}"}, Route: Route{"top", "one"}},
+		{Segments: []string{"{f}", "{g}"}, Route: Route{"low", "three"}},
+	}
+	got := tbl.best(tmpls, []string{"x", "y"})
+	if want := []Route{{"top", "one"}}; !slices.Equal(got, want) {
+		t.Fatalf("best = %+v, want %+v", got, want)
+	}
+}
+
+func TestMatchTemplate_BoundedOnLongPaths(t *testing.T) {
+	t.Parallel()
+
+	names := []string{"p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"}
+	tbl := &Table{multiSegment: map[string]bool{}}
+	tmpl := []string{"a"}
+	for _, n := range names {
+		tbl.multiSegment[n] = true
+		tmpl = append(tmpl, "{"+n+"}")
+	}
+	tmpl = append(tmpl, "end")
+	req := append([]string{"a"}, slices.Repeat([]string{"z"}, 200)...)
+	// Without the memo the walk explores every way to split 200 segments among ten spans, which never finishes;
+	// with it the work is bounded by (template segments + 1) x (request segments + 1) states. Lookup's segment cap
+	// bounds the recursion depth and the memo size the same way, so the product stays small in memory too.
+	done := make(chan bool, 1)
+	go func() { done <- tbl.matchTemplate(tmpl, req) }()
+	select {
+	case got := <-done:
+		if got {
+			t.Fatal("a path without the literal end matched")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("matchTemplate did not return within 5s")
+	}
+}
+
+func TestMatchFixed(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	if tbl.matchTemplate([]string{"b", "{id}"}, []string{"b", "x", "y"}) {
+		t.Error("a longer request matched a fixed-length template")
+	}
+	if tbl.matchTemplate([]string{"c", "{id}", "lit"}, []string{"c", "1", "other"}) {
+		t.Error("a differing literal matched")
+	}
+}
+
+func TestLookup_CapsPathSegments(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	prefix := []string{"repos", "o", "r", "contents"}
+	pathOf := func(n int) string {
+		return "/" + strings.Join(append(slices.Clone(prefix), slices.Repeat([]string{"x"}, n-len(prefix))...), "/")
+	}
+	atCap := tbl.Lookup("GET", pathOf(maxPathSegments))
+	if want := []Route{{"repos", "contents"}}; !slices.Equal(atCap, want) {
+		t.Errorf("Lookup at the cap = %+v, want %+v", atCap, want)
+	}
+	if got := tbl.Lookup("GET", pathOf(maxPathSegments+1)); got != nil {
+		t.Errorf("Lookup over the cap = %+v, want nil", got)
+	}
+}
+
+func TestLookup_RejectsSeparatorFloodBeforeSplitting(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	if got := tbl.Lookup("GET", "/x"+strings.Repeat("/", 2*maxPathSegments)); got != nil {
+		t.Errorf("Lookup of a separator flood = %+v, want nil", got)
+	}
+}
+
+func TestMatchTemplate_RejectsPrefixMismatchBeforeWalking(t *testing.T) {
+	t.Parallel()
+
+	tbl := shadowTable(t)
+	tmpl := []string{"repos", "{owner}", "{repo}", "commits", "{ref}", "status"}
+	if tbl.matchTemplate(tmpl, []string{"repoz", "o", "r", "commits", "main", "status"}) {
+		t.Error("a differing first literal matched")
+	}
+	if tbl.matchTemplate(tmpl, []string{"repos", "o"}) {
+		t.Error("a request shorter than the fixed prefix matched")
+	}
+	if !tbl.matchTemplate(tmpl, []string{"repos", "o", "r", "commits", "main", "status"}) {
+		t.Error("a request with the fixed prefix did not match")
+	}
+}
+
+func TestLookup_DoubledTrailingSlashAddsNoReading(t *testing.T) {
+	t.Parallel()
+
+	tbl, err := DistillOpenAPI([]byte(`{
+  "components": {"parameters": {"ref": {"name": "ref", "x-multi-segment": true}}},
+  "paths": {
+    "/repos/{owner}/{repo}/commits/{ref}": {"get": {"x-github": {"category": "commits", "subcategory": "commits"}}},
+    "/repos/{owner}/{repo}/commits/{ref}/check-runs/{id}": {"get": {"x-github": {"category": "checks", "subcategory": "runs"}}}
+  }
+}`))
+	if err != nil {
+		t.Fatalf("DistillOpenAPI: %v", err)
+	}
+	// The escaped reading ends in an empty segment after an empty one, which GitHub keeps as part of the value, so the
+	// trimmed reading (check-runs/ + empty id) must not be offered.
+	got := tbl.Lookup("GET", "/repos/o/r/commits/main/check-runs//")
+	if want := []Route{{"commits", "commits"}}; !slices.Equal(got, want) {
+		t.Fatalf("Lookup = %+v, want %+v", got, want)
 	}
 }
