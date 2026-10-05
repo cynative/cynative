@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
+	"sync"
 
+	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
@@ -23,17 +25,62 @@ const githubDownloadHostsNote = " Also authorizes the GitHub download hosts code
 	"api.github.com answers tarball/asset downloads with a redirect there — redirects are not followed, " +
 	"so request the Location URL explicitly."
 
+// hintLatch remembers that the denial path failed to load docs. Hint records
+// the epoch before loading; a failure latches only if no successful load
+// (Reference) reset the latch since then.
+type hintLatch struct {
+	mu     sync.Mutex
+	epoch  uint64
+	failed bool
+}
+
+// begin returns the current epoch and whether the latch is set.
+func (l *hintLatch) begin() (uint64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.epoch, l.failed
+}
+
+// fail sets the latch only if no reset happened since begin returned epoch.
+func (l *hintLatch) fail(epoch uint64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.epoch == epoch {
+		l.failed = true
+	}
+}
+
+// reset clears the latch and invalidates every earlier epoch.
+func (l *hintLatch) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.epoch++
+	l.failed = false
+}
+
 type githubProvider struct {
 	token    string
 	exposure exposure.Exposure
 	tables   *cache.TTLCache[githubhardening.Table]
+	docs     *cache.TTLCache[githubhardening.OperationDocs]
 	errOut   io.Writer
+	// hintMu serializes the Hint path's latch check, docs load and latch set, so
+	// concurrent denials queue behind the first load instead of each retrying it.
+	hintMu sync.Mutex
+	// hintDocsFailed latches once a Hint-path docs load fails with a live
+	// context, so the error path does not re-download the document on every
+	// denied request. Reference resets it once it loads the docs; the epoch
+	// orders that reset against a Hint failure that was already in flight.
+	hintDocsFailed hintLatch
 }
 
 var (
 	_ Provider         = (*githubProvider)(nil)
 	_ ActionAuthorizer = (*githubProvider)(nil)
 	_ ResponseAuditor  = (*githubProvider)(nil)
+
+	_ OperationDocumenter = (*githubProvider)(nil)
 )
 
 // newGithubProvider constructs the provider with a resolved exposure ceiling and
@@ -65,7 +112,8 @@ func (p *githubProvider) Description() string {
 		"GitHub category/subcategory and access level and allowed only within the configured " +
 		"connectors.github.permissions ceiling (read-only by default; secret-scanning blocked). " +
 		"The GraphQL API (/graphql) is not supported; use the REST API. " +
-		"Allows reading private GitHub repositories." + githubDownloadHostsNote
+		"Allows reading private GitHub repositories." + githubDownloadHostsNote +
+		" For an operation's request template and response format, call the api_reference tool."
 }
 
 func (p *githubProvider) InjectAuth(req *http.Request, _ authreq.ProviderArgs) error {
@@ -304,4 +352,50 @@ func (p *githubProvider) AuditResponse(v authreq.AuditView, header http.Header) 
 	if msg, warn := githubhardening.DriftWarning(level, accepted); warn {
 		fmt.Fprintln(p.out(), msg)
 	}
+}
+
+// Reference answers an api_reference lookup from the cached OpenAPI documentation.
+func (p *githubProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
+	d := p.loadDocs(ctx)
+	if d == nil {
+		return apiref.Result{
+			Outcome: apiref.OutcomeUnavailable,
+			Reason:  "GitHub OpenAPI documentation could not be loaded",
+		}
+	}
+
+	p.hintDocsFailed.reset()
+
+	return d.Reference(q)
+}
+
+// Hint suggests operations for a request the gate matched to none.
+func (p *githubProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
+	p.hintMu.Lock()
+	defer p.hintMu.Unlock()
+	epoch, failed := p.hintDocsFailed.begin()
+	if failed {
+		return apiref.Hint{}
+	}
+	d := p.loadDocs(ctx)
+	if d == nil {
+		// A cancelled denial says nothing about the docs, so it must not
+		// disable hints for the process.
+		if ctx.Err() == nil {
+			p.hintDocsFailed.fail(epoch)
+		}
+
+		return apiref.Hint{}
+	}
+
+	return d.Hint(v)
+}
+
+// loadDocs returns the documentation, or nil when none is wired or loadable.
+func (p *githubProvider) loadDocs(ctx context.Context) *githubhardening.OperationDocs {
+	if p.docs == nil {
+		return nil
+	}
+
+	return p.docs.Get(ctx)
 }

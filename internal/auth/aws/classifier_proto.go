@@ -127,9 +127,9 @@ func ClassifyOperation(model *ServiceModel, v authreq.View, parsed ParsedHost) (
 	case ProtocolAWSQuery, ProtocolEC2Query:
 		return single(classifyQuery(model, v))
 	case ProtocolUnknown:
-		return nil, fmt.Errorf("%w: unknown service protocol", ErrClassifierUnknownOp)
+		return nil, fmt.Errorf("%w: %w: unknown service protocol", ErrClassifierUnknownOp, ErrUnsupportedProtocol)
 	default:
-		return nil, fmt.Errorf("%w: unsupported protocol %v", ErrClassifierUnknownOp, model.Protocol)
+		return nil, fmt.Errorf("%w: %w: %v", ErrClassifierUnknownOp, ErrUnsupportedProtocol, model.Protocol)
 	}
 }
 

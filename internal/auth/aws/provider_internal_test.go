@@ -982,3 +982,45 @@ func TestProvider_AuthorizeAction_bucketTrailingSlashListsTheBucket(t *testing.T
 		})
 	}
 }
+
+func TestProvider_AuthorizeAction_noMatchCarriesUnmatchedMarker(t *testing.T) {
+	t.Parallel()
+	p := &Provider{
+		models:    &fakeArchive{models: []*ServiceModel{s3MinModel(t)}, err: nil},
+		resolver:  &fakeResolver{actions: []string{"s3:ListBuckets"}, source: SourceServiceRef},
+		evaluator: &fakeEvaluator{allowed: map[string]bool{"s3:ListBuckets": true}, err: nil},
+		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
+	}
+	v := mustProviderView(t, http.MethodPost, "https://s3.us-east-1.amazonaws.com/foo")
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	err := p.AuthorizeAction(t.Context(), v, raw)
+	var um *authreq.UnmatchedRequestError
+	if !errors.As(err, &um) {
+		t.Fatalf("want UnmatchedRequestError, got %v", err)
+	}
+	if !errors.Is(err, ErrActionUnresolved) {
+		t.Error("identity must still be ErrActionUnresolved")
+	}
+	if um.Service != "s3" {
+		t.Errorf("Service = %q", um.Service)
+	}
+}
+
+func TestProvider_AuthorizeAction_unsupportedProtocolIsNotMarked(t *testing.T) {
+	t.Parallel()
+	p := &Provider{
+		models:    &fakeArchive{models: []*ServiceModel{{EndpointPrefix: "s3", Protocol: ProtocolUnknown}}, err: nil},
+		resolver:  &fakeResolver{actions: []string{"s3:ListBuckets"}, source: SourceServiceRef},
+		evaluator: &fakeEvaluator{allowed: map[string]bool{"s3:ListBuckets": true}, err: nil},
+		policyARN: "arn:aws:iam::aws:policy/SecurityAudit",
+	}
+	v := mustProviderView(t, http.MethodGet, "https://s3.us-east-1.amazonaws.com/")
+	raw := awsToolCall(`{"aws_auth":{"service":"s3","region":"us-east-1"}}`)
+	err := p.AuthorizeAction(t.Context(), v, raw)
+	if _, ok := errors.AsType[*authreq.UnmatchedRequestError](err); ok {
+		t.Fatalf("an unsupported protocol must not be marked unmatched: %v", err)
+	}
+	if !errors.Is(err, ErrActionUnresolved) {
+		t.Errorf("want ErrActionUnresolved, got %v", err)
+	}
+}

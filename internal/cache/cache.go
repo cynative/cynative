@@ -140,9 +140,24 @@ func NewTableCache[T any](
 	unmarshal func([]byte) (*T, error),
 	admit func(*T) error,
 ) *TTLCache[T] {
+	return NewNamedCache(cfg, "table", fetch, distill, serialize, unmarshal, admit)
+}
+
+// NewNamedCache is NewTableCache with the on-disk file stem chosen by the
+// caller: it persists <name>.json and <name>.meta under cfg.Dir, so two caches
+// can share one directory.
+func NewNamedCache[T any](
+	cfg Config,
+	name string,
+	fetch func(ctx context.Context) ([]byte, error),
+	distill func(raw []byte) (*T, error),
+	serialize func(*T) []byte,
+	unmarshal func([]byte) (*T, error),
+	admit func(*T) error,
+) *TTLCache[T] {
 	return &TTLCache[T]{ //nolint:exhaustruct // mu/loaded/data zero-valued by design.
-		DataPath: filepath.Join(cfg.Dir, "table.json"),
-		MetaPath: filepath.Join(cfg.Dir, "table.meta"),
+		DataPath: filepath.Join(cfg.Dir, name+".json"),
+		MetaPath: filepath.Join(cfg.Dir, name+".meta"),
 		TTL:      cfg.TTL,
 		Clock:    cfg.Clock,
 		Fetch: func(ctx context.Context) ([]byte, error) {

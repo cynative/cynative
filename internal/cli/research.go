@@ -635,10 +635,13 @@ func (d *deps) buildProviders(
 	return providers, views
 }
 
-// buildToolSet builds the approval-wrapped tool set (http_request + code_execution)
-// from the given providers, egress policy, config, flags, verbose writer, and audit
-// sink. egress goes to http_request, which is where a model request picks its
-// route.
+// extraTools counts the tools added after the primitives: code_execution and api_reference.
+const extraTools = 2
+
+// buildToolSet builds the tool set from the given providers, egress policy, config,
+// flags, verbose writer, and audit sink: approval-wrapped http_request and
+// code_execution, plus the unwrapped api_reference lookup.
+// egress goes to http_request, which is where a model request picks its route.
 func (d *deps) buildToolSet(
 	providers []auth.Provider,
 	egress *auth.Egress,
@@ -662,12 +665,18 @@ func (d *deps) buildToolSet(
 
 	// Approval-wrap every primitive plus the code tool. With --auto-approve the
 	// prompter prints and approves each call without pausing.
-	toolSet := make([]schema.InvokableTool, 0, len(primitives)+1)
+	toolSet := make([]schema.InvokableTool, 0, len(primitives)+extraTools)
 	for _, p := range primitives {
 		toolSet = append(toolSet, tools.NewApprovalTool(p, prompter, cfg.RenderStyle))
 	}
 
-	return append(toolSet, tools.NewApprovalTool(codeTool, prompter, cfg.RenderStyle)), nil
+	// api_reference reads public vendor metadata and sends no credentials, so it
+	// runs without an approval prompt, like the orchestration tools, and is not
+	// exposed inside code_execution.
+	return append(toolSet,
+		tools.NewApprovalTool(codeTool, prompter, cfg.RenderStyle),
+		tools.NewAPIReferenceTool(providers),
+	), nil
 }
 
 // interactiveLoop runs the follow-up prompt loop until the user exits or EOF.

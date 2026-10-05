@@ -6,7 +6,9 @@ Single static Go binary, no server, no external state.
 
 - **CLI** - interactive session or `-p` single-task mode.
 - **Agent loop** - drives the model, bounded by iteration and token limits.
-- **Tools** - `http_request`, `code_execution`, `verify_findings`.
+- **Tools** - `http_request`, `code_execution`, `verify_findings`,
+  `api_reference`. The last is a read-only lookup of public API metadata:
+  no credentials, no approval prompt, and not reachable from `code_execution`.
 - **Action gate** - resolves each call to its required IAM actions and
   authorizes against the configured policy before credentials are attached.
   Fails closed.

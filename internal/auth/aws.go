@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4signer "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 
+	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 )
@@ -68,11 +69,14 @@ type awsProvider struct {
 	cfg            aws.Config
 	signHTTP       signHTTPFunc
 	actionProvider *awshardening.Provider
+	docs           *awshardening.Documenter
 }
 
 var (
 	_ Provider         = (*awsProvider)(nil)
 	_ ActionAuthorizer = (*awsProvider)(nil)
+
+	_ OperationDocumenter = (*awsProvider)(nil)
 )
 
 // newAWSProvider constructs an AWS provider with a closure that performs the
@@ -96,7 +100,27 @@ func (p *awsProvider) Name() string {
 func (p *awsProvider) Description() string {
 	return "AWS API authentication (via AWS SDK). Discovers credentials from " +
 		"environment variables, ~/.aws/credentials, or IAM roles. Signs requests using SigV4. " +
-		"Requires aws_auth field."
+		"Requires aws_auth field." +
+		" For an operation's request template and response format, call the api_reference tool."
+}
+
+// Reference answers an api_reference lookup from the AWS model archive. It
+// never touches the policy or the credentials.
+func (p *awsProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
+	if p.docs == nil {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: "AWS API metadata is not configured"}
+	}
+
+	return p.docs.Reference(ctx, q)
+}
+
+// Hint suggests operations for a request the gate matched to none.
+func (p *awsProvider) Hint(ctx context.Context, v authreq.View, e *authreq.UnmatchedRequestError) apiref.Hint {
+	if p.docs == nil {
+		return apiref.Hint{}
+	}
+
+	return p.docs.Hint(ctx, v, e.Service)
 }
 
 func (p *awsProvider) InjectAuth(req *http.Request, args authreq.ProviderArgs) error {

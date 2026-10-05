@@ -585,3 +585,13 @@ func TestClassifyOperation_VirtualHostedSeparatorsOnlyIsObjectRead(t *testing.T)
 		t.Errorf("ops = %v, want [GetObject]", ops)
 	}
 }
+
+func TestClassifyOperation_UnsupportedProtocolSentinel(t *testing.T) {
+	t.Parallel()
+	for _, p := range []Protocol{ProtocolUnknown, Protocol(99)} {
+		_, err := ClassifyOperation(&ServiceModel{Protocol: p}, authreq.View{}, ParsedHost{})
+		if !errors.Is(err, ErrUnsupportedProtocol) || !errors.Is(err, ErrClassifierUnknownOp) {
+			t.Errorf("protocol %v: %v", p, err)
+		}
+	}
+}

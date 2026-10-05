@@ -1,0 +1,596 @@
+{
+ "components": {
+  "headers": {
+   "link": {
+    "example": "<https://api.github.com/resource?page=2>; rel=\"next\", <https://api.github.com/resource?page=5>; rel=\"last\"",
+    "schema": {
+     "type": "string"
+    }
+   }
+  },
+  "parameters": {
+   "direction": {
+    "description": "The direction to sort the results by.",
+    "in": "query",
+    "name": "direction",
+    "required": false,
+    "schema": {
+     "default": "desc",
+     "enum": [
+      "asc",
+      "desc"
+     ],
+     "type": "string"
+    }
+   },
+   "labels": {
+    "description": "A list of comma separated label names. Example: `bug,ui,@high`",
+    "in": "query",
+    "name": "labels",
+    "required": false,
+    "schema": {
+     "type": "string"
+    }
+   },
+   "owner": {
+    "description": "The account owner of the repository. The name is not case sensitive.",
+    "in": "path",
+    "name": "owner",
+    "required": true,
+    "schema": {
+     "type": "string"
+    }
+   },
+   "page": {
+    "description": "The page number of the results to fetch. For more information, see \"[Using pagination in the REST API](https://docs.github.com/rest/using-the-rest-api/using-pagination-in-the-rest-api).\"",
+    "in": "query",
+    "name": "page",
+    "schema": {
+     "default": 1,
+     "type": "integer"
+    }
+   },
+   "per-page": {
+    "description": "The number of results per page (max 100). For more information, see \"[Using pagination in the REST API](https://docs.github.com/rest/using-the-rest-api/using-pagination-in-the-rest-api).\"",
+    "in": "query",
+    "name": "per_page",
+    "schema": {
+     "default": 30,
+     "type": "integer"
+    }
+   },
+   "repo": {
+    "description": "The name of the repository without the `.git` extension. The name is not case sensitive.",
+    "in": "path",
+    "name": "repo",
+    "required": true,
+    "schema": {
+     "type": "string"
+    }
+   },
+   "since": {
+    "description": "Only show results that were last updated after the given time. This is a timestamp in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format: `YYYY-MM-DDTHH:MM:SSZ`.",
+    "in": "query",
+    "name": "since",
+    "required": false,
+    "schema": {
+     "format": "date-time",
+     "type": "string"
+    }
+   }
+  },
+  "schemas": {}
+ },
+ "info": {
+  "title": "GitHub v3 REST API",
+  "version": "1.1.4"
+ },
+ "openapi": "3.0.3",
+ "paths": {
+  "/markdown": {
+   "post": {
+    "description": "Depending on what is rendered in the Markdown, you may need to provide additional token scopes for labels, such as `issues:read` or `pull_requests:read`.",
+    "externalDocs": {
+     "description": "API method documentation",
+     "url": "https://docs.github.com/rest/markdown/markdown#render-a-markdown-document"
+    },
+    "operationId": "markdown/render",
+    "parameters": [],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "examples": {
+        "default": {
+         "summary": "Rendering markdown",
+         "value": {
+          "text": "Hello **world**"
+         }
+        }
+       },
+       "schema": {
+        "properties": {
+         "context": {
+          "description": "The repository context to use when creating references in `gfm` mode.  For example, setting `context` to `octo-org/octo-repo` will change the text `#42` into an HTML link to issue 42 in the `octo-org/octo-repo` repository.",
+          "type": "string"
+         },
+         "mode": {
+          "default": "markdown",
+          "description": "The rendering mode.",
+          "enum": [
+           "markdown",
+           "gfm"
+          ],
+          "example": "markdown",
+          "type": "string"
+         },
+         "text": {
+          "description": "The Markdown text to render in HTML.",
+          "type": "string"
+         }
+        },
+        "required": [
+         "text"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "text/html": {}
+      },
+      "description": "Response",
+      "headers": {
+       "Content-Length": {
+        "example": "279",
+        "schema": {
+         "type": "string"
+        }
+       },
+       "Content-Type": {
+        "$ref": "#/components/headers/content-type"
+       },
+       "X-CommonMarker-Version": {
+        "$ref": "#/components/headers/x-common-marker-version"
+       }
+      }
+     },
+     "304": {
+      "$ref": "#/components/responses/not_modified"
+     }
+    },
+    "summary": "Render a Markdown document",
+    "tags": [
+     "markdown"
+    ],
+    "x-github": {
+     "category": "markdown",
+     "enabledForGitHubApps": true,
+     "githubCloudOnly": false,
+     "subcategory": "markdown"
+    }
+   }
+  },
+  "/repos/{owner}/{repo}": {
+   "get": {
+    "description": "The `parent` and `source` objects are present when the repository is a fork. `parent` is the repository this repository was forked from, `source` is the ultimate source for the network.\n\n> [!NOTE]\n> - In order to see the `security_and_analysis` block for a repository you must have admin permissions for the repository or be an owner or security manager for the organization that owns the repository. For more information, see \"[Managing security managers in your organization](https://docs.github.com/organizations/managing-peoples-access-to-your-organization-with-roles/managing-security-managers-in-your-organization).\"\n> - To view merge-related settings, you must have the `contents:read` and `contents:write` permissions.",
+    "externalDocs": {
+     "description": "API method documentation",
+     "url": "https://docs.github.com/rest/repos/repos#get-a-repository"
+    },
+    "operationId": "repos/get",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/owner"
+     },
+     {
+      "$ref": "#/components/parameters/repo"
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {}
+      },
+      "description": "Response"
+     },
+     "301": {
+      "$ref": "#/components/responses/moved_permanently"
+     },
+     "403": {
+      "$ref": "#/components/responses/forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/not_found"
+     }
+    },
+    "summary": "Get a repository",
+    "tags": [
+     "repos"
+    ],
+    "x-github": {
+     "category": "repos",
+     "enabledForGitHubApps": true,
+     "githubCloudOnly": false,
+     "subcategory": "repos"
+    }
+   }
+  },
+  "/repos/{owner}/{repo}/issues": {
+   "get": {
+    "description": "List issues in a repository. Only open issues will be listed.\n\n> [!NOTE]\n> GitHub's REST API considers every pull request an issue, but not every issue is a pull request. For this reason, \"Issues\" endpoints may return both issues and pull requests in the response. You can identify pull requests by the `pull_request` key. Be aware that the `id` of a pull request returned from \"Issues\" endpoints will be an _issue id_. To find out the pull request id, use the \"[List pull requests](https://docs.github.com/rest/pulls/pulls#list-pull-requests)\" endpoint.\n\nThis endpoint supports the following custom media types. For more information, see \"[Media types](https://docs.github.com/rest/using-the-rest-api/getting-started-with-the-rest-api#media-types).\"\n\n- **`application/vnd.github.raw+json`**: Returns the raw markdown body. Response will include `body`. This is the default if you do not pass any specific media type.\n- **`application/vnd.github.text+json`**: Returns a text only representation of the markdown body. Response will include `body_text`.\n- **`application/vnd.github.html+json`**: Returns HTML rendered from the body's markdown. Response will include `body_html`.\n- **`application/vnd.github.full+json`**: Returns raw, text, and HTML representations. Response will include `body`, `body_text`, and `body_html`.",
+    "externalDocs": {
+     "description": "API method documentation",
+     "url": "https://docs.github.com/rest/issues/issues#list-repository-issues"
+    },
+    "operationId": "issues/list-for-repo",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/owner"
+     },
+     {
+      "$ref": "#/components/parameters/repo"
+     },
+     {
+      "description": "If an `integer` is passed, it should refer to a milestone by its `number` field. If the string `*` is passed, issues with any milestone are accepted. If the string `none` is passed, issues without milestones are returned.",
+      "in": "query",
+      "name": "milestone",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "Indicates the state of the issues to return.",
+      "in": "query",
+      "name": "state",
+      "required": false,
+      "schema": {
+       "default": "open",
+       "enum": [
+        "open",
+        "closed",
+        "all"
+       ],
+       "type": "string"
+      }
+     },
+     {
+      "description": "Can be the name of a user. Pass in `none` for issues with no assigned user, and `*` for issues assigned to any user.",
+      "in": "query",
+      "name": "assignee",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "Can be the name of an issue type. If the string `*` is passed, issues with any type are accepted. If the string `none` is passed, issues without type are returned.",
+      "in": "query",
+      "name": "type",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "The user that created the issue.",
+      "in": "query",
+      "name": "creator",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "A user that's mentioned in the issue.",
+      "in": "query",
+      "name": "mentioned",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "description": "A comma-separated list of issue field filters in `field_slug:value` format.\nOnly issues matching all specified field values are returned.\nRequires issue fields to be enabled for the repository. Issue fields are\nnot available for user-owned repositories, and field availability for\norganization-owned public repositories depends on the organization's\nvisibility settings. For example, `priority:Urgent,severity:High` filters\nissues where the `priority` field is `Urgent` AND the `severity` field is\n`High`.",
+      "in": "query",
+      "name": "issue_field_values",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "$ref": "#/components/parameters/labels"
+     },
+     {
+      "description": "What to sort results by.",
+      "in": "query",
+      "name": "sort",
+      "required": false,
+      "schema": {
+       "default": "created",
+       "enum": [
+        "created",
+        "updated",
+        "comments"
+       ],
+       "type": "string"
+      }
+     },
+     {
+      "$ref": "#/components/parameters/direction"
+     },
+     {
+      "$ref": "#/components/parameters/since"
+     },
+     {
+      "$ref": "#/components/parameters/per-page"
+     },
+     {
+      "$ref": "#/components/parameters/page"
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {}
+      },
+      "description": "Response",
+      "headers": {
+       "Link": {
+        "$ref": "#/components/headers/link"
+       }
+      }
+     },
+     "301": {
+      "$ref": "#/components/responses/moved_permanently"
+     },
+     "404": {
+      "$ref": "#/components/responses/not_found"
+     },
+     "422": {
+      "$ref": "#/components/responses/validation_failed"
+     }
+    },
+    "summary": "List repository issues",
+    "tags": [
+     "issues"
+    ],
+    "x-github": {
+     "category": "issues",
+     "enabledForGitHubApps": true,
+     "githubCloudOnly": false,
+     "subcategory": "issues"
+    }
+   },
+   "post": {
+    "description": "Any user with pull access to a repository can create an issue. If [issues are disabled in the repository](https://docs.github.com/articles/disabling-issues/), the API returns a `410 Gone` status.\n\nThis endpoint triggers [notifications](https://docs.github.com/github/managing-subscriptions-and-notifications-on-github/about-notifications). Creating content too quickly using this endpoint may result in secondary rate limiting. For more information, see \"[Rate limits for the API](https://docs.github.com/rest/using-the-rest-api/rate-limits-for-the-rest-api#about-secondary-rate-limits)\"\nand \"[Best practices for using the REST API](https://docs.github.com/rest/guides/best-practices-for-using-the-rest-api).\"\n\nThis endpoint supports the following custom media types. For more information, see \"[Media types](https://docs.github.com/rest/using-the-rest-api/getting-started-with-the-rest-api#media-types).\"\n\n- **`application/vnd.github.raw+json`**: Returns the raw markdown body. Response will include `body`. This is the default if you do not pass any specific media type.\n- **`application/vnd.github.text+json`**: Returns a text only representation of the markdown body. Response will include `body_text`.\n- **`application/vnd.github.html+json`**: Returns HTML rendered from the body's markdown. Response will include `body_html`.\n- **`application/vnd.github.full+json`**: Returns raw, text, and HTML representations. Response will include `body`, `body_text`, and `body_html`.",
+    "externalDocs": {
+     "description": "API method documentation",
+     "url": "https://docs.github.com/rest/issues/issues#create-an-issue"
+    },
+    "operationId": "issues/create",
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/owner"
+     },
+     {
+      "$ref": "#/components/parameters/repo"
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "examples": {
+        "default": {
+         "value": {
+          "assignees": [
+           "octocat"
+          ],
+          "body": "I'm having a problem with this.",
+          "labels": [
+           "bug"
+          ],
+          "milestone": 1,
+          "title": "Found a bug"
+         }
+        }
+       },
+       "schema": {
+        "properties": {
+         "assignee": {
+          "description": "Login for the user that this issue should be assigned to. _NOTE: Only users with push access can set the assignee for new issues. The assignee is silently dropped otherwise. **This field is closing down.**_",
+          "nullable": true,
+          "type": "string"
+         },
+         "assignees": {
+          "description": "Logins for Users to assign to this issue. _NOTE: Only users with push access can set assignees for new issues. Assignees are silently dropped otherwise._",
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         },
+         "body": {
+          "description": "The contents of the issue.",
+          "type": "string"
+         },
+         "issue_field_values": {
+          "description": "An array of issue field values to set on this issue. Each field value must include the field ID and the value to set. Issue fields are only available for organization-owned repositories with the feature enabled. Field values are silently dropped otherwise.",
+          "items": {
+           "additionalProperties": false,
+           "properties": {
+            "field_id": {
+             "description": "The ID of the issue field to set",
+             "type": "integer"
+            },
+            "value": {
+             "description": "The value to set for the field. For multi-select fields, provide an array of option names.",
+             "oneOf": [
+              {
+               "type": "string"
+              },
+              {
+               "type": "number"
+              },
+              {
+               "items": {
+                "type": "string"
+               },
+               "type": "array"
+              }
+             ]
+            }
+           },
+           "required": [
+            "field_id",
+            "value"
+           ],
+           "type": "object"
+          },
+          "type": "array"
+         },
+         "labels": {
+          "description": "Labels to associate with this issue. _NOTE: Only users with push access can set labels for new issues. Labels are silently dropped otherwise._",
+          "items": {
+           "oneOf": [
+            {
+             "type": "string"
+            },
+            {
+             "properties": {
+              "color": {
+               "nullable": true,
+               "type": "string"
+              },
+              "description": {
+               "nullable": true,
+               "type": "string"
+              },
+              "id": {
+               "type": "integer"
+              },
+              "name": {
+               "type": "string"
+              }
+             },
+             "type": "object"
+            }
+           ]
+          },
+          "type": "array"
+         },
+         "milestone": {
+          "nullable": true,
+          "oneOf": [
+           {
+            "type": "string"
+           },
+           {
+            "description": "The `number` of the milestone to associate this issue with. _NOTE: Only users with push access can set the milestone for new issues. The milestone is silently dropped otherwise._",
+            "type": "integer"
+           }
+          ]
+         },
+         "parent_issue_id": {
+          "description": "The id of the parent issue to add this issue to as a sub-issue. _NOTE: Only users with triage access to both the parent issue's repository and this repository can set the parent issue._",
+          "type": "integer"
+         },
+         "title": {
+          "description": "The title of the issue.",
+          "oneOf": [
+           {
+            "type": "string"
+           },
+           {
+            "type": "integer"
+           }
+          ]
+         },
+         "type": {
+          "description": "The name of the issue type to associate with this issue. _NOTE: Only users with push access can set the type for new issues. The type is silently dropped otherwise._",
+          "example": "Epic",
+          "nullable": true,
+          "type": "string"
+         }
+        },
+        "required": [
+         "title"
+        ],
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "201": {
+      "content": {
+       "application/json": {}
+      },
+      "description": "Response",
+      "headers": {
+       "Location": {
+        "example": "https://api.github.com/repos/octocat/Hello-World/issues/1347",
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "400": {
+      "$ref": "#/components/responses/bad_request"
+     },
+     "403": {
+      "$ref": "#/components/responses/forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/not_found"
+     },
+     "410": {
+      "$ref": "#/components/responses/gone"
+     },
+     "422": {
+      "$ref": "#/components/responses/validation_failed"
+     },
+     "503": {
+      "$ref": "#/components/responses/service_unavailable"
+     }
+    },
+    "summary": "Create an issue",
+    "tags": [
+     "issues"
+    ],
+    "x-github": {
+     "category": "issues",
+     "enabledForGitHubApps": true,
+     "githubCloudOnly": false,
+     "subcategory": "issues",
+     "triggersNotification": true
+    },
+    "x-github-breaking-changes": [
+     {
+      "changeset": "remove_singular_assignee_from_issues_and_pull_requests",
+      "patch": {
+       "requestBody": {
+        "content": {
+         "application/json": {
+          "schema": {
+           "properties": {
+            "assignee": null
+           }
+          }
+         }
+        }
+       }
+      },
+      "version": "2026-03-10"
+     }
+    ]
+   }
+  }
+ }
+}

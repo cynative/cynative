@@ -252,6 +252,26 @@ func (a *ModelArchive) Resolve(ctx context.Context, prefix string) ([]*ServiceMo
 	return out, nil
 }
 
+// RawModel returns the cached Smithy bytes of the model directory dir and the
+// SHA-256 of the archive they came from. It serves documentation, never
+// classification, and shares the archive the gate loaded. An unknown dir
+// wraps ErrUnsupportedService.
+func (a *ModelArchive) RawModel(ctx context.Context, dir string) ([]byte, string, error) {
+	idx, err := a.load(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, entries := range idx.Prefixes {
+		for _, e := range entries {
+			if e.Dir == dir {
+				raw, extractErr := extractModel(a.raw, e.Dir, e.Version)
+				return raw, idx.SHA256, extractErr
+			}
+		}
+	}
+	return nil, "", fmt.Errorf("%w: model %q", ErrUnsupportedService, dir)
+}
+
 func (a *ModelArchive) modelFor(idx *archiveIndex, dir, version string) (*ServiceModel, error) {
 	if v, ok := a.memo.Load(dir); ok {
 		return v.(*ServiceModel), nil //nolint:forcetypeassert,errcheck // memo only stores *ServiceModel.
