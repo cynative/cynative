@@ -416,6 +416,7 @@ func TestGithubProvider_AuthorizeAction_DotSegmentsDenied(t *testing.T) {
 	paths := []string{
 		"/repos/o/r/branches/x/../../../../../repos/o/r/secret-scanning/alerts",
 		"/repos/o/r/branches/x/%2e%2e/%2E%2e/%2e%2e/%2e%2e/%2e%2e/repos/o/r/secret-scanning/alerts",
+		"/repos/o/r/branches/x/..;/..;/..;/..;/..;/repos/o/r/secret-scanning/alerts",
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {

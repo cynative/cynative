@@ -90,6 +90,7 @@ func FuzzClassifyRequest(f *testing.F) {
 	f.Add(http.MethodGet, "/repos/o/r/commits/a/z/z/z")
 	f.Add(http.MethodGet, "/repos/o/r/branches/x/../../../../../users/octocat")
 	f.Add(http.MethodGet, "/repos/o/r/branches/x/%2e%2e/%2E%2e/%2e%2e/%2e%2e/%2e%2e/users/octocat")
+	f.Add(http.MethodGet, "/repos/o/r/branches/x/..;/..;/..;/..;/..;/user")
 	f.Add(http.MethodGet, "/")
 
 	f.Fuzz(func(t *testing.T, method, path string) {
