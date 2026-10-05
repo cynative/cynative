@@ -567,14 +567,24 @@ func (d *OperationDocs) Hint(v authreq.View) apiref.Hint {
 	return h
 }
 
-// hintTemplate rewrites a trailing {name} whose parameter is multi-segment to {name*}, so the matcher treats it as
-// the catch-all the gate does, which takes zero or more segments.
+// hintTemplate marks each multi-segment {name} the way the gate matches it: a
+// last one becomes {name*} (zero or more segments) and any other {name+} (one or
+// more). The hint matcher handles one greedy label per template, which covers
+// every template GitHub publishes; hints are advisory, so a template with two
+// only loses a hint.
 func (d *OperationDocs) hintTemplate(path string) string {
-	i := strings.LastIndex(path, "/")
-	last := path[i+1:]
-	name, ok := strings.CutSuffix(strings.TrimPrefix(last, "{"), "}")
-	if !ok || !strings.HasPrefix(last, "{") || !slices.Contains(d.MultiSegment, name) {
-		return path
+	segs := strings.Split(path, "/")
+	for i, s := range segs {
+		name, ok := strings.CutSuffix(strings.TrimPrefix(s, "{"), "}")
+		if !ok || !strings.HasPrefix(s, "{") || !slices.Contains(d.MultiSegment, name) {
+			continue
+		}
+		if i == len(segs)-1 {
+			segs[i] = "{" + name + "*}"
+		} else {
+			segs[i] = "{" + name + "+}"
+		}
 	}
-	return path[:i+1] + "{" + name + "*}"
+
+	return strings.Join(segs, "/")
 }

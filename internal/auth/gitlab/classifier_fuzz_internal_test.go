@@ -86,6 +86,8 @@ func FuzzClassifyRequest(f *testing.F) {
 	f.Add(http.MethodGet, "/api/v4/unknown/route")
 	f.Add(http.MethodHead, "/api/v4/projects/1/issues")
 	f.Add("FROBNICATE", "/api/v4/projects")
+	f.Add(http.MethodGet, "/api/v4/projects/./issues")
+	f.Add(http.MethodGet, "/api/v4/projects/%2e%2E/issues")
 
 	f.Fuzz(func(t *testing.T, method, path string) {
 		acc, err := ClassifyRequest(fuzzTable(t), method, path)

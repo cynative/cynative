@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 )
 
@@ -107,6 +108,10 @@ func ClassifyRequest(t *Table, method, escapedPath string) (Access, error) {
 	lvl, err := RequiredLevel(method, escapedPath)
 	if err != nil {
 		return Access{}, err
+	}
+	// GitLab resolves "." and ".." segments before it routes, so the path as sent can name a different operation.
+	if authreq.HasDotSegment(escapedPath) {
+		return Access{}, fmt.Errorf("%w: dot segment in %s %s", ErrUnclassifiable, method, escapedPath)
 	}
 	lookupMethod := strings.ToUpper(strings.TrimSpace(method))
 	if lookupMethod == http.MethodHead || lookupMethod == http.MethodOptions {

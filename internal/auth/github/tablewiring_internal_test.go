@@ -48,8 +48,8 @@ func TestTableCache_poisonedCacheRejected(t *testing.T) {
 	if tbl == nil {
 		t.Fatal("Get = nil, want the clean fetched table")
 	}
-	if r, ok := tbl.Lookup("GET", "/repos/o/r/secret-scanning/alerts"); !ok || r.Category != "secret-scanning" {
-		t.Fatalf("poisoned route survived: %+v ok=%v", r, ok)
+	if r := tbl.Lookup("GET", "/repos/o/r/secret-scanning/alerts"); len(r) != 1 || r[0].Category != "secret-scanning" {
+		t.Fatalf("poisoned route survived: %+v", r)
 	}
 }
 

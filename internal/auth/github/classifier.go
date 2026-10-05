@@ -20,11 +20,11 @@ var readOnlyPOSTPaths = map[string]bool{ //nolint:gochecknoglobals // immutable 
 	"/markdown/raw": true,
 }
 
-// Access is the classification of a request: the GitHub category/subcategory it
-// belongs to and the access level it requires.
+// Access is the classification of a request: every GitHub category/subcategory
+// it may run as (at least one) and the access level it requires.
 type Access struct {
-	Route Route
-	Level exposure.Level
+	Routes []Route
+	Level  exposure.Level
 }
 
 // IsGraphQLEndpoint reports whether path targets GitHub's GraphQL endpoint,
@@ -42,10 +42,11 @@ func RequiredLevel(method, path string) (exposure.Level, error) {
 	return methodLevel(method, path)
 }
 
-// ClassifyRequest resolves a REST request to its (Route, required Level). It
-// derives the level (RequiredLevel) and looks the route up in the table — a route
-// absent from the table fails closed (ErrUnclassifiable). Secret-scanning routes
-// are protected by the admission guard and the secret-scanning:none baseline.
+// ClassifyRequest resolves a REST request to the routes it may run as and its
+// required Level. It derives the level (RequiredLevel) and looks the route set up
+// in the table; a request that matches no route fails closed (ErrUnclassifiable).
+// Secret-scanning routes are protected by the admission guard and the
+// secret-scanning:none baseline.
 func ClassifyRequest(t *Table, method, path string) (Access, error) {
 	method = strings.ToUpper(strings.TrimSpace(method))
 
@@ -54,16 +55,22 @@ func ClassifyRequest(t *Table, method, path string) (Access, error) {
 		return Access{}, err
 	}
 
+	// GitHub resolves "." and ".." segments before it routes, so the path as sent can name a different operation
+	// from the one served. This is not an unmatched route, so it carries no api_reference hint.
+	if authreq.HasDotSegment(path) {
+		return Access{}, fmt.Errorf("%w: dot segment in %s %s", ErrUnclassifiable, method, path)
+	}
+
 	// HEAD and OPTIONS are read probes of the same resource a GET would return.
 	lookupMethod := method
 	if method == http.MethodHead || method == http.MethodOptions {
 		lookupMethod = http.MethodGet
 	}
-	route, ok := t.Lookup(lookupMethod, path)
-	if !ok {
+	routes := t.Lookup(lookupMethod, path)
+	if routes == nil {
 		return Access{}, &authreq.UnmatchedRequestError{Err: fmt.Errorf("%w: %s %s", ErrUnclassifiable, method, path)}
 	}
-	return Access{Route: route, Level: lvl}, nil
+	return Access{Routes: routes, Level: lvl}, nil
 }
 
 // methodLevel maps an HTTP method to its required level, honoring the read-only

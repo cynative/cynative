@@ -55,10 +55,13 @@ func TestClassifyRequest_NoOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClassifyRequest: unexpected error: %v", err)
 	}
-	if got.Route.Category != "repos" {
+	if len(got.Routes) != 1 {
+		t.Fatalf("routes = %+v, want one", got.Routes)
+	}
+	if got.Routes[0].Category != "repos" {
 		t.Errorf(
 			"category = %q, want %q (user-controlled segment must not override table)",
-			got.Route.Category, "repos",
+			got.Routes[0].Category, "repos",
 		)
 	}
 }

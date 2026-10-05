@@ -331,3 +331,101 @@ func TestAuditResponse_dispatcher(t *testing.T) {
 		t.Errorf("dispatcher must run the auditor, got %q", buf.String())
 	}
 }
+
+const shadowProvFixtureOpenAPI = `{"components":{"parameters":{
+	"branch":{"name":"branch","x-multi-segment":true},"ref":{"name":"ref","x-multi-segment":true}}},"paths":{
+	"/repos/{owner}/{repo}/branches/{branch}": {"get": {"x-github": {"category":"branches","subcategory":"branches"}}},
+	"/repos/{owner}/{repo}/branches/{branch}/protection": {"get": {"x-github": {"category":"branches","subcategory":"branch-protection"}}},
+	"/repos/{owner}/{repo}/commits/{ref}": {"get": {"x-github": {"category":"commits","subcategory":"commits"}}},
+	"/repos/{owner}/{repo}/commits/{ref}/check-runs": {"get": {"x-github": {"category":"checks","subcategory":"runs"}}},
+	"/repos/{owner}/{repo}/commits/{ref}/secret-scanning": {"get": {"x-github": {"category":"secret-scanning","subcategory":"secret-scanning"}}},
+	"/user/codespaces/secrets/{secret_name}": {"get": {"x-github": {"category":"codespaces","subcategory":"secrets"}}},
+	"/user/codespaces/{codespace_name}/machines": {"get": {"x-github": {"category":"codespaces","subcategory":"machines"}}}
+}}`
+
+func shadowFetch(context.Context) ([]byte, error) { return []byte(shadowProvFixtureOpenAPI), nil }
+
+func TestGithubProvider_AuthorizeAction_EveryRouteCeiling(t *testing.T) {
+	t.Parallel()
+
+	base := githubhardening.BaselineExposure()
+	with := func(key string) exposure.Exposure {
+		return exposure.MergeExposure(base, exposure.Exposure{key: exposure.LevelNone})
+	}
+	const api = "https://api.github.com"
+	cases := []struct {
+		name     string
+		exposure exposure.Exposure
+		path     string
+		allowed  bool
+	}{
+		{"protection denied", with("branches/branch-protection"), "/repos/o/r/branches/main/protection", false},
+		{
+			"protection denied, slashed branch", with("branches/branch-protection"),
+			"/repos/o/r/branches/feat/x/protection", false,
+		},
+		{"branch read still allowed", with("branches/branch-protection"), "/repos/o/r/branches/feat/x", true},
+		{
+			"protection allowed when branches denied", with("branches/branches"),
+			"/repos/o/r/branches/feat/x/protection", true,
+		},
+		{"branch denied when branches denied", with("branches/branches"), "/repos/o/r/branches/main", false},
+		{"check runs denied", with("checks"), "/repos/o/r/commits/main/check-runs", false},
+		{"check runs denied, one trailing slash", with("checks"), "/repos/o/r/commits/main/check-runs/", false},
+		{"two trailing slashes are a commit", with("checks"), "/repos/o/r/commits/main/check-runs//", true},
+		{"commit allowed", with("checks"), "/repos/o/r/commits/main", true},
+		{"shadowed secret scanning denied", base, "/repos/o/r/commits/main/secret-scanning", false},
+		{"tie denied by the first route", with("codespaces/secrets"), "/user/codespaces/secrets/machines", false},
+		{"tie denied by the second route", with("codespaces/machines"), "/user/codespaces/secrets/machines", false},
+		{"tie allowed when both allow", base, "/user/codespaces/secrets/machines", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			p, _ := testGithubProvider(t, c.exposure, shadowFetch)
+			err := p.AuthorizeAction(context.Background(), actionView(t, http.MethodGet, api+c.path), noArgs())
+			if c.allowed && err != nil {
+				t.Fatalf("AuthorizeAction = %v, want nil", err)
+			}
+			if !c.allowed && !errors.Is(err, githubhardening.ErrExposureExceeded) {
+				t.Fatalf("AuthorizeAction = %v, want ErrExposureExceeded", err)
+			}
+		})
+	}
+}
+
+func TestGithubProvider_AuthorizeAction_ShadowedDenialText(t *testing.T) {
+	t.Parallel()
+
+	exp := exposure.MergeExposure(githubhardening.BaselineExposure(),
+		exposure.Exposure{"branches/branch-protection": exposure.LevelNone})
+	p, _ := testGithubProvider(t, exp, shadowFetch)
+	err := p.AuthorizeAction(context.Background(),
+		actionView(t, http.MethodGet, "https://api.github.com/repos/o/r/branches/main/protection"), noArgs())
+	want := `github_hardening: request exceeds configured exposure: ` +
+		`GET /repos/o/r/branches/main/protection needs read on "branches" (ceiling none)`
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
+func TestGithubProvider_AuthorizeAction_DotSegmentsDenied(t *testing.T) {
+	t.Parallel()
+
+	const api = "https://api.github.com"
+	paths := []string{
+		"/repos/o/r/branches/x/../../../../../repos/o/r/secret-scanning/alerts",
+		"/repos/o/r/branches/x/%2e%2e/%2E%2e/%2e%2e/%2e%2e/%2e%2e/repos/o/r/secret-scanning/alerts",
+		"/repos/o/r/branches/x/..;/..;/..;/..;/..;/repos/o/r/secret-scanning/alerts",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+			p, _ := testGithubProvider(t, githubhardening.BaselineExposure(), shadowFetch)
+			err := p.AuthorizeAction(context.Background(), actionView(t, http.MethodGet, api+path), noArgs())
+			if !errors.Is(err, githubhardening.ErrUnclassifiable) {
+				t.Fatalf("AuthorizeAction = %v, want ErrUnclassifiable", err)
+			}
+		})
+	}
+}

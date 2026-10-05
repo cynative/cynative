@@ -9,11 +9,16 @@ import (
 	"github.com/cynative/cynative/internal/auth/exposure"
 )
 
-const fuzzMiniOpenAPI = `{"paths":{
+const fuzzMiniOpenAPI = `{"components":{"parameters":{
+  "branch":{"name":"branch","x-multi-segment":true},"ref":{"name":"ref","x-multi-segment":true},
+  "path":{"name":"path","x-multi-segment":true}}},"paths":{
   "/user": {"get": {"x-github": {"category":"users","subcategory":"users"}}},
   "/markdown": {"post": {"x-github": {"category":"markdown","subcategory":"markdown"}}},
   "/repos/{owner}/{repo}/issues": {"post": {"x-github": {"category":"issues","subcategory":"issues"}}},
-  "/repos/{owner}/{repo}/secret-scanning/alerts": {"get": {"x-github": {"category":"secret-scanning","subcategory":"secret-scanning"}}}
+  "/repos/{owner}/{repo}/secret-scanning/alerts": {"get": {"x-github": {"category":"secret-scanning","subcategory":"secret-scanning"}}},
+  "/repos/{owner}/{repo}/branches/{branch}": {"get": {"x-github": {"category":"branches","subcategory":"branches"}}},
+  "/repos/{owner}/{repo}/branches/{branch}/protection": {"get": {"x-github": {"category":"branches","subcategory":"branch-protection"}}},
+  "/repos/{owner}/{repo}/commits/{ref}/z/{path}/end": {"get": {"x-github": {"category":"two","subcategory":"suffix"}}}
 }}`
 
 //nolint:gochecknoglobals // fuzz table built once; immutable after DistillOpenAPI.
@@ -78,6 +83,15 @@ func FuzzClassifyRequest(f *testing.F) {
 	f.Add(http.MethodGet, "/nope")
 	f.Add(http.MethodGet, "/repos/o/r/secret-scanning/alerts")
 	f.Add("FOO", "/user")
+	f.Add(http.MethodGet, "/repos/o/r/branches/feat/x/protection")
+	f.Add(http.MethodGet, "/repos/o/r/branches/main/")
+	f.Add(http.MethodGet, "/repos/o/r/branches/main//")
+	f.Add(http.MethodGet, "/repos/o/r/commits/a/b/z/c/d/end")
+	f.Add(http.MethodGet, "/repos/o/r/commits/a/z/z/z")
+	f.Add(http.MethodGet, "/repos/o/r/branches/x/../../../../../users/octocat")
+	f.Add(http.MethodGet, "/repos/o/r/branches/x/%2e%2e/%2E%2e/%2e%2e/%2e%2e/%2e%2e/users/octocat")
+	f.Add(http.MethodGet, "/repos/o/r/branches/x/..;/..;/..;/..;/..;/user")
+	f.Add(http.MethodGet, "/")
 
 	f.Fuzz(func(t *testing.T, method, path string) {
 		acc, err := ClassifyRequest(fuzzTable(t), method, path)
@@ -88,8 +102,13 @@ func FuzzClassifyRequest(f *testing.F) {
 
 			return
 		}
-		if acc.Route.Category == "" {
-			t.Fatal("success with empty category")
+		if len(acc.Routes) == 0 {
+			t.Fatal("success with no routes")
+		}
+		for _, r := range acc.Routes {
+			if r.Category == "" {
+				t.Fatal("success with empty category")
+			}
 		}
 	})
 }
@@ -99,9 +118,15 @@ func FuzzLookup(f *testing.F) {
 	f.Add("GET", "/user")
 	f.Add("GET", "/unknown")
 	f.Add("GET", "/repos/o/r/contents/src/a/b.go")
+	f.Add("GET", "/repos/o/r/branches/feat/x/protection")
+	f.Add("GET", "/repos/o/r/branches/main/")
+	f.Add("GET", "/repos/o/r/branches/main//")
+	f.Add("GET", "/repos/o/r/commits/a/b/z/c/d/end")
+	f.Add("GET", "/repos/o/r/commits/a/z/z/z")
+	f.Add("GET", "/")
 
 	f.Fuzz(func(t *testing.T, method, path string) {
-		_, _ = fuzzTable(t).Lookup(method, path)
+		_ = fuzzTable(t).Lookup(method, path)
 	})
 }
 
