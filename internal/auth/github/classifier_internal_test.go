@@ -3,6 +3,7 @@ package github
 import (
 	"errors"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -82,8 +83,11 @@ func TestClassifyRequest_REST(t *testing.T) {
 			if got.Level != c.wantLevel {
 				t.Fatalf("ClassifyRequest(%q,%q) level=%v, want %v", c.method, c.path, got.Level, c.wantLevel)
 			}
-			if got.Route.Category != c.wantCat {
-				t.Fatalf("ClassifyRequest(%q,%q) cat=%q, want %q", c.method, c.path, got.Route.Category, c.wantCat)
+			if len(got.Routes) != 1 {
+				t.Fatalf("ClassifyRequest(%q,%q) routes=%+v, want one", c.method, c.path, got.Routes)
+			}
+			if got.Routes[0].Category != c.wantCat {
+				t.Fatalf("ClassifyRequest(%q,%q) cat=%q, want %q", c.method, c.path, got.Routes[0].Category, c.wantCat)
 			}
 		})
 	}
@@ -113,8 +117,11 @@ func TestClassifyRequest_HEAD_OPTIONS(t *testing.T) {
 			if got.Level != c.wantLevel {
 				t.Fatalf("level=%v, want %v", got.Level, c.wantLevel)
 			}
-			if got.Route.Category != c.wantCat {
-				t.Fatalf("category=%q, want %q", got.Route.Category, c.wantCat)
+			if len(got.Routes) != 1 {
+				t.Fatalf("routes=%+v, want one", got.Routes)
+			}
+			if got.Routes[0].Category != c.wantCat {
+				t.Fatalf("category=%q, want %q", got.Routes[0].Category, c.wantCat)
 			}
 		})
 	}
@@ -131,5 +138,34 @@ func TestClassifyRequest_NoTemplateIsUnmatched(t *testing.T) {
 	_, err = ClassifyRequest(tbl, "BREW", "/user")
 	if errors.As(err, &um) || !errors.Is(err, ErrUnclassifiable) {
 		t.Fatalf("an unrecognized method is not an unmatched route: %v", err)
+	}
+}
+
+func TestClassifyRequest_ShadowedRoutesAllMethodsReadAsGet(t *testing.T) {
+	t.Parallel()
+
+	tbl, err := DistillOpenAPI([]byte(shadowOpenAPI))
+	if err != nil {
+		t.Fatalf("DistillOpenAPI: %v", err)
+	}
+	for _, m := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
+		got, mErr := ClassifyRequest(tbl, m, "/repos/o/r/branches/main/protection")
+		if mErr != nil {
+			t.Fatalf("%s: %v", m, mErr)
+		}
+		if want := []Route{{"branches", "branch-protection"}}; !slices.Equal(got.Routes, want) {
+			t.Errorf("%s: routes = %+v, want %+v", m, got.Routes, want)
+		}
+	}
+	got, tieErr := ClassifyRequest(tbl, http.MethodGet, "/user/codespaces/secrets/machines")
+	if tieErr != nil {
+		t.Fatalf("tie: %v", tieErr)
+	}
+	if len(got.Routes) != 2 {
+		t.Errorf("tie routes = %+v, want two", got.Routes)
+	}
+	var unmatched *authreq.UnmatchedRequestError
+	if _, uErr := ClassifyRequest(tbl, http.MethodGet, "/b/x/"); !errors.As(uErr, &unmatched) {
+		t.Errorf("unmatched err = %v, want UnmatchedRequestError", uErr)
 	}
 }

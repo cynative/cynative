@@ -20,11 +20,11 @@ var readOnlyPOSTPaths = map[string]bool{ //nolint:gochecknoglobals // immutable 
 	"/markdown/raw": true,
 }
 
-// Access is the classification of a request: the GitHub category/subcategory it
-// belongs to and the access level it requires.
+// Access is the classification of a request: every GitHub category/subcategory
+// it may run as (at least one) and the access level it requires.
 type Access struct {
-	Route Route
-	Level exposure.Level
+	Routes []Route
+	Level  exposure.Level
 }
 
 // IsGraphQLEndpoint reports whether path targets GitHub's GraphQL endpoint,
@@ -42,7 +42,7 @@ func RequiredLevel(method, path string) (exposure.Level, error) {
 	return methodLevel(method, path)
 }
 
-// ClassifyRequest resolves a REST request to its (Route, required Level). It
+// ClassifyRequest resolves a REST request to the routes it may run as and its required Level. It
 // derives the level (RequiredLevel) and looks the route up in the table — a route
 // absent from the table fails closed (ErrUnclassifiable). Secret-scanning routes
 // are protected by the admission guard and the secret-scanning:none baseline.
@@ -59,11 +59,11 @@ func ClassifyRequest(t *Table, method, path string) (Access, error) {
 	if method == http.MethodHead || method == http.MethodOptions {
 		lookupMethod = http.MethodGet
 	}
-	route, ok := t.Lookup(lookupMethod, path)
-	if !ok {
+	routes := t.Lookup(lookupMethod, path)
+	if routes == nil {
 		return Access{}, &authreq.UnmatchedRequestError{Err: fmt.Errorf("%w: %s %s", ErrUnclassifiable, method, path)}
 	}
-	return Access{Route: route, Level: lvl}, nil
+	return Access{Routes: routes, Level: lvl}, nil
 }
 
 // methodLevel maps an HTTP method to its required level, honoring the read-only

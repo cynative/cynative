@@ -1,8 +1,10 @@
 package github
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -22,12 +24,12 @@ type Templ struct {
 // Table maps (method, concrete path) to a Route. It is built from the public
 // OpenAPI and is safe for concurrent reads (immutable after construction).
 type Table struct {
-	// byMethod indexes templates by upper-case method then by segment count, so a
-	// lookup only scans templates of the matching arity (plus catch-alls).
+	// byMethod indexes templates by upper-case method.
 	byMethod map[string][]Templ
 	// multiSegment is the set of parameter names (without braces) that carry
-	// x-multi-segment:true in the GitHub OpenAPI — these params may contain "/"
-	// and therefore act as greedy trailing catch-alls (e.g. "path", "basehead").
+	// x-multi-segment:true in the GitHub OpenAPI. These params may contain "/"
+	// and span segments wherever they sit in a template (e.g. "path", "basehead");
+	// a last one also takes zero segments.
 	multiSegment map[string]bool
 }
 
@@ -64,8 +66,8 @@ var httpMethods = map[string]bool{ //nolint:gochecknoglobals // immutable lookup
 // The x-multi-segment vendor extension (GitHub OpenAPI) marks path parameters
 // whose values may contain "/" (e.g. "path", "basehead", "ref"). These are
 // identified by scanning all JSON objects for {"x-multi-segment": true, "name":
-// "<param-name>"} and stored in Table.multiSegment so matchTemplate can treat
-// trailing {name} segments as greedy catch-alls.
+// "<param-name>"} and stored in Table.multiSegment so matchTemplate lets a
+// {name} segment span several request segments.
 func DistillOpenAPI(raw []byte) (*Table, error) {
 	// Parse once into a generic value so we can both extract the typed paths
 	// view and walk the full document for x-multi-segment annotations.
@@ -148,9 +150,9 @@ func walkAny(v any, out map[string]bool) {
 	}
 }
 
-// sortTemplates orders each method's templates deterministically (by joined
-// segments) so Lookup's equal-score tie-break is reproducible regardless of the
-// OpenAPI map iteration order.
+// sortTemplates orders each method's templates by joined segments so the
+// serialized table is reproducible regardless of the OpenAPI map iteration
+// order. Lookup does not depend on the order.
 func sortTemplates(byMethod map[string][]Templ) {
 	for m := range byMethod {
 		ts := byMethod[m]
@@ -175,68 +177,140 @@ func isParam(seg string) bool {
 	return strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}")
 }
 
-// Lookup resolves a concrete request to its Route, or false when no template
-// matches (the caller fails closed). Among matches the lowest score (fewest
-// param segments = most literal) wins; byMethod slices are sorted at build time
-// (DistillOpenAPI/UnmarshalTable), so equal-score ties resolve deterministically
-// by the first match in sorted order.
-func (t *Table) Lookup(method, path string) (Route, bool) {
-	reqSegs := splitPath(path)
+// Lookup returns the routes a request may run, or nil when no template matches
+// (the caller fails closed). Among the templates matching the escaped path, the
+// ones with the most literal segments win; when several win with different
+// routes, GitHub's own router decides which runs, so the caller must allow every
+// one. When the path ends in exactly one '/' after a non-empty segment, some
+// GitHub routes ignore that slash and others keep it as part of the value, so
+// the winners of the path without it are added too. That reading only adds
+// routes: a path whose escaped form matches nothing stays unmatched. The result
+// is sorted by category then subcategory and has no duplicates, whatever order
+// the templates are stored in.
+func (t *Table) Lookup(method, path string) []Route {
 	tmpls := t.byMethod[strings.ToUpper(method)]
-	bestIdx, bestScore := -1, 0
+	segs := splitPath(path)
+	routes := t.best(tmpls, segs)
+	if routes == nil {
+		return nil
+	}
+	if trimmed, ok := dropOneTrailingSlash(segs); ok {
+		routes = append(routes, t.best(tmpls, trimmed)...)
+	}
+	slices.SortFunc(routes, func(a, b Route) int {
+		return cmp.Or(strings.Compare(a.Category, b.Category), strings.Compare(a.Subcategory, b.Subcategory))
+	})
+
+	return slices.Compact(routes)
+}
+
+// best returns the routes of the matching templates with the most literal
+// segments, or nil when none matches. For two fixed-length templates matching
+// one request, literals plus params equal the request length, so more literals
+// means fewer params.
+func (t *Table) best(tmpls []Templ, segs []string) []Route {
+	var out []Route
+	top := -1
 	for i := range tmpls {
-		score, ok := t.matchTemplate(tmpls[i].Segments, reqSegs)
-		if ok && (bestIdx == -1 || score < bestScore) {
-			bestIdx, bestScore = i, score
-		}
-	}
-	if bestIdx == -1 {
-		return Route{}, false
-	}
-	return tmpls[bestIdx].Route, true
-}
-
-// isCatchAll reports whether a template segment is a multi-segment catch-all
-// param — i.e. its inner name is marked x-multi-segment:true in the OpenAPI.
-// Greedy-trailing is harmless for a single-segment value (no slash).
-func (t *Table) isCatchAll(seg string) bool {
-	if !isParam(seg) {
-		return false
-	}
-	name := seg[1 : len(seg)-1] // strip braces
-	return t.multiSegment[name]
-}
-
-// matchTemplate reports whether tmpl matches req and a score (count of param
-// segments; lower is more literal, hence preferred). A trailing catch-all param
-// (x-multi-segment:true) matches zero-or-more remaining segments; any other
-// param matches exactly one, so a non-catch-all template requires an exact
-// segment-count match.
-func (t *Table) matchTemplate(tmpl, req []string) (int, bool) {
-	score := 0
-	for i, seg := range tmpl {
-		isLast := i == len(tmpl)-1
-		catchAll := isLast && t.isCatchAll(seg)
-		if catchAll {
-			// Catch-all: match zero-or-more remaining request segments.
-			score++
-			return score, true
-		}
-		if i >= len(req) {
-			return 0, false
-		}
-		if isParam(seg) {
-			score++
+		if !t.matchTemplate(tmpls[i].Segments, segs) {
 			continue
 		}
-		if req[i] != seg {
-			return 0, false
+		switch lit := literals(tmpls[i].Segments); {
+		case lit > top:
+			top, out = lit, []Route{tmpls[i].Route}
+		case lit == top:
+			out = append(out, tmpls[i].Route)
 		}
 	}
-	if len(req) != len(tmpl) {
-		return 0, false // non-catch-all tail: lengths must match exactly.
+
+	return out
+}
+
+// isMultiSegment reports whether a template segment is a param whose name is
+// marked x-multi-segment:true in the OpenAPI, so its value may contain '/'.
+func (t *Table) isMultiSegment(seg string) bool {
+	return isParam(seg) && t.multiSegment[seg[1:len(seg)-1]]
+}
+
+// matchTemplate reports whether tmpl matches req. A literal matches one equal
+// segment and an ordinary param any one segment, empty included. A
+// multi-segment param that is not last takes one or more segments, any of them
+// empty, as GitHub routes /branches/main//protection to branch protection; one
+// that is last takes whatever is left, nothing included, so the root contents
+// path matches.
+func (t *Table) matchTemplate(tmpl, req []string) bool {
+	m := matcher{t: t, tmpl: tmpl, req: req, failed: make([]bool, (len(tmpl)+1)*(len(req)+1))}
+
+	return m.match(0, 0)
+}
+
+// matcher walks (template index, request index) states. Every step moves at
+// least one index forward, and a state that failed is never explored again, so
+// the work is bounded by the number of states however many multi-segment
+// params the template has.
+type matcher struct {
+	t         *Table
+	tmpl, req []string
+	failed    []bool
+}
+
+func (m *matcher) match(ti, ri int) bool {
+	if ti == len(m.tmpl) {
+		return ri == len(m.req)
 	}
-	return score, true
+	k := ti*(len(m.req)+1) + ri
+	if m.failed[k] {
+		return false
+	}
+	if m.step(ti, ri) {
+		return true
+	}
+	m.failed[k] = true
+
+	return false
+}
+
+// step matches template segment ti starting at request segment ri. A
+// multi-segment param that is not last takes the segment at ri, then either
+// stops or takes another.
+func (m *matcher) step(ti, ri int) bool {
+	seg := m.tmpl[ti]
+	if m.t.isMultiSegment(seg) {
+		if ti == len(m.tmpl)-1 {
+			return true
+		}
+
+		return ri < len(m.req) && (m.match(ti+1, ri+1) || m.match(ti, ri+1))
+	}
+	if ri == len(m.req) || (!isParam(seg) && m.req[ri] != seg) {
+		return false
+	}
+
+	return m.match(ti+1, ri+1)
+}
+
+// literals counts the non-param segments of a template.
+func literals(segs []string) int {
+	n := 0
+	for _, s := range segs {
+		if !isParam(s) {
+			n++
+		}
+	}
+
+	return n
+}
+
+// dropOneTrailingSlash returns segs without the empty segment a single trailing
+// '/' leaves. It declines when the segment before it is empty too, since GitHub
+// keeps a doubled slash as part of the value, and when nothing else is left.
+func dropOneTrailingSlash(segs []string) ([]string, bool) {
+	n := len(segs)
+	if n < 2 || segs[n-1] != "" || segs[n-2] == "" {
+		return nil, false
+	}
+
+	return segs[:n-1], true
 }
 
 // Knows reports whether key (a "category" or "category/subcategory") names a real
@@ -272,8 +346,7 @@ func (t *Table) Serialize() []byte {
 }
 
 // UnmarshalTable deserializes a table produced by Serialize, failing closed on a
-// malformed or empty blob. The stored order is already sorted (Serialize is
-// called on a sorted table), so Lookup stays deterministic.
+// malformed or empty blob.
 func UnmarshalTable(b []byte) (*Table, error) {
 	var w tableWire
 	if err := json.Unmarshal(b, &w); err != nil {
