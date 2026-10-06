@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/cynative/cynative/internal/apiref"
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 func TestGitLabRefusedInput(t *testing.T) {
@@ -60,5 +63,31 @@ func TestGitLabRefusedInput_CoversEveryListedName(t *testing.T) {
 		if !gitlabRefusedInput(apiref.LocationBody, p) {
 			t.Errorf("body %q not refused", p)
 		}
+	}
+}
+
+func TestGitLabAuthorizeAction_MarksOnlyTheTableMiss(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, method, url string
+		marked            bool
+	}{
+		{"route not in the table", http.MethodGet, "https://gitlab.com/api/v4/nope/route", true},
+		{"ceiling", http.MethodGet, "https://gitlab.com/api/v4/projects/1/variables", false},
+		{"write over the read ceiling", http.MethodPost, "https://gitlab.com/api/v4/projects", false},
+		{"dot segment", http.MethodGet, "https://gitlab.com/api/v4/projects/1/./issues", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := newTestGitLab(t, "gitlab.com")
+			err := p.AuthorizeAction(t.Context(), actionView(t, tc.method, tc.url), noArgs())
+			if err == nil {
+				t.Fatal("want a denial")
+			}
+			if _, marked := errors.AsType[*authreq.UnmatchedRequestError](err); marked != tc.marked {
+				t.Errorf("marked = %v, want %v (err %v)", marked, tc.marked, err)
+			}
+		})
 	}
 }
