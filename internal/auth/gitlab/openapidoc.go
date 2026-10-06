@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -142,9 +143,9 @@ func Reference(
 	if res.Outcome != apiref.OutcomeNotFound {
 		return res
 	}
-	// The echo is bounded first, so the guidance after it fits within MaxReason unless %q escaping expands the echo;
-	// the outer Truncate keeps the hard bound either way.
-	notFound := fmt.Sprintf("no operation %q in gitlab", apiref.Truncate(q.Operation, apiref.MaxChoice))
+	// The quoted echo is bounded before the guidance is appended, so the guidance always fits within MaxReason; the
+	// outer Truncate only keeps the hard bound.
+	notFound := fmt.Sprintf("no operation %s in gitlab", apiref.Truncate(strconv.Quote(q.Operation), apiref.MaxChoice))
 	// Models copy GitHub's "repos/get" naming and prefix a correct GitLab id ("projects/getApiV4..."). Name the
 	// operation the part after the last slash resolves to, without answering for it.
 	tail := q.Operation[strings.LastIndex(q.Operation, "/")+1:]

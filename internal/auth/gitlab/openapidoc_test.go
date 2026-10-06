@@ -354,6 +354,11 @@ func TestDocsReference_PrefixedName(t *testing.T) {
 	if !strings.HasSuffix(res.Reason, gitlab.DocNameFormat) {
 		t.Errorf("long name: reason = %q", res.Reason)
 	}
+	// Quoting can expand each rune several times over, so the bound applies to the quoted echo.
+	res = lookup(t, strings.Repeat("\x00", 200)+"/getApiV4ProjectsId")
+	if !strings.HasSuffix(res.Reason, `did you mean "getApiV4ProjectsId"?`) {
+		t.Errorf("escaped name: reason = %q", res.Reason)
+	}
 	// The suffix is matched case-insensitively, like the name itself.
 	res = lookup(t, "a/b/GETAPIV4PROJECTSID")
 	if !strings.HasSuffix(res.Reason, `did you mean "getApiV4ProjectsId"?`) {
