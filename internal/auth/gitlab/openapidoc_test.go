@@ -320,11 +320,33 @@ func TestDocsReference_Lookup(t *testing.T) {
 		t,
 		"nope",
 	); res.Outcome != apiref.OutcomeNotFound ||
-		res.Reason != `no operation "nope" in gitlab` {
+		res.Reason != `no operation "nope" in gitlab; `+gitlab.DocNameFormat {
 		t.Errorf("res = %+v", res)
 	}
 	if res := lookup(t, "GETAPIV4PROJECTSID"); res.Outcome != apiref.OutcomeFound ||
 		res.Reference.Operation != "getApiV4ProjectsId" {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+// TestDocsReference_PrefixedName pins the not_found reason for a name with a GitHub-style "projects/" prefix: a
+// weak model guessed the right id with that prefix and looped on a bare not_found until the run stopped it.
+func TestDocsReference_PrefixedName(t *testing.T) {
+	t.Parallel()
+	res := lookup(t, "projects/getApiV4ProjectsIdMergeRequests")
+	want := `no operation "projects/getApiV4ProjectsIdMergeRequests" in gitlab; GitLab operation names ` +
+		`carry no prefix: did you mean "getApiV4ProjectsIdMergeRequests"?`
+	if res.Outcome != apiref.OutcomeNotFound || res.Reason != want || res.Reference != nil {
+		t.Errorf("res = %+v", res)
+	}
+	// A suffix that names no operation falls back to the format sentence.
+	res = lookup(t, "projects/getApiV4Nope")
+	if res.Reason != `no operation "projects/getApiV4Nope" in gitlab; `+gitlab.DocNameFormat {
+		t.Errorf("res = %+v", res)
+	}
+	// The suffix is matched case-insensitively, like the name itself.
+	res = lookup(t, "a/b/GETAPIV4PROJECTSID")
+	if !strings.HasSuffix(res.Reason, `did you mean "getApiV4ProjectsId"?`) {
 		t.Errorf("res = %+v", res)
 	}
 }

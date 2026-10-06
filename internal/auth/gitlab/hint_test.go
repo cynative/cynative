@@ -133,6 +133,17 @@ func TestHint_NamespaceRuleSuggestsNothing(t *testing.T) {
 	}
 }
 
+// TestHint_NamespaceRuleSkipsOtherLabels pins the fold to templates whose segment after projects is {id}. The NuGet
+// route's label there is {project_id}, so the fold never matches it and falls through to the project lookup, the
+// documented unknown-suffix limitation.
+func TestHint_NamespaceRuleSkipsOtherLabels(t *testing.T) {
+	t.Parallel()
+	h := hintFor(t, http.MethodGet, "/api/v4/projects/a/b/packages/nuget/v2/FindPackagesById()")
+	if h.Operation != "getApiV4ProjectsId" {
+		t.Errorf("hint = %+v, want the project lookup, not the {project_id} route", h)
+	}
+}
+
 func TestHint_OverLongPathGetsNothing(t *testing.T) {
 	t.Parallel()
 	ns := strings.Repeat("n", 2000)

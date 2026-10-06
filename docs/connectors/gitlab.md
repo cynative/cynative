@@ -138,7 +138,7 @@ For self-managed instances, replace `gitlab.com` with your configured `host` (or
 
 ### Operation reference
 
-`api_reference` returns the request template, inputs and response format of one GitLab REST operation, named by its OpenAPI `operationId`, for example `{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}`. It reads the cached public OpenAPI document and sends nothing to the instance. A request the gate's table does not know comes back with candidates in its error, including a suggestion when a project or group path was sent unencoded. See [API reference lookup](api-reference.md#gitlab).
+`api_reference` returns the request template, inputs and response format of one GitLab REST operation, named by its OpenAPI `operationId`, for example `{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}`. It reads the cached public OpenAPI document and sends nothing to the instance. A request the gate's table does not know can come back with candidates in its error, including a suggestion when a project or group path was sent unencoded. See [API reference lookup](api-reference.md#gitlab).
 
 ## Hardening
 

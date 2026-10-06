@@ -137,8 +137,30 @@ func labelParams(path string, params []openapidoc.DocParam) []openapidoc.DocPara
 func Reference(
 	d *openapidoc.OperationDocs, q apiref.Query, endpoint string, refuse func(apiref.Location, string) bool,
 ) apiref.Result {
-	return d.Reference(q, docProfile(endpoint, refuse))
+	prof := docProfile(endpoint, refuse)
+	res := d.Reference(q, prof)
+	if res.Outcome != apiref.OutcomeNotFound {
+		return res
+	}
+	// Models copy GitHub's "repos/get" naming and prefix a correct GitLab id ("projects/getApiV4..."). Name the
+	// operation the part after the last slash resolves to, without answering for it.
+	tail := q.Operation[strings.LastIndex(q.Operation, "/")+1:]
+	if tail != q.Operation {
+		sub := q
+		sub.Operation = tail
+		if r := d.Reference(sub, prof); r.Reference != nil {
+			res.Reason = apiref.Truncate(fmt.Sprintf("%s; GitLab operation names carry no prefix: did you mean %q?",
+				res.Reason, r.Reference.Operation), apiref.MaxReason)
+			return res
+		}
+	}
+	res.Reason = apiref.Truncate(res.Reason+"; "+docNameFormat, apiref.MaxReason)
+	return res
 }
+
+// docNameFormat tells a model what a GitLab operation name looks like, after a lookup found none.
+const docNameFormat = "GitLab operation names are the document's camelCase operationId, the method plus the " +
+	"path, for example getApiV4ProjectsIdMergeRequests"
 
 // docProfile is the gitlab connector's reference profile. Distill runs it with no endpoint, so the document's
 // https://{hostname} server is ignored. The document often omits response content (162 GETs declare a 200 with
