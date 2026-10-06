@@ -247,3 +247,42 @@ func TestCandidates_ZeroOrMoreTail(t *testing.T) {
 		t.Errorf("plus matched zero segments: %q", got)
 	}
 }
+
+func TestRouteLine(t *testing.T) {
+	t.Parallel()
+	got := apiref.RouteLine(
+		apiref.Route{Operation: "getApiV4ProjectsId", Method: "get", Template: "/api/v4/projects/{id}"},
+	)
+	if got != "getApiV4ProjectsId (GET /api/v4/projects/{id})" {
+		t.Errorf("line = %q", got)
+	}
+}
+
+func TestHintPathTooLong(t *testing.T) {
+	t.Parallel()
+	if apiref.HintPathTooLong("/" + strings.Repeat("a", 2047)) {
+		t.Error("a 2048-byte path is within the bound")
+	}
+	if !apiref.HintPathTooLong("/" + strings.Repeat("a", 2048)) {
+		t.Error("a 2049-byte path is over the bound")
+	}
+}
+
+func TestMatch(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		template, path string
+		want           bool
+	}{
+		{"/api/v4/projects/{id}/merge_requests", "/api/v4/projects/team%2Fapp/merge_requests", true},
+		{"/api/v4/projects/{id}/merge_requests", "/api/v4/projects/team/app/merge_requests", false},
+		{"/api/v4/projects/{id}", "/api/v4/projects/", false},
+		{"/repos/{owner}/{repo}/contents/{path*}", "/repos/o/r/contents/a/b", true},
+		{"/x?list-type=2", "/x", true},
+	}
+	for _, tc := range cases {
+		if got := apiref.Match(tc.template, tc.path); got != tc.want {
+			t.Errorf("Match(%q, %q) = %v, want %v", tc.template, tc.path, got, tc.want)
+		}
+	}
+}

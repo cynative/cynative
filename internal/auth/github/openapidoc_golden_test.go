@@ -218,10 +218,12 @@ type goldenHintOut struct {
 	Candidates  []string `json:"candidates"`
 	Operation   string   `json:"operation"`
 	NoReference bool     `json:"no_reference"`
+	// Note is omitted when empty, so GitHub, which never sets it, records the bytes it recorded before Note existed.
+	Note string `json:"note,omitempty"`
 }
 
 func hintOut(h apiref.Hint) goldenHintOut {
-	return goldenHintOut{Candidates: h.Candidates, Operation: h.Operation, NoReference: h.NoReference}
+	return goldenHintOut{Candidates: h.Candidates, Operation: h.Operation, NoReference: h.NoReference, Note: h.Note}
 }
 
 func hintView(method, path string) authreq.View {

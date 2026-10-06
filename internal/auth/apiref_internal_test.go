@@ -506,3 +506,37 @@ func TestGithubOutcome_WiresDocsAndLeavesTableAlone(t *testing.T) {
 		t.Errorf("AuthorizeAction must keep working with a malformed docs.json: %v", err)
 	}
 }
+
+func TestExplainUnmatched_NoteFollowsCandidates(t *testing.T) {
+	t.Parallel()
+	note := `If "team/app" is the namespace path, send it as one segment: "team%2Fapp".`
+	doc := &fakeDocumenter{name: "gitlab", hint: apiref.Hint{
+		Candidates: []string{"getApiV4ProjectsIdMergeRequests (GET /api/v4/projects/{id}/merge_requests)"},
+		Operation:  "getApiV4ProjectsIdMergeRequests",
+		Note:       note,
+	}}
+	um := &authreq.UnmatchedRequestError{Err: errors.New("gitlab_hardening: cannot classify request")}
+	view := authreq.View{Method: "GET", EscapedPath: "/api/v4/projects/team/app/merge_requests"}
+	got := ExplainUnmatched(t.Context(), "gitlab", view, []Provider{doc}, um).Error()
+	want := `gitlab_hardening: cannot classify request. GET "/api/v4/projects/team/app/merge_requests" on gitlab ` +
+		`matched no operation in the cached API metadata. The gate stopped before attaching credentials or sending ` +
+		`anything; this says nothing about the principal's permissions. Check the request shape against the ` +
+		`operation reference. Candidates: getApiV4ProjectsIdMergeRequests (GET /api/v4/projects/{id}/merge_requests). ` +
+		note + ` For an operation's request template call api_reference with ` +
+		`{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}.`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestExplainUnmatched_BoundsNote(t *testing.T) {
+	t.Parallel()
+	doc := &fakeDocumenter{name: "gitlab", hint: apiref.Hint{Note: strings.Repeat("n", 5000)}}
+	um := &authreq.UnmatchedRequestError{Err: errors.New("x")}
+	msg := ExplainUnmatched(t.Context(), "gitlab", authreq.View{Method: "GET", EscapedPath: "/a"},
+		[]Provider{doc}, um).Error()
+	if strings.Contains(msg, strings.Repeat("n", apiref.MaxHintNote+1)) ||
+		!strings.Contains(msg, strings.Repeat("n", apiref.MaxHintNote-3)+"...") {
+		t.Errorf("note not bounded: %d bytes", len(msg))
+	}
+}

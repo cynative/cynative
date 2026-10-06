@@ -46,6 +46,8 @@ const (
 	MaxOptionalInputs = 25
 	// MaxCandidates bounds the candidates in a hint.
 	MaxCandidates = 3
+	// MaxHintNote bounds a hint's connector note.
+	MaxHintNote = 500
 	// MaxOutputBytes bounds the whole tool output, in bytes.
 	MaxOutputBytes = 8192
 )
@@ -197,6 +199,9 @@ func (r *Reference) Shape() string {
 type Hint struct {
 	Candidates []string
 	Operation  string
+	// Note is one short connector sentence the diagnostic prints after the candidates. It is fixed host text whose
+	// only variable part may be an echo of the request path, truncated to MaxPathEcho and quoted with %q.
+	Note string
 	// NoReference is set when no model for the service can be described by
 	// api_reference, so the message must not tell the model to call it.
 	NoReference bool

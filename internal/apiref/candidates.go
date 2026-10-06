@@ -30,9 +30,26 @@ func Candidates(routes []Route, method, escapedPath string) []string {
 	hits := candidateRoutes(routes, method, escapedPath)
 	out := make([]string, 0, len(hits))
 	for _, r := range hits {
-		out = append(out, r.Operation+" ("+strings.ToUpper(r.Method)+" "+r.Template+")")
+		out = append(out, RouteLine(r))
 	}
 	return Bound(out)
+}
+
+// RouteLine renders a route as a candidate line, "Name (METHOD /template)".
+func RouteLine(r Route) string {
+	return r.Operation + " (" + strings.ToUpper(r.Method) + " " + r.Template + ")"
+}
+
+// HintPathTooLong reports an escaped request path longer than a hint inspects. A connector-specific hint rule
+// checks it before doing any work of its own, so the bound holds for every rule.
+func HintPathTooLong(escapedPath string) bool {
+	return len(escapedPath) > maxHintPathBytes
+}
+
+// Match reports whether an escaped request path fits a route template under the rules Candidates uses for a
+// template match.
+func Match(template, escapedPath string) bool {
+	return matches(splitPath(templatePath(template)), splitPath(escapedPath))
 }
 
 // CandidateOperations returns the operation names behind Candidates' result,
@@ -62,7 +79,7 @@ func Bound(out []string) []string {
 }
 
 func candidateRoutes(routes []Route, method, escapedPath string) []Route {
-	if len(escapedPath) > maxHintPathBytes {
+	if HintPathTooLong(escapedPath) {
 		return nil
 	}
 	segs := splitPath(escapedPath)
