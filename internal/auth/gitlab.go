@@ -554,50 +554,21 @@ func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ au
 	return p.authorizesDialIP(ctx, ip)
 }
 
-// newGitLabProvider constructs the gitlabProvider for an already-discovered
-// (non-empty) credential. It returns (nil, error) when the served host is one
-// [AdmitHost] refuses (validateGitLabHosts) or a configured ca_cert is
-// unreadable, both of which gitlabOutcome surfaces as a visible unavailable
-// status, and (provider, nil) otherwise. gitlabOutcome admits the same
-// authority before it discovers the credential, so on that path this is the
-// second of two checks; it sits here so the rule does not rest on the caller.
-// The token source is static for an env/PAT credential and a caching
-// glab-helper source for a glab OAuth credential (newTokenSource). fetch
-// downloads the OpenAPI document; one download feeds both caches on a cold
-// start. readCA reads the configured CA file, so the file read stays in the shell.
-func newGitLabProvider(
-	cfg GitLabHardeningConfig, host string, cred glabCredential, e *Egress,
-	fetch func(context.Context) ([]byte, error), readCA func(path string) (string, error),
-) (*gitlabProvider, error) {
-	if err := validateGitLabHosts(host, cfg.APIHost); err != nil {
-		return nil, err
-	}
-
-	caData, err := readCA(cfg.CACertPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// One download feeds both caches on a cold start: the table's fetch hands its
-	// bytes to the docs cache once, and the table is never served from the docs.
+// newGitLabCaches builds the gate's table cache and the api_reference docs cache over one fetch of the OpenAPI
+// document. One download feeds both on a cold start: the table's fetch hands its bytes to the docs cache once, and
+// the table is never served from the docs.
+func newGitLabCaches(
+	cfg GitLabHardeningConfig, fetch func(context.Context) ([]byte, error),
+) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs]) {
 	handoff := newOpenAPIHandoff(cfg.Config.Clock, cfg.Config.TTL)
-	p := &gitlabProvider{ //nolint:exhaustruct // tokenSource set below.
-		host: host, apiHost: cfg.APIHost,
-		allowPrivateNetwork: cfg.AllowPrivateNetwork,
-		caData:              caData, resolver: defaultResolveAddrs,
-		egress:   e,
-		exposure: gitlabclass.BuildExposure(cfg.Permissions),
-		tables: cache.NewTableCache(cfg.Config, handoff.record(fetch),
-			gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
-			gitlabclass.UnmarshalTable, gitlabclass.AdmitTable),
-	}
-	p.docs.cache = cache.NewNamedCache(cfg.Config, "docs", handoff.take(fetch),
+	tables := cache.NewTableCache(cfg.Config, handoff.record(fetch),
+		gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
+		gitlabclass.UnmarshalTable, gitlabclass.AdmitTable)
+	docs := cache.NewNamedCache(cfg.Config, "docs", handoff.take(fetch),
 		gitlabclass.DistillDocs, (*openapidoc.OperationDocs).Serialize,
 		openapidoc.Unmarshal, openapidoc.Admit)
 
-	p.tokenSource = newTokenSource(p, cred)
-
-	return p, nil
+	return tables, docs
 }
 
 // Reference answers an api_reference lookup from the cached OpenAPI

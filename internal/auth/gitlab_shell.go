@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+
+	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 )
 
 // maxIntrospectBytes caps the eager /user validation response read.
@@ -27,12 +29,39 @@ func readCACertBase64(path string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pem), nil
 }
 
-// buildGitLabProvider constructs the gitlabProvider over the live OpenAPI
-// fetcher; newGitLabProvider holds the logic.
+// buildGitLabProvider constructs the gitlabProvider for an already-discovered
+// (non-empty) credential. It returns (nil, error) when the served host is one
+// [AdmitHost] refuses (validateGitLabHosts) or a configured ca_cert is
+// unreadable, both of which gitlabOutcome surfaces as a visible unavailable
+// status, and (provider, nil) otherwise. gitlabOutcome admits the same
+// authority before it discovers the credential, so on that path this is the
+// second of two checks; it sits here so the rule does not rest on the caller.
+// The token source is static for an env/PAT credential and a caching
+// glab-helper source for a glab OAuth credential (newTokenSource).
 func buildGitLabProvider(
 	cfg GitLabHardeningConfig, host string, cred glabCredential, e *Egress,
 ) (*gitlabProvider, error) {
-	return newGitLabProvider(cfg, host, cred, e, newGitLabOpenAPIFetcher(e), readCACertBase64)
+	if err := validateGitLabHosts(host, cfg.APIHost); err != nil {
+		return nil, err
+	}
+
+	caData, err := readCACertBase64(cfg.CACertPath)
+	if err != nil {
+		return nil, err
+	}
+
+	p := &gitlabProvider{ //nolint:exhaustruct // tokenSource and caches set below.
+		host: host, apiHost: cfg.APIHost,
+		allowPrivateNetwork: cfg.AllowPrivateNetwork,
+		caData:              caData, resolver: defaultResolveAddrs,
+		egress:   e,
+		exposure: gitlabclass.BuildExposure(cfg.Permissions),
+	}
+	p.tables, p.docs.cache = newGitLabCaches(cfg, newGitLabOpenAPIFetcher(e))
+
+	p.tokenSource = newTokenSource(p, cred)
+
+	return p, nil
 }
 
 // buildProbeClient constructs the pinned HTTP client used for the eager /user

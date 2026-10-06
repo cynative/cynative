@@ -7,6 +7,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
+	"github.com/cynative/cynative/internal/cache"
 )
 
 // TestBuildGitLabProvider_ServedHostAdmission pins the ASCII admission of the
@@ -88,11 +92,11 @@ func TestBuildGitLabProvider_WiresDocsCache(t *testing.T) {
 	}
 }
 
-// TestNewGitLabProvider_OneDownloadFeedsBothCaches pins the handoff at the constructor: after the table loads, the
+// TestNewGitLabCaches_OneDownloadFeedsBothCaches pins the handoff the provider's caches are built with: after the table loads, the
 // docs load costs no second download, and a docs load never fills the table.
-func TestNewGitLabProvider_OneDownloadFeedsBothCaches(t *testing.T) {
+func TestNewGitLabCaches_OneDownloadFeedsBothCaches(t *testing.T) {
 	t.Parallel()
-	newProv := func(t *testing.T, fetches *atomic.Int32) *gitlabProvider {
+	newCaches := func(t *testing.T, fetches *atomic.Int32) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs]) {
 		t.Helper()
 		cfg := GitLabHardeningConfig{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now}
 		fetch := func(context.Context) ([]byte, error) {
@@ -100,19 +104,13 @@ func TestNewGitLabProvider_OneDownloadFeedsBothCaches(t *testing.T) {
 
 			return []byte(gitlabDocsFixture), nil
 		}
-		p, err := newGitLabProvider(cfg, "gitlab.com", glabCredential{AccessToken: "glpat-test"}, NoProxy(), fetch,
-			func(string) (string, error) { return "", nil })
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return p
+		return newGitLabCaches(cfg, fetch)
 	}
 	t.Run("table first", func(t *testing.T) {
 		t.Parallel()
 		var fetches atomic.Int32
-		p := newProv(t, &fetches)
-		if p.tables.Get(t.Context()) == nil || p.docs.forReference(t.Context()) == nil {
+		tables, docs := newCaches(t, &fetches)
+		if tables.Get(t.Context()) == nil || docs.Get(t.Context()) == nil {
 			t.Fatal("a cache failed to load")
 		}
 		if n := fetches.Load(); n != 1 {
@@ -122,30 +120,12 @@ func TestNewGitLabProvider_OneDownloadFeedsBothCaches(t *testing.T) {
 	t.Run("docs first", func(t *testing.T) {
 		t.Parallel()
 		var fetches atomic.Int32
-		p := newProv(t, &fetches)
-		if p.docs.forReference(t.Context()) == nil || p.tables.Get(t.Context()) == nil {
+		tables, docs := newCaches(t, &fetches)
+		if docs.Get(t.Context()) == nil || tables.Get(t.Context()) == nil {
 			t.Fatal("a cache failed to load")
 		}
 		if n := fetches.Load(); n != 2 {
 			t.Errorf("docs then table downloaded %d times, want 2: the table must not be served from the docs", n)
 		}
 	})
-}
-
-// TestNewGitLabProvider_UnreadableCACert pins that the constructor reads the CA through the injected reader, with
-// the configured path, and returns its error: the file read itself stays in the shell.
-func TestNewGitLabProvider_UnreadableCACert(t *testing.T) {
-	t.Parallel()
-	errCA := errors.New("ca unreadable")
-	var gotPath string
-	cfg := GitLabHardeningConfig{CACertPath: "/etc/gitlab/ca.pem"}
-	p, err := newGitLabProvider(cfg, "gitlab.example", glabCredential{AccessToken: "glpat-test"}, NoProxy(),
-		func(context.Context) ([]byte, error) { return nil, errors.New("unused") },
-		func(path string) (string, error) { gotPath = path; return "", errCA })
-	if !errors.Is(err, errCA) || p != nil {
-		t.Errorf("provider %v err %v, want errCA", p, err)
-	}
-	if gotPath != cfg.CACertPath {
-		t.Errorf("reader got path %q, want %q", gotPath, cfg.CACertPath)
-	}
 }
