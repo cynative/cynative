@@ -15,6 +15,7 @@ import (
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 	"github.com/cynative/cynative/internal/cache"
 )
 
@@ -411,9 +412,9 @@ func (d *registrationDeps) githubOutcome(
 		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
 		githubhardening.UnmarshalTable, githubhardening.AdmitTable)
 	gh := newGithubProvider(token, exposure, tables)
-	gh.docs = cache.NewNamedCache(ghCfg.Config, "docs", handoff.take(fetch),
-		githubhardening.DistillDocs, (*githubhardening.OperationDocs).Serialize,
-		githubhardening.UnmarshalDocs, githubhardening.AdmitDocs)
+	gh.docs.cache = cache.NewNamedCache(ghCfg.Config, "docs", handoff.take(fetch),
+		githubhardening.DistillDocs, (*openapidoc.OperationDocs).Serialize,
+		openapidoc.Unmarshal, openapidoc.Admit)
 	gh.errOut = os.Stderr
 
 	return connectorOutcome{

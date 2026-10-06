@@ -1,0 +1,1018 @@
+{
+  "fixture case-insensitive": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "repos/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/repos/{owner}/{repo}",
+        "summary": "Get a repository",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "owner",
+            "wire_name": "owner",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The account owner of the repository. The name is not case sensitive."
+          },
+          {
+            "name": "repo",
+            "wire_name": "repo",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The name of the repository without the `.git` extension. The name is not case sensitive."
+          }
+        ],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "json",
+          "parse": "JSON.parse(response.body)"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "1.1.4",
+          "sha256": "d98eda671d2128cec47b6bcd9f6a2c039ec5700dff2da3a8e4b1c853bc479ecc"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      true,
+      true
+    ]
+  },
+  "fixture issues/create": {
+    "result": {
+      "outcome": "incomplete",
+      "reference": {
+        "connector": "github",
+        "operation": "issues/create",
+        "protocol": "rest-json",
+        "method": "POST",
+        "path_template": "/repos/{owner}/{repo}/issues",
+        "summary": "Create an issue",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "owner",
+            "wire_name": "owner",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The account owner of the repository. The name is not case sensitive."
+          },
+          {
+            "name": "repo",
+            "wire_name": "repo",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The name of the repository without the `.git` extension. The name is not case sensitive."
+          },
+          {
+            "name": "title",
+            "wire_name": "title",
+            "location": "body",
+            "required": true,
+            "type": "unknown",
+            "description": "The title of the issue."
+          }
+        ],
+        "body_encoding": "json",
+        "response": {
+          "encoding": "json",
+          "parse": "JSON.parse(response.body)"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "1.1.4",
+          "sha256": "d98eda671d2128cec47b6bcd9f6a2c039ec5700dff2da3a8e4b1c853bc479ecc"
+        },
+        "gaps": [
+          "required input title (unknown in body) cannot be rendered"
+        ],
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      },
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "renderable": [
+      true,
+      true,
+      false
+    ]
+  },
+  "fixture issues/list-for-repo": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "issues/list-for-repo",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/repos/{owner}/{repo}/issues",
+        "summary": "List repository issues",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "owner",
+            "wire_name": "owner",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The account owner of the repository. The name is not case sensitive."
+          },
+          {
+            "name": "repo",
+            "wire_name": "repo",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The name of the repository without the `.git` extension. The name is not case sensitive."
+          },
+          {
+            "name": "milestone",
+            "wire_name": "milestone",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "If an `integer` is passed, it should refer to a milestone by its `number` field. If the string `*` is passed, issues with any milestone are accepted. If the string `none` is passed, issues without ..."
+          },
+          {
+            "name": "state",
+            "wire_name": "state",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "Indicates the state of the issues to return."
+          },
+          {
+            "name": "assignee",
+            "wire_name": "assignee",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "Can be the name of a user. Pass in `none` for issues with no assigned user, and `*` for issues assigned to any user."
+          },
+          {
+            "name": "type",
+            "wire_name": "type",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "Can be the name of an issue type. If the string `*` is passed, issues with any type are accepted. If the string `none` is passed, issues without type are returned."
+          },
+          {
+            "name": "creator",
+            "wire_name": "creator",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "The user that created the issue."
+          },
+          {
+            "name": "mentioned",
+            "wire_name": "mentioned",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "A user that's mentioned in the issue."
+          },
+          {
+            "name": "issue_field_values",
+            "wire_name": "issue_field_values",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "A comma-separated list of issue field filters in `field_slug:value` format. Only issues matching all specified field values are returned. Requires issue fields to be enabled for the repository. Iss..."
+          },
+          {
+            "name": "labels",
+            "wire_name": "labels",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "A list of comma separated label names. Example: `bug,ui,@high`"
+          },
+          {
+            "name": "sort",
+            "wire_name": "sort",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "What to sort results by."
+          },
+          {
+            "name": "direction",
+            "wire_name": "direction",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "The direction to sort the results by."
+          },
+          {
+            "name": "since",
+            "wire_name": "since",
+            "location": "query",
+            "required": false,
+            "type": "string",
+            "description": "Only show results that were last updated after the given time. This is a timestamp in [ISO 8601](https://en.wikipedia.org/wiki/ISO_8601) format: `YYYY-MM-DDTHH:MM:SSZ`."
+          },
+          {
+            "name": "per_page",
+            "wire_name": "per_page",
+            "location": "query",
+            "required": false,
+            "type": "integer",
+            "description": "The number of results per page (max 100). For more information, see \"[Using pagination in the REST API](https://docs.github.com/rest/using-the-rest-api/using-pagination-in-the-rest-api).\""
+          },
+          {
+            "name": "page",
+            "wire_name": "page",
+            "location": "query",
+            "required": false,
+            "type": "integer",
+            "description": "The page number of the results to fetch. For more information, see \"[Using pagination in the REST API](https://docs.github.com/rest/using-the-rest-api/using-pagination-in-the-rest-api).\""
+          }
+        ],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "json",
+          "parse": "JSON.parse(response.body)"
+        },
+        "pagination": {
+          "style": "link-header",
+          "input_token": "page",
+          "page_size": "per_page"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "1.1.4",
+          "sha256": "d98eda671d2128cec47b6bcd9f6a2c039ec5700dff2da3a8e4b1c853bc479ecc"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies",
+          "pagination is inferred from per_page/page parameters and a declared Link header; follow rel=\"next\" in the Link response header"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "fixture markdown/render": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "markdown/render",
+        "protocol": "rest-json",
+        "method": "POST",
+        "path_template": "/markdown",
+        "summary": "Render a Markdown document",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "text",
+            "wire_name": "text",
+            "location": "body",
+            "required": true,
+            "type": "string",
+            "description": "The Markdown text to render in HTML."
+          }
+        ],
+        "body_encoding": "json",
+        "response": {
+          "encoding": "text/html",
+          "parse": "the body is text/html text, not JSON; read response.body as a string"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "1.1.4",
+          "sha256": "d98eda671d2128cec47b6bcd9f6a2c039ec5700dff2da3a8e4b1c853bc479ecc"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      },
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "renderable": [
+      true
+    ]
+  },
+  "fixture not found": {
+    "result": {
+      "outcome": "not_found",
+      "reason": "no operation \"nope/none\" in github"
+    }
+  },
+  "fixture repos/get": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "repos/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/repos/{owner}/{repo}",
+        "summary": "Get a repository",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "owner",
+            "wire_name": "owner",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The account owner of the repository. The name is not case sensitive."
+          },
+          {
+            "name": "repo",
+            "wire_name": "repo",
+            "location": "path",
+            "required": true,
+            "type": "string",
+            "description": "The name of the repository without the `.git` extension. The name is not case sensitive."
+          }
+        ],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "json",
+          "parse": "JSON.parse(response.body)"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "1.1.4",
+          "sha256": "d98eda671d2128cec47b6bcd9f6a2c039ec5700dff2da3a8e4b1c853bc479ecc"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      true,
+      true
+    ]
+  },
+  "synth alternate server": {
+    "result": {
+      "outcome": "incomplete",
+      "reference": {
+        "connector": "github",
+        "operation": "srv/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/srv",
+        "endpoint": "https://uploads.github.com",
+        "inputs": [],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "gaps": [
+          "operation is served from https://uploads.github.com, not from the github connector's API host https://api.github.com"
+        ],
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ]
+  },
+  "synth ambiguous": {
+    "result": {
+      "outcome": "ambiguous",
+      "reason": "several operations differ only by case",
+      "choices": [
+        "dup/X",
+        "dup/x"
+      ]
+    }
+  },
+  "synth body gap": {
+    "result": {
+      "outcome": "incomplete",
+      "reference": {
+        "connector": "github",
+        "operation": "gap/post",
+        "protocol": "rest-json",
+        "method": "POST",
+        "path_template": "/gap",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "body",
+            "wire_name": "body",
+            "location": "body",
+            "required": true,
+            "type": "unknown"
+          }
+        ],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "gaps": [
+          "request body is not a JSON object the template can render",
+          "required input body (unknown in body) cannot be rendered"
+        ],
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      false
+    ]
+  },
+  "synth document server": {
+    "result": {
+      "outcome": "incomplete",
+      "reference": {
+        "connector": "github",
+        "operation": "d/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/d",
+        "endpoint": "https://ghe.example/api/v3",
+        "inputs": [],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "84c8eb4eaf1d2702606e63551bb4d18e499e54b9383aaeacdd2d7f6ab2e969c5"
+        },
+        "gaps": [
+          "operation is served from https://ghe.example/api/v3, not from the github connector's API host https://api.github.com"
+        ],
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ]
+  },
+  "synth multi-segment path": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "repos/get-content",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/repos/{owner}/{repo}/contents/{path}",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "path",
+            "wire_name": "path",
+            "location": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      true
+    ]
+  },
+  "synth optional body skipped": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "skip/post",
+        "protocol": "rest-json",
+        "method": "POST",
+        "path_template": "/skip",
+        "endpoint": "https://api.github.com",
+        "inputs": [],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies",
+          "optional request body is not rendered"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ]
+  },
+  "synth optional inputs truncated": {
+    "result": {
+      "outcome": "found",
+      "reference": {
+        "connector": "github",
+        "operation": "many/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/many",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "p0",
+            "wire_name": "p0",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p1",
+            "wire_name": "p1",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p2",
+            "wire_name": "p2",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p3",
+            "wire_name": "p3",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p4",
+            "wire_name": "p4",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p5",
+            "wire_name": "p5",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p6",
+            "wire_name": "p6",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p7",
+            "wire_name": "p7",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p8",
+            "wire_name": "p8",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p9",
+            "wire_name": "p9",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p10",
+            "wire_name": "p10",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p11",
+            "wire_name": "p11",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p12",
+            "wire_name": "p12",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p13",
+            "wire_name": "p13",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p14",
+            "wire_name": "p14",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p15",
+            "wire_name": "p15",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p16",
+            "wire_name": "p16",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p17",
+            "wire_name": "p17",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p18",
+            "wire_name": "p18",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p19",
+            "wire_name": "p19",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p20",
+            "wire_name": "p20",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p21",
+            "wire_name": "p21",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p22",
+            "wire_name": "p22",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p23",
+            "wire_name": "p23",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "p24",
+            "wire_name": "p24",
+            "location": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "inputs_truncated": true,
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "synth params": {
+    "result": {
+      "outcome": "incomplete",
+      "reference": {
+        "connector": "github",
+        "operation": "params/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/params/{id}",
+        "endpoint": "https://api.github.com",
+        "inputs": [
+          {
+            "name": "id",
+            "wire_name": "id",
+            "location": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "q",
+            "wire_name": "q",
+            "location": "query",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "name": "ids",
+            "wire_name": "ids",
+            "location": "query",
+            "required": true,
+            "type": "array"
+          },
+          {
+            "name": "X-Trace",
+            "wire_name": "X-Trace",
+            "location": "header",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "text/alpha",
+          "parse": "the body is text/alpha text, not JSON; read response.body as a string"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "gaps": [
+          "required input ids (array in query) cannot be rendered"
+        ],
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ],
+    "renderable": [
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "synth path-item server": {
+    "result": {
+      "outcome": "incomplete",
+      "reference": {
+        "connector": "github",
+        "operation": "pi/get",
+        "protocol": "rest-json",
+        "method": "GET",
+        "path_template": "/pi",
+        "endpoint": "https://pi.example",
+        "inputs": [],
+        "body_encoding": "none",
+        "response": {
+          "encoding": "none",
+          "parse": "no response body; read the status and headers"
+        },
+        "pagination": {
+          "style": "unspecified"
+        },
+        "source": {
+          "name": "github/rest-api-description",
+          "document": "descriptions/api.github.com/api.github.com.json",
+          "version": "9",
+          "sha256": "bf98e946c2517a600018481031f357e71c54bf081066ce02ea7d4c05b2f9b544"
+        },
+        "gaps": [
+          "operation is served from https://pi.example, not from the github connector's API host https://api.github.com"
+        ],
+        "limitations": [
+          "the connector strips X-GitHub-Api-Version, so the server's default API version applies"
+        ]
+      }
+    },
+    "fixed_headers": [
+      {
+        "key": "Accept",
+        "value": "application/vnd.github+json"
+      }
+    ]
+  }
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/authtest"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 	"github.com/cynative/cynative/internal/cache"
 )
 
@@ -313,10 +314,10 @@ func docsFixture(t *testing.T) []byte {
 func newDocsCache(
 	dir string,
 	fetch func(context.Context) ([]byte, error),
-) *cache.TTLCache[githubhardening.OperationDocs] {
+) *cache.TTLCache[openapidoc.OperationDocs] {
 	return cache.NewNamedCache(cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now}, "docs", fetch,
-		githubhardening.DistillDocs, (*githubhardening.OperationDocs).Serialize,
-		githubhardening.UnmarshalDocs, githubhardening.AdmitDocs)
+		githubhardening.DistillDocs, (*openapidoc.OperationDocs).Serialize,
+		openapidoc.Unmarshal, openapidoc.Admit)
 }
 
 func TestGithubProvider_ReferenceAndHint(t *testing.T) {
@@ -352,7 +353,7 @@ func TestGithubProvider_ReferenceAndHint(t *testing.T) {
 	t.Run("fetch fails, no disk copy", func(t *testing.T) {
 		t.Parallel()
 		p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-		p.docs = newDocsCache(t.TempDir(), failing)
+		p.docs.cache = newDocsCache(t.TempDir(), failing)
 		check(t, p, false)
 	})
 	t.Run("warm cache never fetches", func(t *testing.T) {
@@ -362,7 +363,7 @@ func TestGithubProvider_ReferenceAndHint(t *testing.T) {
 			t.Fatal("seed cache failed")
 		}
 		p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-		p.docs = newDocsCache(dir, func(context.Context) ([]byte, error) {
+		p.docs.cache = newDocsCache(dir, func(context.Context) ([]byte, error) {
 			t.Error("warm cache must not fetch")
 
 			return nil, errors.New("unexpected")
@@ -378,7 +379,7 @@ func TestGithubProvider_HintTriesAFailingDocsLoadOnce(t *testing.T) {
 	newProv := func(t *testing.T, fetches *atomic.Int32) *githubProvider {
 		t.Helper()
 		p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-		p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
+		p.docs.cache = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
 			fetches.Add(1)
 
 			return nil, errors.New("offline")
@@ -439,7 +440,7 @@ func TestGithubProvider_ReferenceSuccessClearsHintLatch(t *testing.T) {
 	view := authreq.View{Method: "DELETE", Hostname: "api.github.com", Path: "/repos/o/r", EscapedPath: "/repos/o/r"}
 	var fetches atomic.Int32
 	p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-	p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
+	p.docs.cache = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
 		if fetches.Add(1) == 1 {
 			return nil, errors.New("offline")
 		}
@@ -468,6 +469,7 @@ func TestProviderDescriptions_NameAPIReference(t *testing.T) {
 	for _, p := range []Provider{
 		newGithubProvider("t", githubhardening.BaselineExposure(), nil),
 		newAWSProvider(aws.Config{}, nil),
+		&gitlabProvider{host: "gitlab.com"},
 	} {
 		if !strings.Contains(p.Description(), "call the api_reference tool.") {
 			t.Errorf("%s description lacks the api_reference sentence: %q", p.Name(), p.Description())
@@ -497,11 +499,45 @@ func TestGithubOutcome_WiresDocsAndLeavesTableAlone(t *testing.T) {
 	}
 	out := d.githubOutcome(t.Context(), cfg, false)
 	gh, ok := out.providers[0].(*githubProvider)
-	if !ok || gh.docs == nil {
+	if !ok || gh.docs.cache == nil {
 		t.Fatalf("provider = %+v", out.providers)
 	}
 	v := authreq.View{Method: "GET", Hostname: "api.github.com", Path: "/user", EscapedPath: "/user", Port: "443"}
 	if err := gh.AuthorizeAction(t.Context(), v, authreq.ProviderArgs{}); err != nil {
 		t.Errorf("AuthorizeAction must keep working with a malformed docs.json: %v", err)
+	}
+}
+
+func TestExplainUnmatched_NoteFollowsCandidates(t *testing.T) {
+	t.Parallel()
+	note := `If "team/app" is the namespace path, send it as one segment: "team%2Fapp".`
+	doc := &fakeDocumenter{name: "gitlab", hint: apiref.Hint{
+		Candidates: []string{"getApiV4ProjectsIdMergeRequests (GET /api/v4/projects/{id}/merge_requests)"},
+		Operation:  "getApiV4ProjectsIdMergeRequests",
+		Note:       note,
+	}}
+	um := &authreq.UnmatchedRequestError{Err: errors.New("gitlab_hardening: cannot classify request")}
+	view := authreq.View{Method: "GET", EscapedPath: "/api/v4/projects/team/app/merge_requests"}
+	got := ExplainUnmatched(t.Context(), "gitlab", view, []Provider{doc}, um).Error()
+	want := `gitlab_hardening: cannot classify request. GET "/api/v4/projects/team/app/merge_requests" on gitlab ` +
+		`matched no operation in the cached API metadata. The gate stopped before attaching credentials or sending ` +
+		`anything; this says nothing about the principal's permissions. Check the request shape against the ` +
+		`operation reference. Candidates: getApiV4ProjectsIdMergeRequests (GET /api/v4/projects/{id}/merge_requests). ` +
+		note + ` For an operation's request template call api_reference with ` +
+		`{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}.`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+func TestExplainUnmatched_BoundsNote(t *testing.T) {
+	t.Parallel()
+	doc := &fakeDocumenter{name: "gitlab", hint: apiref.Hint{Note: strings.Repeat("n", 5000)}}
+	um := &authreq.UnmatchedRequestError{Err: errors.New("x")}
+	msg := ExplainUnmatched(t.Context(), "gitlab", authreq.View{Method: "GET", EscapedPath: "/a"},
+		[]Provider{doc}, um).Error()
+	if strings.Contains(msg, strings.Repeat("n", apiref.MaxHintNote+1)) ||
+		!strings.Contains(msg, strings.Repeat("n", apiref.MaxHintNote-3)+"...") {
+		t.Errorf("note not bounded: %d bytes", len(msg))
 	}
 }

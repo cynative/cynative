@@ -18,7 +18,8 @@ var _ schema.InvokableTool = (*apiReferenceTool)(nil)
 
 const apiReferenceDescription = "Look up one connector API operation by exact name and get its protocol, inputs, " +
 	"an http_request template with <placeholders>, response parsing and pagination. Read-only; sends nothing " +
-	"to the connector. Supported: aws (restXml, restJson1, awsQuery, awsJson) and github."
+	"to the connector. Supported: aws (restXml, restJson1, awsQuery, awsJson), github and gitlab. GitLab " +
+	"operation IDs are generated from the path, so an ID changes when its path does."
 
 const (
 	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values and every path value " +
@@ -35,10 +36,10 @@ const (
 )
 
 type apiReferenceArgs struct {
-	Connector string `json:"connector"         jsonschema_description:"Connector name, e.g. 'aws' or 'github'."`
-	Service   string `json:"service,omitempty" jsonschema_description:"AWS only: the endpoint prefix from the request host, e.g. 'route53' or 'iam'."`                                                  //nolint:lll // struct tags are indivisible
-	Model     string `json:"model,omitempty"   jsonschema_description:"AWS only: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices)."`       //nolint:lll // struct tags are indivisible
-	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get')."` //nolint:lll // struct tags are indivisible
+	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github' or 'gitlab'."`
+	Service   string `json:"service,omitempty" jsonschema_description:"AWS only: the endpoint prefix from the request host, e.g. 'route53' or 'iam'."`                                                                                                      //nolint:lll // struct tags are indivisible
+	Model     string `json:"model,omitempty"   jsonschema_description:"AWS only: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices)."`                                                           //nolint:lll // struct tags are indivisible
+	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get') and GitLab (e.g. 'getApiV4ProjectsIdMergeRequests')."` //nolint:lll // struct tags are indivisible
 }
 
 type referenceOutput struct {
@@ -246,10 +247,7 @@ func buildTemplate(ref *apiref.Reference) map[string]any {
 func buildURL(ref *apiref.Reference) string {
 	segs := strings.Split(ref.PathTemplate, "/")
 	for i, s := range segs {
-		if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
-			name, greedy := strings.CutSuffix(strings.TrimSuffix(strings.TrimPrefix(s, "{"), "}"), "+")
-			segs[i] = pathPlaceholder(ref, name, greedy)
-		}
+		segs[i] = segmentPlaceholders(ref, s)
 	}
 	query := paramPairs(ref.FixedQuery)
 	for _, in := range requiredAt(ref, apiref.LocationQuery) {
@@ -261,6 +259,29 @@ func buildURL(ref *apiref.Reference) string {
 	}
 
 	return u
+}
+
+// segmentPlaceholders replaces every {label} in one path segment with its placeholder: a whole-segment label as in
+// /things/{Id}, or one inside literal text as in GitLab's {file_name}.tgz.
+func segmentPlaceholders(ref *apiref.Reference, seg string) string {
+	var b strings.Builder
+	for {
+		open := strings.IndexByte(seg, '{')
+		if open < 0 {
+			break
+		}
+		end := strings.IndexByte(seg[open:], '}')
+		if end < 0 {
+			break
+		}
+		name, greedy := strings.CutSuffix(seg[open+1:open+end], "+")
+		b.WriteString(seg[:open])
+		b.WriteString(pathPlaceholder(ref, name, greedy))
+		seg = seg[open+end+1:]
+	}
+	b.WriteString(seg)
+
+	return b.String()
 }
 
 // bareTypes are the input types whose JSON placeholder is unquoted, so the substituted value stays a number or

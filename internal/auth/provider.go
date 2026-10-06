@@ -100,23 +100,9 @@ func Inject(req *http.Request, name string, providers []Provider, rawArgs json.R
 // Go's [http.Client] mints "Authorization: Basic ..." from it whenever
 // injection set no Authorization header (the mTLS no-op case).
 func rejectModelSuppliedCredential(req *http.Request, name string) error {
-	credentialHeaders := []string{
-		"Authorization",
-		"Proxy-Authorization",
-		"X-Http-Authorization", // Rails authorization fallback (X-HTTP_AUTHORIZATION / X_HTTP_AUTHORIZATION, _→- normalized).
-		"X-Ms-Authorization-Auxiliary",
-		"Private-Token",
-		"Job-Token",
-		"Deploy-Token",                 // GitLab package/registry deploy-token credential.
-		"X-Gitlab-Static-Object-Token", // GitLab private archive/blob static-object credential.
-		"Cookie",                       // e.g. GitLab's _gitlab_session — a documented API session credential.
-	}
 	for _, h := range credentialHeaders {
 		for key, values := range req.Header {
-			// Normalize '_' to '-' before matching: Rack-style backends fold an
-			// underscore header (e.g. Private_Token) onto the same HTTP_ variable as
-			// the hyphenated form, so the underscore variant must not slip past.
-			if strings.EqualFold(strings.ReplaceAll(key, "_", "-"), h) && len(values) > 0 {
+			if credentialHeaderIs(key, h) && len(values) > 0 {
 				return fmt.Errorf("%w: %s header present (provider %s)", ErrModelSuppliedCredential, h, name)
 			}
 		}
@@ -131,15 +117,9 @@ func rejectModelSuppliedCredential(req *http.Request, name string) error {
 	if perr != nil {
 		return fmt.Errorf("%w: unparseable URL query (provider %s): %w", ErrModelSuppliedCredential, name, perr)
 	}
-	// GitLab also authenticates RSS/ICS feed routes via feed_token/rss_token query
-	// params, so those are rejected alongside the api-token query params.
-	credentialParams := []string{"private_token", "access_token", "job_token", "feed_token", "rss_token"}
 	for key := range params {
-		base := baseParamName(key)
-		for _, p := range credentialParams {
-			if strings.EqualFold(base, p) {
-				return fmt.Errorf("%w: %s query parameter present (provider %s)", ErrModelSuppliedCredential, key, name)
-			}
+		if isCredentialParam(key) {
+			return fmt.Errorf("%w: %s query parameter present (provider %s)", ErrModelSuppliedCredential, key, name)
 		}
 	}
 
@@ -148,6 +128,51 @@ func rejectModelSuppliedCredential(req *http.Request, name string) error {
 	}
 
 	return nil
+}
+
+// credentialHeaders are the request headers rejectModelSuppliedCredential refuses
+// for every connector. The gitlab connector's api_reference reads the same list.
+//
+//nolint:gochecknoglobals // immutable credential-name list.
+var credentialHeaders = []string{
+	"Authorization",
+	"Proxy-Authorization",
+	"X-Http-Authorization", // Rails authorization fallback (X-HTTP_AUTHORIZATION / X_HTTP_AUTHORIZATION, _→- normalized).
+	"X-Ms-Authorization-Auxiliary",
+	"Private-Token",
+	"Job-Token",
+	"Deploy-Token",                 // GitLab package/registry deploy-token credential.
+	"X-Gitlab-Static-Object-Token", // GitLab private archive/blob static-object credential.
+	"Cookie",                       // e.g. GitLab's _gitlab_session, a documented API session credential.
+}
+
+// credentialParams are the query parameters rejectModelSuppliedCredential refuses
+// for every connector. GitLab also authenticates RSS/ICS feed routes via
+// feed_token/rss_token, so those sit alongside the api-token names. The gitlab
+// connector's api_reference reads the same list.
+//
+//nolint:gochecknoglobals // immutable credential-name list.
+var credentialParams = []string{"private_token", "access_token", "job_token", "feed_token", "rss_token"}
+
+// credentialHeaderIs reports whether header key names the credential header h.
+// It folds '_' to '-' before matching: Rack-style backends fold an underscore
+// header (e.g. Private_Token) onto the same HTTP_ variable as the hyphenated
+// form, so the underscore variant must not slip past.
+func credentialHeaderIs(key, h string) bool {
+	return strings.EqualFold(strings.ReplaceAll(key, "_", "-"), h)
+}
+
+// isCredentialParam reports whether query key, ignoring a Rack-style bracket
+// suffix and case, is one of credentialParams.
+func isCredentialParam(key string) bool {
+	base := baseParamName(key)
+	for _, p := range credentialParams {
+		if strings.EqualFold(base, p) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // baseParamName strips a Rack-style bracket suffix from a parameter key, returning

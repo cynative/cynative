@@ -136,6 +136,10 @@ console.log(resp.body);
 
 For self-managed instances, replace `gitlab.com` with your configured `host` (or `api_host`).
 
+### Operation reference
+
+`api_reference` returns the request template, inputs and response format of one GitLab REST operation, named by its OpenAPI `operationId`, for example `{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}`. It reads the cached public OpenAPI document and sends nothing to the instance. A request the gate's table does not know can come back with candidates in its error, including a suggestion when a project or group path was sent unencoded. See [API reference lookup](api-reference.md#gitlab).
+
 ## Hardening
 
 Cynative's GitLab connector is built for read-oriented source-and-repository research. By default it combines an in-process per-request classifier — resolving each request to its GitLab category and required access level — with host pinning, dial-time IP authorization, and response redaction before output returns to the model.

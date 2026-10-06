@@ -9,7 +9,6 @@ import (
 	"os"
 
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
-	"github.com/cynative/cynative/internal/cache"
 )
 
 // maxIntrospectBytes caps the eager /user validation response read.
@@ -51,16 +50,14 @@ func buildGitLabProvider(
 		return nil, err
 	}
 
-	p := &gitlabProvider{ //nolint:exhaustruct // tokenSource set below.
+	p := &gitlabProvider{ //nolint:exhaustruct // tokenSource and caches set below.
 		host: host, apiHost: cfg.APIHost,
 		allowPrivateNetwork: cfg.AllowPrivateNetwork,
 		caData:              caData, resolver: defaultResolveAddrs,
 		egress:   e,
 		exposure: gitlabclass.BuildExposure(cfg.Permissions),
-		tables: cache.NewTableCache(cfg.Config, newGitLabOpenAPIFetcher(e),
-			gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
-			gitlabclass.UnmarshalTable, gitlabclass.AdmitTable),
 	}
+	p.tables, p.docs.cache = newGitLabCaches(cfg, newGitLabOpenAPIFetcher(e))
 
 	p.tokenSource = newTokenSource(p, cred)
 

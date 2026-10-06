@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 )
 
@@ -284,6 +285,42 @@ paths:
 			t.Parallel()
 			if _, cErr := ClassifyRequest(tbl, http.MethodGet, path); !errors.Is(cErr, ErrUnclassifiable) {
 				t.Fatalf("ClassifyRequest(%q) err = %v, want ErrUnclassifiable", path, cErr)
+			}
+		})
+	}
+}
+
+// TestClassifyRequest_MarksOnlyTheTableMiss pins which denials carry the api_reference hint: only a route the
+// table does not hold. The text and the ErrUnclassifiable identity stay what they were.
+func TestClassifyRequest_MarksOnlyTheTableMiss(t *testing.T) {
+	t.Parallel()
+	tbl, err := DistillOpenAPI([]byte("paths:\n  /api/v4/projects/{id}/issues:\n    get:\n      tags: [Issues]\n"))
+	if err != nil {
+		t.Fatalf("DistillOpenAPI: %v", err)
+	}
+	cases := []struct {
+		method, path string
+		marked       bool
+	}{
+		{http.MethodGet, "/api/v4/projects/1/isues", true},
+		{http.MethodHead, "/api/v4/projects/team/app/issues", true},
+		{"BREW", "/api/v4/projects/1/issues", false},
+		{http.MethodGet, "/api/v4/projects/./issues", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			t.Parallel()
+			_, cErr := ClassifyRequest(tbl, tc.method, tc.path)
+			if !errors.Is(cErr, ErrUnclassifiable) {
+				t.Fatalf("err = %v, want ErrUnclassifiable", cErr)
+			}
+			um, marked := errors.AsType[*authreq.UnmatchedRequestError](cErr)
+			if marked != tc.marked {
+				t.Fatalf("marked = %v, want %v (err %v)", marked, tc.marked, cErr)
+			}
+			if marked && (um.Service != "" ||
+				cErr.Error() != "gitlab_hardening: cannot classify request as read or write: "+tc.method+" "+tc.path) {
+				t.Errorf("service %q text %q", um.Service, cErr.Error())
 			}
 		})
 	}

@@ -92,6 +92,9 @@ func formatUnmatched(connector, service string, v authreq.View, h apiref.Hint, e
 	if len(h.Candidates) > 0 {
 		cand = " Candidates: " + strings.Join(h.Candidates, "; ") + "."
 	}
+	if h.Note != "" {
+		cand += " " + apiref.Truncate(h.Note, apiref.MaxHintNote)
+	}
 	var tmpl string
 	if !h.NoReference {
 		tmpl = fmt.Sprintf(" For an operation's request template call api_reference with %s.", marshalLookup(lookup))

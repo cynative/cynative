@@ -92,7 +92,7 @@ func githubReference(t *testing.T, op string) apiref.Result {
 		t.Fatal(err)
 	}
 
-	return d.Reference(apiref.Query{Connector: "github", Operation: op})
+	return github.Reference(d, apiref.Query{Connector: "github", Operation: op})
 }
 
 type refOut struct {
@@ -152,6 +152,10 @@ func TestAPIReference_Info(t *testing.T) {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("schema missing %q: %s", want, raw)
 		}
+	}
+	if !strings.Contains(info.Desc, "github and gitlab.") || !strings.Contains(info.Desc, "generated from the path") ||
+		!strings.Contains(string(raw), "getApiV4ProjectsIdMergeRequests") {
+		t.Errorf("gitlab missing from the description or schema: %s %s", info.Desc, raw)
 	}
 	if _, ok := tools.NewAPIReferenceTool(nil).(schema.StructuredRunner); ok {
 		t.Error("api_reference must not implement StructuredRunner")
@@ -243,6 +247,33 @@ func TestAPIReference_UnrenderedPlaceholder(t *testing.T) {
 	}
 	if out.Reference["gaps"] == nil || fail.Progress() == 0 || fail.Failed() {
 		t.Errorf("gaps %v progress %d failed %v", out.Reference["gaps"], fail.Progress(), fail.Failed())
+	}
+}
+
+// TestAPIReference_EmbeddedPathLabels pins labels inside a literal segment (GitLab's {file_name}.tgz and NuGet's
+// Packages(Id='{package_name}',...)) rendering as placeholders, like whole-segment labels, and an unclosed brace
+// staying literal.
+func TestAPIReference_EmbeddedPathLabels(t *testing.T) {
+	t.Parallel()
+
+	path := func(name string) apiref.Input {
+		return apiref.Input{
+			Name: name, WireName: name, Location: apiref.LocationPath, Required: true, Type: "string", Renderable: true,
+		}
+	}
+	ref := &apiref.Reference{
+		Connector: "gitlab", Operation: "Op", Method: "GET",
+		PathTemplate: "/p/{id}/charts/{file_name}.tgz/Packages(Id='{package_name}',Version='{package_version}')/odd{x",
+		Endpoint:     "https://gitlab.com", BodyEncoding: apiref.BodyNone,
+		Inputs: []apiref.Input{path("id"), path("file_name"), path("package_name"), path("package_version")},
+	}
+	p := &docProvider{name: "gitlab", res: apiref.Result{Outcome: apiref.OutcomeFound, Reference: ref}}
+	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"gitlab","operation":"Op"}`)
+	// An unclosed brace is literal text, as the metadata wrote it.
+	want := "https://gitlab.com/p/<id>/charts/<file_name>.tgz/Packages(Id='<package_name>',Version='<package_version>')" +
+		"/odd{x"
+	if got := templateArgs(t, out).URL; got != want {
+		t.Errorf("url = %q, want %q", got, want)
 	}
 }
 

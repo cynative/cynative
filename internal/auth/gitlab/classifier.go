@@ -102,8 +102,10 @@ func RequiredLevel(method, escapedPath string) (exposure.Level, error) {
 }
 
 // ClassifyRequest resolves a REST request to its (Category, required Level). A
-// route absent from the table fails closed (ErrUnclassifiable). HEAD/OPTIONS look
-// up as GET (read probes of the same resource).
+// route absent from the table fails closed (ErrUnclassifiable) and is marked
+// *authreq.UnmatchedRequestError, so the denial carries the api_reference hint;
+// an unknown method and a dot segment are not marked. HEAD/OPTIONS look up as
+// GET (read probes of the same resource).
 func ClassifyRequest(t *Table, method, escapedPath string) (Access, error) {
 	lvl, err := RequiredLevel(method, escapedPath)
 	if err != nil {
@@ -119,7 +121,9 @@ func ClassifyRequest(t *Table, method, escapedPath string) (Access, error) {
 	}
 	route, ok := t.Lookup(lookupMethod, escapedPath)
 	if !ok {
-		return Access{}, fmt.Errorf("%w: %s %s", ErrUnclassifiable, method, escapedPath)
+		return Access{}, &authreq.UnmatchedRequestError{
+			Err: fmt.Errorf("%w: %s %s", ErrUnclassifiable, method, escapedPath),
+		}
 	}
 	return Access{Category: route.Category, Level: lvl}, nil
 }

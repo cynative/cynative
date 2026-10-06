@@ -1,0 +1,57 @@
+{
+  "fixture HEAD near miss": {
+    "candidates": [
+      "repos/get (GET /repos/{owner}/{repo})"
+    ],
+    "operation": "repos/get",
+    "no_reference": false
+  },
+  "fixture OPTIONS near miss": {
+    "candidates": [
+      "repos/get (GET /repos/{owner}/{repo})"
+    ],
+    "operation": "repos/get",
+    "no_reference": false
+  },
+  "fixture no match": {
+    "candidates": null,
+    "operation": "",
+    "no_reference": false
+  },
+  "fixture two candidates": {
+    "candidates": [
+      "issues/create (POST /repos/{owner}/{repo}/issues)",
+      "issues/list-for-repo (GET /repos/{owner}/{repo}/issues)"
+    ],
+    "operation": "",
+    "no_reference": false
+  },
+  "fixture wrong method": {
+    "candidates": [
+      "repos/get (GET /repos/{owner}/{repo})"
+    ],
+    "operation": "repos/get",
+    "no_reference": false
+  },
+  "synth multi-segment empty": {
+    "candidates": [
+      "repos/get-content (GET /repos/{owner}/{repo}/contents/{path*})"
+    ],
+    "operation": "repos/get-content",
+    "no_reference": false
+  },
+  "synth multi-segment mid-path": {
+    "candidates": [
+      "repos/get-branch-protection (GET /repos/{owner}/{repo}/branches/{branch+}/protection)"
+    ],
+    "operation": "repos/get-branch-protection",
+    "no_reference": false
+  },
+  "synth multi-segment tail": {
+    "candidates": [
+      "repos/get-content (GET /repos/{owner}/{repo}/contents/{path*})"
+    ],
+    "operation": "repos/get-content",
+    "no_reference": false
+  }
+}

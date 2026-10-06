@@ -1,8 +1,16 @@
 package auth
 
 import (
+	"context"
 	"errors"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
+	"github.com/cynative/cynative/internal/cache"
 )
 
 // TestBuildGitLabProvider_ServedHostAdmission pins the ASCII admission of the
@@ -66,4 +74,58 @@ func TestBuildGitLabProvider_ServedHostAdmission(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestBuildGitLabProvider_WiresDocsCache pins the docs cache beside the table cache in the connector's cache
+// directory. Nothing is fetched: both caches load lazily.
+func TestBuildGitLabProvider_WiresDocsCache(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cfg := GitLabHardeningConfig{Dir: dir, TTL: time.Hour, Clock: time.Now}
+	p, err := buildGitLabProvider(cfg, "gitlab.example", glabCredential{AccessToken: "glpat-test"}, NoProxy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.docs.cache == nil || p.docs.cache.DataPath != filepath.Join(dir, "docs.json") ||
+		p.tables.DataPath != filepath.Join(dir, "table.json") {
+		t.Errorf("docs %+v tables %+v", p.docs.cache, p.tables)
+	}
+}
+
+// TestNewGitLabCaches_OneDownloadFeedsBothCaches pins the handoff the provider's caches are built with: after the table loads, the
+// docs load costs no second download, and a docs load never fills the table.
+func TestNewGitLabCaches_OneDownloadFeedsBothCaches(t *testing.T) {
+	t.Parallel()
+	newCaches := func(t *testing.T, fetches *atomic.Int32) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs]) {
+		t.Helper()
+		cfg := GitLabHardeningConfig{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now}
+		fetch := func(context.Context) ([]byte, error) {
+			fetches.Add(1)
+
+			return []byte(gitlabDocsFixture), nil
+		}
+		return newGitLabCaches(cfg, fetch)
+	}
+	t.Run("table first", func(t *testing.T) {
+		t.Parallel()
+		var fetches atomic.Int32
+		tables, docs := newCaches(t, &fetches)
+		if tables.Get(t.Context()) == nil || docs.Get(t.Context()) == nil {
+			t.Fatal("a cache failed to load")
+		}
+		if n := fetches.Load(); n != 1 {
+			t.Errorf("table then docs downloaded %d times, want 1", n)
+		}
+	})
+	t.Run("docs first", func(t *testing.T) {
+		t.Parallel()
+		var fetches atomic.Int32
+		tables, docs := newCaches(t, &fetches)
+		if docs.Get(t.Context()) == nil || tables.Get(t.Context()) == nil {
+			t.Fatal("a cache failed to load")
+		}
+		if n := fetches.Load(); n != 2 {
+			t.Errorf("docs then table downloaded %d times, want 2: the table must not be served from the docs", n)
+		}
+	})
 }
