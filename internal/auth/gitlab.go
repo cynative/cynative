@@ -299,6 +299,14 @@ func (p *gitlabProvider) CACertData(_ context.Context, _ authreq.ProviderArgs) (
 	return p.caData, nil
 }
 
+// The GitLab controls rejectGitLabSmuggledControls refuses whatever the
+// permission level. The gitlab connector's api_reference reads the same names.
+const (
+	gitlabSudoParam  = "sudo"
+	gitlabTokenParam = "token"
+	gitlabSudoHeader = "Sudo"
+)
+
 // errGitLabSudoBlocked is returned when a request carries a model-supplied GitLab
 // sudo impersonation control. The model must never act as another user.
 var errGitLabSudoBlocked = errors.New(
@@ -321,14 +329,14 @@ func rejectGitLabSmuggledControls(v authreq.View) error {
 	}
 	for key := range params {
 		switch base := baseParamName(key); {
-		case strings.EqualFold(base, "sudo"):
+		case strings.EqualFold(base, gitlabSudoParam):
 			return fmt.Errorf("%w (sudo query parameter)", errGitLabSudoBlocked)
-		case strings.EqualFold(base, "token"):
+		case strings.EqualFold(base, gitlabTokenParam):
 			return fmt.Errorf("%w: token query parameter present (provider gitlab)", ErrModelSuppliedCredential)
 		}
 	}
 	for key := range v.Header {
-		if strings.EqualFold(key, "Sudo") {
+		if strings.EqualFold(key, gitlabSudoHeader) {
 			return fmt.Errorf("%w (Sudo header)", errGitLabSudoBlocked)
 		}
 	}
