@@ -247,10 +247,7 @@ func buildTemplate(ref *apiref.Reference) map[string]any {
 func buildURL(ref *apiref.Reference) string {
 	segs := strings.Split(ref.PathTemplate, "/")
 	for i, s := range segs {
-		if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
-			name, greedy := strings.CutSuffix(strings.TrimSuffix(strings.TrimPrefix(s, "{"), "}"), "+")
-			segs[i] = pathPlaceholder(ref, name, greedy)
-		}
+		segs[i] = segmentPlaceholders(ref, s)
 	}
 	query := paramPairs(ref.FixedQuery)
 	for _, in := range requiredAt(ref, apiref.LocationQuery) {
@@ -262,6 +259,29 @@ func buildURL(ref *apiref.Reference) string {
 	}
 
 	return u
+}
+
+// segmentPlaceholders replaces every {label} in one path segment with its placeholder: a whole-segment label as in
+// /things/{Id}, or one inside literal text as in GitLab's {file_name}.tgz.
+func segmentPlaceholders(ref *apiref.Reference, seg string) string {
+	var b strings.Builder
+	for {
+		open := strings.IndexByte(seg, '{')
+		if open < 0 {
+			break
+		}
+		end := strings.IndexByte(seg[open:], '}')
+		if end < 0 {
+			break
+		}
+		name, greedy := strings.CutSuffix(seg[open+1:open+end], "+")
+		b.WriteString(seg[:open])
+		b.WriteString(pathPlaceholder(ref, name, greedy))
+		seg = seg[open+end+1:]
+	}
+	b.WriteString(seg)
+
+	return b.String()
 }
 
 // bareTypes are the input types whose JSON placeholder is unquoted, so the substituted value stays a number or

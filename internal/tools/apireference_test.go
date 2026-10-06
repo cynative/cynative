@@ -250,6 +250,33 @@ func TestAPIReference_UnrenderedPlaceholder(t *testing.T) {
 	}
 }
 
+// TestAPIReference_EmbeddedPathLabels pins labels inside a literal segment (GitLab's {file_name}.tgz and NuGet's
+// Packages(Id='{package_name}',...)) rendering as placeholders, like whole-segment labels, and an unclosed brace
+// staying literal.
+func TestAPIReference_EmbeddedPathLabels(t *testing.T) {
+	t.Parallel()
+
+	path := func(name string) apiref.Input {
+		return apiref.Input{
+			Name: name, WireName: name, Location: apiref.LocationPath, Required: true, Type: "string", Renderable: true,
+		}
+	}
+	ref := &apiref.Reference{
+		Connector: "gitlab", Operation: "Op", Method: "GET",
+		PathTemplate: "/p/{id}/charts/{file_name}.tgz/Packages(Id='{package_name}',Version='{package_version}')/odd{x",
+		Endpoint:     "https://gitlab.com", BodyEncoding: apiref.BodyNone,
+		Inputs: []apiref.Input{path("id"), path("file_name"), path("package_name"), path("package_version")},
+	}
+	p := &docProvider{name: "gitlab", res: apiref.Result{Outcome: apiref.OutcomeFound, Reference: ref}}
+	_, out, _ := runRef(t, []auth.Provider{p}, `{"connector":"gitlab","operation":"Op"}`)
+	// An unclosed brace is literal text, as the metadata wrote it.
+	want := "https://gitlab.com/p/<id>/charts/<file_name>.tgz/Packages(Id='<package_name>',Version='<package_version>')" +
+		"/odd{x"
+	if got := templateArgs(t, out).URL; got != want {
+		t.Errorf("url = %q, want %q", got, want)
+	}
+}
+
 func TestAPIReference_JSONBodyPlaceholderTypes(t *testing.T) {
 	t.Parallel()
 
