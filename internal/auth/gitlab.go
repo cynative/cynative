@@ -564,16 +564,16 @@ func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ au
 // The token source is static for an env/PAT credential and a caching
 // glab-helper source for a glab OAuth credential (newTokenSource). fetch
 // downloads the OpenAPI document; one download feeds both caches on a cold
-// start.
+// start. readCA reads the configured CA file, so the file read stays in the shell.
 func newGitLabProvider(
 	cfg GitLabHardeningConfig, host string, cred glabCredential, e *Egress,
-	fetch func(context.Context) ([]byte, error),
+	fetch func(context.Context) ([]byte, error), readCA func(path string) (string, error),
 ) (*gitlabProvider, error) {
 	if err := validateGitLabHosts(host, cfg.APIHost); err != nil {
 		return nil, err
 	}
 
-	caData, err := readCACertBase64(cfg.CACertPath)
+	caData, err := readCA(cfg.CACertPath)
 	if err != nil {
 		return nil, err
 	}

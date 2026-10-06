@@ -32,7 +32,7 @@ func readCACertBase64(path string) (string, error) {
 func buildGitLabProvider(
 	cfg GitLabHardeningConfig, host string, cred glabCredential, e *Egress,
 ) (*gitlabProvider, error) {
-	return newGitLabProvider(cfg, host, cred, e, newGitLabOpenAPIFetcher(e))
+	return newGitLabProvider(cfg, host, cred, e, newGitLabOpenAPIFetcher(e), readCACertBase64)
 }
 
 // buildProbeClient constructs the pinned HTTP client used for the eager /user

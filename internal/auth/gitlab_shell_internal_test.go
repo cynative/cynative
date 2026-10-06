@@ -100,7 +100,8 @@ func TestNewGitLabProvider_OneDownloadFeedsBothCaches(t *testing.T) {
 
 			return []byte(gitlabDocsFixture), nil
 		}
-		p, err := newGitLabProvider(cfg, "gitlab.com", glabCredential{AccessToken: "glpat-test"}, NoProxy(), fetch)
+		p, err := newGitLabProvider(cfg, "gitlab.com", glabCredential{AccessToken: "glpat-test"}, NoProxy(), fetch,
+			func(string) (string, error) { return "", nil })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,12 +132,20 @@ func TestNewGitLabProvider_OneDownloadFeedsBothCaches(t *testing.T) {
 	})
 }
 
+// TestNewGitLabProvider_UnreadableCACert pins that the constructor reads the CA through the injected reader, with
+// the configured path, and returns its error: the file read itself stays in the shell.
 func TestNewGitLabProvider_UnreadableCACert(t *testing.T) {
 	t.Parallel()
-	cfg := GitLabHardeningConfig{CACertPath: filepath.Join(t.TempDir(), "missing.pem")}
+	errCA := errors.New("ca unreadable")
+	var gotPath string
+	cfg := GitLabHardeningConfig{CACertPath: "/etc/gitlab/ca.pem"}
 	p, err := newGitLabProvider(cfg, "gitlab.example", glabCredential{AccessToken: "glpat-test"}, NoProxy(),
-		func(context.Context) ([]byte, error) { return nil, errors.New("unused") })
-	if err == nil || p != nil {
-		t.Errorf("provider %v err %v", p, err)
+		func(context.Context) ([]byte, error) { return nil, errors.New("unused") },
+		func(path string) (string, error) { gotPath = path; return "", errCA })
+	if !errors.Is(err, errCA) || p != nil {
+		t.Errorf("provider %v err %v, want errCA", p, err)
+	}
+	if gotPath != cfg.CACertPath {
+		t.Errorf("reader got path %q, want %q", gotPath, cfg.CACertPath)
 	}
 }
