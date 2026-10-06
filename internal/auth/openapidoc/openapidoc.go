@@ -21,13 +21,16 @@ var ErrDocsRejected = errors.New("openapidoc: operation docs rejected")
 
 const (
 	unknownType     = "unknown"
+	stringType      = "string"
 	paramRefPrefix  = "#/components/parameters/"
 	schemaRefPrefix = "#/components/schemas/"
 	jsonMedia       = "application/json"
 	bodySkipped     = "optional request body is not rendered"
 	bodyGap         = "request body is not a JSON object the template can render"
 	serverGap       = "operation is served from %s, not from the %s connector's API host %s"
-	okStatus        = "200"
+	unspecifiedNote = "the document does not describe this operation's response format; check the Content-Type " +
+		"response header before parsing"
+	okStatus = "200"
 )
 
 // Profile is what one connector's references differ in.
@@ -36,9 +39,12 @@ type Profile struct {
 	Protocol       string
 	SourceName     string
 	SourceDocument string
-	// Endpoint is the base URL the connector calls. Distill records an operation's own server when it differs.
+	// Endpoint is the base URL the connector calls. Distill records an operation's own server when it differs, and
+	// ignores the document's servers when Endpoint is empty.
 	Endpoint     string
 	FixedHeaders []apiref.Param
+	// ScalarUnion renders a parameter whose schema is oneOf exactly a string and an integer as a string.
+	ScalarUnion bool
 	// Paged reports at distill time whether an operation pages its results. headers are the header names its 200
 	// response declares, sorted. It must be set.
 	Paged func(params []DocParam, headers []string) bool
@@ -47,6 +53,12 @@ type Profile struct {
 	PagingLimit string
 	// Limitations apply to every reference.
 	Limitations []string
+	// UnspecifiedResponse reports a selected success response that declares no content as unspecified, with a
+	// limitation, instead of as having no body. It suits a document that often omits response content.
+	UnspecifiedResponse bool
+	// Refuse reports an input the connector rejects whatever the permission level. A refused input is left out of
+	// the inputs and the template, and a required one is a gap. Nil refuses nothing.
+	Refuse func(loc apiref.Location, name string) bool
 }
 
 // DocParam is one documented parameter or required body property.
@@ -78,6 +90,10 @@ type OperationDoc struct {
 	Paged bool `json:"l,omitempty"`
 	// Server is the operation's server URL (operation over path item over document), "" when it is the default.
 	Server string `json:"sv,omitempty"`
+	// Alt lists other concrete forms of Path that a hint should also match.
+	Alt []string `json:"ap,omitempty"`
+	// Gaps are blocking gaps a connector's distiller recorded for the operation.
+	Gaps []string `json:"gp,omitempty"`
 }
 
 // OperationDocs is the distilled documentation of every operation, keyed by operation ID.
@@ -201,10 +217,14 @@ func distillOp(doc *rawDoc, prof *Profile, method, path string, item *rawPathIte
 		Method:  method,
 		Path:    path,
 		Summary: apiref.StripMarkup(op.Summary, apiref.MaxSummary),
-		Params:  mergeParams(resolveParams(doc, item.Parameters), resolveParams(doc, op.Parameters)),
+		Params: mergeParams(
+			resolveParams(doc, item.Parameters, prof.ScalarUnion), resolveParams(doc, op.Parameters, prof.ScalarUnion),
+		),
 	}
-	if server := serverURL(prof.Endpoint, op.Servers, item.Servers, doc.Servers); server != prof.Endpoint {
-		d.Server = server
+	if prof.Endpoint != "" {
+		if server := serverURL(prof.Endpoint, op.Servers, item.Servers, doc.Servers); server != prof.Endpoint {
+			d.Server = server
+		}
 	}
 	if rb := op.RequestBody; rb != nil {
 		fields, ok := bodyFields(doc, rb)
@@ -235,7 +255,7 @@ func serverURL(def string, lists ...[]rawServer) string {
 	return def
 }
 
-func resolveParams(doc *rawDoc, in []rawParam) []DocParam {
+func resolveParams(doc *rawDoc, in []rawParam, union bool) []DocParam {
 	var out []DocParam
 	for _, p := range in {
 		if p.Ref != "" {
@@ -250,7 +270,7 @@ func resolveParams(doc *rawDoc, in []rawParam) []DocParam {
 		out = append(out, DocParam{
 			Name:        text(p.Name),
 			In:          text(p.In),
-			Type:        typeName(schemaType(p.Schema)),
+			Type:        paramType(p.Schema, union),
 			Required:    p.Required == true,
 			Description: apiref.StripMarkup(text(p.Description), apiref.MaxInputDescription),
 		})
@@ -270,11 +290,28 @@ func schemaType(schema any) any {
 	return m["type"]
 }
 
-func typeName(t any) string {
-	if s := text(t); s != "" {
+// paramType is the parameter schema's type, "string" for a oneOf of exactly a string and an integer when union is
+// set, and "unknown" otherwise.
+func paramType(schema any, union bool) string {
+	if s := text(schemaType(schema)); s != "" {
 		return s
 	}
+	if union && isScalarUnion(schema) {
+		return stringType
+	}
 	return unknownType
+}
+
+// isScalarUnion reports a schema that is oneOf exactly two alternatives typed string and integer.
+func isScalarUnion(schema any) bool {
+	m, _ := schema.(map[string]any)
+	alts, _ := m["oneOf"].([]any)
+	types := make([]string, 0, len(alts))
+	for _, alt := range alts {
+		types = append(types, text(schemaType(alt)))
+	}
+	slices.Sort(types)
+	return slices.Equal(types, []string{"integer", stringType})
 }
 
 // mergeParams lets an operation-level parameter replace a path-level one with the same name and location.
@@ -354,7 +391,7 @@ func bodyType(p rawProp) string {
 
 func isScalar(t string) bool {
 	switch t {
-	case "string", "integer", "number", "boolean":
+	case stringType, "integer", "number", "boolean":
 		return true
 	}
 	return false
@@ -469,11 +506,14 @@ func (d *OperationDocs) Reference(q apiref.Query, prof Profile) apiref.Result {
 	return apiref.Result{Outcome: apiref.OutcomeOf(ref), Reference: ref}
 }
 
-// Routes lists every operation's method and path as hint routes.
+// Routes lists every operation's method and path, and each alternate form of the path, as hint routes.
 func (d *OperationDocs) Routes() []apiref.Route {
 	routes := make([]apiref.Route, 0, len(d.Ops))
 	for id, op := range d.Ops {
 		routes = append(routes, apiref.Route{Operation: id, Method: op.Method, Template: op.Path})
+		for _, alt := range op.Alt {
+			routes = append(routes, apiref.Route{Operation: id, Method: op.Method, Template: alt})
+		}
 	}
 	return routes
 }
@@ -500,6 +540,13 @@ func (d *OperationDocs) build(id string, op OperationDoc, prof *Profile) *apiref
 		ref.Pagination = prof.Paging
 		ref.Limitations = append(ref.Limitations, prof.PagingLimit)
 	}
+	if op.ResponseType == "" && prof.UnspecifiedResponse {
+		ref.Response = apiref.Response{
+			Encoding: "unspecified",
+			Parse:    "the document does not describe the response; read Content-Type before parsing response.body",
+		}
+		ref.Limitations = append(ref.Limitations, unspecifiedNote)
+	}
 	if op.BodyRequired || len(op.BodyFields) > 0 {
 		ref.BodyEncoding = apiref.BodyJSON
 		ref.FixedHeaders = append(ref.FixedHeaders, apiref.Param{Key: "Content-Type", Value: jsonMedia})
@@ -511,10 +558,11 @@ func (d *OperationDocs) build(id string, op OperationDoc, prof *Profile) *apiref
 	if op.BodyGap != "" {
 		ref.Gaps = append(ref.Gaps, op.BodyGap)
 	}
+	ref.Gaps = append(ref.Gaps, op.Gaps...)
 	if op.BodySkipped {
 		ref.Limitations = append(ref.Limitations, bodySkipped)
 	}
-	inputs(ref, op)
+	inputs(ref, op, prof)
 	return ref
 }
 
@@ -532,9 +580,36 @@ func response(mediaType string) apiref.Response {
 }
 
 // inputs lists every required input and the first MaxOptionalInputs optional ones, and records a gap for each
-// required input the template cannot render.
-func inputs(ref *apiref.Reference, op OperationDoc) {
+// required input the template cannot render or the profile refuses.
+func inputs(ref *apiref.Reference, op OperationDoc, prof *Profile) {
 	ref.Inputs = []apiref.Input{}
+	optional := 0
+	for _, in := range allInputs(op) {
+		if prof.refuses(in) {
+			if in.Required {
+				ref.Gaps = append(ref.Gaps, fmt.Sprintf("required input %s is a credential the %s connector refuses",
+					in.Name, prof.Connector))
+			}
+			continue
+		}
+		if !in.Required {
+			if optional == apiref.MaxOptionalInputs {
+				ref.InputsTruncated = true
+				continue
+			}
+			optional++
+		}
+		if in.Required && !in.Renderable {
+			ref.Gaps = append(ref.Gaps, fmt.Sprintf("required input %s (%s in %s) cannot be rendered",
+				in.Name, in.Type, in.Location))
+		}
+		ref.Inputs = append(ref.Inputs, in)
+	}
+}
+
+// allInputs lists the operation's inputs: path, query and header parameters, then body fields, then a placeholder
+// for a required body the template cannot render.
+func allInputs(op OperationDoc) []apiref.Input {
 	var all []apiref.Input
 	for _, loc := range []apiref.Location{apiref.LocationPath, apiref.LocationQuery, apiref.LocationHeader} {
 		for _, p := range op.Params {
@@ -551,21 +626,7 @@ func inputs(ref *apiref.Reference, op OperationDoc) {
 			Name: "body", WireName: "body", Location: apiref.LocationBody, Required: true, Type: unknownType,
 		})
 	}
-	optional := 0
-	for _, in := range all {
-		if !in.Required {
-			if optional == apiref.MaxOptionalInputs {
-				ref.InputsTruncated = true
-				continue
-			}
-			optional++
-		}
-		if in.Required && !in.Renderable {
-			ref.Gaps = append(ref.Gaps, fmt.Sprintf("required input %s (%s in %s) cannot be rendered",
-				in.Name, in.Type, in.Location))
-		}
-		ref.Inputs = append(ref.Inputs, in)
-	}
+	return all
 }
 
 func input(p DocParam, loc apiref.Location) apiref.Input {
@@ -578,4 +639,9 @@ func input(p DocParam, loc apiref.Location) apiref.Input {
 		Renderable:  isScalar(p.Type),
 		Description: p.Description,
 	}
+}
+
+// refuses reports an input the profile's Refuse rejects.
+func (p *Profile) refuses(in apiref.Input) bool {
+	return p.Refuse != nil && p.Refuse(in.Location, in.Name)
 }
