@@ -14,6 +14,7 @@ import (
 	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 	"github.com/cynative/cynative/internal/cache"
 )
 
@@ -85,7 +86,7 @@ func goldenReference(t *testing.T, raw []byte, op string) apiref.Result {
 		t.Fatal(err)
 	}
 
-	return d.Reference(apiref.Query{Connector: "github", Operation: op})
+	return github.Reference(d, apiref.Query{Connector: "github", Operation: op})
 }
 
 func goldenHint(t *testing.T, raw []byte, v authreq.View) apiref.Hint {
@@ -95,28 +96,28 @@ func goldenHint(t *testing.T, raw []byte, v authreq.View) apiref.Hint {
 		t.Fatal(err)
 	}
 
-	return d.Hint(v)
+	return github.Hint(d, v)
 }
 
 // cachedReference looks op up in docs read back from their serialized cache form, as a warm docs.json is.
 func cachedReference(t *testing.T, serialized []byte, op string) apiref.Result {
 	t.Helper()
-	d, err := github.UnmarshalDocs(serialized)
+	d, err := openapidoc.Unmarshal(serialized)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return d.Reference(apiref.Query{Connector: "github", Operation: op})
+	return github.Reference(d, apiref.Query{Connector: "github", Operation: op})
 }
 
 func cachedHint(t *testing.T, serialized []byte, v authreq.View) apiref.Hint {
 	t.Helper()
-	d, err := github.UnmarshalDocs(serialized)
+	d, err := openapidoc.Unmarshal(serialized)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return d.Hint(v)
+	return github.Hint(d, v)
 }
 
 // checkGolden compares got with testdata/golden/name byte for byte. A missing golden is recorded and the test

@@ -1,4 +1,4 @@
-package github_test
+package openapidoc_test
 
 import (
 	"errors"
@@ -14,7 +14,15 @@ import (
 	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 )
+
+// ghDocs reads the shared docs through GitHub's profile, the connector these tests were written against.
+type ghDocs struct{ *openapidoc.OperationDocs }
+
+func (d ghDocs) Reference(q apiref.Query) apiref.Result { return github.Reference(d.OperationDocs, q) }
+
+func (d ghDocs) Hint(v authreq.View) apiref.Hint { return github.Hint(d.OperationDocs, v) }
 
 func inputNamed(ref *apiref.Reference, name string) (apiref.Input, bool) {
 	for _, in := range ref.Inputs {
@@ -25,9 +33,9 @@ func inputNamed(ref *apiref.Reference, name string) (apiref.Input, bool) {
 	return apiref.Input{}, false
 }
 
-func fixtureDocs(t *testing.T) *github.OperationDocs {
+func fixtureDocs(t *testing.T) ghDocs {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/openapi-docs.json")
+	raw, err := os.ReadFile("../github/testdata/openapi-docs.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,16 +43,16 @@ func fixtureDocs(t *testing.T) *github.OperationDocs {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return d
+	return ghDocs{d}
 }
 
-func synthDocs(t *testing.T, doc string) *github.OperationDocs {
+func synthDocs(t *testing.T, doc string) ghDocs {
 	t.Helper()
 	d, err := github.DistillDocs([]byte(doc))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return d
+	return ghDocs{d}
 }
 
 func ghView(t *testing.T, method, rawURL string) authreq.View {
@@ -483,8 +491,8 @@ func TestDocsReference_ChoicesTruncated(t *testing.T) {
 func TestDocs_RoundTrip(t *testing.T) {
 	t.Parallel()
 	d := fixtureDocs(t)
-	back, err := github.UnmarshalDocs(d.Serialize())
-	if err != nil || !reflect.DeepEqual(d, back) {
+	back, err := openapidoc.Unmarshal(d.Serialize())
+	if err != nil || !reflect.DeepEqual(d.OperationDocs, back) {
 		t.Errorf("err = %v, round trip differs", err)
 	}
 	if d.Version == "" || len(d.SHA256) != 64 {
@@ -494,17 +502,17 @@ func TestDocs_RoundTrip(t *testing.T) {
 
 func TestDocs_Rejects(t *testing.T) {
 	t.Parallel()
-	if _, err := github.UnmarshalDocs([]byte("{")); !errors.Is(err, github.ErrDocsRejected) {
+	if _, err := openapidoc.Unmarshal([]byte("{")); !errors.Is(err, openapidoc.ErrDocsRejected) {
 		t.Errorf("err = %v", err)
 	}
-	if err := github.AdmitDocs(&github.OperationDocs{}); !errors.Is(err, github.ErrDocsRejected) {
+	if err := openapidoc.Admit(&openapidoc.OperationDocs{}); !errors.Is(err, openapidoc.ErrDocsRejected) {
 		t.Errorf("err = %v", err)
 	}
-	if err := github.AdmitDocs(fixtureDocs(t)); err != nil {
+	if err := openapidoc.Admit(fixtureDocs(t).OperationDocs); err != nil {
 		t.Errorf("err = %v", err)
 	}
 	for _, raw := range []string{"not json", `{"paths":{}}`, `{"paths":{"/a":{"get":"x"}}}`, `{"paths":{"/a":{"get":{}}}}`} {
-		if _, err := github.DistillDocs([]byte(raw)); !errors.Is(err, github.ErrDocsRejected) {
+		if _, err := github.DistillDocs([]byte(raw)); !errors.Is(err, openapidoc.ErrDocsRejected) {
 			t.Errorf("%s: err = %v", raw, err)
 		}
 	}

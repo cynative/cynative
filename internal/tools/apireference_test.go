@@ -92,7 +92,7 @@ func githubReference(t *testing.T, op string) apiref.Result {
 		t.Fatal(err)
 	}
 
-	return d.Reference(apiref.Query{Connector: "github", Operation: op})
+	return github.Reference(d, apiref.Query{Connector: "github", Operation: op})
 }
 
 type refOut struct {

@@ -12,6 +12,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 	"github.com/cynative/cynative/internal/cache"
 )
 
@@ -63,7 +64,7 @@ type githubProvider struct {
 	token    string
 	exposure exposure.Exposure
 	tables   *cache.TTLCache[githubhardening.Table]
-	docs     *cache.TTLCache[githubhardening.OperationDocs]
+	docs     *cache.TTLCache[openapidoc.OperationDocs]
 	errOut   io.Writer
 	// hintMu serializes the Hint path's latch check, docs load and latch set, so
 	// concurrent denials queue behind the first load instead of each retrying it.
@@ -370,7 +371,7 @@ func (p *githubProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 
 	p.hintDocsFailed.reset()
 
-	return d.Reference(q)
+	return githubhardening.Reference(d, q)
 }
 
 // Hint suggests operations for a request the gate matched to none.
@@ -392,11 +393,11 @@ func (p *githubProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.Un
 		return apiref.Hint{}
 	}
 
-	return d.Hint(v)
+	return githubhardening.Hint(d, v)
 }
 
 // loadDocs returns the documentation, or nil when none is wired or loadable.
-func (p *githubProvider) loadDocs(ctx context.Context) *githubhardening.OperationDocs {
+func (p *githubProvider) loadDocs(ctx context.Context) *openapidoc.OperationDocs {
 	if p.docs == nil {
 		return nil
 	}

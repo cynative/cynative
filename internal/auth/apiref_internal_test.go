@@ -21,6 +21,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/authtest"
 	awshardening "github.com/cynative/cynative/internal/auth/aws"
 	githubhardening "github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 	"github.com/cynative/cynative/internal/cache"
 )
 
@@ -313,10 +314,10 @@ func docsFixture(t *testing.T) []byte {
 func newDocsCache(
 	dir string,
 	fetch func(context.Context) ([]byte, error),
-) *cache.TTLCache[githubhardening.OperationDocs] {
+) *cache.TTLCache[openapidoc.OperationDocs] {
 	return cache.NewNamedCache(cache.Config{Dir: dir, TTL: time.Hour, Clock: time.Now}, "docs", fetch,
-		githubhardening.DistillDocs, (*githubhardening.OperationDocs).Serialize,
-		githubhardening.UnmarshalDocs, githubhardening.AdmitDocs)
+		githubhardening.DistillDocs, (*openapidoc.OperationDocs).Serialize,
+		openapidoc.Unmarshal, openapidoc.Admit)
 }
 
 func TestGithubProvider_ReferenceAndHint(t *testing.T) {
