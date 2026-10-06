@@ -469,6 +469,7 @@ func TestProviderDescriptions_NameAPIReference(t *testing.T) {
 	for _, p := range []Provider{
 		newGithubProvider("t", githubhardening.BaselineExposure(), nil),
 		newAWSProvider(aws.Config{}, nil),
+		&gitlabProvider{host: "gitlab.com"},
 	} {
 		if !strings.Contains(p.Description(), "call the api_reference tool.") {
 			t.Errorf("%s description lacks the api_reference sentence: %q", p.Name(), p.Description())

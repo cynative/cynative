@@ -14,9 +14,11 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	"github.com/cynative/cynative/internal/auth/exposure"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
+	"github.com/cynative/cynative/internal/auth/openapidoc"
 	"github.com/cynative/cynative/internal/cache"
 
 	"golang.org/x/oauth2"
@@ -132,7 +134,9 @@ type gitlabProvider struct {
 	caData              string // base64 PEM; "" = system roots.
 	exposure            exposure.Exposure
 	tables              *cache.TTLCache[gitlabclass.Table]
-	resolver            addrResolver
+	// docs serves api_reference and the unmatched-request hint; set by buildGitLabProvider.
+	docs     openAPIDocs
+	resolver addrResolver
 	// egress routes the registration probe; set by buildGitLabProvider.
 	egress *Egress
 }
@@ -142,6 +146,8 @@ var (
 	_ ActionAuthorizer = (*gitlabProvider)(nil)
 	_ AddrAuthorizer   = (*gitlabProvider)(nil)
 	_ CACertProvider   = (*gitlabProvider)(nil)
+
+	_ OperationDocumenter = (*gitlabProvider)(nil)
 )
 
 // Name returns the provider's canonical name used as the auth_provider value.
@@ -255,7 +261,8 @@ func (p *gitlabProvider) Description() string {
 		"Each request is classified to its GitLab category and access level and allowed only within "+
 		"the configured connectors.gitlab.permissions ceiling (read-only by default; ci-variables blocked). "+
 		"The GraphQL API (/api/graphql) is not supported; use the REST API. Allows reading "+
-		"GitLab projects, issues, merge requests, and other resources.", p.servedHost())
+		"GitLab projects, issues, merge requests, and other resources. For an operation's request template "+
+		"and response format, call the api_reference tool.", p.servedHost())
 }
 
 // InjectAuth resolves the current access token (via glab's credential-helper for a
@@ -545,4 +552,75 @@ func (p *gitlabProvider) authorizesDialIP(ctx context.Context, ip netip.Addr) (b
 // AuthorizesAddr implements AddrAuthorizer by delegating to authorizesDialIP.
 func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ authreq.ProviderArgs) (bool, error) {
 	return p.authorizesDialIP(ctx, ip)
+}
+
+// newGitLabProvider constructs the gitlabProvider for an already-discovered
+// (non-empty) credential. It returns (nil, error) when the served host is one
+// [AdmitHost] refuses (validateGitLabHosts) or a configured ca_cert is
+// unreadable, both of which gitlabOutcome surfaces as a visible unavailable
+// status, and (provider, nil) otherwise. gitlabOutcome admits the same
+// authority before it discovers the credential, so on that path this is the
+// second of two checks; it sits here so the rule does not rest on the caller.
+// The token source is static for an env/PAT credential and a caching
+// glab-helper source for a glab OAuth credential (newTokenSource). fetch
+// downloads the OpenAPI document; one download feeds both caches on a cold
+// start.
+func newGitLabProvider(
+	cfg GitLabHardeningConfig, host string, cred glabCredential, e *Egress,
+	fetch func(context.Context) ([]byte, error),
+) (*gitlabProvider, error) {
+	if err := validateGitLabHosts(host, cfg.APIHost); err != nil {
+		return nil, err
+	}
+
+	caData, err := readCACertBase64(cfg.CACertPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// One download feeds both caches on a cold start: the table's fetch hands its
+	// bytes to the docs cache once, and the table is never served from the docs.
+	handoff := newOpenAPIHandoff(cfg.Config.Clock, cfg.Config.TTL)
+	p := &gitlabProvider{ //nolint:exhaustruct // tokenSource set below.
+		host: host, apiHost: cfg.APIHost,
+		allowPrivateNetwork: cfg.AllowPrivateNetwork,
+		caData:              caData, resolver: defaultResolveAddrs,
+		egress:   e,
+		exposure: gitlabclass.BuildExposure(cfg.Permissions),
+		tables: cache.NewTableCache(cfg.Config, handoff.record(fetch),
+			gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
+			gitlabclass.UnmarshalTable, gitlabclass.AdmitTable),
+	}
+	p.docs.cache = cache.NewNamedCache(cfg.Config, "docs", handoff.take(fetch),
+		gitlabclass.DistillDocs, (*openapidoc.OperationDocs).Serialize,
+		openapidoc.Unmarshal, openapidoc.Admit)
+
+	p.tokenSource = newTokenSource(p, cred)
+
+	return p, nil
+}
+
+// Reference answers an api_reference lookup from the cached OpenAPI
+// documentation. It reads only the docs cache and the served host, so it never
+// resolves the token, probes the instance or loads the gate's table.
+func (p *gitlabProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
+	d := p.docs.forReference(ctx)
+	if d == nil {
+		return apiref.Result{
+			Outcome: apiref.OutcomeUnavailable,
+			Reason:  "GitLab OpenAPI documentation could not be loaded",
+		}
+	}
+
+	return gitlabclass.Reference(d, q, "https://"+p.servedHost(), gitlabRefusedInput)
+}
+
+// Hint suggests operations for a request the gate's table matched to none.
+func (p *gitlabProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
+	d := p.docs.forHint(ctx)
+	if d == nil {
+		return apiref.Hint{}
+	}
+
+	return gitlabclass.Hint(d, v)
 }
