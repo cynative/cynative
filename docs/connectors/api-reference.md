@@ -1,7 +1,7 @@
 # API reference lookup
 
 **Tool:** `api_reference`
-**Connectors:** `aws` and `github`
+**Connectors:** `aws`, `github` and `gitlab`
 
 `api_reference` returns a short, bounded description of one named API operation, including an `http_request` template the model can fill in. It exists because models often build connector requests from memory and get the path, the protocol or the response format wrong, and then read the resulting local classification failure as a permission denial.
 
@@ -11,12 +11,12 @@ The tool reads public vendor metadata only. It sends no credentials, has no appr
 
 | Field | Connector | Meaning |
 |---|---|---|
-| `connector` | both | `aws` or `github`. Required. |
-| `operation` | both | The exact operation name. Required. |
+| `connector` | all | `aws`, `github` or `gitlab`. Required. |
+| `operation` | all | The exact operation name. Required. |
 | `service` | `aws` | The endpoint prefix from the request host, such as `route53` or `iam`. For `api.ecr.us-east-1.amazonaws.com` the prefix is `api.ecr`. |
 | `model` | `aws` | Optional. The model directory, used to choose between models that share an endpoint prefix (for example `ses` and `sesv2`). |
 
-For AWS the operation is the Smithy name (`ListHostedZones`). For GitHub it is the OpenAPI `operationId` (`repos/get`). A name is matched exactly first, then case-insensitively.
+For AWS the operation is the Smithy name (`ListHostedZones`). For GitHub it is the OpenAPI `operationId` (`repos/get`), and for GitLab too (`getApiV4ProjectsIdMergeRequests`). GitLab generates its IDs from the method and path, so an ID changes when its path changes. A name is matched exactly first, then case-insensitively.
 
 ## What comes back
 
@@ -32,8 +32,8 @@ At most 25 optional inputs are listed, and `inputs_truncated` is set when more w
 
 The tool checks the arguments before any lookup: invalid arguments or an empty `operation` answer `not_found` without consulting a connector. Past that, the outcome is one of the following, and when more than one applies the first in this list wins.
 
-1. `unsupported`: the connector is not configured in this session, or it has no reference support (every connector other than `aws` and `github`).
-2. `unavailable`: the metadata could not be loaded or parsed. For AWS the reason is the load error text truncated to 500 characters. For GitHub it is a fixed message. This is never reported as `not_found`.
+1. `unsupported`: the connector is not configured in this session, or it has no reference support (every connector other than `aws`, `github` and `gitlab`).
+2. `unavailable`: the metadata could not be loaded or parsed. For AWS the reason is the load error text truncated to 500 characters. For GitHub and GitLab it is a fixed message. This is never reported as `not_found`.
 3. `not_found`: no AWS `service` (the reason says it is required and what to pass), no model for the AWS endpoint prefix, a `model` that does not belong to the prefix (the choices list the valid ones), or no operation by that name.
 4. `ambiguous`: several models for the prefix define the operation and no `model` was given, or the case-insensitive match hits several names. At most 5 choices are returned.
 5. `unsupported`: the operation was found in a model whose protocol the tool cannot describe (`ec2Query`).
@@ -85,23 +85,40 @@ The operation is the OpenAPI `operationId`. The template uses `https://api.githu
 
 Because the two caches can be filled from different downloads, the docs can describe an operation that an older cached table does not know yet. The reference states the document version it was read from.
 
+## GitLab
+
+The operation is the OpenAPI `operationId`. The template uses `https://` plus the connector's served host (`api_host` when set, else `host`, default `gitlab.com`, with a configured port kept) and the path, which keeps `/api/v4`. The document's own `https://{hostname}` server is ignored and the docs cache stores no host, so a lookup names the instance this session talks to. No connector-wide header is added; a JSON body adds `Content-Type: application/json`, and the connector injects the token.
+
+- GitLab writes its paths in Grape syntax. An optional group renders in its present form, so `/groups/{id}/(-/)epics` becomes `/groups/{id}/-/epics`. A group with no `/` inside, such as NuGet's `FindPackagesById()` or `Packages(Id='{package_name}',Version='{package_version}')`, is a literal OData call and renders as written, and escaped `\(` and `\)` are literal parentheses. No `.format` suffix is added. Every `{label}` in the rendered path is a required path input, even when the document marks it optional or does not declare it; an undeclared label is a string.
+- A project or group `id` is a numeric ID or the full namespace path sent as one segment: `team/app` goes on the wire as `team%2Fapp`. The document declares these parameters as a string-or-integer union, which the reference reports as `string`. Any other union is `unknown`, and a required one makes the result `incomplete`.
+- When the docs are built, each rendered path, with every label filled in, is classified against the gate's table built from the same download. An operation whose rendered path the gitlab classifier cannot recognize comes back `incomplete` with the gap `rendered path is not admitted by the gitlab gate`. Recognizing a path is not permission: the `permissions` ceiling can still deny a recognized operation. In the current document the gap covers untagged operations, a label inside a segment (`{file_name}.tgz`, `binary-{architecture}`), a dotted last segment such as `trace.jsonl`, whose suffix the gate strips before it matches, and the literal NuGet paths, which the gate reads as optional groups and registers without the parentheses. The lookup itself never reads the gate's table.
+- The connector rejects some inputs at every permission level: the `sudo` and `token` query parameters, the `Sudo` header, the credential headers and query parameters every connector rejects (for example `Private-Token` and `private_token`), and the body fields `token`, `private_token`, `access_token` and `job_token`. A required input with one of those names makes the result `incomplete` with the gap `required input <name> is a credential the gitlab connector refuses` and stays out of the template (`deleteApiV4Runners` is an example). An optional one is left out of the inputs.
+- Request bodies follow the GitHub rules. A required multipart or form body, such as a file upload, gets the gap `request body is not a JSON object the template can render`.
+- The document often leaves the response undescribed: 162 GETs declare a 200 with no content, the Terraform state GET among them. When the selected success response has no content, the reference reports the encoding as `unspecified` with the limitation `the document does not describe this operation's response format; check the Content-Type response header before parsing`, not as having no body. Otherwise response guidance follows the GitHub rules.
+- Pagination is reported as `offset`, with `page` and `per_page`, only when the operation has both as query parameters. It is inferred from the parameters, and the result says so: follow the `X-Next-Page` response header (or `rel="next"` in the `Link` header). Keyset pagination is never reported. Otherwise the style is `unspecified`.
+- Every reference carries two limitations: the document describes GitLab's master branch, so a self-managed instance on an older version may lack the operation, and the docs and the gate's table can come from different downloads.
+
+**Source.** `doc/api/openapi/openapi_v3.yaml` on the master branch of `gitlab-org/gitlab`, the document the GitLab gate already downloads anonymously. It feeds two caches under `<cache.dir>/gitlab`, `table.json` for the gate and `docs.json` for `api_reference`, with the same one-time handoff, stale fallback and `unavailable` rule as GitHub. `source.sha256` hashes the YAML as downloaded. A lookup never resolves the token, probes the instance or loads the gate's table.
+
 ## Offline use
 
-Both sources are cached on disk. With a warm cache, lookups work without network access. A cold AWS archive or a cold GitHub docs cache needs one fetch, and a lookup answers `unavailable` if that fetch fails. The first run of a version with `api_reference` fills the docs cache on first use even when the gate's table is already warm.
+All three sources are cached on disk. With a warm cache, lookups work without network access. A cold AWS archive or a cold GitHub or GitLab docs cache needs one fetch, and a lookup answers `unavailable` if that fetch fails. The first run of a version with `api_reference` fills the docs cache on first use even when the gate's table is already warm.
 
 ## Unmatched-request message
 
-When the AWS or GitHub action gate finds that a request matches no operation in its metadata, `http_request` returns an explanatory error in place of the bare gate text. For example, a Route53 request to `/2013-04-01/hostedzones` produces:
+When the AWS, GitHub or GitLab action gate finds that a request matches no operation in its metadata, `http_request` returns an explanatory error in place of the bare gate text. For example, a Route53 request to `/2013-04-01/hostedzones` produces:
 
 ```
 auth: authorize action for provider aws: aws_hardening: could not resolve IAM action for operation: no candidate serves the request for "route53". GET "/2013-04-01/hostedzones" on aws/route53 matched no operation in the cached API metadata. The gate stopped before attaching credentials or sending anything; this says nothing about the principal's permissions. Check the request shape against the operation reference. Candidates: ListHostedZones (GET /2013-04-01/hostedzone). For an operation's request template call api_reference with {"connector":"aws","operation":"ListHostedZones","service":"route53"}.
 ```
 
-The message starts with the gate's own error text, including the `auth: authorize action for provider <name>: ` wrapper, so anything that matches the gate's error by prefix still does. It then echoes only the method (at most 16 characters) and a truncated, escaped path (200 characters), and the gate text is truncated to 300 characters. When the service has no model that `api_reference` can describe (for example `ec2`, whose `ec2Query` protocol answers `unsupported`), the final sentence that points at `api_reference` is left out and the rest stays. It names at most 3 candidates, found by three cheap rules: the request used another protocol's shape for an operation the service defines (AWS), the path matches under another method (AWS REST, GitHub), or the path is a near miss with one segment within edit distance 2 (AWS REST, GitHub). With more than 3 candidates it shows none. When exactly one operation is suggested, its name fills the `api_reference` call.
+The message starts with the gate's own error text, including the `auth: authorize action for provider <name>: ` wrapper, so anything that matches the gate's error by prefix still does. It then echoes only the method (at most 16 characters) and a truncated, escaped path (200 characters), and the gate text is truncated to 300 characters. When the service has no model that `api_reference` can describe (for example `ec2`, whose `ec2Query` protocol answers `unsupported`), the final sentence that points at `api_reference` is left out and the rest stays. It names at most 3 candidates, found by three cheap rules: the request used another protocol's shape for an operation the service defines (AWS), the path matches under another method (AWS REST, GitHub, GitLab), or the path is a near miss with one segment within edit distance 2 (AWS REST, GitHub, GitLab). With more than 3 candidates it shows none. When exactly one operation is suggested, its name fills the `api_reference` call.
+
+GitLab adds a namespace rule for its most common mistake, a project or group path sent unencoded. When the rules above find nothing for a request under `/api/v4/projects/` or `/api/v4/groups/`, it joins the first two segments after `projects` or `groups` into one `%2F`-encoded segment, then the first three, and so on up to 21, the deepest namespace GitLab allows (subgroups nest at most 20 levels), and matches each folded path against the same-method operations whose next segment is `{id}`. The smallest fold that matches anything wins, so `/projects/team/app/merge_requests` suggests `getApiV4ProjectsIdMergeRequests`, not the project lookup that folding all three segments would also match. That fold must name exactly one operation, or the rule suggests nothing. The message then adds a sentence that echoes the folded value, truncated and escaped like the path: `If "team/app" is the namespace path, send it as one segment: "team%2Fapp".` The sentence is conditional because the rule cannot tell a deeper namespace from an endpoint the docs do not know: `/projects/team/app/unknown` folds all three segments and suggests the project lookup. A path over 2048 bytes gets no candidates from any rule.
 
 The message is text only. It never changes what the gate allows or denies, never rewrites or retries the request, and the original gate error stays reachable through `errors.Is`. It appears only when the request matched nothing. Policy denials, unmapped IAM actions, metadata failures, and requests where no model matched but some candidate model for the prefix uses an unsupported protocol keep their original text. The vendor descriptions are never included.
 
-Because the hint reads the GitHub docs cache, the first unmatched GitHub request on a cold docs cache costs one fetch on the error path, unless the gate's table was downloaded in this process within the cache TTL, in which case its bytes were already handed to the docs cache. If that load fails, the error path does not try it again (a load cut short by a cancelled request does not count), so later denials carry no candidates, until an `api_reference` call loads the docs successfully. That call tries the cache each time it is asked and re-enables the error path when it succeeds. The metadata can also be stale: a request the cache does not know may still be valid on the server.
+Because the hint reads the connector's docs cache, the first unmatched GitHub or GitLab request on a cold docs cache costs one fetch on the error path, unless the gate's table was downloaded in this process within the cache TTL, in which case its bytes were already handed to the docs cache. If that load fails, the error path does not try it again (a load cut short by a cancelled request does not count), so later denials carry no candidates, until an `api_reference` call loads the docs successfully. That call tries the cache each time it is asked and re-enables the error path when it succeeds. The metadata can also be stale: a request the cache does not know may still be valid on the server.
 
 ## Limits
 
