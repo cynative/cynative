@@ -142,6 +142,9 @@ func Reference(
 	if res.Outcome != apiref.OutcomeNotFound {
 		return res
 	}
+	// The echo is bounded first, so the guidance after it fits within MaxReason unless %q escaping expands the echo;
+	// the outer Truncate keeps the hard bound either way.
+	notFound := fmt.Sprintf("no operation %q in gitlab", apiref.Truncate(q.Operation, apiref.MaxChoice))
 	// Models copy GitHub's "repos/get" naming and prefix a correct GitLab id ("projects/getApiV4..."). Name the
 	// operation the part after the last slash resolves to, without answering for it.
 	tail := q.Operation[strings.LastIndex(q.Operation, "/")+1:]
@@ -150,11 +153,11 @@ func Reference(
 		sub.Operation = tail
 		if r := d.Reference(sub, prof); r.Reference != nil {
 			res.Reason = apiref.Truncate(fmt.Sprintf("%s; GitLab operation names carry no prefix: did you mean %q?",
-				res.Reason, r.Reference.Operation), apiref.MaxReason)
+				notFound, r.Reference.Operation), apiref.MaxReason)
 			return res
 		}
 	}
-	res.Reason = apiref.Truncate(res.Reason+"; "+docNameFormat, apiref.MaxReason)
+	res.Reason = apiref.Truncate(notFound+"; "+docNameFormat, apiref.MaxReason)
 	return res
 }
 

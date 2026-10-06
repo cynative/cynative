@@ -344,6 +344,16 @@ func TestDocsReference_PrefixedName(t *testing.T) {
 	if res.Reason != `no operation "projects/getApiV4Nope" in gitlab; `+gitlab.DocNameFormat {
 		t.Errorf("res = %+v", res)
 	}
+	// A long name is echoed truncated, so the suggestion and the format sentence always survive the reason bound.
+	long := strings.Repeat("a", 600)
+	res = lookup(t, long+"/getApiV4ProjectsId")
+	if !strings.HasSuffix(res.Reason, `did you mean "getApiV4ProjectsId"?`) {
+		t.Errorf("long prefixed name: reason = %q", res.Reason)
+	}
+	res = lookup(t, long)
+	if !strings.HasSuffix(res.Reason, gitlab.DocNameFormat) {
+		t.Errorf("long name: reason = %q", res.Reason)
+	}
 	// The suffix is matched case-insensitively, like the name itself.
 	res = lookup(t, "a/b/GETAPIV4PROJECTSID")
 	if !strings.HasSuffix(res.Reason, `did you mean "getApiV4ProjectsId"?`) {
