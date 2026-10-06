@@ -26,7 +26,7 @@ const goldenMultiSegmentDocs = `{"info":{"version":"9"},"paths":{
 func goldenGithubProvider(t *testing.T, raw []byte) *githubProvider {
 	t.Helper()
 	p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-	p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) { return raw, nil })
+	p.docs.cache = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) { return raw, nil })
 
 	return p
 }

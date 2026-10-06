@@ -412,7 +412,7 @@ func (d *registrationDeps) githubOutcome(
 		githubhardening.DistillOpenAPI, (*githubhardening.Table).Serialize,
 		githubhardening.UnmarshalTable, githubhardening.AdmitTable)
 	gh := newGithubProvider(token, exposure, tables)
-	gh.docs = cache.NewNamedCache(ghCfg.Config, "docs", handoff.take(fetch),
+	gh.docs.cache = cache.NewNamedCache(ghCfg.Config, "docs", handoff.take(fetch),
 		githubhardening.DistillDocs, (*openapidoc.OperationDocs).Serialize,
 		openapidoc.Unmarshal, openapidoc.Admit)
 	gh.errOut = os.Stderr

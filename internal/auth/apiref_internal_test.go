@@ -353,7 +353,7 @@ func TestGithubProvider_ReferenceAndHint(t *testing.T) {
 	t.Run("fetch fails, no disk copy", func(t *testing.T) {
 		t.Parallel()
 		p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-		p.docs = newDocsCache(t.TempDir(), failing)
+		p.docs.cache = newDocsCache(t.TempDir(), failing)
 		check(t, p, false)
 	})
 	t.Run("warm cache never fetches", func(t *testing.T) {
@@ -363,7 +363,7 @@ func TestGithubProvider_ReferenceAndHint(t *testing.T) {
 			t.Fatal("seed cache failed")
 		}
 		p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-		p.docs = newDocsCache(dir, func(context.Context) ([]byte, error) {
+		p.docs.cache = newDocsCache(dir, func(context.Context) ([]byte, error) {
 			t.Error("warm cache must not fetch")
 
 			return nil, errors.New("unexpected")
@@ -379,7 +379,7 @@ func TestGithubProvider_HintTriesAFailingDocsLoadOnce(t *testing.T) {
 	newProv := func(t *testing.T, fetches *atomic.Int32) *githubProvider {
 		t.Helper()
 		p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-		p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
+		p.docs.cache = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
 			fetches.Add(1)
 
 			return nil, errors.New("offline")
@@ -440,7 +440,7 @@ func TestGithubProvider_ReferenceSuccessClearsHintLatch(t *testing.T) {
 	view := authreq.View{Method: "DELETE", Hostname: "api.github.com", Path: "/repos/o/r", EscapedPath: "/repos/o/r"}
 	var fetches atomic.Int32
 	p := newGithubProvider("t", githubhardening.BaselineExposure(), nil)
-	p.docs = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
+	p.docs.cache = newDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
 		if fetches.Add(1) == 1 {
 			return nil, errors.New("offline")
 		}
@@ -498,7 +498,7 @@ func TestGithubOutcome_WiresDocsAndLeavesTableAlone(t *testing.T) {
 	}
 	out := d.githubOutcome(t.Context(), cfg, false)
 	gh, ok := out.providers[0].(*githubProvider)
-	if !ok || gh.docs == nil {
+	if !ok || gh.docs.cache == nil {
 		t.Fatalf("provider = %+v", out.providers)
 	}
 	v := authreq.View{Method: "GET", Hostname: "api.github.com", Path: "/user", EscapedPath: "/user", Port: "443"}
