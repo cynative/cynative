@@ -416,3 +416,108 @@ func TestDocsReference_UnspecifiedResponse(t *testing.T) {
 		t.Errorf("a described response changed: %q", got)
 	}
 }
+
+func TestDocsRender_GrapeForms(t *testing.T) {
+	t.Parallel()
+	d := docsFixtureDocs(t)
+	cases := map[string]struct {
+		path string
+		alt  []string
+	}{
+		"getApiV4GroupsIdDashEpics": {"/api/v4/groups/{id}/-/epics", []string{"/api/v4/groups/{id}/epics"}},
+		"getApiV4ProjectsIdArchiveSha": {
+			"/api/v4/projects/{id}/archive/{sha}", []string{"/api/v4/projects/{id}/archive"},
+		},
+		"getApiV4ProjectsIdDashThingsThingId": {"/api/v4/projects/{id}/-/things/{thing_id}", []string{
+			"/api/v4/projects/{id}/-/things", "/api/v4/projects/{id}/things/{thing_id}", "/api/v4/projects/{id}/things",
+		}},
+		// A group with no "/" is a literal OData call, rendered as documented with no alternative.
+		"getApiV4ProjectsProjectIdPackagesNugetV2Findpackagesbyid": {
+			"/api/v4/projects/{project_id}/packages/nuget/v2/FindPackagesById()", nil,
+		},
+		"getApiV4ProjectsProjectIdPackagesNugetV2PackagesidPackageNameVersionPackageVersion": {
+			"/api/v4/projects/{project_id}/packages/nuget/v2/Packages(Id='{package_name}',Version='{package_version}')",
+			nil,
+		},
+		// Escaped parentheses are literal too.
+		"getApiV4ProjectsProjectIdPackagesNugetV2Packages": {
+			"/api/v4/projects/{project_id}/packages/nuget/v2/Packages()", nil,
+		},
+		// An unbalanced parenthesis stays as written, as the gate's table keeps it.
+		"getApiV4ProjectsIdOdd": {"/api/v4/projects/{id}/odd(", nil},
+		"getApiV4ProjectsId":    {"/api/v4/projects/{id}", nil},
+	}
+	for id, want := range cases {
+		op := d.Ops[id]
+		if op.Path != want.path || !slices.Equal(op.Alt, want.alt) {
+			t.Errorf("%s: path %q alt %q", id, op.Path, op.Alt)
+		}
+	}
+}
+
+func TestDocsRender_LabelsAreRequiredPathInputs(t *testing.T) {
+	t.Parallel()
+	ref := lookup(t, "getApiV4ProjectsIdArchiveSha").Reference
+	for _, name := range []string{"id", "sha"} {
+		in, ok := inputNamed(ref, name)
+		if !ok || !in.Required || in.Location != apiref.LocationPath || in.Type != "string" || !in.Renderable {
+			t.Errorf("%s = %+v", name, in)
+		}
+	}
+	ref = lookup(t, "getApiV4JobsIdSbomScansSbomScanId").Reference
+	digest, ok := inputNamed(ref, "sbom_digest")
+	if !ok || !digest.Required || digest.Type != "string" || digest.Description != "" {
+		t.Errorf("undeclared label = %+v", digest)
+	}
+	if id, _ := inputNamed(ref, "id"); id.Type != "integer" {
+		t.Errorf("declared label lost its type: %+v", id)
+	}
+	// Labels inside a literal OData segment are path inputs too.
+	ref = lookup(t, "getApiV4ProjectsProjectIdPackagesNugetV2PackagesidPackageNameVersionPackageVersion").Reference
+	for _, name := range []string{"project_id", "package_name", "package_version"} {
+		if in, found := inputNamed(ref, name); !found || !in.Required || in.Location != apiref.LocationPath {
+			t.Errorf("%s = %+v", name, in)
+		}
+	}
+}
+
+func TestDocsRender_Admission(t *testing.T) {
+	t.Parallel()
+	const gap = "rendered path is not admitted by the gitlab gate"
+	admitted := []string{
+		"getApiV4ProjectsId", "getApiV4GroupsIdDashEpics", "getApiV4ProjectsIdArchiveSha",
+		"getApiV4ProjectsIdDashThingsThingId", "getApiV4ProjectsProjectIdPackagesNugetV2Packages",
+		"getApiV4ProjectsIdOdd",
+		"headApiV4ProjectsIdRepositoryFilesFilePath", "getApiV4JobsIdSbomScansSbomScanId",
+	}
+	for _, id := range admitted {
+		if res := lookup(t, id); res.Outcome != apiref.OutcomeFound {
+			t.Errorf("%s: %+v", id, res)
+		}
+	}
+	// A label inside a segment never matches the gate's literal segment, and the gate strips the dotted suffix
+	// of the last segment; an untagged operation is not in the table at all. The gate reads an unescaped "()" as
+	// an empty optional group and registers the path without it, so the literal NuGet paths do not classify.
+	for _, id := range []string{
+		"getApiV4ProjectsIdPackagesHelmChannelChartsFileNameTgz", "getApiV4SwaggerDoc",
+		"getApiV4ProjectsProjectIdPackagesNugetV2Findpackagesbyid",
+		"getApiV4ProjectsProjectIdPackagesNugetV2PackagesidPackageNameVersionPackageVersion",
+	} {
+		if res := lookup(t, id); res.Outcome != apiref.OutcomeIncomplete || !slices.Equal(res.Reference.Gaps,
+			[]string{gap}) {
+			t.Errorf("%s: %+v", id, res)
+		}
+	}
+}
+
+func TestDocsRender_TableRejectionAdmitsNothing(t *testing.T) {
+	t.Parallel()
+	// No operation is tagged, so the gate's table distiller has no routes and rejects the document.
+	d, err := gitlab.DistillDocs([]byte("paths:\n  /api/v4/a:\n    get:\n      operationId: getA\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gaps := d.Ops["getA"].Gaps; !slices.Equal(gaps, []string{"rendered path is not admitted by the gitlab gate"}) {
+		t.Errorf("gaps = %q", gaps)
+	}
+}

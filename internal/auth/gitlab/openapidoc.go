@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -23,8 +25,15 @@ const (
 		`X-Next-Page response header (or rel="next" in the Link header)`
 	docMasterLimit = "the document describes GitLab's master branch; a self-managed instance may run an older " +
 		"version that lacks this operation"
-	docDriftLimit = "the docs and the gitlab gate's table can be read from different downloads of the document"
+	docDriftLimit  = "the docs and the gitlab gate's table can be read from different downloads of the document"
+	docNotAdmitted = "rendered path is not admitted by the gitlab gate"
+	// docPlaceholder fills every label when the rendered path is checked against the gate's table. It is no
+	// literal segment of GitLab's document and has no dot, so the format-suffix strip leaves it whole.
+	docPlaceholder = "x"
 )
+
+// docLabel matches a {label} anywhere in a rendered path, including inside a segment.
+var docLabel = regexp.MustCompile(`\{([^{}]+)\}`)
 
 // DistillDocs distills GitLab's OpenAPI v3 YAML into operation docs for api_reference and the unmatched-request
 // hint. It is separate from the gate's table distiller. It runs when the docs cache loads, which a cold
@@ -40,7 +49,87 @@ func DistillDocs(raw []byte) (*openapidoc.OperationDocs, error) {
 	}
 	sum := sha256.Sum256(raw)
 	d.SHA256 = hex.EncodeToString(sum[:])
+	admitted := tableAdmits(raw)
+	for id, op := range d.Ops {
+		d.Ops[id] = renderOp(op, admitted)
+	}
 	return d, nil
+}
+
+// tableAdmits builds the gate's table from the same bytes and returns a check that a rendered path, every label
+// filled with docPlaceholder, classifies under its method. A document the table distiller rejects admits nothing.
+func tableAdmits(raw []byte) func(method, path string) bool {
+	table, err := DistillOpenAPI(raw)
+	if err != nil {
+		return func(string, string) bool { return false }
+	}
+	return func(method, path string) bool {
+		_, cerr := ClassifyRequest(table, method, docLabel.ReplaceAllString(path, docPlaceholder))
+		return cerr == nil
+	}
+}
+
+// renderOp rewrites one operation's Grape path to the concrete form with every optional group present, keeps the
+// other forms as hint alternatives, makes every label in the rendered path a required path input, and records a
+// gap when the gate's table does not admit the rendered path.
+func renderOp(op openapidoc.OperationDoc, admitted func(method, path string) bool) openapidoc.OperationDoc {
+	forms := expandOptionalGroups(literalGroups(op.Path))
+	op.Path = forms[0]
+	for _, alt := range forms[1:] {
+		if alt != op.Path && !slices.Contains(op.Alt, alt) {
+			op.Alt = append(op.Alt, alt)
+		}
+	}
+	op.Params = labelParams(op.Path, op.Params)
+	if !admitted(op.Method, op.Path) {
+		op.Gaps = append(op.Gaps, docNotAdmitted)
+	}
+	return op
+}
+
+// literalGroups escapes every unescaped "(...)" group with no "/" inside, so expandOptionalGroups keeps it as
+// written. Such a group is a literal OData call, as in NuGet's FindPackagesById() or
+// Packages(Id='{package_name}',Version='{package_version}'), not an optional part of the path: every optional
+// group GitLab documents holds a "/". The gate's table still expands these groups; a rendered path it cannot
+// classify gets the not-admitted gap.
+func literalGroups(path string) string {
+	var b strings.Builder
+	for i := 0; i < len(path); i++ {
+		c := path[i]
+		if c == '\\' && i+1 < len(path) {
+			b.WriteString(path[i : i+2])
+			i++
+			continue
+		}
+		if c == '(' {
+			if end := strings.IndexByte(path[i:], ')'); end > 0 && !strings.ContainsAny(path[i+1:i+end], "/(") {
+				b.WriteString(`\(` + path[i+1:i+end] + `\)`)
+				i += end
+				continue
+			}
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// labelParams makes every {label} in path a required path input: a declared one is required whatever the
+// metadata says, and an undeclared one is added as a string with no description.
+func labelParams(path string, params []openapidoc.DocParam) []openapidoc.DocParam {
+	out := slices.Clone(params)
+	for _, m := range docLabel.FindAllStringSubmatch(path, -1) {
+		i := slices.IndexFunc(out, func(p openapidoc.DocParam) bool {
+			return p.Name == m[1] && p.In == string(apiref.LocationPath)
+		})
+		if i < 0 {
+			out = append(out, openapidoc.DocParam{
+				Name: m[1], In: string(apiref.LocationPath), Type: "string", Required: true,
+			})
+			continue
+		}
+		out[i].Required = true
+	}
+	return out
 }
 
 // Reference looks q up in GitLab's docs. endpoint is the served API base URL, supplied at lookup because the
