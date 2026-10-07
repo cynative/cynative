@@ -143,16 +143,19 @@ type discoverySchema struct {
 type discoveryDoc struct {
 	discoveryResource
 
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Revision    string `json:"revision"`
-	RootURL     string `json:"rootUrl"`
-	ServicePath string `json:"servicePath"`
-	Endpoints   []struct {
-		Location    string `json:"location"`
-		EndpointURL string `json:"endpointUrl"`
-	} `json:"endpoints"`
-	Schemas map[string]discoverySchema `json:"schemas"`
+	Name        string                     `json:"name"`
+	Version     string                     `json:"version"`
+	Revision    string                     `json:"revision"`
+	RootURL     string                     `json:"rootUrl"`
+	ServicePath string                     `json:"servicePath"`
+	Endpoints   []discoveryEndpoint        `json:"endpoints"`
+	Schemas     map[string]discoverySchema `json:"schemas"`
+}
+
+// discoveryEndpoint is one locational or regional host a Discovery document lists.
+type discoveryEndpoint struct {
+	Location    string `json:"location"`
+	EndpointURL string `json:"endpointUrl"`
 }
 
 // DistillDoc distills one Discovery REST document. It runs when a document cache loads, on an api_reference
@@ -179,12 +182,31 @@ func endpointForms(doc discoveryDoc) []string {
 	for _, e := range doc.Endpoints {
 		u := strings.TrimSuffix(e.EndpointURL, "/")
 		if e.Location != "" {
-			u = strings.Replace(u, e.Location, locationPlaceholder, 1)
+			u = placeLocation(u, e.Location)
 		}
 		forms = append(forms, u)
 	}
 	slices.Sort(forms)
 	return slices.Compact(forms)
+}
+
+// placeLocation replaces the location in a host only where it is a whole label or a dash-bounded part of one
+// (logging.in.rep, in-discoveryengine, us-east1-aiplatform, synth-eu), so a location that is also a substring of
+// the service name ("in" in "logging") stays in the name.
+func placeLocation(u, loc string) string {
+	scheme, host, _ := strings.Cut(u, "://")
+	labels := strings.Split(host, ".")
+	for i, l := range labels {
+		switch {
+		case l == loc:
+			labels[i] = locationPlaceholder
+		case strings.HasPrefix(l, loc+"-"):
+			labels[i] = locationPlaceholder + strings.TrimPrefix(l, loc)
+		case strings.HasSuffix(l, "-"+loc):
+			labels[i] = strings.TrimSuffix(l, loc) + locationPlaceholder
+		}
+	}
+	return scheme + "://" + strings.Join(labels, ".")
 }
 
 func distillResource(doc *discoveryDoc, r discoveryResource, out *APIDoc) {

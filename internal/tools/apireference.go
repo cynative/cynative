@@ -38,7 +38,7 @@ const (
 
 type apiReferenceArgs struct {
 	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github', 'gitlab' or 'gcp'."`
-	Service   string `json:"service,omitempty" jsonschema_description:"AWS only: the endpoint prefix from the request host, e.g. 'route53' or 'iam'."`                                                                                                                                                                       //nolint:lll // struct tags are indivisible
+	Service   string `json:"service,omitempty" jsonschema_description:"AWS: the endpoint prefix from the request host, e.g. 'route53' or 'iam'. GCP, optional: the Discovery API name when the method id does not start with it, e.g. 'sqladmin' for 'sql.instances.list'."`                                                 //nolint:lll // struct tags are indivisible
 	Model     string `json:"model,omitempty"   jsonschema_description:"AWS: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices). GCP: the Discovery version label, e.g. 'v1' or 'beta'; without it the lookup searches the API's vN versions."`                    //nolint:lll // struct tags are indivisible
 	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get') and GitLab (e.g. 'getApiV4ProjectsIdMergeRequests'), the Discovery method id for GCP (e.g. 'compute.instances.list')."` //nolint:lll // struct tags are indivisible
 }

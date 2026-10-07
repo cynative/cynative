@@ -36,6 +36,8 @@ var (
 	docLabel = regexp.MustCompile(`\{([^{}]+)\}`)
 	// docReserved matches a {+param} reserved expansion in a Discovery path.
 	docReserved = regexp.MustCompile(`\{\+([^{}]+)\}`)
+	// docVersionSegment matches a path segment that names an API version (v1, v1beta1, v2alpha, v1p1beta1).
+	docVersionSegment = regexp.MustCompile(`^v[0-9]+[a-z0-9]*$`)
 )
 
 // buildReference describes one method of a distilled document.
@@ -90,9 +92,19 @@ func versionSelected(doc *APIDoc, m DocMethod) bool {
 	if rel == "" {
 		rel = m.Path
 	}
-	first, _, _ := strings.Cut(strings.TrimPrefix(rel, "/"), "/")
-	first, _, _ = strings.Cut(first, ":")
-	return first == doc.Version
+	// The version counts in the path's literal prefix, before the first label (tagmanager/v2/accounts), never after
+	// one, where the same word is a resource (compute's routers/{router}/preview). The first version-like segment
+	// decides: v1/v2 selects v1, so it does not select v2.
+	for seg := range strings.SplitSeq(strings.TrimPrefix(rel, "/"), "/") {
+		seg, _, _ = strings.Cut(seg, ":")
+		switch {
+		case seg == doc.Version:
+			return true
+		case strings.HasPrefix(seg, "{"), docVersionSegment.MatchString(seg):
+			return false
+		}
+	}
+	return false
 }
 
 // renderPath renders the request path the gate matches, servicePath plus flatPath (or path), and lists every

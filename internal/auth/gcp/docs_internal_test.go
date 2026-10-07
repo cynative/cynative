@@ -146,6 +146,25 @@ func TestDistillDoc_Shapes(t *testing.T) {
 	}
 }
 
+// TestEndpointForms_ReplacesTheLocationLabel pins the location replaced only as a whole host label: logging's "in"
+// location must not turn "logging" into "logg<location>g".
+func TestEndpointForms_ReplacesTheLocationLabel(t *testing.T) {
+	t.Parallel()
+	doc := discoveryDoc{Endpoints: []discoveryEndpoint{
+		{EndpointURL: "https://logging.in.rep.googleapis.com/", Location: "in"},
+		{EndpointURL: "https://in-discoveryengine.googleapis.com/", Location: "in"},
+		{EndpointURL: "https://us-east1-aiplatform.googleapis.com/", Location: "us-east1"},
+		{EndpointURL: "https://nolabel.googleapis.com/", Location: "in"},
+	}}
+	want := []string{
+		"https://<location>-aiplatform.googleapis.com", "https://<location>-discoveryengine.googleapis.com",
+		"https://logging.<location>.rep.googleapis.com", "https://nolabel.googleapis.com",
+	}
+	if got := endpointForms(doc); !slices.Equal(got, want) {
+		t.Errorf("forms = %q\nwant %q", got, want)
+	}
+}
+
 func TestDistillDoc_RejectsMalformed(t *testing.T) {
 	t.Parallel()
 	if _, err := DistillDoc([]byte(`{"name": 1}`)); !errors.Is(err, ErrDocsRejected) {

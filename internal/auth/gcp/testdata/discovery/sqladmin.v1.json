@@ -1,0 +1,22 @@
+{
+ "kind": "discovery#restDescription",
+ "name": "sqladmin",
+ "version": "v1",
+ "revision": "20260101",
+ "rootUrl": "https://sqladmin.googleapis.com/",
+ "servicePath": "",
+ "resources": {
+  "instances": {
+   "methods": {
+    "list": {
+     "httpMethod": "GET",
+     "id": "sql.instances.list",
+     "path": "v1/projects/{project}/instances",
+     "flatPath": "v1/projects/{project}/instances",
+     "parameterOrder": ["project"],
+     "parameters": {"project": {"location": "path", "required": true, "type": "string", "description": "Project ID."}}
+    }
+   }
+  }
+ }
+}

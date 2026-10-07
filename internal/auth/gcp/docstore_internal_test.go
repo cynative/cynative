@@ -26,6 +26,7 @@ const testDirectory = `{"items":[
 {"name":"cloudresourcemanager","version":"v1","discoveryRestUrl":"mem://cloudresourcemanager.v1"},
 {"name":"cloudresourcemanager","version":"v2beta1","discoveryRestUrl":"mem://never"},
 {"name":"storage","version":"v1","discoveryRestUrl":"mem://storage.v1"},
+{"name":"sqladmin","version":"v1","discoveryRestUrl":"mem://sqladmin.v1"},
 {"name":"aiplatform","version":"v1","discoveryRestUrl":"mem://aiplatform.v1"},
 {"name":"aiplatform","version":"v1beta1","discoveryRestUrl":"mem://never"},
 {"name":"synth","version":"v1","discoveryRestUrl":"mem://synth.v1"},
@@ -131,15 +132,51 @@ func TestDocs_NotFound(t *testing.T) {
 			docNameFormat},
 		{"compute.instances.get", "v9", `API compute has no version "v9"; its versions are beta, stable, v1; ` +
 			docNameFormat},
-		{"nope.things.get", "", `API "nope" is not in the Google API Discovery directory; ` + docNameFormat},
+		{"nope.things.get", "", `API "nope" is not in the Google API Discovery directory; ` + docServiceHint +
+			docNameFormat},
 		{"projects/compute.instances.list", "", `API "projects/compute" is not in the Google API Discovery ` +
 			`directory; GCP operation names carry no prefix: did you mean "compute.instances.list"?`},
-		{"a/b/nope.x.y", "", `API "a/b/nope" is not in the Google API Discovery directory; ` + docNameFormat},
+		{"a/b/nope.x.y", "", `API "a/b/nope" is not in the Google API Discovery directory; ` + docServiceHint +
+			docNameFormat},
+		// Cloud SQL's ids start with "sql", but its directory name is sqladmin.
+		{"sql.instances.list", "", `API "sql" is not in the Google API Discovery directory; ` + docServiceHint +
+			docNameFormat},
 	} {
 		res := lookup(t, d, tc.op, tc.model)
 		if res.Outcome != apiref.OutcomeNotFound || res.Reason != tc.reason {
 			t.Errorf("%s model %q = %s %q\nwant reason %q", tc.op, tc.model, res.Outcome, res.Reason, tc.reason)
 		}
+	}
+}
+
+// TestDocs_ServiceNamesTheAPI pins service as the directory name for ids whose prefix is not one (Cloud SQL's sql.*
+// under sqladmin, Admin Reports' reports.* under admin), without rewriting the id.
+func TestDocs_ServiceNamesTheAPI(t *testing.T) {
+	t.Parallel()
+	d, _ := newTestDocs(t, t.TempDir(), time.Now)
+	q := apiref.Query{Connector: "gcp", Service: "sqladmin", Operation: "sql.instances.list"}
+	res := d.Reference(t.Context(), q)
+	if res.Reference == nil || res.Reference.Operation != "sql.instances.list" || res.Reference.Model != "v1" ||
+		res.Reference.AuthArgs["service"] != "sqladmin" {
+		t.Fatalf("service sqladmin = %+v", res)
+	}
+	// A hint fills service with the gate's short name, which is not always the directory name (translation for
+	// translate), so a service the directory does not list falls back to the prefix.
+	if alt := d.Reference(t.Context(), apiref.Query{
+		Connector: "gcp", Service: "translation",
+		Operation: "compute.instances.list",
+	}); alt.Reference == nil || alt.Reference.Operation != "compute.instances.list" {
+		t.Errorf("unlisted service with a listed prefix = %+v", alt)
+	}
+	// When neither names an API, the reason names the service the caller passed.
+	q.Service = "nosuch"
+	if miss := d.Reference(t.Context(), q); miss.Outcome != apiref.OutcomeNotFound ||
+		!strings.HasPrefix(miss.Reason, `API "nosuch" is not in the Google API Discovery directory`) {
+		t.Errorf("service nosuch = %+v", miss)
+	}
+	// Without service the prefix still names the API.
+	if plain := lookup(t, d, "compute.instances.list", ""); plain.Reference == nil {
+		t.Errorf("prefix lookup = %+v", plain)
 	}
 }
 
@@ -246,6 +283,7 @@ func TestReference_VersionFidelity(t *testing.T) {
 		{"cloudresourcemanager.v3", "cloudresourcemanager.fetchResourceSemantics", false}, // v3:fetchResourceSemantics.
 		{"cloudresourcemanager.v1", "cloudresourcemanager.projects.list", false},          // first segment v1.
 		{"storage.v1", "storage.objects.get", false},                                      // no flatPath; servicePath.
+		{"sqladmin.v1", "sql.instances.list", false},                                      // first segment v1.
 	} {
 		d := distilled(t, tc.stem)
 		ref := buildReference(d, tc.id)
@@ -263,6 +301,18 @@ func TestReference_VersionFidelity(t *testing.T) {
 	}
 	if ref := buildReference(d, "a.y.get"); len(ref.Gaps) != 1 {
 		t.Errorf("path v1/v2 gaps = %q, want the version gap", ref.Gaps)
+	}
+	// The version can follow the API name in the path's literal prefix (Tag Manager's tagmanager/v2/accounts),
+	// but not follow a label, where it is a resource word (compute's routers/{router}/preview).
+	d.Methods["a.z.get"] = DocMethod{HTTPMethod: "GET", Path: "a/v2/accounts/{id}"}
+	d.Methods["a.w.get"] = DocMethod{HTTPMethod: "GET", Path: "a/{x}/v2"}
+	d.Methods["a.v.get"] = DocMethod{HTTPMethod: "GET", Path: "a/v2:batch"}
+	// A path of literals that never names a version does not select it either.
+	d.Methods["a.u.get"] = DocMethod{HTTPMethod: "GET", Path: "a/accounts"}
+	for id, want := range map[string]int{"a.z.get": 0, "a.w.get": 1, "a.v.get": 0, "a.u.get": 1} {
+		if ref := buildReference(d, id); len(ref.Gaps) != want {
+			t.Errorf("%s gaps = %q, want %d", id, ref.Gaps, want)
+		}
 	}
 }
 

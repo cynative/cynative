@@ -24,6 +24,12 @@ func Hint(methods func() MethodIndex, v authreq.View) apiref.Hint {
 	if apiref.HintPathTooLong(v.EscapedPath) {
 		return h
 	}
+	// The classifier never lets a label take a segment holding ":", so a colon before the last segment (an
+	// unencoded domain-scoped project, example.com:proj) has no near miss worth naming.
+	segs := strings.Split(strings.TrimPrefix(v.EscapedPath, "/"), "/")
+	if slices.ContainsFunc(segs[:len(segs)-1], func(s string) bool { return strings.Contains(s, ":") }) {
+		return h
+	}
 	idx := methods()
 	verb := hasVerb(v.EscapedPath)
 	var shown, split []apiref.Route

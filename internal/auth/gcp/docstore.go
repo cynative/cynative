@@ -19,6 +19,13 @@ import (
 const docNameFormat = "GCP operation names are Discovery method ids: the API name, then the resources and the " +
 	"method, for example compute.instances.list"
 
+// docNotInDirectory ends the reason for an API name the directory does not list.
+const docNotInDirectory = "is not in the Google API Discovery directory"
+
+// docServiceHint follows a directory miss: some APIs' method ids do not start with their directory name.
+const docServiceHint = "if its methods belong to an API with another name (Cloud SQL's sql.* methods are in " +
+	"sqladmin), pass service with that API's name; "
+
 // docSafePart is what a directory name or version must look like before it names a cache file.
 var docSafePart = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
@@ -94,15 +101,27 @@ func (d *Docs) Reference(ctx context.Context, q apiref.Query) apiref.Result {
 			return res
 		}
 	}
-	res.Reason = apiref.Truncate(res.Reason+"; "+docNameFormat, apiref.MaxReason)
+	guidance := docNameFormat
+	if res.Choices == nil && strings.HasSuffix(res.Reason, docNotInDirectory) {
+		guidance = docServiceHint + docNameFormat
+	}
+	res.Reason = apiref.Truncate(res.Reason+"; "+guidance, apiref.MaxReason)
 	return res
 }
 
 // lookup resolves the API name, selects the versions to search and finds the method in them.
 func (d *Docs) lookup(ctx context.Context, dir *directoryResponse, q apiref.Query) apiref.Result {
 	echo := apiref.Truncate(strconv.Quote(q.Operation), apiref.MaxChoice)
+	// service names the API when the id's prefix is not its directory name. A hint fills it with the gate's short
+	// name, which can differ from the directory name (translation for translate), so a service the directory does
+	// not list falls back to the prefix; when neither resolves, the reason names the service.
 	prefix, _, _ := strings.Cut(q.Operation, ".")
 	api, res := resolveAPI(dir, prefix)
+	if q.Service != "" {
+		if sapi, sres := resolveAPI(dir, q.Service); sres == nil || res != nil {
+			api, res = sapi, sres
+		}
+	}
 	if res != nil {
 		return *res
 	}
@@ -162,8 +181,11 @@ func resolveAPI(dir *directoryResponse, name string) (string, *apiref.Result) {
 	case 0:
 		return "", &apiref.Result{
 			Outcome: apiref.OutcomeNotFound,
-			Reason: fmt.Sprintf("API %s is not in the Google API Discovery directory",
-				apiref.Truncate(strconv.Quote(name), apiref.MaxChoice)),
+			Reason: fmt.Sprintf(
+				"API %s %s",
+				apiref.Truncate(strconv.Quote(name), apiref.MaxChoice),
+				docNotInDirectory,
+			),
 		}
 	}
 	return "", &apiref.Result{

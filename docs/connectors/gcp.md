@@ -103,7 +103,7 @@ console.log(resp.body);
 
 ### Operation reference
 
-The `api_reference` tool describes a Google API method by its Discovery method id, such as `compute.instances.list`, and returns an `http_request` template that carries the `gcp_auth` block. It reads the public Discovery documents anonymously, caches them under `<cache.dir>/gcp/docs`, and never sends the ADC token. A request the action gate matches to no Discovery method gets candidates from the gate's own catalog. See [api-reference.md](api-reference.md#gcp).
+The `api_reference` tool describes a Google API method by its Discovery method id, such as `compute.instances.list`, and returns an `http_request` template that carries the `gcp_auth` block. It reads the public Discovery documents anonymously, caches them under `<cache.dir>/gcp/docs`, and never sends the ADC token. A request the action gate matches to no Discovery method can get candidates from the gate's own catalog. See [api-reference.md](api-reference.md#gcp).
 
 ## Hardening
 

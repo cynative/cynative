@@ -78,6 +78,9 @@ func TestHint(t *testing.T) {
 		},
 		// And a request with no verb never reaches a verb route: ":predict" is one edit from "predict".
 		{"no verb against a verb route", ai, "POST", endpoints + "123/predict", nil, ""},
+		// The classifier never lets a label take a segment with ":" in it, so an unencoded domain-scoped project
+		// (example.com:proj) must not steer the model to a sibling create method through a near miss.
+		{"colon in an earlier segment", ai, "GET", "/v1/projects/example.com:proj/locations/l/endpoints", nil, ""},
 		{"near miss on a literal", crm, "GET", "/v1/projectz/p", []string{
 			"cloudresourcemanager.projects.get (GET /v1/projects/{projectId})",
 		}, "cloudresourcemanager.projects.get"},
