@@ -1,0 +1,149 @@
+{
+ "endpoints": [
+  {
+   "description": "Regional Endpoint",
+   "endpointUrl": "https://storage.us-central1.rep.googleapis.com/",
+   "location": "us-central1"
+  }
+ ],
+ "mtlsRootUrl": "https://storage.mtls.googleapis.com/",
+ "name": "storage",
+ "resources": {
+  "buckets": {
+   "methods": {
+    "delete": {
+     "description": "Deletes an empty bucket. Deletions are permanent unless soft delete is enabled o...",
+     "httpMethod": "DELETE",
+     "id": "storage.buckets.delete",
+     "parameters": {"bucket": {"description": "Name of a bucket.", "location": "path", "required": true, "type": "string"}},
+     "path": "b/{bucket}"
+    },
+    "insert": {
+     "description": "Creates a new bucket.",
+     "httpMethod": "POST",
+     "id": "storage.buckets.insert",
+     "parameters": {
+      "project": {"description": "A valid API project identifier.", "location": "query", "required": true, "type": "string"}
+     },
+     "path": "b",
+     "request": {"$ref": "Bucket"},
+     "response": {"$ref": "Bucket"}
+    },
+    "list": {
+     "description": "Retrieves a list of buckets for a given project.",
+     "httpMethod": "GET",
+     "id": "storage.buckets.list",
+     "parameters": {
+      "maxResults": {
+       "description": "Maximum number of buckets to return in a single response. The service will use t...",
+       "format": "uint32",
+       "location": "query",
+       "type": "integer"
+      },
+      "pageToken": {
+       "description": "A previously-returned page token representing part of the larger set of results...",
+       "location": "query",
+       "type": "string"
+      },
+      "prefix": {
+       "description": "Filter results to buckets whose names begin with this prefix.",
+       "location": "query",
+       "type": "string"
+      },
+      "project": {"description": "A valid API project identifier.", "location": "query", "required": true, "type": "string"}
+     },
+     "path": "b",
+     "response": {"$ref": "Buckets"}
+    },
+    "update": {
+     "description": "Updates a bucket. Changes to the bucket will be readable immediately after writi...",
+     "httpMethod": "PUT",
+     "id": "storage.buckets.update",
+     "parameters": {"bucket": {"description": "Name of a bucket.", "location": "path", "required": true, "type": "string"}},
+     "path": "b/{bucket}",
+     "request": {"$ref": "Bucket"},
+     "response": {"$ref": "Bucket"}
+    }
+   }
+  },
+  "objects": {
+   "methods": {
+    "get": {
+     "description": "Retrieves an object or its metadata.",
+     "httpMethod": "GET",
+     "id": "storage.objects.get",
+     "parameters": {
+      "bucket": {
+       "description": "Name of the bucket in which the object resides.",
+       "location": "path",
+       "required": true,
+       "type": "string"
+      },
+      "generation": {
+       "description": "If present, selects a specific revision of this object (as opposed to the latest...",
+       "format": "int64",
+       "location": "query",
+       "type": "string"
+      },
+      "object": {
+       "description": "Name of the object. For information about how to URL encode object names to be p...",
+       "location": "path",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "b/{bucket}/o/{object}",
+     "response": {"$ref": "Object"},
+     "supportsMediaDownload": true
+    }
+   }
+  }
+ },
+ "revision": "20260930",
+ "rootUrl": "https://storage.googleapis.com/",
+ "schemas": {
+  "Bucket": {
+   "id": "Bucket",
+   "properties": {
+    "acl": {
+     "annotations": {"required": ["storage.buckets.update"]},
+     "description": "Access controls on the bucket.",
+     "items": {"$ref": "BucketAccessControl"},
+     "type": "array"
+    },
+    "kind": {"description": "The kind of item this is. For buckets, this is always storage#bucket.", "type": "string"},
+    "location": {
+     "description": "The location of the bucket. Object data for objects in the bucket resides in phy...",
+     "type": "string"
+    },
+    "name": {
+     "annotations": {"required": ["storage.buckets.insert"]},
+     "description": "The name of the bucket.",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "Buckets": {
+   "id": "Buckets",
+   "properties": {
+    "items": {"description": "The list of items.", "items": {"$ref": "Bucket"}, "type": "array"},
+    "nextPageToken": {
+     "description": "The continuation token, used to page through large result sets. Provide this val...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "Object": {
+   "id": "Object",
+   "properties": {
+    "bucket": {"description": "The name of the bucket containing this object.", "type": "string"},
+    "name": {"description": "The name of the object. Required if not specified by URL parameter.", "type": "string"}
+   },
+   "type": "object"
+  }
+ },
+ "servicePath": "storage/v1/",
+ "version": "v1"
+}

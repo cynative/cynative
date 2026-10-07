@@ -101,6 +101,10 @@ const resp = await http_request({
 console.log(resp.body);
 ```
 
+### Operation reference
+
+The `api_reference` tool describes a Google API method by its Discovery method id, such as `compute.instances.list`, and returns an `http_request` template that carries the `gcp_auth` block. It reads the public Discovery documents anonymously, caches them under `<cache.dir>/gcp/docs`, and never sends the ADC token. A request the action gate matches to no Discovery method can get candidates from the gate's own catalog. See [api-reference.md](api-reference.md#gcp).
+
 ## Hardening
 
 Cynative's GCP connector is built for read-oriented cloud research with client-side checks around every model-authored request. Because GCP has no general credential-downscoping primitive, the in-process action gate is the client-side control: a request resolves to a service and operation, those resolve to required IAM permissions, and every permission must be granted by the configured role before the ADC token is attached.

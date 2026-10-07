@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/oauth2"
 
+	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	gcphardening "github.com/cynative/cynative/internal/auth/gcp"
+	"github.com/cynative/cynative/internal/cache"
 )
 
 const gcpProviderName = "gcp"
@@ -32,11 +35,14 @@ type gcpProvider struct {
 	catalog         gcphardening.Catalog // Layer 3 host resolution, available pre-lazy.
 	tokenSource     oauth2.TokenSource   // populated by lazy init; the raw ADC token (no downscoping).
 	hardeningAction ActionAuthorizer     // Layer 2; delegates AuthorizeAction, set by the shell on lazy init.
+	// docs serves api_reference; nil when no docs are wired (bare providers in tests).
+	docs *gcphardening.Docs
 }
 
 var (
-	_ Provider         = (*gcpProvider)(nil)
-	_ ActionAuthorizer = (*gcpProvider)(nil)
+	_ Provider            = (*gcpProvider)(nil)
+	_ ActionAuthorizer    = (*gcpProvider)(nil)
+	_ OperationDocumenter = (*gcpProvider)(nil)
 )
 
 // newGCPProvider constructs a GCP provider with the catalog available immediately
@@ -61,7 +67,36 @@ func (p *gcpProvider) Name() string { return gcpProviderName }
 func (p *gcpProvider) Description() string {
 	return "Google Cloud Platform API authentication (hardened). Discovers Application Default " +
 		"Credentials (ADC) and authorizes each request with read-only action authorization and " +
-		"host pinning. Requires gcp_auth field."
+		"host pinning. Requires gcp_auth field." +
+		" For an operation's request template and response format, call the api_reference tool."
+}
+
+// newGCPDocs builds the api_reference store under <cache>/gcp/docs. fetch is the anonymous capped download;
+// nothing here reaches the gate's catalog cache or the credential bootstrap.
+func newGCPDocs(cfg cache.Config, fetch func(ctx context.Context, url string) ([]byte, error)) *gcphardening.Docs {
+	return gcphardening.NewDocs(cache.Config{Dir: filepath.Join(cfg.Dir, "docs"), TTL: cfg.TTL, Clock: cfg.Clock},
+		gcphardening.DefaultDiscoveryDirectoryURL, fetch)
+}
+
+// Reference answers an api_reference lookup from the Discovery documents. It
+// never runs the lazy credential bootstrap and never reads the gate's catalog.
+func (p *gcpProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
+	if p.docs == nil {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: "GCP API metadata is not configured"}
+	}
+
+	return p.docs.Reference(ctx, q)
+}
+
+// Hint suggests methods for a request the classifier matched to none, from
+// the catalog snapshot the gate already loaded. It never fetches: with no
+// snapshot in memory it suggests nothing.
+func (p *gcpProvider) Hint(_ context.Context, v authreq.View, e *authreq.UnmatchedRequestError) apiref.Hint {
+	return gcphardening.Hint(func() gcphardening.MethodIndex {
+		idx, _ := p.catalog.PeekMethodIndex(e.Service)
+
+		return idx
+	}, v)
 }
 
 // parseGCPArgs decodes gcp_auth; fails closed when absent or Service is empty.

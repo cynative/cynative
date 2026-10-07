@@ -10,10 +10,11 @@ import (
 )
 
 // Classify resolves v to exactly one Discovery method id from idx, or returns
-// ErrClassifierUnknownOp on zero or multiple survivors. Every reading of the
-// path is classified and the survivors are pooled: Google's frontend routes the
-// path as sent, so a percent-encoded slash stays inside its segment there while
-// the decoded path splits on it, and a request whose readings name different
+// ErrClassifierUnknownOp on zero or multiple survivors; zero survivors is also
+// marked *authreq.UnmatchedRequestError. Every reading of the path is
+// classified and the survivors are pooled: Google's frontend routes the path as
+// sent, so a percent-encoded slash stays inside its segment there while the
+// decoded path splits on it, and a request whose readings name different
 // methods is an ambiguity the gate denies. Deterministic. Pure.
 func Classify(idx MethodIndex, v authreq.View) (string, error) {
 	method := strings.ToUpper(v.Method)
@@ -32,7 +33,11 @@ func Classify(idx MethodIndex, v authreq.View) (string, error) {
 	case 1:
 		return survivors[0], nil
 	case 0:
-		return "", fmt.Errorf("%w: no method matches %s %s", ErrClassifierUnknownOp, method, v.EscapedPath)
+		// Only a miss is marked: the unmatched-request hint can help it, while an ambiguous match already named
+		// several methods.
+		return "", &authreq.UnmatchedRequestError{
+			Err: fmt.Errorf("%w: no method matches %s %s", ErrClassifierUnknownOp, method, v.EscapedPath),
+		}
 	default:
 		return "", fmt.Errorf(
 			"%w: %d methods match %s %s (ambiguous)",

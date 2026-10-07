@@ -1,0 +1,99 @@
+{
+ "endpoints": [
+  {"endpointUrl": "https://synth.us-east1.rep.googleapis.com/", "location": "us-east1"},
+  {"endpointUrl": "https://us-east1-synth.googleapis.com/", "location": "us-east1"},
+  {"endpointUrl": "https://synth.us-west1.rep.googleapis.com/", "location": "us-west1"},
+  {"endpointUrl": "https://synth-eu.googleapis.com/", "location": "eu"},
+  {"endpointUrl": "https://synth-global.googleapis.com/", "location": ""}
+ ],
+ "kind": "discovery#restDescription",
+ "name": "synth",
+ "resources": {
+  "things": {
+   "methods": {
+    "create": {
+     "httpMethod": "POST",
+     "id": "synth.things.create",
+     "path": "things",
+     "request": {"$ref": "Thing"},
+     "response": {"$ref": "Thing"}
+    },
+    "empty": {
+     "httpMethod": "POST",
+     "id": "synth.things.empty",
+     "path": "things:empty",
+     "request": {"$ref": "Empty"},
+     "response": {"$ref": "Empty"}
+    },
+    "inline": {
+     "httpMethod": "POST",
+     "id": "synth.things.inline",
+     "path": "things:inline",
+     "request": {"additionalProperties": {"type": "any"}, "type": "object"}
+    },
+    "list": {
+     "httpMethod": "GET",
+     "id": "synth.things.list",
+     "parameters": {
+      "maxResults": {"format": "uint32", "location": "query", "type": "integer"},
+      "pageSize": {"format": "int32", "location": "query", "type": "integer"},
+      "pageToken": {"location": "query", "type": "string"},
+      "parent": {"location": "query", "required": true, "type": "string"},
+      "tag": {"description": "Tags to match.", "location": "query", "repeated": true, "type": "string"}
+     },
+     "path": "things",
+     "response": {"$ref": "ListThingsResponse"}
+    },
+    "misaligned": {
+     "flatPath": "things/{thingsId}/other",
+     "httpMethod": "GET",
+     "id": "synth.things.misaligned",
+     "parameters": {"name": {"location": "path", "required": true, "type": "string"}},
+     "path": "{+name}/extra",
+     "response": {"$ref": "Thing"}
+    },
+    "reserved": {
+     "httpMethod": "GET",
+     "id": "synth.things.reserved",
+     "parameters": {"name": {"location": "path", "pattern": "^[^/]+$", "required": true, "type": "string"}},
+     "path": "things/{+name}",
+     "response": {"$ref": "Thing"}
+    },
+    "scalar": {"httpMethod": "POST", "id": "synth.things.scalar", "path": "things:scalar", "request": {"$ref": "Name"}},
+    "unresolved": {
+     "httpMethod": "POST",
+     "id": "synth.things.unresolved",
+     "path": "things:unresolved",
+     "request": {"$ref": "Missing"}
+    }
+   }
+  }
+ },
+ "revision": "20261006",
+ "rootUrl": "https://www.googleapis.com/",
+ "schemas": {
+  "Empty": {"id": "Empty", "properties": {}, "type": "object"},
+  "ListThingsResponse": {
+   "id": "ListThingsResponse",
+   "properties": {"nextPageToken": {"type": "string"}, "things": {"items": {"$ref": "Thing"}, "type": "array"}},
+   "type": "object"
+  },
+  "Name": {"id": "Name", "type": "string"},
+  "Thing": {
+   "id": "Thing",
+   "properties": {
+    "etag": {"readOnly": true, "type": "string"},
+    "misc": {"description": "Anything."},
+    "name": {"description": "Required. The thing's name.", "type": "string"},
+    "note": {"description": "Optional. A note.", "type": "string"},
+    "shape": {"$ref": "Shape", "annotations": {"required": ["synth.things.create"]}},
+    "size": {"annotations": {"required": ["synth.things.create"]}, "format": "int64", "type": "string"},
+    "state": {"description": "Output only. The state.", "type": "string"},
+    "zone": {"description": "[Output Only] The zone.", "type": "string"}
+   },
+   "type": "object"
+  }
+ },
+ "servicePath": "synth/v1/",
+ "version": "v1"
+}

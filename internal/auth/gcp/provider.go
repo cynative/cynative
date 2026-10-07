@@ -79,6 +79,10 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 
 	methodID, err := Classify(idx, v)
 	if err != nil {
+		// Classify has no service context; the hint needs it to find the service's methods.
+		if um, ok := errors.AsType[*authreq.UnmatchedRequestError](err); ok {
+			um.Service = service
+		}
 		return err
 	}
 

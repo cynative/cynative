@@ -1,0 +1,110 @@
+{
+ "mtlsRootUrl": "https://compute.mtls.googleapis.com/",
+ "name": "compute",
+ "resources": {
+  "instances": {
+   "methods": {
+    "get": {
+     "description": "Returns the specified Instance resource.",
+     "flatPath": "projects/{project}/zones/{zone}/instances/{instance}",
+     "httpMethod": "GET",
+     "id": "compute.instances.get",
+     "parameters": {
+      "instance": {
+       "description": "Name of the instance resource to return.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?|[1-9][0-9]{0,19}",
+       "required": true,
+       "type": "string"
+      },
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "zone": {
+       "description": "The name of the zone for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/zones/{zone}/instances/{instance}",
+     "response": {"$ref": "Instance"}
+    }
+   }
+  },
+  "routers": {
+   "methods": {
+    "preview": {
+     "description": "Preview fields auto-generated during router create andupdate operations. Calling...",
+     "flatPath": "projects/{project}/regions/{region}/routers/{router}/preview",
+     "httpMethod": "POST",
+     "id": "compute.routers.preview",
+     "parameters": {
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "region": {
+       "description": "Name of the region for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      },
+      "router": {
+       "description": "Name of the Router resource to query.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?|[1-9][0-9]{0,19}",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/regions/{region}/routers/{router}/preview",
+     "request": {"$ref": "Router"},
+     "response": {"$ref": "RoutersPreviewResponse"}
+    }
+   }
+  }
+ },
+ "revision": "20260922",
+ "rootUrl": "https://compute.googleapis.com/",
+ "schemas": {
+  "Instance": {
+   "id": "Instance",
+   "properties": {
+    "name": {
+     "annotations": {"required": ["compute.instances.insert"]},
+     "description": "The name of the resource, provided by the client when initially creating the res...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "Router": {
+   "id": "Router",
+   "properties": {
+    "name": {
+     "annotations": {"required": ["compute.routers.insert"]},
+     "description": "Name of the resource. Provided by the client when the resource is created. The n...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "RoutersPreviewResponse": {
+   "id": "RoutersPreviewResponse",
+   "properties": {"resource": {"$ref": "Router", "description": "Preview of given router."}},
+   "type": "object"
+  }
+ },
+ "servicePath": "compute/v1/",
+ "version": "preview"
+}

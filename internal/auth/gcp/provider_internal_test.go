@@ -346,6 +346,8 @@ func (f *fakeCatalogPort) ResolveWWWService(_ context.Context, _ string) (string
 	return "", false
 }
 
+func (f *fakeCatalogPort) PeekMethodIndex(string) (MethodIndex, bool) { return nil, false }
+
 // methodIndexErrCatalog wraps a *catalog, delegates ResolveService /
 // ResolveWWWService, but always returns an error from MethodIndex. Used to cover
 // the MethodIndex error branch.
@@ -361,6 +363,10 @@ func (m *methodIndexErrCatalog) ResolveWWWService(ctx context.Context, reqPath s
 
 func (m *methodIndexErrCatalog) MethodIndex(_ context.Context, _ string) (MethodIndex, error) {
 	return nil, ErrCatalogUnavailable
+}
+
+func (m *methodIndexErrCatalog) PeekMethodIndex(service string) (MethodIndex, bool) {
+	return m.inner.PeekMethodIndex(service)
 }
 
 // buildCRMProvider wires a Provider over a faithful v3 cloudresourcemanager catalog
@@ -784,5 +790,59 @@ func TestProviderAuthorizeActionWWWClaimMismatchWithTrailingDot(t *testing.T) {
 	)
 	if !errors.Is(err, ErrHostClaimMismatch) {
 		t.Fatalf("dotted-host www claim mismatch should return ErrHostClaimMismatch, got %v", err)
+	}
+}
+
+// TestProviderAuthorizeAction_MarksOnlyAZeroSurvivorMiss pins that only a request the classifier matched to no
+// method carries the unmatched marker, with the resolved service, and that every other denial and the allowed
+// read keep their outcome.
+func TestProviderAuthorizeAction_MarksOnlyAZeroSurvivorMiss(t *testing.T) {
+	t.Parallel()
+
+	p := buildProvider(t)
+	ambiguousData := DiscoveryData{Services: map[string]ServiceDoc{"compute": {
+		RootURL: "https://compute.googleapis.com/", ServicePath: "compute/v1/",
+		Methods: MethodIndex{
+			"compute.a.get": {ID: "compute.a.get", HTTPMethod: "GET", ServicePath: "compute/v1/", FlatPath: "x/{a}"},
+			"compute.b.get": {ID: "compute.b.get", HTTPMethod: "GET", ServicePath: "compute/v1/", FlatPath: "x/{b}"},
+		},
+	}}}
+	ambiguous := NewProvider(newCatalog(func(context.Context) (DiscoveryData, error) { return ambiguousData, nil }),
+		NewPermissionResolver(map[string]bool{}, defaultPrefixMap(), emptyDataset{}), newRoleEvaluator(nil), "r")
+	denyAll := NewProvider(p.catalog, p.perms, newRoleEvaluator(map[string]bool{}), "roles/none")
+	unavailable := NewProvider(&methodIndexErrCatalog{inner: p.catalog.(*catalog)}, p.perms, p.eval, "roles/viewer")
+
+	const base = "https://compute.googleapis.com/compute/v1/projects/p/zones/z/"
+	for _, tc := range []struct {
+		name     string
+		p        *Provider
+		method   string
+		url      string
+		sentinel error
+		marked   bool
+	}{
+		{"no method matches", p, "GET", base + "instancez", ErrClassifierUnknownOp, true},
+		{"ambiguous", ambiguous, "GET", "https://compute.googleapis.com/compute/v1/x/1", ErrClassifierUnknownOp, false},
+		{"unresolved permission", p, "DELETE", base + "instances/i", ErrPermissionUnresolved, false},
+		{"permission denied", denyAll, "GET", base + "instances", ErrPermissionDenied, false},
+		{"catalog unavailable", unavailable, "GET", base + "instances", ErrCatalogUnavailable, false},
+		{"unknown host", p, "GET", "https://madeupservice.googleapis.com/x", ErrHostPattern, false},
+		{"www path with no service", p, "GET", "https://www.googleapis.com/nope/v1/x", ErrHostPattern, false},
+	} {
+		svc := "compute"
+		if tc.name == "unknown host" {
+			svc = "madeupservice"
+		}
+		err := tc.p.AuthorizeAction(context.Background(), providerView(t, tc.method, tc.url), gcpArgs(t, svc))
+		var um *authreq.UnmatchedRequestError
+		marked := errors.As(err, &um)
+		if !errors.Is(err, tc.sentinel) || marked != tc.marked || (marked && um.Service != "compute") {
+			t.Errorf("%s: err = %v, marked %v, want %v and marked %v with service compute", tc.name, err, marked,
+				tc.sentinel, tc.marked)
+		}
+	}
+	if err := p.AuthorizeAction(context.Background(), providerView(t, "GET", base+"instances"),
+		gcpArgs(t, "compute")); err != nil {
+		t.Errorf("the allowed read is now denied: %v", err)
 	}
 }

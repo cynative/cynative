@@ -153,9 +153,14 @@ func TestAPIReference_Info(t *testing.T) {
 			t.Errorf("schema missing %q: %s", want, raw)
 		}
 	}
-	if !strings.Contains(info.Desc, "github and gitlab.") || !strings.Contains(info.Desc, "generated from the path") ||
+	if !strings.Contains(info.Desc, "github, gitlab and gcp.") ||
+		!strings.Contains(info.Desc, "generated from the path") ||
 		!strings.Contains(string(raw), "getApiV4ProjectsIdMergeRequests") {
 		t.Errorf("gitlab missing from the description or schema: %s %s", info.Desc, raw)
+	}
+	if !strings.Contains(info.Desc, "compute.instances.list") || !strings.Contains(string(raw), "'gcp'") ||
+		!strings.Contains(string(raw), "GCP: the Discovery version label") {
+		t.Errorf("gcp missing from the description or schema: %s %s", info.Desc, raw)
 	}
 	if _, ok := tools.NewAPIReferenceTool(nil).(schema.StructuredRunner); ok {
 		t.Error("api_reference must not implement StructuredRunner")

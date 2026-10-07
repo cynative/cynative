@@ -1,0 +1,87 @@
+{
+ "mtlsRootUrl": "https://cloudresourcemanager.mtls.googleapis.com/",
+ "name": "cloudresourcemanager",
+ "resources": {
+  "projects": {
+   "methods": {
+    "get": {
+     "description": "Retrieves the Project identified by the specified `project_id` (for example, `my...",
+     "flatPath": "v1/projects/{projectId}",
+     "httpMethod": "GET",
+     "id": "cloudresourcemanager.projects.get",
+     "parameters": {
+      "projectId": {
+       "description": "Required. The Project ID (for example, `my-project-123`).",
+       "location": "path",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "v1/projects/{projectId}",
+     "response": {"$ref": "Project"}
+    },
+    "list": {
+     "description": "Lists Projects that the caller has the `resourcemanager.projects.get` permission...",
+     "flatPath": "v1/projects",
+     "httpMethod": "GET",
+     "id": "cloudresourcemanager.projects.list",
+     "parameters": {
+      "filter": {
+       "description": "Optional. An expression for filtering the results of the request. Filter rules a...",
+       "location": "query",
+       "type": "string"
+      },
+      "pageSize": {
+       "description": "Optional. The maximum number of Projects to return in the response. The server c...",
+       "format": "int32",
+       "location": "query",
+       "type": "integer"
+      },
+      "pageToken": {
+       "description": "Optional. A pagination token returned from a previous call to ListProjects that...",
+       "location": "query",
+       "type": "string"
+      }
+     },
+     "path": "v1/projects",
+     "response": {"$ref": "ListProjectsResponse"}
+    }
+   }
+  }
+ },
+ "revision": "20260917",
+ "rootUrl": "https://cloudresourcemanager.googleapis.com/",
+ "schemas": {
+  "ListProjectsResponse": {
+   "id": "ListProjectsResponse",
+   "properties": {
+    "nextPageToken": {
+     "description": "Pagination token. If the result set is too large to fit in a single response, th...",
+     "type": "string"
+    },
+    "projects": {
+     "description": "The list of Projects that matched the list filter. This list can be paginated.",
+     "items": {"$ref": "Project"},
+     "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "Project": {
+   "id": "Project",
+   "properties": {
+    "name": {
+     "description": "The optional user-assigned display name of the Project. When present it must be...",
+     "type": "string"
+    },
+    "projectId": {
+     "description": "The unique, user-assigned ID of the Project. It must be 6 to 30 lowercase letter...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "servicePath": "",
+ "version": "v1"
+}

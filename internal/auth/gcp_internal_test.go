@@ -31,6 +31,8 @@ func (fakeCatalog) ResolveWWWService(_ context.Context, _ string) (string, bool)
 	return "", false
 }
 
+func (fakeCatalog) PeekMethodIndex(string) (gcphardening.MethodIndex, bool) { return nil, false }
+
 // fakeTokenSource returns a fixed token without error.
 type fakeTokenSource struct{ accessToken string }
 

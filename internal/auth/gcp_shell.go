@@ -68,6 +68,7 @@ func buildHardenedGCPProvider(root oauth2.TokenSource, gcpCfg GCPHardeningConfig
 	// Build the provider with a nil closure first, then assign one that
 	// captures p so it can populate the provider's fields on first call.
 	p := newGCPProvider(catalog, nil)
+	p.docs = newGCPDocs(gcpCfg.Config, gcphardening.NewDocsFetcher(httpClient))
 	p.doLazyResolve = func(ctx context.Context) error {
 		// Every per-call client used by the one-time bootstrap (identity probe →
 		// role union → queryTestablePermissions) gets the dedicated bootstrap

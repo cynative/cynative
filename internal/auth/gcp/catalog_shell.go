@@ -58,12 +58,14 @@ func NewCatalog(cfg CatalogConfig) Catalog {
 		},
 		Parse: parseDiscoveryData,
 	}
-	return newCatalog(func(ctx context.Context) (DiscoveryData, error) {
+	c := newCatalog(func(ctx context.Context) (DiscoveryData, error) {
 		if d := tc.Get(ctx); d != nil {
 			return *d, nil
 		}
 		return DiscoveryData{}, ErrCatalogUnavailable
 	})
+	c.peek = tc.Peek
+	return c
 }
 
 type directoryItem struct {
