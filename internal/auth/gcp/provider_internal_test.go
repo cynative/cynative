@@ -346,6 +346,8 @@ func (f *fakeCatalogPort) ResolveWWWService(_ context.Context, _ string) (string
 	return "", false
 }
 
+func (f *fakeCatalogPort) PeekMethodIndex(string) (MethodIndex, bool) { return nil, false }
+
 // methodIndexErrCatalog wraps a *catalog, delegates ResolveService /
 // ResolveWWWService, but always returns an error from MethodIndex. Used to cover
 // the MethodIndex error branch.
@@ -361,6 +363,10 @@ func (m *methodIndexErrCatalog) ResolveWWWService(ctx context.Context, reqPath s
 
 func (m *methodIndexErrCatalog) MethodIndex(_ context.Context, _ string) (MethodIndex, error) {
 	return nil, ErrCatalogUnavailable
+}
+
+func (m *methodIndexErrCatalog) PeekMethodIndex(service string) (MethodIndex, bool) {
+	return m.inner.PeekMethodIndex(service)
 }
 
 // buildCRMProvider wires a Provider over a faithful v3 cloudresourcemanager catalog

@@ -46,6 +46,9 @@ type Catalog interface {
 	ResolveService(ctx context.Context, parsed ParsedHost, host string) (string, error)
 	MethodIndex(ctx context.Context, service string) (MethodIndex, error)
 	ResolveWWWService(ctx context.Context, reqPath string) (string, bool)
+	// PeekMethodIndex returns the service's methods from a snapshot already in
+	// memory, never loading or refreshing one.
+	PeekMethodIndex(service string) (MethodIndex, bool)
 }
 
 // catalogFetcher fetches the Discovery directory + per-API docs. One-call seam;
@@ -54,9 +57,13 @@ type catalogFetcher func(ctx context.Context) (DiscoveryData, error)
 
 type catalog struct {
 	fetch catalogFetcher
+	// peek returns the snapshot already in memory, or nil; it never fetches.
+	peek func() *DiscoveryData
 }
 
-func newCatalog(fetch catalogFetcher) *catalog { return &catalog{fetch: fetch} }
+func newCatalog(fetch catalogFetcher) *catalog {
+	return &catalog{fetch: fetch, peek: func() *DiscoveryData { return nil }}
+}
 
 // applyDefaults fills the zero-valued CatalogConfig fields with their production
 // defaults. Pure; the gated counterpart of NewCatalog's inline defaulting so the
@@ -214,6 +221,17 @@ func (c *catalog) MethodIndex(ctx context.Context, service string) (MethodIndex,
 		return nil, fmt.Errorf("%w: service %q has no discovery doc", ErrClassifierUnknownOp, service)
 	}
 	return doc.Methods, nil
+}
+
+// PeekMethodIndex returns the service's methods from the loaded snapshot without
+// calling the fetch closure. No snapshot, or no such service, reports false.
+func (c *catalog) PeekMethodIndex(service string) (MethodIndex, bool) {
+	data := c.peek()
+	if data == nil {
+		return nil, false
+	}
+	doc, ok := data.Services[service]
+	return doc.Methods, ok
 }
 
 func serviceShortName(rootURL, dirName string) string {

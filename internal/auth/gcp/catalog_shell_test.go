@@ -321,3 +321,34 @@ func TestCatalogShellAllDocsTransientErrors(t *testing.T) {
 		t.Fatal("expected empty-directory error when all docs fail transiently")
 	}
 }
+
+func TestCatalogShellPeekNeverFetches(t *testing.T) {
+	t.Parallel()
+	hits := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/discovery/v1/apis", func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"items":[{"name":"compute","version":"v1","discoveryRestUrl":"DOC/compute"}]}`))
+	})
+	mux.HandleFunc("/DOC/compute", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"rootUrl":"https://compute.googleapis.com/","servicePath":"compute/v1/",` +
+			`"methods":{"list":{"id":"compute.instances.list","httpMethod":"GET","flatPath":"projects/{project}/zones/{zone}/instances"}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	cat := gcphardening.NewCatalog(gcphardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
+		DirectoryURL: srv.URL + "/discovery/v1/apis",
+		BaseURL:      srv.URL + "/",
+		HTTPClient:   srv.Client(),
+	})
+	if _, ok := cat.PeekMethodIndex("compute"); ok || hits != 0 {
+		t.Fatalf("peek before any load = %v with %d fetches, want nothing and none", ok, hits)
+	}
+	if _, err := cat.MethodIndex(context.Background(), "compute"); err != nil {
+		t.Fatal(err)
+	}
+	if idx, ok := cat.PeekMethodIndex("compute"); !ok || len(idx) != 1 || hits != 1 {
+		t.Errorf("peek after load = %v %v with %d fetches, want the loaded method and one fetch", idx, ok, hits)
+	}
+}
