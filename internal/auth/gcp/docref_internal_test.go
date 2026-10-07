@@ -363,3 +363,76 @@ func TestReference_OptionalInputsAreBounded(t *testing.T) {
 			ref.InputsTruncated, apiref.MaxOptionalInputs)
 	}
 }
+
+func TestReference_Pagination(t *testing.T) {
+	t.Parallel()
+	pageToken := func(size string) apiref.Pagination {
+		return apiref.Pagination{
+			Style:       "page-token",
+			InputToken:  "pageToken",
+			OutputToken: "nextPageToken",
+			PageSize:    size,
+		}
+	}
+	unspecified := apiref.Pagination{Style: apiref.PaginationUnspecified}
+	for _, tc := range []struct {
+		stem, id string
+		want     apiref.Pagination
+		notes    []string
+	}{
+		{"compute.v1", "compute.instances.list", pageToken("maxResults"), []string{docPagingNote}},
+		{"storage.v1", "storage.buckets.list", pageToken("maxResults"), []string{docPagingNote}},
+		{"aiplatform.v1", "aiplatform.projects.locations.endpoints.list", pageToken("pageSize"), []string{docPagingNote}},
+		{"cloudresourcemanager.v1", "cloudresourcemanager.projects.list", pageToken("pageSize"), []string{docPagingNote}},
+		{"synth.v1", "synth.things.list", pageToken(""), []string{docPagingNote, docBothSizes}},
+		{"compute.v1", "compute.instances.get", unspecified, nil},
+	} {
+		ref := reference(t, tc.stem, tc.id)
+		if ref.Pagination != tc.want {
+			t.Errorf("%s pagination = %+v, want %+v", tc.id, ref.Pagination, tc.want)
+		}
+		for _, n := range []string{docPagingNote, docBothSizes} {
+			if slices.Contains(ref.Limitations, n) != slices.Contains(tc.notes, n) {
+				t.Errorf("%s limitations = %q, want %q", tc.id, ref.Limitations, tc.notes)
+			}
+		}
+	}
+	// A pageToken parameter alone is not pagination: the response must carry nextPageToken.
+	d := &APIDoc{
+		Name: "synth", Version: "v1", RootURL: "https://synth.googleapis.com/", ServicePath: "v1/",
+		Methods: map[string]DocMethod{"synth.things.list": {
+			HTTPMethod: "GET", Path: "things", Response: "Things",
+			Params: []DocParam{{Name: "pageToken", Location: "query", Type: "string"}},
+		}},
+	}
+	if ref := buildReference(d, "synth.things.list"); ref.Pagination != unspecified {
+		t.Errorf("pageToken without nextPageToken = %+v, want unspecified", ref.Pagination)
+	}
+}
+
+func TestReference_Response(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		stem, id, encoding string
+		note               string
+	}{
+		{"compute.v1", "compute.instances.get", "json", ""},
+		{"aiplatform.v1", "aiplatform.projects.locations.endpoints.rawPredict", "raw", docHTTPBodyNote},
+		{"storage.v1", "storage.buckets.delete", "none", ""},
+		{"storage.v1", "storage.objects.get", "json", docMediaNote},
+	} {
+		ref := reference(t, tc.stem, tc.id)
+		if ref.Response.Encoding != tc.encoding {
+			t.Errorf("%s response = %+v, want %s", tc.id, ref.Response, tc.encoding)
+		}
+		for _, n := range []string{docHTTPBodyNote, docMediaNote} {
+			if slices.Contains(ref.Limitations, n) != (n == tc.note) {
+				t.Errorf("%s limitations = %q, want note %q", tc.id, ref.Limitations, tc.note)
+			}
+		}
+	}
+	if ref := reference(t, "storage.v1", "storage.buckets.delete"); ref.Response.Parse !=
+		"no modeled body fields; read the status and headers" {
+		t.Errorf("no response schema parse = %q", ref.Response.Parse)
+	}
+}

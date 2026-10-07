@@ -22,6 +22,13 @@ const (
 	docProseRequired    = "required per the field documentation: "
 	docStandardParams   = "the standard query parameters every Google API accepts, such as fields, alt, " +
 		"prettyPrint and quotaUser, are not listed"
+	docPageToken  = "pageToken"
+	docPagingNote = "pagination is inferred from the pageToken parameter and the nextPageToken response field; " +
+		"send each response's nextPageToken as pageToken until a response has none"
+	docBothSizes = "the method declares both pageSize and maxResults; read their descriptions before choosing " +
+		"a page size"
+	docHTTPBodyNote = "the response is a google.api.HttpBody: an arbitrary payload, not a JSON object"
+	docMediaNote    = "alt=media returns the raw bytes instead of JSON"
 )
 
 var (
@@ -57,6 +64,8 @@ func buildReference(doc *APIDoc, id string) *apiref.Reference {
 	}
 	ref.Gaps = append(ref.Gaps, gaps...)
 	addInputs(ref, queryAndBody(doc, m, id))
+	addPagination(ref, m)
+	addResponse(ref, m)
 	if len(doc.Endpoints) > 0 {
 		forms := doc.Endpoints[:min(len(doc.Endpoints), docMaxEndpointForms)]
 		ref.Limitations = append(ref.Limitations, "the API also serves locational endpoints ("+
@@ -288,5 +297,49 @@ func addInputs(ref *apiref.Reference, b bodyInputs) {
 		ref.Inputs = append(ref.Inputs, apiref.Input{
 			Name: "body", WireName: "body", Location: apiref.LocationBody, Required: true, Type: unknownDocType,
 		})
+	}
+}
+
+// addPagination infers page-token pagination when the method takes a pageToken query parameter and its response
+// has a nextPageToken property. The page size is pageSize or maxResults, whichever the method declares.
+func addPagination(ref *apiref.Reference, m DocMethod) {
+	query := map[string]bool{}
+	for _, p := range m.Params {
+		if p.Location == string(apiref.LocationQuery) {
+			query[p.Name] = true
+		}
+	}
+	if !query[docPageToken] || !m.NextPageToken {
+		return
+	}
+	ref.Pagination = apiref.Pagination{Style: "page-token", InputToken: docPageToken, OutputToken: "nextPageToken"}
+	ref.Limitations = append(ref.Limitations, docPagingNote)
+	switch {
+	case query["pageSize"] && query["maxResults"]:
+		ref.Limitations = append(ref.Limitations, docBothSizes)
+	case query["pageSize"]:
+		ref.Pagination.PageSize = "pageSize"
+	case query["maxResults"]:
+		ref.Pagination.PageSize = "maxResults"
+	}
+}
+
+// addResponse describes the response: JSON for a modeled response, the raw payload for a google.api.HttpBody, and
+// no modeled fields when the method names no response schema.
+func addResponse(ref *apiref.Reference, m DocMethod) {
+	switch {
+	case m.Response == "":
+		ref.Response = apiref.Response{Encoding: "none", Parse: "no modeled body fields; read the status and headers"}
+	case m.HTTPBody:
+		ref.Response = apiref.Response{
+			Encoding: "raw",
+			Parse:    "the body is an arbitrary payload; its content type is in the Content-Type response header",
+		}
+		ref.Limitations = append(ref.Limitations, docHTTPBodyNote)
+	default:
+		ref.Response = apiref.Response{Encoding: "json", Parse: "JSON.parse(response.body)"}
+	}
+	if m.MediaDownload {
+		ref.Limitations = append(ref.Limitations, docMediaNote)
 	}
 }
