@@ -473,3 +473,30 @@ func TestClassify_PlainCustomVerbStillClassifies(t *testing.T) {
 		t.Errorf("id = %q, want apigee.organizations.environments.testIamPermissions", id)
 	}
 }
+
+// TestClassify_MarksOnlyZeroSurvivors pins that a request no method matches is marked unmatched, with the gate's
+// text and sentinel unchanged, and that an ambiguous one is not.
+func TestClassify_MarksOnlyZeroSurvivors(t *testing.T) {
+	t.Parallel()
+
+	_, err := Classify(computeIndex(), classifyView(t, "GET",
+		"https://compute.googleapis.com/compute/v1/projects/p/zones/z/instancez"))
+	var um *authreq.UnmatchedRequestError
+	if !errors.As(err, &um) || um.Service != "" {
+		t.Fatalf("zero survivors = %v, want an unmatched marker with no service", err)
+	}
+	const want = "gcp_hardening: cannot identify method from request: no method matches GET " +
+		"/compute/v1/projects/p/zones/z/instancez"
+	if !errors.Is(err, ErrClassifierUnknownOp) || err.Error() != want {
+		t.Fatalf("zero survivors = %q, want %q wrapping ErrClassifierUnknownOp", err, want)
+	}
+
+	ambiguous := MethodIndex{
+		"svc.foo.get": {ID: "svc.foo.get", HTTPMethod: "GET", FlatPath: "v1/projects/{project}/foo/{foo}"},
+		"svc.bar.get": {ID: "svc.bar.get", HTTPMethod: "GET", FlatPath: "v1/projects/{project}/foo/{foo}"},
+	}
+	_, err = Classify(ambiguous, classifyView(t, "GET", "https://example.googleapis.com/v1/projects/p/foo/f"))
+	if !errors.Is(err, ErrClassifierUnknownOp) || errors.As(err, &um) {
+		t.Fatalf("ambiguous = %v, want ErrClassifierUnknownOp and no unmatched marker", err)
+	}
+}
