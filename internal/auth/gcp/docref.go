@@ -1,6 +1,7 @@
 package gcp
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,6 +17,11 @@ const (
 	// docMaxEndpointForms bounds the locational host forms a reference names.
 	docMaxEndpointForms = 3
 	docSegment          = "a path segment"
+	docJSONMedia        = "application/json"
+	docBodyGap          = "request body is not a JSON object the template can render"
+	docProseRequired    = "required per the field documentation: "
+	docStandardParams   = "the standard query parameters every Google API accepts, such as fields, alt, " +
+		"prettyPrint and quotaUser, are not listed"
 )
 
 var (
@@ -44,11 +50,13 @@ func buildReference(doc *APIDoc, id string) *apiref.Reference {
 		AuthField:    docAuthField,
 		AuthArgs:     map[string]string{"service": serviceShortName(doc.RootURL, doc.Name)},
 		Pagination:   apiref.Pagination{Style: apiref.PaginationUnspecified},
+		Limitations:  []string{docStandardParams},
 		Source: apiref.Source{
 			Name: docSourceName, Document: doc.Name + " " + doc.Version, Version: doc.Revision, SHA256: doc.SHA256,
 		},
 	}
 	ref.Gaps = append(ref.Gaps, gaps...)
+	addInputs(ref, queryAndBody(doc, m, id))
 	if len(doc.Endpoints) > 0 {
 		forms := doc.Endpoints[:min(len(doc.Endpoints), docMaxEndpointForms)]
 		ref.Limitations = append(ref.Limitations, "the API also serves locational endpoints ("+
@@ -188,4 +196,97 @@ func verbSegments(path string) []string {
 		segs = append(segs[:len(segs)-1], last[:i], last[i:])
 	}
 	return segs
+}
+
+// queryAndBody lists the method's query parameters, then its request body: the writable top-level properties of
+// a JSON object schema, or a body gap when the schema is missing, inline or not an object.
+func queryAndBody(doc *APIDoc, m DocMethod, id string) bodyInputs {
+	out := bodyInputs{encoding: apiref.BodyNone}
+	for _, p := range m.Params {
+		if p.Location != string(apiref.LocationQuery) {
+			continue
+		}
+		desc := p.Description
+		if p.Repeated {
+			desc = apiref.Truncate("(repeatable) "+desc, apiref.MaxInputDescription)
+		}
+		out.inputs = append(out.inputs, docInput(p.Name, apiref.LocationQuery, p.Required, p.Type, desc))
+	}
+	if !m.Body {
+		return out
+	}
+	s, ok := doc.Schemas[m.Request]
+	if !ok || !s.Object {
+		out.bodyGap = true
+		return out
+	}
+	out.encoding = apiref.BodyJSON
+	for _, p := range s.Props {
+		if p.ReadOnly {
+			continue
+		}
+		required := slices.Contains(p.RequiredBy, id)
+		desc := p.Description
+		if !required && p.Prose {
+			required = true
+			desc = apiref.Truncate(docProseRequired+desc, apiref.MaxInputDescription)
+		}
+		out.inputs = append(out.inputs, docInput(p.Name, apiref.LocationBody, required, p.Type, desc))
+	}
+	return out
+}
+
+// bodyInputs is what queryAndBody found after the path.
+type bodyInputs struct {
+	inputs   []apiref.Input
+	encoding apiref.BodyEncoding
+	bodyGap  bool
+}
+
+func docInput(name string, loc apiref.Location, required bool, typ, desc string) apiref.Input {
+	return apiref.Input{
+		Name: name, WireName: name, Location: loc, Required: required, Type: typ,
+		Renderable: isDocScalar(typ), Description: desc,
+	}
+}
+
+// isDocScalar reports a type the template renders as one value. Discovery writes int64 and uint64 as strings.
+func isDocScalar(t string) bool {
+	switch t {
+	case "string", "integer", "number", "boolean":
+		return true
+	}
+	return false
+}
+
+// addInputs appends every required input and the first apiref.MaxOptionalInputs optional ones, records a gap for
+// each required input the template cannot render, and sets the body encoding.
+func addInputs(ref *apiref.Reference, b bodyInputs) {
+	ref.BodyEncoding = b.encoding
+	if b.encoding == apiref.BodyJSON {
+		ref.FixedHeaders = append(ref.FixedHeaders, apiref.Param{Key: "Content-Type", Value: docJSONMedia})
+	}
+	if b.bodyGap {
+		ref.Gaps = append(ref.Gaps, docBodyGap)
+	}
+	optional := 0
+	for _, in := range b.inputs {
+		switch {
+		case !in.Required && optional == apiref.MaxOptionalInputs:
+			ref.InputsTruncated = true
+			continue
+		case !in.Required:
+			optional++
+		case !in.Renderable:
+			ref.Gaps = append(ref.Gaps, fmt.Sprintf("required input %s (%s in %s) cannot be rendered",
+				in.Name, in.Type, in.Location))
+		}
+		ref.Inputs = append(ref.Inputs, in)
+	}
+	// The body gap already says why; the placeholder only marks the body in the template.
+	if b.bodyGap {
+		ref.Inputs = append(ref.Inputs, apiref.Input{
+			Name: "body", WireName: "body", Location: apiref.LocationBody, Required: true, Type: unknownDocType,
+		})
+	}
 }

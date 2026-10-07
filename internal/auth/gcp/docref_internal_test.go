@@ -206,7 +206,8 @@ func TestReference_LocationalEndpoints(t *testing.T) {
 			}
 		}
 	}
-	if ref := reference(t, "cloudresourcemanager.v1", "cloudresourcemanager.projects.get"); len(ref.Limitations) != 0 {
+	ref := reference(t, "cloudresourcemanager.v1", "cloudresourcemanager.projects.get")
+	if slices.ContainsFunc(ref.Limitations, func(l string) bool { return strings.Contains(l, "locational") }) {
 		t.Errorf("an API with no endpoints[] got %q", ref.Limitations)
 	}
 }
@@ -231,5 +232,134 @@ func TestRenderedTemplatesClassify(t *testing.T) {
 				t.Errorf("%s: %s %s classified as %q, %v", id, ref.Method, path, got, err)
 			}
 		}
+	}
+}
+
+// inputLines renders a reference's query and body inputs as "location name|type|required|description" lines.
+func inputLines(ref *apiref.Reference) []string {
+	var out []string
+	for _, in := range ref.Inputs {
+		if in.Location == apiref.LocationPath {
+			continue
+		}
+		req := "optional"
+		if in.Required {
+			req = "required"
+		}
+		out = append(out, string(in.Location)+" "+in.Name+"|"+in.Type+"|"+req+"|"+in.Description)
+	}
+	return out
+}
+
+func TestReference_QueryAndBody(t *testing.T) {
+	t.Parallel()
+	const ai = "aiplatform.projects.locations.endpoints."
+	for _, tc := range []struct {
+		stem, id string
+		inputs   []string
+		gaps     []string
+	}{
+		// annotations.required names the method; read-only properties (id, kind) are dropped.
+		{"compute.v1", "compute.instances.insert", []string{
+			"query requestId|string|optional|An optional request ID to identify requests. Specify a unique request ID so that...",
+			"body labels|object|optional|Labels to apply to this instance. These can be later modified by the setLabels m...",
+			"body machineType|string|optional|Full or partial URL of the machine type resource to use for this instance, in th...",
+			"body name|string|required|The name of the resource, provided by the client when initially creating the res...",
+			"body tags|object|optional|Tags to apply to this instance. Tags are used to identify valid sources or targe...",
+		}, nil},
+		// A description that starts with "Required." makes the property required and says so.
+		{"aiplatform.v1", ai + "create", []string{
+			"query endpointId|string|optional|Immutable. The ID to use for endpoint, which will become the final component of...",
+			"body description|string|optional|The description of the Endpoint.",
+			"body displayName|string|required|required per the field documentation: Required. The display name of the " +
+				"Endpoint. The name can be up to 128 characters...",
+			"body name|string|optional|Identifier. The resource name of the Endpoint.",
+		}, nil},
+		{"aiplatform.v1", ai + "predict", []string{
+			"body instances|array|required|required per the field documentation: Required. The instances that are the " +
+				"input to the prediction call. A DeployedMod...",
+			"body parameters|any|optional|The parameters that govern the prediction. The schema of the parameters may be s...",
+		}, []string{"required input instances (array in body) cannot be rendered"}},
+		{"storage.v1", "storage.buckets.update", []string{
+			"body acl|array|required|Access controls on the bucket.",
+			"body kind|string|optional|The kind of item this is. For buckets, this is always storage#bucket.",
+			"body location|string|optional|The location of the bucket. Object data for objects in the bucket resides in phy...",
+			"body name|string|optional|The name of the bucket.",
+		}, []string{"required input acl (array in body) cannot be rendered"}},
+		{"synth.v1", "synth.things.create", []string{
+			"body misc|unknown|optional|Anything.",
+			"body name|string|required|required per the field documentation: Required. The thing's name.",
+			"body note|string|optional|Optional. A note.",
+			"body shape|object|required|",
+			"body size|string|required|",
+		}, []string{"required input shape (object in body) cannot be rendered"}},
+		{"synth.v1", "synth.things.list", []string{
+			"query maxResults|integer|optional|",
+			"query pageSize|integer|optional|",
+			"query pageToken|string|optional|",
+			"query parent|string|required|",
+			"query tag|string|optional|(repeatable) Tags to match.",
+		}, nil},
+	} {
+		ref := reference(t, tc.stem, tc.id)
+		if got := inputLines(ref); !slices.Equal(got, tc.inputs) {
+			t.Errorf("%s inputs:\n%s\nwant:\n%s", tc.id, strings.Join(got, "\n"), strings.Join(tc.inputs, "\n"))
+		}
+		if !slices.Equal(ref.Gaps, tc.gaps) {
+			t.Errorf("%s gaps = %q, want %q", tc.id, ref.Gaps, tc.gaps)
+		}
+		if !slices.Contains(ref.Limitations, docStandardParams) {
+			t.Errorf("%s limitations = %q, want the standard-parameter note", tc.id, ref.Limitations)
+		}
+	}
+}
+
+func TestReference_BodyEncoding(t *testing.T) {
+	t.Parallel()
+	jsonHeader := []apiref.Param{{Key: "Content-Type", Value: "application/json"}}
+	for _, tc := range []struct {
+		id       string
+		encoding apiref.BodyEncoding
+		headers  []apiref.Param
+		gap      bool
+	}{
+		{"synth.things.list", apiref.BodyNone, nil, false},
+		{"synth.things.empty", apiref.BodyJSON, jsonHeader, false},
+		{"synth.things.create", apiref.BodyJSON, jsonHeader, false},
+		{"synth.things.unresolved", apiref.BodyNone, nil, true},
+		{"synth.things.scalar", apiref.BodyNone, nil, true},
+		{"synth.things.inline", apiref.BodyNone, nil, true},
+	} {
+		ref := reference(t, "synth.v1", tc.id)
+		if ref.BodyEncoding != tc.encoding || !slices.Equal(ref.FixedHeaders, tc.headers) {
+			t.Errorf("%s = %s %v, want %s %v", tc.id, ref.BodyEncoding, ref.FixedHeaders, tc.encoding, tc.headers)
+		}
+		if got := slices.Contains(ref.Gaps, docBodyGap); got != tc.gap {
+			t.Errorf("%s body gap = %v, want %v (gaps %q)", tc.id, got, tc.gap, ref.Gaps)
+		}
+		body := slices.IndexFunc(ref.Inputs, func(in apiref.Input) bool { return in.Name == "body" })
+		if tc.gap && (body < 0 || ref.Inputs[body].Renderable || !ref.Inputs[body].Required || len(ref.Gaps) != 1) {
+			t.Errorf("%s inputs %+v gaps %q, want one unrenderable body input and only the body gap", tc.id,
+				ref.Inputs, ref.Gaps)
+		}
+	}
+}
+
+func TestReference_OptionalInputsAreBounded(t *testing.T) {
+	t.Parallel()
+	m := DocMethod{HTTPMethod: "GET", Path: "things"}
+	for i := range apiref.MaxOptionalInputs + 5 {
+		m.Params = append(m.Params, DocParam{Name: "p" + string(rune('a'+i)), Location: "query", Type: "string"})
+	}
+	m.Params = append(m.Params, DocParam{Name: "z", Location: "query", Type: "string", Required: true})
+	d := &APIDoc{
+		Name: "synth", Version: "v1", RootURL: "https://synth.googleapis.com/", ServicePath: "v1/",
+		Methods: map[string]DocMethod{"synth.things.list": m},
+	}
+	ref := buildReference(d, "synth.things.list")
+	if !ref.InputsTruncated || len(ref.Inputs) != apiref.MaxOptionalInputs+1 ||
+		ref.Inputs[len(ref.Inputs)-1].Name != "z" {
+		t.Errorf("inputs = %d (truncated %v), want %d optional plus the required z", len(ref.Inputs),
+			ref.InputsTruncated, apiref.MaxOptionalInputs)
 	}
 }
