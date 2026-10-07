@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -358,5 +359,64 @@ func TestNewNamedCache_UsesNamedFiles(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("%s not written: %v", f, err)
 		}
+	}
+}
+
+func TestTTLCache_PeekNeverLoads(t *testing.T) {
+	t.Parallel()
+	// A fresh copy on disk is still not in memory, so Peek returns nil and calls nothing.
+	c := newCache(seedDisk(t), time.Now, func(context.Context) ([]byte, error) {
+		t.Error("Peek fetched")
+		return nil, errors.New("unexpected fetch")
+	})
+	if got := c.Peek(); got != nil {
+		t.Fatalf("Peek before Get = %v, want nil", got)
+	}
+	if got := c.Get(t.Context()); got == nil || got.V != "ok" {
+		t.Fatalf("Get = %v, want ok from disk", got)
+	}
+	if got := c.Peek(); got == nil || got.V != "ok" {
+		t.Fatalf("Peek after Get = %v, want ok", got)
+	}
+}
+
+// TestTTLCache_PeekWaitsForALoadAndNeverRefreshes pins Peek's locking: a Peek that starts while a Get is loading
+// waits for that load and returns its value rather than reading the unfinished field, and a Peek after the TTL has
+// passed returns the loaded value without refreshing it.
+func TestTTLCache_PeekWaitsForALoadAndNeverRefreshes(t *testing.T) {
+	t.Parallel()
+	var now atomic.Int64
+	clock := func() time.Time { return time.Unix(now.Load(), 0) }
+	entered, release := make(chan struct{}), make(chan struct{})
+	var fetches atomic.Int32
+	c := newCache(t.TempDir(), clock, func(context.Context) ([]byte, error) {
+		if fetches.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return []byte(goodRaw), nil
+	})
+	got := make(chan *strDoc, 1)
+	go func() { got <- c.Get(context.Background()) }()
+	<-entered
+	peeked := make(chan *strDoc, 1)
+	go func() { peeked <- c.Peek() }()
+	// Peek holds the same lock as the loading Get, so it cannot return before the load is released. The timer is
+	// the only arm that can be ready here; a Peek that skipped the lock would return nil at once.
+	select {
+	case d := <-peeked:
+		t.Fatalf("Peek returned %v while a load was in flight", d)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if d := <-peeked; d == nil || d.V != "ok" {
+		t.Fatalf("Peek after the load = %v, want the loaded value", d)
+	}
+	if d := <-got; d == nil || d.V != "ok" {
+		t.Fatalf("Get = %v", d)
+	}
+	now.Store(int64(10 * time.Hour / time.Second)) // well past the one-hour TTL.
+	if d := c.Peek(); d == nil || d.V != "ok" || fetches.Load() != 1 {
+		t.Errorf("stale Peek = %v after %d fetches, want the loaded value and no refresh", d, fetches.Load())
 	}
 }

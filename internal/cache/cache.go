@@ -70,6 +70,16 @@ func (c *TTLCache[T]) Get(ctx context.Context) *T {
 	return c.data
 }
 
+// Peek returns the payload a Get already loaded into memory, or nil. It never
+// reads the disk, fetches or refreshes, so a caller on a path that must not do
+// I/O can use whatever is loaded, however old. It does wait for a Get that is
+// loading in another goroutine, since both hold the same lock.
+func (c *TTLCache[T]) Peek() *T {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.data
+}
+
 // load resolves the payload: fresh disk → Fetch (with stale-disk fallback on
 // error). Returns nil on any unrecoverable failure; never memoizes a failure.
 func (c *TTLCache[T]) load(ctx context.Context) *T {
