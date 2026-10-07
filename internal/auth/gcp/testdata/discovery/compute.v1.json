@@ -1,0 +1,223 @@
+{
+ "endpoints": [
+  {
+   "description": "Regional Endpoint",
+   "endpointUrl": "https://compute.europe-west1.rep.googleapis.com/",
+   "location": "europe-west1"
+  },
+  {
+   "description": "Regional Endpoint",
+   "endpointUrl": "https://compute.us-central1.rep.googleapis.com/",
+   "location": "us-central1"
+  }
+ ],
+ "mtlsRootUrl": "https://compute.mtls.googleapis.com/",
+ "name": "compute",
+ "resources": {
+  "instances": {
+   "methods": {
+    "get": {
+     "description": "Returns the specified Instance resource.",
+     "flatPath": "projects/{project}/zones/{zone}/instances/{instance}",
+     "httpMethod": "GET",
+     "id": "compute.instances.get",
+     "parameters": {
+      "instance": {
+       "description": "Name of the instance resource to return.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?|[1-9][0-9]{0,19}",
+       "required": true,
+       "type": "string"
+      },
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "zone": {
+       "description": "The name of the zone for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/zones/{zone}/instances/{instance}",
+     "response": {"$ref": "Instance"}
+    },
+    "insert": {
+     "description": "Creates an instance resource in the specified project using the data included in...",
+     "flatPath": "projects/{project}/zones/{zone}/instances",
+     "httpMethod": "POST",
+     "id": "compute.instances.insert",
+     "parameters": {
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "requestId": {
+       "description": "An optional request ID to identify requests. Specify a unique request ID so that...",
+       "location": "query",
+       "type": "string"
+      },
+      "zone": {
+       "description": "The name of the zone for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/zones/{zone}/instances",
+     "request": {"$ref": "Instance"},
+     "response": {"$ref": "Operation"}
+    },
+    "list": {
+     "description": "Retrieves the list of instances contained within the specified zone.",
+     "flatPath": "projects/{project}/zones/{zone}/instances",
+     "httpMethod": "GET",
+     "id": "compute.instances.list",
+     "parameters": {
+      "filter": {
+       "description": "A filter expression that filters resources listed in the response. Most Compute...",
+       "location": "query",
+       "type": "string"
+      },
+      "maxResults": {
+       "description": "The maximum number of results per page that should be returned. If the number of...",
+       "format": "uint32",
+       "location": "query",
+       "type": "integer"
+      },
+      "pageToken": {
+       "description": "Specifies a page token to use. Set `pageToken` to the `nextPageToken` returned b...",
+       "location": "query",
+       "type": "string"
+      },
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "zone": {
+       "description": "The name of the zone for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/zones/{zone}/instances",
+     "response": {"$ref": "InstanceList"}
+    },
+    "setLabels": {
+     "description": "Sets labels on an instance.  To learn more about labels, read theLabeling Resour...",
+     "flatPath": "projects/{project}/zones/{zone}/instances/{instance}/setLabels",
+     "httpMethod": "POST",
+     "id": "compute.instances.setLabels",
+     "parameters": {
+      "instance": {
+       "description": "Name of the instance scoping this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?|[1-9][0-9]{0,19}",
+       "required": true,
+       "type": "string"
+      },
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "zone": {
+       "description": "The name of the zone for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/zones/{zone}/instances/{instance}/setLabels",
+     "request": {"$ref": "InstancesSetLabelsRequest"},
+     "response": {"$ref": "Operation"}
+    }
+   }
+  }
+ },
+ "revision": "20260922",
+ "rootUrl": "https://compute.googleapis.com/",
+ "schemas": {
+  "Instance": {
+   "id": "Instance",
+   "properties": {
+    "id": {
+     "description": "Output only. [Output Only] The unique identifier for the resource. This identifi...",
+     "format": "uint64",
+     "readOnly": true,
+     "type": "string"
+    },
+    "kind": {
+     "description": "Output only. [Output Only] Type of the resource. Always compute#instance for ins...",
+     "readOnly": true,
+     "type": "string"
+    },
+    "labels": {
+     "description": "Labels to apply to this instance. These can be later modified by the setLabels m...",
+     "type": "object"
+    },
+    "machineType": {
+     "description": "Full or partial URL of the machine type resource to use for this instance, in th...",
+     "type": "string"
+    },
+    "name": {
+     "annotations": {"required": ["compute.instances.insert"]},
+     "description": "The name of the resource, provided by the client when initially creating the res...",
+     "type": "string"
+    },
+    "tags": {
+     "$ref": "Tags",
+     "description": "Tags to apply to this instance. Tags are used to identify valid sources or targe..."
+    }
+   },
+   "type": "object"
+  },
+  "InstanceList": {
+   "id": "InstanceList",
+   "properties": {
+    "items": {"description": "A list of Instance resources.", "items": {"$ref": "Instance"}, "type": "array"},
+    "nextPageToken": {
+     "description": "[Output Only] This token allows you to get the next page of results for list req...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "InstancesSetLabelsRequest": {
+   "id": "InstancesSetLabelsRequest",
+   "properties": {
+    "labelFingerprint": {
+     "description": "Fingerprint of the previous set of labels for this resource, used to prevent con...",
+     "format": "byte",
+     "type": "string"
+    },
+    "labels": {"type": "object"}
+   },
+   "type": "object"
+  },
+  "Operation": {
+   "id": "Operation",
+   "properties": {"name": {"description": "[Output Only] Name of the operation.", "type": "string"}},
+   "type": "object"
+  }
+ },
+ "servicePath": "compute/v1/",
+ "version": "v1"
+}

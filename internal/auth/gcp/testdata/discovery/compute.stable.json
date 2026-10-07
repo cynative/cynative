@@ -1,0 +1,58 @@
+{
+ "mtlsRootUrl": "https://compute.mtls.googleapis.com/",
+ "name": "compute",
+ "resources": {
+  "instances": {
+   "methods": {
+    "get": {
+     "description": "Returns the specified Instance resource.",
+     "flatPath": "projects/{project}/zones/{zone}/instances/{instance}",
+     "httpMethod": "GET",
+     "id": "compute.instances.get",
+     "parameters": {
+      "instance": {
+       "description": "Name of the instance resource to return.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?|[1-9][0-9]{0,19}",
+       "required": true,
+       "type": "string"
+      },
+      "project": {
+       "description": "Project ID for this request.",
+       "location": "path",
+       "pattern": "(?:(?:[-a-z0-9]{1,63}\\.)*(?:[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?):)?(?:[0-9]{1,19}|(?:[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?))",
+       "required": true,
+       "type": "string"
+      },
+      "zone": {
+       "description": "The name of the zone for this request.",
+       "location": "path",
+       "pattern": "[a-z](?:[-a-z0-9]{0,61}[a-z0-9])?",
+       "required": true,
+       "type": "string"
+      }
+     },
+     "path": "projects/{project}/zones/{zone}/instances/{instance}",
+     "response": {"$ref": "Instance"}
+    }
+   }
+  }
+ },
+ "revision": "20260922",
+ "rootUrl": "https://compute.googleapis.com/",
+ "schemas": {
+  "Instance": {
+   "id": "Instance",
+   "properties": {
+    "name": {
+     "annotations": {"required": ["compute.instances.insert"]},
+     "description": "The name of the resource, provided by the client when initially creating the res...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "servicePath": "compute/v1/",
+ "version": "stable"
+}

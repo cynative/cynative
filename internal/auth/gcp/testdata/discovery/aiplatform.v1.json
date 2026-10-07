@@ -1,0 +1,279 @@
+{
+ "endpoints": [
+  {
+   "description": "Locational Endpoint",
+   "endpointUrl": "https://us-central1-aiplatform.googleapis.com/",
+   "location": "us-central1"
+  },
+  {"description": "Regional Endpoint", "endpointUrl": "https://aiplatform.us.rep.googleapis.com/", "location": "us"},
+  {
+   "description": "Regional Endpoint",
+   "endpointUrl": "https://aiplatform-preprod.us.rep.googleapis.com/",
+   "location": "us"
+  }
+ ],
+ "mtlsRootUrl": "https://aiplatform.mtls.googleapis.com/",
+ "name": "aiplatform",
+ "resources": {
+  "projects": {
+   "resources": {
+    "locations": {
+     "resources": {
+      "endpoints": {
+       "methods": {
+        "create": {
+         "description": "Creates an Endpoint.",
+         "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/endpoints",
+         "httpMethod": "POST",
+         "id": "aiplatform.projects.locations.endpoints.create",
+         "parameters": {
+          "endpointId": {
+           "description": "Immutable. The ID to use for endpoint, which will become the final component of...",
+           "location": "query",
+           "type": "string"
+          },
+          "parent": {
+           "description": "Required. The resource name of the Location to create the Endpoint in. Format: `...",
+           "location": "path",
+           "pattern": "^projects/[^/]+/locations/[^/]+$",
+           "required": true,
+           "type": "string"
+          }
+         },
+         "path": "v1/{+parent}/endpoints",
+         "request": {"$ref": "GoogleCloudAiplatformV1Endpoint"},
+         "response": {"$ref": "GoogleLongrunningOperation"}
+        },
+        "list": {
+         "description": "Lists Endpoints in a Location.",
+         "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/endpoints",
+         "httpMethod": "GET",
+         "id": "aiplatform.projects.locations.endpoints.list",
+         "parameters": {
+          "pageSize": {
+           "description": "Optional. The standard list page size.",
+           "format": "int32",
+           "location": "query",
+           "type": "integer"
+          },
+          "pageToken": {
+           "description": "Optional. The standard list page token. Typically obtained via ListEndpointsResp...",
+           "location": "query",
+           "type": "string"
+          },
+          "parent": {
+           "description": "Required. The resource name of the Location from which to list the Endpoints. Fo...",
+           "location": "path",
+           "pattern": "^projects/[^/]+/locations/[^/]+$",
+           "required": true,
+           "type": "string"
+          }
+         },
+         "path": "v1/{+parent}/endpoints",
+         "response": {"$ref": "GoogleCloudAiplatformV1ListEndpointsResponse"}
+        },
+        "predict": {
+         "description": "",
+         "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/endpoints/{endpointsId}:predict",
+         "httpMethod": "POST",
+         "id": "aiplatform.projects.locations.endpoints.predict",
+         "parameters": {
+          "endpoint": {
+           "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `p...",
+           "location": "path",
+           "pattern": "^projects/[^/]+/locations/[^/]+/endpoints/[^/]+$",
+           "required": true,
+           "type": "string"
+          }
+         },
+         "path": "v1/{+endpoint}:predict",
+         "request": {"$ref": "GoogleCloudAiplatformV1PredictRequest"},
+         "response": {"$ref": "GoogleCloudAiplatformV1PredictResponse"}
+        },
+        "rawPredict": {
+         "description": "Perform an online prediction with an arbitrary HTTP payload. The response includ...",
+         "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/endpoints/{endpointsId}:rawPredict",
+         "httpMethod": "POST",
+         "id": "aiplatform.projects.locations.endpoints.rawPredict",
+         "parameters": {
+          "endpoint": {
+           "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `p...",
+           "location": "path",
+           "pattern": "^projects/[^/]+/locations/[^/]+/endpoints/[^/]+$",
+           "required": true,
+           "type": "string"
+          }
+         },
+         "path": "v1/{+endpoint}:rawPredict",
+         "request": {"$ref": "GoogleCloudAiplatformV1RawPredictRequest"},
+         "response": {"$ref": "GoogleApiHttpBody"}
+        }
+       },
+       "resources": {
+        "deployedModels": {
+         "resources": {
+          "invoke": {
+           "methods": {
+            "invoke": {
+             "description": "Forwards arbitrary HTTP requests for both streaming and non-streaming cases. To...",
+             "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/endpoints/{endpointsId}/deployedModels/{deployedModelId}/invoke/{invokeId}",
+             "httpMethod": "POST",
+             "id": "aiplatform.projects.locations.endpoints.deployedModels.invoke.invoke",
+             "parameters": {
+              "deployedModelId": {
+               "description": "ID of the DeployedModel that serves the invoke request.",
+               "location": "path",
+               "required": true,
+               "type": "string"
+              },
+              "endpoint": {
+               "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `p...",
+               "location": "path",
+               "pattern": "^projects/[^/]+/locations/[^/]+/endpoints/[^/]+$",
+               "required": true,
+               "type": "string"
+              },
+              "invokeId": {"location": "path", "required": true, "type": "string"}
+             },
+             "path": "v1/{+endpoint}/deployedModels/{deployedModelId}/invoke/{+invokeId}",
+             "request": {"$ref": "GoogleCloudAiplatformV1InvokeRequest"},
+             "response": {"$ref": "GoogleApiHttpBody"}
+            }
+           }
+          }
+         }
+        },
+        "invoke": {
+         "methods": {
+          "invoke": {
+           "description": "Forwards arbitrary HTTP requests for both streaming and non-streaming cases. To...",
+           "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/endpoints/{endpointsId}/invoke/{invokeId}",
+           "httpMethod": "POST",
+           "id": "aiplatform.projects.locations.endpoints.invoke.invoke",
+           "parameters": {
+            "endpoint": {
+             "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `p...",
+             "location": "path",
+             "pattern": "^projects/[^/]+/locations/[^/]+/endpoints/[^/]+$",
+             "required": true,
+             "type": "string"
+            },
+            "invokeId": {"location": "path", "required": true, "type": "string"}
+           },
+           "path": "v1/{+endpoint}/invoke/{+invokeId}",
+           "request": {"$ref": "GoogleCloudAiplatformV1InvokeRequest"},
+           "response": {"$ref": "GoogleApiHttpBody"}
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "revision": "20260930",
+ "rootUrl": "https://aiplatform.googleapis.com/",
+ "schemas": {
+  "GoogleApiHttpBody": {
+   "id": "GoogleApiHttpBody",
+   "properties": {
+    "contentType": {"description": "The HTTP Content-Type header value specifying the content type of the body.", "type": "string"},
+    "data": {"description": "The HTTP request/response body as raw binary.", "format": "byte", "type": "string"},
+    "extensions": {
+     "description": "Application specific response metadata. Must be set in the first response for st...",
+     "items": {"type": "object"},
+     "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "GoogleCloudAiplatformV1Endpoint": {
+   "id": "GoogleCloudAiplatformV1Endpoint",
+   "properties": {
+    "createTime": {
+     "description": "Output only. Timestamp when this Endpoint was created.",
+     "format": "google-datetime",
+     "readOnly": true,
+     "type": "string"
+    },
+    "description": {"description": "The description of the Endpoint.", "type": "string"},
+    "displayName": {
+     "description": "Required. The display name of the Endpoint. The name can be up to 128 characters...",
+     "type": "string"
+    },
+    "name": {"description": "Identifier. The resource name of the Endpoint.", "type": "string"}
+   },
+   "type": "object"
+  },
+  "GoogleCloudAiplatformV1InvokeRequest": {
+   "id": "GoogleCloudAiplatformV1InvokeRequest",
+   "properties": {"deployedModelId": {"description": "ID of the DeployedModel that serves the invoke request.", "type": "string"}},
+   "type": "object"
+  },
+  "GoogleCloudAiplatformV1ListEndpointsResponse": {
+   "id": "GoogleCloudAiplatformV1ListEndpointsResponse",
+   "properties": {
+    "endpoints": {
+     "description": "List of Endpoints in the requested page.",
+     "items": {"$ref": "GoogleCloudAiplatformV1Endpoint"},
+     "type": "array"
+    },
+    "nextPageToken": {
+     "description": "A token to retrieve the next page of results. Pass to ListEndpointsRequest.page_...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "GoogleCloudAiplatformV1PredictRequest": {
+   "id": "GoogleCloudAiplatformV1PredictRequest",
+   "properties": {
+    "instances": {
+     "description": "Required. The instances that are the input to the prediction call. A DeployedMod...",
+     "items": {"type": "any"},
+     "type": "array"
+    },
+    "parameters": {
+     "description": "The parameters that govern the prediction. The schema of the parameters may be s...",
+     "type": "any"
+    }
+   },
+   "type": "object"
+  },
+  "GoogleCloudAiplatformV1PredictResponse": {
+   "id": "GoogleCloudAiplatformV1PredictResponse",
+   "properties": {
+    "predictions": {
+     "description": "The predictions that are the output of the predictions call. The schema of any s...",
+     "items": {"type": "any"},
+     "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "GoogleCloudAiplatformV1RawPredictRequest": {
+   "id": "GoogleCloudAiplatformV1RawPredictRequest",
+   "properties": {
+    "httpBody": {
+     "$ref": "GoogleApiHttpBody",
+     "description": "The prediction input. Supports HTTP headers and arbitrary data payload. A Deploy..."
+    }
+   },
+   "type": "object"
+  },
+  "GoogleLongrunningOperation": {
+   "id": "GoogleLongrunningOperation",
+   "properties": {
+    "name": {
+     "description": "The server-assigned name, which is only unique within the same service that orig...",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "servicePath": "",
+ "version": "v1"
+}

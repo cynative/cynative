@@ -1,0 +1,123 @@
+{
+ "mtlsRootUrl": "https://cloudresourcemanager.mtls.googleapis.com/",
+ "name": "cloudresourcemanager",
+ "resources": {
+  "projects": {
+   "methods": {
+    "list": {
+     "description": "Lists projects that are direct children of the specified folder or organization...",
+     "flatPath": "v3/projects",
+     "httpMethod": "GET",
+     "id": "cloudresourcemanager.projects.list",
+     "parameters": {
+      "pageSize": {
+       "description": "Optional. The maximum number of projects to return in the response. The server c...",
+       "format": "int32",
+       "location": "query",
+       "type": "integer"
+      },
+      "pageToken": {
+       "description": "Optional. A pagination token returned from a previous call to ListProjects that...",
+       "location": "query",
+       "type": "string"
+      },
+      "parent": {
+       "description": "Required. The name of the parent resource whose projects are being listed. Only...",
+       "location": "query",
+       "type": "string"
+      },
+      "showDeleted": {
+       "description": "Optional. Indicate that projects in the `DELETE_REQUESTED` state should also be...",
+       "location": "query",
+       "type": "boolean"
+      }
+     },
+     "path": "v3/projects",
+     "response": {"$ref": "ListProjectsResponse"}
+    },
+    "search": {
+     "description": "Search for projects that the caller has the `resourcemanager.projects.get` permi...",
+     "flatPath": "v3/projects:search",
+     "httpMethod": "GET",
+     "id": "cloudresourcemanager.projects.search",
+     "parameters": {
+      "pageSize": {
+       "description": "Optional. The maximum number of projects to return in the response. The server c...",
+       "format": "int32",
+       "location": "query",
+       "type": "integer"
+      },
+      "pageToken": {
+       "description": "Optional. A pagination token returned from a previous call to ListProjects that...",
+       "location": "query",
+       "type": "string"
+      },
+      "query": {
+       "description": "Optional. A query string for searching for projects that the caller has `resourc...",
+       "location": "query",
+       "type": "string"
+      }
+     },
+     "path": "v3/projects:search",
+     "response": {"$ref": "SearchProjectsResponse"}
+    }
+   }
+  },
+  "v3": {
+   "methods": {
+    "fetchResourceSemantics": {
+     "description": "Returns the semantics associated with the specified resource.",
+     "flatPath": "v3:fetchResourceSemantics",
+     "httpMethod": "GET",
+     "id": "cloudresourcemanager.fetchResourceSemantics",
+     "parameters": {
+      "fullResourceName": {
+       "description": "Required. The full resource name of the GCP resource to retrieve semantics for....",
+       "location": "query",
+       "type": "string"
+      }
+     },
+     "path": "v3:fetchResourceSemantics",
+     "response": {"$ref": "FetchResourceSemanticsResponse"}
+    }
+   }
+  }
+ },
+ "revision": "20260917",
+ "rootUrl": "https://cloudresourcemanager.googleapis.com/",
+ "schemas": {
+  "FetchResourceSemanticsResponse": {"id": "FetchResourceSemanticsResponse", "properties": {}, "type": "object"},
+  "ListProjectsResponse": {
+   "id": "ListProjectsResponse",
+   "properties": {
+    "nextPageToken": {
+     "description": "Pagination token. If the result set is too large to fit in a single response, th...",
+     "type": "string"
+    },
+    "projects": {
+     "description": "The list of Projects under the parent. This list can be paginated.",
+     "items": {"$ref": "Project"},
+     "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "SearchProjectsResponse": {
+   "id": "SearchProjectsResponse",
+   "properties": {
+    "nextPageToken": {
+     "description": "Pagination token. If the result set is too large to fit in a single response, th...",
+     "type": "string"
+    },
+    "projects": {
+     "description": "The list of Projects that matched the list filter query. This list can be pagina...",
+     "items": {"$ref": "Project"},
+     "type": "array"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "servicePath": "",
+ "version": "v3"
+}
