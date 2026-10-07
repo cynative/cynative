@@ -18,8 +18,9 @@ var _ schema.InvokableTool = (*apiReferenceTool)(nil)
 
 const apiReferenceDescription = "Look up one connector API operation by exact name and get its protocol, inputs, " +
 	"an http_request template with <placeholders>, response parsing and pagination. Read-only; sends nothing " +
-	"to the connector. Supported: aws (restXml, restJson1, awsQuery, awsJson), github and gitlab. GitLab " +
-	"operation IDs are generated from the path, so an ID changes when its path does."
+	"to the connector. Supported: aws (restXml, restJson1, awsQuery, awsJson), github, gitlab and gcp. GitLab " +
+	"operation IDs are generated from the path, so an ID changes when its path does. GCP operations are " +
+	"Discovery method ids such as compute.instances.list, and model picks the Discovery version."
 
 const (
 	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values and every path value " +
@@ -36,10 +37,10 @@ const (
 )
 
 type apiReferenceArgs struct {
-	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github' or 'gitlab'."`
-	Service   string `json:"service,omitempty" jsonschema_description:"AWS only: the endpoint prefix from the request host, e.g. 'route53' or 'iam'."`                                                                                                      //nolint:lll // struct tags are indivisible
-	Model     string `json:"model,omitempty"   jsonschema_description:"AWS only: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices)."`                                                           //nolint:lll // struct tags are indivisible
-	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get') and GitLab (e.g. 'getApiV4ProjectsIdMergeRequests')."` //nolint:lll // struct tags are indivisible
+	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github', 'gitlab' or 'gcp'."`
+	Service   string `json:"service,omitempty" jsonschema_description:"AWS only: the endpoint prefix from the request host, e.g. 'route53' or 'iam'."`                                                                                                                                                                       //nolint:lll // struct tags are indivisible
+	Model     string `json:"model,omitempty"   jsonschema_description:"AWS: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices). GCP: the Discovery version label, e.g. 'v1' or 'beta'; without it the lookup searches the API's vN versions."`                    //nolint:lll // struct tags are indivisible
+	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get') and GitLab (e.g. 'getApiV4ProjectsIdMergeRequests'), the Discovery method id for GCP (e.g. 'compute.instances.list')."` //nolint:lll // struct tags are indivisible
 }
 
 type referenceOutput struct {

@@ -20,7 +20,7 @@ Run `cynative -p "..."` from a shell that already has the credentials you want C
 | `aks` | AKS Kubernetes APIs | the Azure credential chain mints a test ARM token (registers alongside `azure`) | [aks.md](aks.md) |
 | `kubernetes` | Self-managed Kubernetes APIs | a kubeconfig context loads **and** a dial-guarded fetch of the configured ClusterRole succeeds | [kubernetes-self-managed.md](kubernetes-self-managed.md) |
 
-The model can look up an exact AWS, GitHub or GitLab operation, with a request template, through the `api_reference` tool: see [api-reference.md](api-reference.md).
+The model can look up an exact AWS, GitHub, GitLab or GCP operation, with a request template, through the `api_reference` tool: see [api-reference.md](api-reference.md).
 
 ## Targets and environment at a glance
 
