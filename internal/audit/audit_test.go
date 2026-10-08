@@ -259,3 +259,29 @@ func TestLog_OverwritesCallerSuppliedAgent(t *testing.T) {
 		t.Fatalf("Agent = %+v, want the logger's configured provenance", rec.Agent)
 	}
 }
+
+func TestLog_ParentCallIDFollowsCallIDAndIsOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	l := audit.New(&buf, audit.WithClock(fixedClock()), audit.WithActor("a"))
+	for _, rec := range []audit.Record{
+		{CallID: "C", Phase: audit.PhaseAttempt, Tool: "api_reference", Arguments: json.RawMessage(`{}`)},
+		{
+			CallID: "K", ParentCallID: "C", Phase: audit.PhaseAttempt, Via: audit.ViaAPIReference,
+			Tool: audit.ToolLookupRead, Arguments: json.RawMessage(`{}`),
+		},
+	} {
+		if err := l.Log(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if strings.Contains(lines[0], "parent_call_id") {
+		t.Errorf("parent record carries parent_call_id: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"call_id":"K","parent_call_id":"C","depth":0`) ||
+		!strings.Contains(lines[1], `"via":"api_reference","tool":"lookup_read"`) {
+		t.Errorf("child record: %s", lines[1])
+	}
+}

@@ -478,3 +478,35 @@ func assertUngatedRecords(t *testing.T, recs []audit.Record, outcome, result str
 		t.Errorf("result record: %+v", r)
 	}
 }
+
+// ungatedFunc is an ungated I/O tool whose Run is a function.
+type ungatedFunc struct{ funcTool }
+
+func (ungatedFunc) UngatedIO() {}
+
+func TestDispatch_UngatedIO_UnpromptedAndCallIDScope(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{} //nolint:exhaustruct // failOn/failErr zero-init means never-fail.
+	var scope audit.Scope
+	tool := ungatedFunc{funcTool{name: "api_reference", run: func(ctx context.Context, _ string) (string, error) {
+		scope, _ = audit.ScopeFrom(ctx)
+		audit.RecordUnprompted(ctx)
+
+		return "REF", nil
+	}}}
+	a := auditAgent(sink, map[string]schema.InvokableTool{"api_reference": tool})
+	rs := &runState{depth: 2, out: io.Discard, runID: "R"}
+	if _, _, err := a.dispatch(context.Background(), rs, dispatchTC("api_reference", `{}`)); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if len(sink.recs) != 2 {
+		t.Fatalf("want 2 records, got %+v", sink.recs)
+	}
+	if r := sink.recs[1]; r.Decision != audit.DecisionUnprompted || r.CallID != "C1" || r.ParentCallID != "" {
+		t.Errorf("result record: %+v", r)
+	}
+	if scope != (audit.Scope{SessionID: "S", RunID: "R", Depth: 2, CallID: "C1"}) {
+		t.Errorf("tool saw scope %+v, want the call's own ID", scope)
+	}
+}

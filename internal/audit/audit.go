@@ -40,8 +40,11 @@ type Record struct {
 	SessionID string    `json:"session_id"`
 	RunID     string    `json:"run_id"`
 	CallID    string    `json:"call_id"`
-	Depth     int       `json:"depth"`
-	Actor     string    `json:"actor"`
+	// ParentCallID is the call ID of the tool call a child record belongs to: a lookup_read is one credentialed
+	// read an api_reference call made. Empty on every other record.
+	ParentCallID string `json:"parent_call_id,omitempty"`
+	Depth        int    `json:"depth"`
+	Actor        string `json:"actor"`
 	// Agent is the agent file that framed this run, when one was selected. Set
 	// by the Logger, never by the caller.
 	Agent     *AgentProvenance `json:"agent,omitempty"`
@@ -74,12 +77,20 @@ const (
 	DecisionDenied          = "denied"
 	DecisionUngated         = "ungated"
 	DecisionApprovedSession = "approved_session"
+	// DecisionUnprompted labels a call that ran without a prompt by design and could use a connector's credentials
+	// for metadata reads at host-built paths: a targeted api_reference lookup and each read it made.
+	DecisionUnprompted = "unprompted"
 
 	OutcomeOK     = "ok"
 	OutcomeDenied = "denied"
 	OutcomeError  = "error"
 
 	ViaCodeExecution = "code_execution"
+	ViaAPIReference  = "api_reference"
+
+	// ToolLookupRead is the tool name of a child record for one credentialed read a targeted api_reference
+	// lookup made.
+	ToolLookupRead = "lookup_read"
 )
 
 // ErrLog wraps any audit write/marshal failure. [errors.Is](err, ErrLog) marks a
