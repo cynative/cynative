@@ -514,3 +514,18 @@ func TestGitLabReference_ScrubsProxyCredentials(t *testing.T) {
 		}
 	})
 }
+
+// TestGitLabReference_NamesAnEmptyDocument pins what api-reference.md says of a document that parses but lists no
+// operations: the reason names that rejection.
+func TestGitLabReference_NamesAnEmptyDocument(t *testing.T) {
+	t.Parallel()
+	p := newDocsOnlyGitLab(t, "gitlab.example", "", func(context.Context) ([]byte, error) {
+		return []byte("openapi: 3.0.0\npaths: {}\n"), nil
+	})
+	p.docsFailure = recordLoadFailure(p.docs.cache)
+	res := p.Reference(t.Context(), apiref.Query{Operation: "getApiV4ProjectsId"})
+	want := gitlabDocsUnloaded + ": openapidoc: operation docs rejected: no operations"
+	if res.Outcome != apiref.OutcomeUnavailable || res.Reason != want {
+		t.Errorf("res = %+v", res)
+	}
+}

@@ -95,7 +95,8 @@ func (p *gitlabProvider) unloadedReason(failure *loadFailure) string {
 }
 
 // loadFailure keeps the last error a docs cache's fetch returned, because [cache.TTLCache.Get] reports a failed
-// load only as nil. The wired fetch runs the distiller too, so a parse error is kept as well.
+// load only as nil. The wired fetch runs the distiller too, so a parse error, or a
+// document with no operations, is kept as well.
 type loadFailure struct {
 	mu  sync.Mutex
 	err error

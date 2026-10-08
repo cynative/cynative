@@ -621,9 +621,11 @@ func newGitLabCaches(
 }
 
 // Reference answers an api_reference lookup from the cached OpenAPI
-// documentation registration selected for the instance's version. It reads only
-// that docs cache and the served host, so it never resolves the token, probes
-// the instance or loads the gate's table.
+// documentation registration selected for the instance's version. It reads that
+// docs cache, the served host and the gate's table as already loaded (Peek), so
+// it never resolves the token, probes the instance or loads the table. Peek
+// takes the table cache's lock, so a lookup can wait for a table load another
+// goroutine has in progress.
 func (p *gitlabProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
 	docs, failure, why := p.selectedDocs()
 	if why != "" {

@@ -65,7 +65,7 @@ This matches the GitHub and Kubernetes connectors' validated-live registration.
 
 ### Version detection
 
-After the token validates, Cynative reads `GET /api/v4/metadata` once, through the same pinned client and under its own short deadline, to learn the instance's GitLab version. A token with `read_api` or `read_user` scope can read it. The version only selects the documentation `api_reference` reads; the gate always classifies against GitLab's master document.
+After the token validates, Cynative reads `GET /api/v4/metadata` once, through a new client built the same way as the validation's (configured CA, private-network setting, dial guard) to learn the instance's GitLab version. Registration waits for the read, token refresh included, no longer than its own short deadline. A token with `read_api` or `read_user` scope can read it. The version only selects the documentation `api_reference` reads; the gate always classifies against GitLab's master document.
 
 - **GitLab 18.9 or later is required.** An instance that reports an older version is skipped at startup with `GitLab 18.9 or later required (instance reports "X.Y.Z")`, because `openapi_v3.yaml` first shipped in 18.9. This is the only metadata outcome that affects registration.
 - A release version (`18.11.0-ee`, or `18.11.0` for Community Edition) selects the `v18.11.0-ee` document.
