@@ -102,6 +102,45 @@ func parseGitLabUser(raw []byte) (string, error) {
 	return resp.Username, nil
 }
 
+// gitlabMetadata holds the parsed outcome of a GET /api/v4/metadata probe.
+type gitlabMetadata struct {
+	version    string
+	enterprise bool
+}
+
+// metadataOutcome records the result of the metadata probe: either success with
+// version info, or failure with a reason.
+type metadataOutcome struct {
+	ok      bool
+	version string
+	reason  string // only set when !ok.
+}
+
+// errGitLabMetadata wraps a failed metadata probe.
+var errGitLabMetadata = errors.New("gitlab metadata probe failed")
+
+// parseGitLabMetadata returns the version and enterprise flag from a GET
+// /api/v4/metadata response. It fails closed unless "version" is a present
+// non-empty string.
+func parseGitLabMetadata(raw []byte) (gitlabMetadata, error) {
+	var resp struct {
+		Version    string `json:"version"`
+		Revision   string `json:"revision"`
+		Enterprise bool   `json:"enterprise"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return gitlabMetadata{}, fmt.Errorf("%w: invalid metadata JSON: %w", errGitLabMetadata, err)
+	}
+	if resp.Version == "" {
+		return gitlabMetadata{}, fmt.Errorf("%w: metadata response has no version", errGitLabMetadata)
+	}
+
+	return gitlabMetadata{
+		version:    resp.Version,
+		enterprise: resp.Enterprise,
+	}, nil
+}
+
 // gitlabIdentity renders the startup-inventory identity: the validated @username,
 // and — for a self-managed instance (served host other than gitlab.com) — the
 // served host too, so the operator sees which instance was reached. Falls back to
@@ -138,7 +177,8 @@ type gitlabProvider struct {
 	docs     openAPIDocs
 	resolver addrResolver
 	// egress routes the registration probe; set by buildGitLabProvider.
-	egress *Egress
+	egress   *Egress
+	metadata metadataOutcome // filled by fetchGitLabMetadata; never returned as a registration error.
 }
 
 var (

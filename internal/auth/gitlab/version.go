@@ -7,21 +7,24 @@ import (
 	"strings"
 )
 
-// versionClassification is the outcome of version parsing and classification.
-type versionClassification int
+// VersionClassification is the outcome of version parsing and classification.
+type VersionClassification int
 
 const (
-	versionUnknown versionClassification = iota
-	versionBelowFloor
-	versionMaster
-	versionTag
+	// VersionUnknown indicates an unparseable or unsupported version.
+	VersionUnknown VersionClassification = iota
+	// VersionBelowFloor indicates a version below the supported floor (18.9).
+	VersionBelowFloor
+	// VersionMaster indicates a -pre version on gitlab.com.
+	VersionMaster
+	// VersionTag indicates a release version.
+	VersionTag
 )
 
 // floorMajor and floorMinor define the minimum supported GitLab version (18.9).
 const (
 	floorMajor = 18
 	floorMinor = 9
-	maxDigits  = 9999
 )
 
 // versionRe matches the version grammar: major.minor.patch with optional -ee or -pre suffix.
@@ -37,20 +40,17 @@ type parsedVersion struct {
 }
 
 // parseVersion parses a GitLab version string. It returns (nil, false) for an
-// unparseable version or one whose components overflow maxDigits.
+// unparseable version. The regex ensures each component is at most 4 digits.
 func parseVersion(version string) (*parsedVersion, bool) {
 	m := versionRe.FindStringSubmatch(version)
 	if m == nil {
 		return nil, false
 	}
 
+	// Atoi cannot fail: the regex already validated decimal format.
 	major, _ := strconv.Atoi(m[1])
 	minor, _ := strconv.Atoi(m[2])
 	patch, _ := strconv.Atoi(m[3])
-
-	if major > maxDigits || minor > maxDigits || patch > maxDigits {
-		return nil, false
-	}
 
 	return &parsedVersion{
 		major:  major,
@@ -72,28 +72,28 @@ func (v *parsedVersion) belowFloor() bool {
 	return v.minor < floorMinor
 }
 
-// classifyVersion classifies a GitLab instance version and returns the
+// ClassifyVersion classifies a GitLab instance version and returns the
 // classification, the git ref to use for fetching the OpenAPI document, and a
 // reason string for unsupported versions. hostname and port are the served
 // authority (api_host when set, else host), with the port explicit.
-func classifyVersion(version, hostname, port string) (versionClassification, string, string) {
+func ClassifyVersion(version, hostname, port string) (VersionClassification, string, string) {
 	parsed, ok := parseVersion(version)
 	if !ok {
-		return versionUnknown, "", fmt.Sprintf("instance reports unrecognized version %q", version)
+		return VersionUnknown, "", fmt.Sprintf("instance reports unrecognized version %q", version)
 	}
 
 	if parsed.belowFloor() {
-		return versionBelowFloor, "", fmt.Sprintf(
+		return VersionBelowFloor, "", fmt.Sprintf(
 			"GitLab 18.9 or later required (instance reports %q)", version)
 	}
 
 	// -pre on gitlab.com is master.
 	if parsed.suffix == "-pre" {
 		if isGitLabCom(hostname, port) {
-			return versionMaster, "master", ""
+			return VersionMaster, "master", ""
 		}
 
-		return versionUnknown, "", fmt.Sprintf(
+		return VersionUnknown, "", fmt.Sprintf(
 			"instance reports development version %q (only gitlab.com's development builds are supported)", version)
 	}
 
@@ -101,7 +101,7 @@ func classifyVersion(version, hostname, port string) (versionClassification, str
 	// CE gets the EE file (they are byte-identical).
 	ref := fmt.Sprintf("v%d.%d.%d-ee", parsed.major, parsed.minor, parsed.patch)
 
-	return versionTag, ref, ""
+	return VersionTag, ref, ""
 }
 
 // isGitLabCom reports whether hostname:port names the public GitLab SaaS instance.

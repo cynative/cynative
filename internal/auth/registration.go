@@ -38,9 +38,10 @@ type registrationDeps struct {
 	tokenForHost   func(ctx context.Context) (token string, present bool, err error)
 	validateGithub func(ctx context.Context, token string) (login string, err error)
 
-	discoverGitLab func(loginHost, apiHost string) (cred glabCredential, err error)
-	buildGitLab    func(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error)
-	validateGitLab func(ctx context.Context, p *gitlabProvider) (username string, err error)
+	discoverGitLab      func(loginHost, apiHost string) (cred glabCredential, err error)
+	buildGitLab         func(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error)
+	validateGitLab      func(ctx context.Context, p *gitlabProvider) (username string, err error)
+	fetchGitLabMetadata func(ctx context.Context, p *gitlabProvider)
 
 	loadAWS           func(context.Context) (aws.Config, error)
 	retrieveAWS       func(context.Context, aws.Config) error
@@ -483,6 +484,29 @@ func (d *registrationDeps) gitlabOutcome(
 
 		return skipOutcome(gitlabProviderName, true, verbose, policy,
 			fmt.Sprintf("gitlab_hardening: skipped (token validation failed): %v", perr))
+	}
+
+	// Fetch metadata after /user succeeds, outside its retry loop.
+	// A metadata failure never disables a connector whose /user validation passed.
+	mctx, mcancel := context.WithTimeout(ctx, credentialProbeTimeout)
+	defer mcancel()
+
+	d.fetchGitLabMetadata(mctx, gl)
+
+	// BELOW_FLOOR is the only metadata outcome that affects registration.
+	if gl.metadata.ok {
+		hostname := stripHostPort(served)
+		port := portOfAuthority(served)
+		class, _, reason := gitlabclass.ClassifyVersion(gl.metadata.version, hostname, port)
+		if class == gitlabclass.VersionBelowFloor {
+			return skipOutcome(
+				gitlabProviderName,
+				true,
+				verbose,
+				emitAlways,
+				fmt.Sprintf("gitlab_hardening: skipped: %s", reason),
+			)
+		}
 	}
 
 	exposure := gitlabclass.BuildExposure(glCfg.Permissions)

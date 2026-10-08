@@ -140,3 +140,40 @@ func gitlabProbeBody(
 
 	return body, nil
 }
+
+// fetchGitLabMetadata fetches GET /api/v4/metadata once with the same pinned
+// probe client used for /user validation. It runs AFTER /user succeeds and
+// OUTSIDE its retry loop, under its own short deadline. Its outcome is stored in
+// p.metadata, never returned as a registration error. A metadata failure never
+// disables a connector whose /user validation passed. Shell I/O.
+func fetchGitLabMetadata(ctx context.Context, p *gitlabProvider) {
+	accessToken, err := p.currentToken()
+	if err != nil {
+		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("token resolution failed: %v", err)}
+
+		return
+	}
+
+	hc, err := buildProbeClient(p)
+	if err != nil {
+		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("build client failed: %v", err)}
+
+		return
+	}
+
+	body, err := gitlabProbeBody(ctx, hc, p, "/api/v4/metadata", accessToken)
+	if err != nil {
+		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("probe failed: %v", err)}
+
+		return
+	}
+
+	md, err := parseGitLabMetadata(body)
+	if err != nil {
+		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("parse failed: %v", err)}
+
+		return
+	}
+
+	p.metadata = metadataOutcome{ok: true, version: md.version}
+}

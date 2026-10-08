@@ -56,20 +56,8 @@ func TestParseVersion(t *testing.T) {
 			wantOK:  false,
 		},
 		{
-			name:    "overflow major",
+			name:    "too many digits rejected",
 			version: "10000.9.0-ee",
-			want:    nil,
-			wantOK:  false,
-		},
-		{
-			name:    "overflow minor",
-			version: "18.10000.0-ee",
-			want:    nil,
-			wantOK:  false,
-		},
-		{
-			name:    "overflow patch",
-			version: "18.9.10000-ee",
 			want:    nil,
 			wantOK:  false,
 		},
@@ -133,16 +121,25 @@ func TestClassifyVersion(t *testing.T) {
 		version    string
 		hostname   string
 		port       string
-		wantClass  versionClassification
+		wantClass  VersionClassification
 		wantRef    string
 		wantReason string
 	}{
+		{
+			name:       "below floor major 17",
+			version:    "17.12.0-ee",
+			hostname:   "selfmanaged.example.com",
+			port:       "443",
+			wantClass:  VersionBelowFloor,
+			wantRef:    "",
+			wantReason: `GitLab 18.9 or later required (instance reports "17.12.0-ee")`,
+		},
 		{
 			name:       "below floor 18.8.0",
 			version:    "18.8.0-ee",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionBelowFloor,
+			wantClass:  VersionBelowFloor,
 			wantRef:    "",
 			wantReason: `GitLab 18.9 or later required (instance reports "18.8.0-ee")`,
 		},
@@ -151,7 +148,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "18.9.0-ee",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionTag,
+			wantClass:  VersionTag,
 			wantRef:    "v18.9.0-ee",
 			wantReason: "",
 		},
@@ -160,7 +157,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "18.10.0",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionTag,
+			wantClass:  VersionTag,
 			wantRef:    "v18.10.0-ee",
 			wantReason: "",
 		},
@@ -169,7 +166,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "19.0.0-ee",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionTag,
+			wantClass:  VersionTag,
 			wantRef:    "v19.0.0-ee",
 			wantReason: "",
 		},
@@ -178,7 +175,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "19.5.0-pre",
 			hostname:   "gitlab.com",
 			port:       "443",
-			wantClass:  versionMaster,
+			wantClass:  VersionMaster,
 			wantRef:    "master",
 			wantReason: "",
 		},
@@ -187,7 +184,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "19.5.0-pre",
 			hostname:   "GitLab.com",
 			port:       "443",
-			wantClass:  versionMaster,
+			wantClass:  VersionMaster,
 			wantRef:    "master",
 			wantReason: "",
 		},
@@ -196,7 +193,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "19.5.0-pre",
 			hostname:   "gitlab.com",
 			port:       "443",
-			wantClass:  versionMaster,
+			wantClass:  VersionMaster,
 			wantRef:    "master",
 			wantReason: "",
 		},
@@ -205,7 +202,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "19.5.0-pre",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionUnknown,
+			wantClass:  VersionUnknown,
 			wantRef:    "",
 			wantReason: `instance reports development version "19.5.0-pre" (only gitlab.com's development builds are supported)`,
 		},
@@ -214,7 +211,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "19.5.0-pre",
 			hostname:   "gitlab.com",
 			port:       "8443",
-			wantClass:  versionUnknown,
+			wantClass:  VersionUnknown,
 			wantRef:    "",
 			wantReason: `instance reports development version "19.5.0-pre" (only gitlab.com's development builds are supported)`,
 		},
@@ -223,7 +220,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "18.9.0-rc42-ee",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionUnknown,
+			wantClass:  VersionUnknown,
 			wantRef:    "",
 			wantReason: `instance reports unrecognized version "18.9.0-rc42-ee"`,
 		},
@@ -232,7 +229,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "18.9.0-custom",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionUnknown,
+			wantClass:  VersionUnknown,
 			wantRef:    "",
 			wantReason: `instance reports unrecognized version "18.9.0-custom"`,
 		},
@@ -241,7 +238,7 @@ func TestClassifyVersion(t *testing.T) {
 			version:    "not-a-version",
 			hostname:   "selfmanaged.example.com",
 			port:       "443",
-			wantClass:  versionUnknown,
+			wantClass:  VersionUnknown,
 			wantRef:    "",
 			wantReason: `instance reports unrecognized version "not-a-version"`,
 		},
@@ -251,15 +248,15 @@ func TestClassifyVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotClass, gotRef, gotReason := classifyVersion(tt.version, tt.hostname, tt.port)
+			gotClass, gotRef, gotReason := ClassifyVersion(tt.version, tt.hostname, tt.port)
 			if gotClass != tt.wantClass {
-				t.Errorf("classifyVersion() class = %v, want %v", gotClass, tt.wantClass)
+				t.Errorf("ClassifyVersion() class = %v, want %v", gotClass, tt.wantClass)
 			}
 			if gotRef != tt.wantRef {
-				t.Errorf("classifyVersion() ref = %q, want %q", gotRef, tt.wantRef)
+				t.Errorf("ClassifyVersion() ref = %q, want %q", gotRef, tt.wantRef)
 			}
 			if gotReason != tt.wantReason {
-				t.Errorf("classifyVersion() reason = %q, want %q", gotReason, tt.wantReason)
+				t.Errorf("ClassifyVersion() reason = %q, want %q", gotReason, tt.wantReason)
 			}
 		})
 	}
