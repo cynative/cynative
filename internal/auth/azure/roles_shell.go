@@ -64,7 +64,8 @@ func NewRoleClient(cfg RoleClientConfig) (RoleClient, error) {
 var defaultAzureNewRoleDefinitionsClient = func(
 	cred azcore.TokenCredential, cfg RoleClientConfig,
 ) (roleDefinitionsClient, error) {
-	opts := &arm.ClientOptions{} //nolint:exhaustruct // defaults fine; overrides below.
+	// The role lookup only reads; it must never register a resource provider on a 409.
+	opts := &arm.ClientOptions{DisableRPRegistration: true} //nolint:exhaustruct // defaults fine; overrides below.
 	switch {
 	case cfg.Endpoint != "":
 		opts.ClientOptions.Cloud.Services = map[cloud.ServiceName]cloud.ServiceConfiguration{

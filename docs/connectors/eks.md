@@ -79,7 +79,7 @@ Use `auth_provider: "eks"` and include:
 }
 ```
 
-`eks_auth.cluster_name` is required. `eks_auth.region` defaults to the SDK-configured AWS region, then `us-east-1` if neither is set.
+`eks_auth.cluster_name` is required. `eks_auth.region` defaults to the SDK-configured AWS region, then `us-east-1` if neither is set. Both are checked before cynative calls the EKS API: `cluster_name` is 1 to 100 letters, digits, hyphens or underscores, starting with a letter or digit, and `region` must be a region of the same AWS partition as the configured region (standard, China or GovCloud; an unset configured region counts as standard). Any other value is rejected without a request.
 
 ### Minimal example
 

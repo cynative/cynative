@@ -71,7 +71,7 @@ Use `auth_provider: "gke"` and include:
 }
 ```
 
-`gke_auth.project`, `gke_auth.location`, and `gke_auth.cluster_name` are all required.
+`gke_auth.project`, `gke_auth.location`, and `gke_auth.cluster_name` are all required. Each must follow Google's naming rules, checked before cynative calls the GKE API: `project` is a project ID (6 to 30 lowercase letters, digits or hyphens, starting with a letter and not ending with a hyphen) or a project number; legacy domain-scoped IDs (`example.com:project`) are not accepted. `location` is a region (`us-central1`) or a zone (`us-central1-a`). `cluster_name` is up to 40 lowercase letters, digits or hyphens, starting with a letter and not ending with a hyphen. Any other value is rejected without a request.
 
 ### Minimal example
 

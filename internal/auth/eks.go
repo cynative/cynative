@@ -63,7 +63,7 @@ func newEKSProvider(cfg aws.Config) *eksProvider {
 	p.cacheKey = func(a *EKSAuthArgs) string {
 		return resolveRegion(a.Region, p.cfg.Region) + "/" + a.ClusterName
 	}
-	p.validate = (*EKSAuthArgs).validate
+	p.validate = p.validateArgs
 	p.clusterRole = defaultClusterRole
 	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
@@ -102,8 +102,23 @@ func (a *EKSAuthArgs) validate() error {
 	if a == nil || a.ClusterName == "" {
 		return errors.New("eks_auth.cluster_name is required for action authorization")
 	}
+	if a.Region != "" && awsPartition(a.Region) == "" {
+		return fmt.Errorf(
+			"%w: eks_auth.region is not a region of a supported AWS partition",
+			ErrInvalidClusterIdentifier,
+		)
+	}
 
-	return nil
+	return checkIdentifier("eks_auth.cluster_name", a.ClusterName, eksClusterName)
+}
+
+// validateArgs is validate plus the partition pin, which needs the provider's configured region.
+func (p *eksProvider) validateArgs(a *EKSAuthArgs) error {
+	if err := a.validate(); err != nil {
+		return err
+	}
+
+	return checkEKSRegionPartition(a.Region, p.cfg.Region)
 }
 
 func (p *eksProvider) InjectAuth(req *http.Request, args authreq.ProviderArgs) error {
@@ -112,8 +127,8 @@ func (p *eksProvider) InjectAuth(req *http.Request, args authreq.ProviderArgs) e
 		return err
 	}
 
-	if eksArgs == nil || eksArgs.ClusterName == "" {
-		return errors.New("eks_auth.cluster_name is required when using the eks auth provider")
+	if err = p.validateArgs(eksArgs); err != nil {
+		return err
 	}
 
 	clusterName := eksArgs.ClusterName
@@ -168,7 +183,7 @@ func (p *eksProvider) CACertData(ctx context.Context, args authreq.ProviderArgs)
 		return "", err
 	}
 
-	if eksArgs.validate() != nil {
+	if p.validateArgs(eksArgs) != nil {
 		return "", nil //nolint:nilerr // CACertData tolerates absent/incomplete args; validate() callers get the error.
 	}
 
@@ -190,7 +205,7 @@ func (p *eksProvider) resolveHost(ctx context.Context, args *EKSAuthArgs) (strin
 }
 
 func (p *eksProvider) AuthorizesHost(ctx context.Context, host string, args authreq.ProviderArgs) (bool, error) {
-	return p.authorizesHost(ctx, host, args, authreq.Parse[EKSAuthArgs], (*EKSAuthArgs).validate, p.resolveHost)
+	return p.authorizesHost(ctx, host, args, authreq.Parse[EKSAuthArgs], p.validateArgs, p.resolveHost)
 }
 
 // authorizesDialIP reports whether ip may be dialed for this cluster: it denies
@@ -225,7 +240,7 @@ func (p *eksProvider) authorizesDialIP(ctx context.Context, ip netip.Addr, args 
 // AuthorizesAddr pins the dial to the cluster endpoint's exact resolved IP(s),
 // after the unconditional link-local floor in authorizesDialIP.
 func (p *eksProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, args authreq.ProviderArgs) (bool, error) {
-	return p.authorizesAddr(ctx, ip, args, authreq.Parse[EKSAuthArgs], (*EKSAuthArgs).validate, p.authorizesDialIP)
+	return p.authorizesAddr(ctx, ip, args, authreq.Parse[EKSAuthArgs], p.validateArgs, p.authorizesDialIP)
 }
 
 func defaultEKSDescribeCluster(ctx context.Context, cfg aws.Config, clusterName string) (clusterTLS, error) {
