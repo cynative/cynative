@@ -1,6 +1,7 @@
 package apiref_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/cynative/cynative/internal/apiref"
@@ -60,5 +61,17 @@ func TestReferenceShape(t *testing.T) {
 				t.Errorf("Shape() =\n%q\nwant\n%q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestSource_TargetedFieldsAreOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	b, err := json.Marshal(apiref.Source{Name: "n", Document: "d"})
+	if err != nil || string(b) != `{"name":"n","document":"d"}` {
+		t.Fatalf("Source = %s, %v", b, err)
+	}
+	b, _ = json.Marshal(apiref.Source{Name: "n", Document: "d", Target: "t", ServerHash: "h", ObservedAt: "o"})
+	if want := `{"name":"n","document":"d","target":"t","server_hash":"h","observed_at":"o"}`; string(b) != want {
+		t.Fatalf("Source = %s, want %s", b, want)
 	}
 }

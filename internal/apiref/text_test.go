@@ -54,3 +54,31 @@ func TestTruncate_BelowEllipsisLength(t *testing.T) {
 		}
 	}
 }
+
+func TestStripMarkupCut(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		in       string
+		maxBytes int
+		maxRunes int
+		want     string
+	}{
+		{"short text is StripMarkup", "<b>a</b>  b", 16, 10, "a b"},
+		{"exactly maxBytes is not cut", "abcdefgh", 8, 10, "abcdefgh"},
+		{"a cut always ends with the ellipsis", "abcdefghij", 8, 100, "abcdefgh..."},
+		{"the cut backs off to a rune boundary", "abcdefgé", 8, 100, "abcdefg..."},
+		{"a tag open across the cut drops the rest", "ab <span class=x>cd", 8, 100, "ab..."},
+		{"a long cut is truncated to make room", "abcdefghij", 8, 6, "abc..."},
+		{"whitespace at the cut collapses", "a b c d e f", 8, 100, "a b c d..."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := apiref.StripMarkupCut(tc.in, tc.maxBytes, tc.maxRunes); got != tc.want {
+				t.Errorf("StripMarkupCut(%q, %d, %d) = %q, want %q", tc.in, tc.maxBytes, tc.maxRunes, got, tc.want)
+			}
+		})
+	}
+}
