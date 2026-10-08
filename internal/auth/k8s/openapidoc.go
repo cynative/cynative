@@ -26,6 +26,10 @@ const (
 	maxParamNameBytes = 100
 	// paramRefPrefix is the only reference form a parameter may use.
 	paramRefPrefix = "#/components/parameters/"
+	// The parameter locations the tool renders.
+	inPath   = "path"
+	inQuery  = "query"
+	inHeader = "header"
 )
 
 // ErrDocument marks a group-version document the pre-pass refuses. Its text is fixed host text.
@@ -292,7 +296,7 @@ func (p *prepper) parameters(item *prepPathItem, op *prepOp) (map[string]bool, s
 				if reason == "" {
 					reason = f.reason
 				}
-			case f.in == "path":
+			case f.in == inPath:
 				declared[f.name] = true
 			}
 		}
@@ -340,7 +344,7 @@ func paramVerdict(raw prepParam) paramFacts {
 	switch {
 	case len(f.name) > maxParamNameBytes || !paramNamePattern.MatchString(f.name):
 		f.reason = reasonName
-	case f.in != "path" && f.in != "query" && f.in != "header":
+	case f.in != inPath && f.in != inQuery && f.in != inHeader:
 		f.reason = reasonLocation
 	default:
 		// Only a string type can fall outside the vocabulary. Any other value is no type, and it is never decoded:
