@@ -166,10 +166,10 @@ func fetchGitLabMetadata(ctx context.Context, p *gitlabProvider) metadataOutcome
 		return metadataOutcome{ok: false, reason: fmt.Sprintf("probe failed: %v", err)}
 	}
 
-	md, err := parseGitLabMetadata(body)
+	version, err := parseGitLabMetadata(body)
 	if err != nil {
 		return metadataOutcome{ok: false, reason: fmt.Sprintf("parse failed: %v", err)}
 	}
 
-	return metadataOutcome{ok: true, version: md.version}
+	return metadataOutcome{ok: true, version: version}
 }

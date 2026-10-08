@@ -102,12 +102,6 @@ func parseGitLabUser(raw []byte) (string, error) {
 	return resp.Username, nil
 }
 
-// gitlabMetadata holds the parsed outcome of a GET /api/v4/metadata probe.
-type gitlabMetadata struct {
-	version    string
-	enterprise bool
-}
-
 // metadataOutcome records the result of the metadata probe: either success with
 // version info, or failure with a reason.
 type metadataOutcome struct {
@@ -119,26 +113,20 @@ type metadataOutcome struct {
 // errGitLabMetadata wraps a failed metadata probe.
 var errGitLabMetadata = errors.New("gitlab metadata probe failed")
 
-// parseGitLabMetadata returns the version and enterprise flag from a GET
-// /api/v4/metadata response. It fails closed unless "version" is a present
-// non-empty string.
-func parseGitLabMetadata(raw []byte) (gitlabMetadata, error) {
+// parseGitLabMetadata returns the version from a GET /api/v4/metadata response. It fails closed unless "version"
+// is a present non-empty string.
+func parseGitLabMetadata(raw []byte) (string, error) {
 	var resp struct {
-		Version    string `json:"version"`
-		Revision   string `json:"revision"`
-		Enterprise bool   `json:"enterprise"`
+		Version string `json:"version"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return gitlabMetadata{}, fmt.Errorf("%w: invalid metadata JSON: %w", errGitLabMetadata, err)
+		return "", fmt.Errorf("%w: invalid metadata JSON: %w", errGitLabMetadata, err)
 	}
 	if resp.Version == "" {
-		return gitlabMetadata{}, fmt.Errorf("%w: metadata response has no version", errGitLabMetadata)
+		return "", fmt.Errorf("%w: metadata response has no version", errGitLabMetadata)
 	}
 
-	return gitlabMetadata{
-		version:    resp.Version,
-		enterprise: resp.Enterprise,
-	}, nil
+	return resp.Version, nil
 }
 
 // gitlabIdentity renders the startup-inventory identity: the validated @username,
