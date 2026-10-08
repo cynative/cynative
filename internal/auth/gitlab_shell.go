@@ -146,39 +146,30 @@ func gitlabProbeBody(
 	return body, nil
 }
 
-// fetchGitLabMetadata fetches GET /api/v4/metadata once with the same pinned
-// probe client used for /user validation. It runs AFTER /user succeeds and
-// OUTSIDE its retry loop, under its own short deadline. Its outcome is stored in
-// p.metadata, never returned as a registration error. A metadata failure never
-// disables a connector whose /user validation passed. Shell I/O.
-func fetchGitLabMetadata(ctx context.Context, p *gitlabProvider) {
+// fetchGitLabMetadata reads GET /api/v4/metadata once, through a new probe client built the same way as the one
+// for /user validation (buildProbeClient), and returns the outcome; a failure is a reason for api_reference, never a
+// registration error. gitlabOutcome calls it after /user succeeds, outside that retry loop, and bounds the whole
+// call, token resolution included, by the step's deadline. Shell I/O.
+func fetchGitLabMetadata(ctx context.Context, p *gitlabProvider) metadataOutcome {
 	accessToken, err := p.currentToken()
 	if err != nil {
-		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("token resolution failed: %v", err)}
-
-		return
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("token resolution failed: %v", err)}
 	}
 
 	hc, err := buildProbeClient(p)
 	if err != nil {
-		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("build client failed: %v", err)}
-
-		return
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("build client failed: %v", err)}
 	}
 
 	body, err := gitlabProbeBody(ctx, hc, p, "/api/v4/metadata", accessToken)
 	if err != nil {
-		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("probe failed: %v", err)}
-
-		return
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("probe failed: %v", err)}
 	}
 
 	md, err := parseGitLabMetadata(body)
 	if err != nil {
-		p.metadata = metadataOutcome{ok: false, reason: fmt.Sprintf("parse failed: %v", err)}
-
-		return
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("parse failed: %v", err)}
 	}
 
-	p.metadata = metadataOutcome{ok: true, version: md.version}
+	return metadataOutcome{ok: true, version: md.version}
 }

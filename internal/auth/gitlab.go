@@ -177,8 +177,7 @@ type gitlabProvider struct {
 	docs     openAPIDocs
 	resolver addrResolver
 	// egress routes the registration probe; set by buildGitLabProvider.
-	egress   *Egress
-	metadata metadataOutcome // filled by fetchGitLabMetadata; never returned as a registration error.
+	egress *Egress
 	// docsFailure keeps the last reason the master docs failed to load; nil when not recorded.
 	docsFailure *loadFailure
 	// docsChoice is the document api_reference reads, set by useDocs at registration.

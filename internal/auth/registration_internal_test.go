@@ -70,7 +70,7 @@ func stubDeps() *registrationDeps {
 			}, nil
 		},
 		validateGitLab:      func(context.Context, *gitlabProvider) (string, error) { return "alice", nil },
-		fetchGitLabMetadata: func(context.Context, *gitlabProvider) {},
+		fetchGitLabMetadata: func(context.Context, *gitlabProvider) metadataOutcome { return metadataOutcome{} },
 		loadAWS:             func(context.Context) (aws.Config, error) { return aws.Config{}, nil }, //nolint:exhaustruct // zero cfg.
 		retrieveAWS:         func(context.Context, aws.Config) error { return nil },
 		validateAWS: func(context.Context, aws.Config) (string, string, string, error) {

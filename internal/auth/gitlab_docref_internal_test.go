@@ -419,7 +419,7 @@ func TestGitLabOutcome_SelectsDocsFromMetadata(t *testing.T) {
 			d.buildGitLab = func(GitLabHardeningConfig, string, glabCredential) (*gitlabProvider, error) {
 				return built, nil
 			}
-			d.fetchGitLabMetadata = func(_ context.Context, p *gitlabProvider) { p.metadata = tc.md }
+			d.fetchGitLabMetadata = func(context.Context, *gitlabProvider) metadataOutcome { return tc.md }
 			out := d.gitlabOutcome(t.Context(), tc.cfg, false)
 			if len(out.providers) != 1 {
 				t.Fatalf("out = %+v", out)

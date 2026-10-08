@@ -10,8 +10,8 @@ func TestGitlabOutcome_BelowFloor(t *testing.T) {
 
 	d := stubDeps()
 	// Override metadata fetch to return a below-floor version.
-	d.fetchGitLabMetadata = func(_ context.Context, p *gitlabProvider) {
-		p.metadata = metadataOutcome{ok: true, version: "18.8.0-ee"}
+	d.fetchGitLabMetadata = func(context.Context, *gitlabProvider) metadataOutcome {
+		return metadataOutcome{ok: true, version: "18.8.0-ee"}
 	}
 
 	out := d.gitlabOutcome(context.Background(), GitLabHardeningConfig{}, false)
@@ -36,8 +36,8 @@ func TestGitlabOutcome_MetadataFailureDoesNotPreventRegistration(t *testing.T) {
 
 	d := stubDeps()
 	// Override metadata fetch to fail.
-	d.fetchGitLabMetadata = func(_ context.Context, p *gitlabProvider) {
-		p.metadata = metadataOutcome{ok: false, reason: "probe failed"}
+	d.fetchGitLabMetadata = func(context.Context, *gitlabProvider) metadataOutcome {
+		return metadataOutcome{ok: false, reason: "probe failed"}
 	}
 
 	out := d.gitlabOutcome(context.Background(), GitLabHardeningConfig{}, false)
