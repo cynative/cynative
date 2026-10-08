@@ -1,20 +1,21 @@
 # API reference lookup
 
 **Tool:** `api_reference`
-**Connectors:** `aws`, `github`, `gitlab` and `gcp`
+**Connectors:** `aws`, `github`, `gitlab`, `gcp` and `kubernetes`
 
 `api_reference` returns a short, bounded description of one named API operation, including an `http_request` template the model can fill in. It exists because models often build connector requests from memory and get the path, the protocol or the response format wrong, and then read the resulting local classification failure as a permission denial.
 
-The tool reads public vendor metadata only. It sends no credentials, has no approval prompt, and is not available inside `code_execution`.
+For `aws`, `github`, `gitlab` and `gcp` the tool reads public vendor metadata only and sends no credentials. For `kubernetes` it reads the configured cluster's own documents with the connector's credentials ([Kubernetes (targeted)](#kubernetes-targeted)). It has no approval prompt and is not available inside `code_execution`.
 
 ## Input
 
 | Field | Connector | Meaning |
 |---|---|---|
-| `connector` | all | `aws`, `github`, `gitlab` or `gcp`. Required. |
+| `connector` | all | `aws`, `github`, `gitlab`, `gcp` or `kubernetes`. Required. |
 | `operation` | all | The exact operation name. Required. |
 | `service` | `aws`, `gcp` | For AWS, the endpoint prefix from the request host, such as `route53` or `iam`. For `api.ecr.us-east-1.amazonaws.com` the prefix is `api.ecr`. For GCP, optional: the Discovery API name, for a method id that does not start with it (`sqladmin` for `sql.instances.list`). |
-| `model` | `aws`, `gcp` | Optional. For AWS, the model directory, used to choose between models that share an endpoint prefix (for example `ses` and `sesv2`). For GCP, the Discovery version label (`v1`, `beta`, `2026-09-01`); without it the lookup searches the API's `vN` versions. |
+| `kubernetes_auth` | `kubernetes` | Required for a `kubernetes` lookup: `{}`, as in `http_request`. The other blocks (`aws_auth`, `gcp_auth`, `eks_auth`, `gke_auth`, `aks_auth`, `azure_auth`) are accepted with `http_request`'s shapes and read by no lookup today. |
+| `model` | `aws`, `gcp`, `kubernetes` | For Kubernetes, required: the apiVersion, used exactly as sent. Otherwise optional. For AWS, the model directory, used to choose between models that share an endpoint prefix (for example `ses` and `sesv2`). For GCP, the Discovery version label (`v1`, `beta`, `2026-09-01`); without it the lookup searches the API's `vN` versions. |
 
 For AWS the operation is the Smithy name (`ListHostedZones`). For GitHub it is the OpenAPI `operationId` (`repos/get`), and for GitLab too (`getApiV4ProjectsIdMergeRequests`). GitLab generates its IDs from the method and path, so an ID changes when its path changes. For GCP it is the Discovery method id (`compute.instances.list`). A name is matched exactly first, then case-insensitively.
 
@@ -32,7 +33,7 @@ At most 25 optional inputs are listed, and `inputs_truncated` is set when more w
 
 The tool checks the arguments before any lookup: invalid arguments or an empty `operation` answer `not_found` without consulting a connector. Past that, the outcome is one of the following, and when more than one applies the first in this list wins.
 
-1. `unsupported`: the connector is not configured in this session, or it has no reference support (every connector other than `aws`, `github`, `gitlab` and `gcp`).
+1. `unsupported`: the connector is not configured in this session, or it has no reference support (every connector other than `aws`, `github`, `gitlab`, `gcp` and `kubernetes`), or the call sends the block of a connector whose targeted lookups are not available yet (`eks`, `gke`, `aks`, `azure`). For `kubernetes`, invalid targeted arguments or a missing `kubernetes_auth` then answer `not_found` with no read.
 2. `unavailable`: the metadata could not be loaded or parsed. For AWS the reason is the load error text truncated to 500 characters. For GitHub it is a fixed message. For GitLab it says why no document matches the instance's version, or names the download error or why the document was rejected (it did not parse, or it lists no operations). For GCP it names the directory or the document that could not be loaded. This is never reported as `not_found`.
 3. `not_found`: no AWS `service` (the reason says it is required and what to pass), no model for the AWS endpoint prefix, a `model` that does not belong to the prefix (the choices list the valid ones), a GCP API that is not in the Discovery directory, a GCP `model` the API does not list, or no operation by that name.
 4. `ambiguous`: several models for the prefix define the operation and no `model` was given, several of a GCP API's `vN` versions define the method and no `model` was given, or the case-insensitive match hits several names. At most 5 choices are returned.
@@ -127,9 +128,24 @@ Not covered: APIs missing from the Discovery directory, media upload paths (`/up
 
 **Source.** The Discovery directory (`https://discovery.googleapis.com/discovery/v1/apis`) and each entry's `discoveryRestUrl`, fetched anonymously through the HTTP client the gate's catalog uses. Each download is capped at 32 MiB; the largest document in the directory on 2026-10-05, compute `alpha`, was 7,566,442 bytes. The directory is cached as `<cache.dir>/gcp/docs/directory.json` and each document, distilled, as `<cache.dir>/gcp/docs/<name>.<version>.json`, with the cache TTL. A document is fetched only when a lookup needs it, one download per document at a time. A name or version with a character outside `A-Z`, `a-z`, `0-9`, `_`, `.` and `-`, or one that is `.` or `..`, is never cached and answers `unavailable`. A directory or document whose download or distillation fails falls back to the copy on disk, however old, and answers `unavailable`, never `not_found`, when there is none. A download that distills but fails admission, a directory that lists no API or a document that names another directory entry, answers `unavailable` without that fallback. A lookup never runs the credential bootstrap and never reads the gate's catalog cache (`discovery.v2.json`).
 
+## Kubernetes (targeted)
+
+Pass `kubernetes_auth` `{}`, `model` as the apiVersion (`apps/v1`, `metrics.k8s.io/v1beta1`, or `v1` for the core group) and `operation` as the OpenAPI `operationId` (`listAppsV1NamespacedDeployment`). `service` must be empty. Without `kubernetes_auth` the lookup answers `not_found` with no I/O.
+
+- **No prompt.** The lookup reads the configured cluster with the connector's credentials and no approval prompt. It can read only `GET /version`, `GET /openapi/v3` and `GET /openapi/v3/<group-version>`, the last optionally with `?hash=` and the 128-character hash the root published, each with the single header `Accept: application/json`. Paths are built from the validated `model`, never from the root's keys or its `serverRelativeURL`. Each read passes the host pin, the port pin, the read-only gate, the dial guard and redaction, and follows no redirect.
+- **Recipe.** The root, then the document by its hash, then `/version`: 3 reads on a miss, 1 on a cache hit, at most 6 when the hash goes stale (a 301 re-reads the root once, then reads the document by the new hash, then once without a hash). A root with no usable hash is read fresh and not cached.
+- **Bounds.** Root 2 MiB, document 10 MiB, `/version` 64 KiB; timeouts 20, 60 and 10 s; 120 s for the whole lookup. Before any decode a streaming pass refuses nesting deeper than 128 and more than 100,000 counted elements in a document (10,000 in the root). Then at most 4,000 operations, 64 parameters per operation and 25,000 parameter references per document. Descriptions are cut to 8 KiB before markup is stripped.
+- **Provenance.** `source` names `cluster /openapi/v3`, the document path, the cluster's `gitVersion`, the SHA-256 of the body received, `target`, the `server_hash` the server confirmed and `observed_at`.
+- **Outcomes.** `unavailable` names the read and its status, or the transport's error text, scrubbed and cut to 500 characters. No response field (body, header or reason phrase) is copied into it directly, but a transport error can carry server text, such as a certificate's names or a malformed header line Go quotes in its protocol error; a cluster that does not serve `/openapi/v3` says so. A group-version the root does not list is `not_found`, with that group's listed versions as choices. An id is matched exactly, then case-insensitively over every indexed id. An id the document lists more than once is `ambiguous`, and one whose path or parameters fall outside the form this tool renders is `unsupported`.
+- **Rules.** Request bodies are never rendered: a required body is a gap naming its kind, and the limitation lists the request's content types. A list with `limit` and `continue` reports `continue-token` paging; a `watch` parameter adds the watch-stream note; deprecated `/watch/` paths are `json-stream`; `exec`, `attach` and `portforward` are gaps (they need an upgrade); a `proxy` label is greedy (`<path+>`); only the pod log gets the special `text/plain` override, since its schema says JSON (an operation that itself declares `text/plain` is still described as text).
+- **Cache.** In memory, per session: at most 16 documents and 16 MiB, keyed by cluster, group-version and the server's hash. Every lookup reads the root, so a changed document misses.
+- **Audit.** The lookup's record has the decision `unprompted`. Each read writes an attempt record before it and a result record after it (`tool` `lookup_read`, `via` `api_reference`, `parent_call_id` the lookup's call ID), with the status, byte count and SHA-256, never the body. A failed audit write stops further reads and aborts the run.
+
+Not covered: the root's non-resource documents (`version`, `api`, `apis`, `apis/<group>`, `openid/v1/jwks`, `.well-known/openid-configuration`, `logs`); operations without an `operationId` or with one outside the grammar; operations outside the form this tool renders and ids listed more than once; documents published outside `/openapi/v3/<group-version>`; documents over 10 MiB, over 100,000 elements or over another structural cap; aggregated APIs whose server is not answering, which the cluster leaves out of its list; and lookup by resource, verb and scope.
+
 ## Offline use
 
-All four sources are cached on disk. With a warm cache, lookups work without network access. A cold AWS archive or a cold GitHub or GitLab docs cache needs one fetch, a cold GCP lookup needs the directory and each document it searches, and a lookup answers `unavailable` if a fetch fails. The first run of a version with `api_reference` fills the docs cache on first use even when the gate's table is already warm.
+A Kubernetes lookup always needs the cluster. All four public sources are cached on disk. With a warm cache, lookups work without network access. A cold AWS archive or a cold GitHub or GitLab docs cache needs one fetch, a cold GCP lookup needs the directory and each document it searches, and a lookup answers `unavailable` if a fetch fails. The first run of a version with `api_reference` fills the docs cache on first use even when the gate's table is already warm.
 
 ## Unmatched-request message
 
@@ -154,6 +170,6 @@ Because the GitHub and GitLab hints read the connector's docs cache, the first u
 ## Limits
 
 - Lookup is by exact name. There is no search or listing of operations.
-- Other connectors answer `unsupported`.
+- Other connectors answer `unsupported`; `eks`, `gke` and `aks` answer `unsupported` for now, even with their block.
 - Schemas are not expanded beyond the rules above, and XML request bodies are not generated.
 - The reference is only as current as the cached vendor metadata.
