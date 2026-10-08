@@ -179,6 +179,16 @@ type gitlabProvider struct {
 	// egress routes the registration probe; set by buildGitLabProvider.
 	egress   *Egress
 	metadata metadataOutcome // filled by fetchGitLabMetadata; never returned as a registration error.
+	// docsFailure keeps the last reason the master docs failed to load; nil when not recorded.
+	docsFailure *loadFailure
+	// docsChoice is the document api_reference reads, set by useDocs at registration.
+	docsChoice gitlabDocsChoice
+	// release holds the chosen release's docs and releaseFailure their load failure; nil for master.
+	release        *openAPIDocs
+	releaseFailure *loadFailure
+	// docsCfg and releaseFetch build a release's docs cache; set by buildGitLabProvider.
+	docsCfg      cache.Config
+	releaseFetch func(ref string) func(context.Context) ([]byte, error)
 }
 
 var (
@@ -612,15 +622,17 @@ func newGitLabCaches(
 }
 
 // Reference answers an api_reference lookup from the cached OpenAPI
-// documentation. It reads only the docs cache and the served host, so it never
-// resolves the token, probes the instance or loads the gate's table.
+// documentation registration selected for the instance's version. It reads only
+// that docs cache and the served host, so it never resolves the token, probes
+// the instance or loads the gate's table.
 func (p *gitlabProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
-	d := p.docs.forReference(ctx)
+	docs, failure, why := p.selectedDocs()
+	if why != "" {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: why}
+	}
+	d := docs.forReference(ctx)
 	if d == nil {
-		return apiref.Result{
-			Outcome: apiref.OutcomeUnavailable,
-			Reason:  "GitLab OpenAPI documentation could not be loaded",
-		}
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: p.unloadedReason(failure)}
 	}
 
 	return gitlabclass.Reference(d, q, "https://"+p.servedHost(), gitlabRefusedInput)
@@ -628,7 +640,11 @@ func (p *gitlabProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 
 // Hint suggests operations for a request the gate's table matched to none.
 func (p *gitlabProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
-	d := p.docs.forHint(ctx)
+	docs, _, why := p.selectedDocs()
+	if why != "" {
+		return apiref.Hint{}
+	}
+	d := docs.forHint(ctx)
 	if d == nil {
 		return apiref.Hint{}
 	}

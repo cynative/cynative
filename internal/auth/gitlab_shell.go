@@ -58,6 +58,11 @@ func buildGitLabProvider(
 		exposure: gitlabclass.BuildExposure(cfg.Permissions),
 	}
 	p.tables, p.docs.cache = newGitLabCaches(cfg, newGitLabOpenAPIFetcher(e))
+	p.docsFailure = recordLoadFailure(p.docs.cache)
+	p.docsCfg = cfg.Config
+	p.releaseFetch = func(ref string) func(context.Context) ([]byte, error) {
+		return newGitLabOpenAPIRefFetcher(e, ref)
+	}
 
 	p.tokenSource = newTokenSource(p, cred)
 

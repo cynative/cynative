@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/cynative/cynative/internal/apiref"
 )
 
 // VersionClassification is the outcome of version parsing and classification.
@@ -79,7 +81,9 @@ func (v *parsedVersion) belowFloor() bool {
 func ClassifyVersion(version, hostname, port string) (VersionClassification, string, string) {
 	parsed, ok := parseVersion(version)
 	if !ok {
-		return VersionUnknown, "", fmt.Sprintf("instance reports unrecognized version %q", version)
+		// The version is the instance's text, so it is quoted and bounded before it reaches a reason.
+		return VersionUnknown, "", "instance reports unrecognized version " +
+			apiref.Truncate(strconv.Quote(version), apiref.MaxChoice)
 	}
 
 	if parsed.belowFloor() {

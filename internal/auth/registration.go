@@ -493,21 +493,19 @@ func (d *registrationDeps) gitlabOutcome(
 
 	d.fetchGitLabMetadata(mctx, gl)
 
-	// BELOW_FLOOR is the only metadata outcome that affects registration.
-	if gl.metadata.ok {
-		hostname := stripHostPort(served)
-		port := portOfAuthority(served)
-		class, _, reason := gitlabclass.ClassifyVersion(gl.metadata.version, hostname, port)
-		if class == gitlabclass.VersionBelowFloor {
-			return skipOutcome(
-				gitlabProviderName,
-				true,
-				verbose,
-				emitAlways,
-				fmt.Sprintf("gitlab_hardening: skipped: %s", reason),
-			)
-		}
+	// BELOW_FLOOR is the only metadata outcome that affects registration. Every
+	// other outcome only selects the document api_reference reads.
+	class, choice := chooseGitLabDocs(gl.metadata, served)
+	if class == gitlabclass.VersionBelowFloor {
+		return skipOutcome(
+			gitlabProviderName,
+			true,
+			verbose,
+			emitAlways,
+			fmt.Sprintf("gitlab_hardening: skipped: %s", choice.unavailable),
+		)
 	}
+	gl.useDocs(choice)
 
 	exposure := gitlabclass.BuildExposure(glCfg.Permissions)
 	posture, warn := gitlabPosture(exposure, glCfg.Permissions)

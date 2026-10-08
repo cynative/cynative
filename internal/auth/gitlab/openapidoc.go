@@ -40,6 +40,19 @@ var docLabel = regexp.MustCompile(`\{([^{}]+)\}`)
 // hint. It is separate from the gate's table distiller. It runs when the docs cache loads, which a cold
 // unmatched-request hint does synchronously on the denial path. The docs hash the YAML bytes as fetched.
 func DistillDocs(raw []byte) (*openapidoc.OperationDocs, error) {
+	return distillDocs(raw, true)
+}
+
+// DistillReleaseDocs is DistillDocs for a release tag's document. It records no admission gap: the gate classifies
+// requests against master's document, so a table built from the release's own bytes would answer for the wrong
+// document. The connector checks each lookup against the gate's live table instead.
+func DistillReleaseDocs(raw []byte) (*openapidoc.OperationDocs, error) {
+	return distillDocs(raw, false)
+}
+
+// distillDocs distills raw and, when checkAdmission is set, records a gap on every operation the table built from
+// the same bytes does not admit.
+func distillDocs(raw []byte, checkAdmission bool) (*openapidoc.OperationDocs, error) {
 	js, err := yamlToJSON(raw)
 	if err != nil {
 		return nil, err
@@ -50,7 +63,10 @@ func DistillDocs(raw []byte) (*openapidoc.OperationDocs, error) {
 	}
 	sum := sha256.Sum256(raw)
 	d.SHA256 = hex.EncodeToString(sum[:])
-	admitted := tableAdmits(raw)
+	admitted := func(string, string) bool { return true }
+	if checkAdmission {
+		admitted = tableAdmits(raw)
+	}
 	for id, op := range d.Ops {
 		d.Ops[id] = renderOp(op, admitted)
 	}
