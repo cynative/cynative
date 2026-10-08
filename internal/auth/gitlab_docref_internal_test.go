@@ -353,15 +353,16 @@ func TestRecordLoadFailure_ClearsOnSuccess(t *testing.T) {
 		return []byte(gitlabDocsFixture), nil
 	})
 	f := recordLoadFailure(c)
-	if c.Get(t.Context()) != nil || f.reason("base") != "base: first" {
-		t.Fatalf("after a failure: %q", f.reason("base"))
+	same := func(s string) string { return s }
+	if c.Get(t.Context()) != nil || f.reason("base", same) != "base: first" {
+		t.Fatalf("after a failure: %q", f.reason("base", same))
 	}
-	if c.Get(t.Context()) == nil || f.reason("base") != "base" {
-		t.Errorf("after a success: %q", f.reason("base"))
+	if c.Get(t.Context()) == nil || f.reason("base", nil) != "base" {
+		t.Errorf("after a success: %q", f.reason("base", nil))
 	}
 	var none *loadFailure
-	if none.reason("base") != "base" {
-		t.Errorf("nil recorder: %q", none.reason("base"))
+	if none.reason("base", nil) != "base" {
+		t.Errorf("nil recorder: %q", none.reason("base", nil))
 	}
 }
 
@@ -452,4 +453,64 @@ func TestBuildGitLabProvider_WiresVersionedDocs(t *testing.T) {
 	if p.release == nil || p.release.cache.DataPath != filepath.Join(dir, "docs-"+gitlabReleaseRef+".json") {
 		t.Errorf("release docs %+v", p.release)
 	}
+}
+
+// TestGitLabReference_ScrubsProxyCredentials pins that a proxy credential carried by a failure's text is
+// replaced before the reason reaches api_reference, and before it is bounded, so a cut can never leave part of
+// one behind. It covers the metadata read's reason and the master and release docs' load failures.
+func TestGitLabReference_ScrubsProxyCredentials(t *testing.T) {
+	t.Parallel()
+	const (
+		proxyErr = "proxyconnect tcp: Proxy Authentication Required alice:s3cret"
+		scrubbed = "proxyconnect tcp: Proxy Authentication Required " + scrubPlaceholder
+	)
+	egress := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://alice:s3cret@proxy.corp:3128"})
+	failing := func(context.Context) ([]byte, error) { return nil, errors.New(proxyErr) }
+	q := apiref.Query{Operation: "getApiV4ProjectsIdIssues"}
+	t.Run("metadata failure", func(t *testing.T) {
+		t.Parallel()
+		p := newDocsOnlyGitLab(t, "gitlab.example", "", nil)
+		p.egress = egress
+		_, choice := chooseGitLabDocs(metadataOutcome{reason: "probe failed: " + proxyErr}, "gitlab.example")
+		p.useDocs(choice)
+		want := "no GitLab OpenAPI document matches this instance: the instance's GitLab version could not be " +
+			"read: probe failed: " + scrubbed
+		if res := p.Reference(t.Context(), q); res.Reason != want {
+			t.Errorf("reason = %q, want %q", res.Reason, want)
+		}
+	})
+	t.Run("master docs load failure", func(t *testing.T) {
+		t.Parallel()
+		p := newDocsOnlyGitLab(t, "gitlab.example", "", failing)
+		p.egress = egress
+		p.docsFailure = recordLoadFailure(p.docs.cache)
+		want := "GitLab OpenAPI documentation could not be loaded: " + scrubbed
+		if res := p.Reference(t.Context(), q); res.Reason != want {
+			t.Errorf("reason = %q, want %q", res.Reason, want)
+		}
+	})
+	t.Run("release docs load failure", func(t *testing.T) {
+		t.Parallel()
+		var refs []string
+		p := newVersionedGitLab(t, t.TempDir(), time.Now, failing, &refs)
+		p.egress = egress
+		p.useDocs(gitlabDocsChoice{ref: gitlabReleaseRef, version: "18.11.0-ee"})
+		want := "GitLab OpenAPI documentation for v18.11.0-ee could not be loaded: " + scrubbed
+		if res := p.Reference(t.Context(), q); res.Reason != want {
+			t.Errorf("reason = %q, want %q", res.Reason, want)
+		}
+	})
+	t.Run("credential across the bound", func(t *testing.T) {
+		t.Parallel()
+		p := newDocsOnlyGitLab(t, "gitlab.example", "", nil)
+		p.egress = egress
+		const base = "no GitLab OpenAPI document matches this instance: "
+		// The pad puts the bound's cut inside the password, after "s3c".
+		pad := strings.Repeat("x", apiref.MaxReason-3-len(base)-len("alice:s3c"))
+		p.useDocs(gitlabDocsChoice{unavailable: pad + "alice:s3cret tail"})
+		want := base + pad + scrubPlaceholder[:len("alice:s3c")] + "..."
+		if res := p.Reference(t.Context(), q); res.Reason != want {
+			t.Errorf("reason = %q, want %q", res.Reason, want)
+		}
+	})
 }

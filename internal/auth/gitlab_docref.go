@@ -61,8 +61,8 @@ func (p *gitlabProvider) useDocs(c gitlabDocsChoice) {
 func (p *gitlabProvider) selectedDocs() (*openAPIDocs, *loadFailure, string) {
 	switch {
 	case p.docsChoice.unavailable != "":
-		return nil, nil, apiref.Truncate("no GitLab OpenAPI document matches this instance: "+
-			p.docsChoice.unavailable, apiref.MaxReason)
+		return nil, nil, apiref.Truncate(p.egress.Scrub("no GitLab OpenAPI document matches this instance: "+
+			p.docsChoice.unavailable), apiref.MaxReason)
 	case p.release != nil:
 		return p.release, p.releaseFailure, ""
 	}
@@ -84,13 +84,14 @@ func (c gitlabDocsChoice) statement() string {
 	return "documentation read from gitlab-org/gitlab at ref " + ref + "; " + version
 }
 
-// unloadedReason is the reason api_reference gives when the selected docs did not load.
+// unloadedReason is the reason api_reference gives when the selected docs did not load. A proxy credential in the
+// recorded cause is scrubbed, as the transport scrubs its own errors.
 func (p *gitlabProvider) unloadedReason(failure *loadFailure) string {
 	if p.docsChoice.ref == "" {
-		return failure.reason(gitlabDocsUnloaded)
+		return failure.reason(gitlabDocsUnloaded, p.egress.Scrub)
 	}
 
-	return failure.reason("GitLab OpenAPI documentation for " + p.docsChoice.ref + " could not be loaded")
+	return failure.reason("GitLab OpenAPI documentation for "+p.docsChoice.ref+" could not be loaded", p.egress.Scrub)
 }
 
 // loadFailure keeps the last error a docs cache's fetch returned, because [cache.TTLCache.Get] reports a failed
@@ -116,9 +117,10 @@ func recordLoadFailure[T any](c *cache.TTLCache[T]) *loadFailure {
 	return f
 }
 
-// reason returns base with the recorded cause appended, bounded to [apiref.MaxReason]; base alone when nothing
-// was recorded or f is nil.
-func (f *loadFailure) reason(base string) string {
+// reason returns base with the recorded cause appended, passed through scrub and then bounded to
+// [apiref.MaxReason], so a cut never leaves part of a scrubbed credential behind; base alone when nothing was
+// recorded or f is nil.
+func (f *loadFailure) reason(base string, scrub func(string) string) string {
 	if f == nil {
 		return base
 	}
@@ -129,5 +131,5 @@ func (f *loadFailure) reason(base string) string {
 		return base
 	}
 
-	return apiref.Truncate(base+": "+err.Error(), apiref.MaxReason)
+	return apiref.Truncate(scrub(base+": "+err.Error()), apiref.MaxReason)
 }
