@@ -321,3 +321,18 @@ func TestParseDocument_Refusals(t *testing.T) {
 		t.Errorf("shape reason = %v", err)
 	}
 }
+
+func TestDocument_Size(t *testing.T) {
+	t.Parallel()
+	d := fixtureDocument(t, "api_v1.json", "v1")
+	full := d.Size(1 << 30)
+	if full <= len(d.Docs.Ops)*sizeOverhead {
+		t.Fatalf("Size = %d for %d operations", full, len(d.Docs.Ops))
+	}
+	// A limit inside the index loop, and one inside the operations loop, stop the walk early.
+	for _, limit := range []int{1, full / 2} {
+		if got := d.Size(limit); got <= limit || got >= full {
+			t.Errorf("Size(%d) = %d, want a stop between the limit and %d", limit, got, full)
+		}
+	}
+}

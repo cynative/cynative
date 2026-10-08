@@ -352,3 +352,53 @@ func (d *Document) reference(id string, q Lookup) apiref.Result {
 
 	return res
 }
+
+// sizeOverhead is what a cache entry's size counts for each operation, parameter, index entry and rule set, on
+// top of the byte length of its strings.
+const sizeOverhead = 96
+
+// Size is the byte length of every string the document holds, counted at each occurrence, plus sizeOverhead for
+// each operation, parameter, index entry and rule set. The walk stops once it passes limit, so measuring an entry
+// costs no allocation and no serialization.
+func (d *Document) Size(limit int) int {
+	n := len(d.APIVersion.Group) + len(d.APIVersion.Version) + len(d.APIVersion.Key) + len(d.Docs.Version) +
+		len(d.Docs.SHA256)
+	for id, e := range d.Index {
+		n += len(id) + len(e.Reason) + sizeOverhead
+		for _, r := range e.Routes {
+			n += len(r.Method) + len(r.Path)
+		}
+		if n > limit {
+			return n
+		}
+	}
+	for id, op := range d.Docs.Ops {
+		n += len(id) + opSize(&op) + sizeOverhead
+		if n > limit {
+			return n
+		}
+	}
+	for id, r := range d.Rules {
+		n += len(id) + sizeOverhead
+		for _, l := range r.Limitations {
+			n += len(l)
+		}
+		if r.Response != nil {
+			n += len(r.Response.Encoding) + len(r.Response.Parse)
+		}
+	}
+
+	return n
+}
+
+func opSize(op *openapidoc.OperationDoc) int {
+	n := len(op.Method) + len(op.Path) + len(op.Summary) + len(op.BodyGap) + len(op.ResponseType)
+	for _, p := range op.Params {
+		n += len(p.Name) + len(p.In) + len(p.Type) + len(p.Description) + sizeOverhead
+	}
+	for _, g := range op.Gaps {
+		n += len(g)
+	}
+
+	return n
+}

@@ -3,10 +3,24 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/cynative/cynative/internal/apiref"
 )
+
+// TargetLookupDeadline bounds one targeted lookup, from Resolve to the end of Answer. The api_reference tool sets it.
+const TargetLookupDeadline = 120 * time.Second
+
+// ContextReason is the unavailable reason for a lookup whose context is done: its deadline passed, or the run
+// was interrupted.
+func ContextReason(ctx context.Context) string {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "the lookup timed out after 120s"
+	}
+
+	return "the lookup was interrupted"
+}
 
 // TargetDocumenter is implemented by connectors whose API reference depends on the target: kubernetes now, the
 // managed Kubernetes connectors and azure later. The api_reference tool routes a call to it when the call carries

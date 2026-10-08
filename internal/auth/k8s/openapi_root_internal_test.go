@@ -154,3 +154,30 @@ func TestParseRoot_Refusals(t *testing.T) {
 		t.Errorf("an empty paths object: err = %v", err)
 	}
 }
+
+func TestRoot_Canonical(t *testing.T) {
+	t.Parallel()
+	r := testRoot(t)
+	for key, want := range map[string]bool{
+		"api/v1":               true,
+		"apis/batch/v1":        true,
+		"apis/q.io/v1":         true,
+		"apis/elsewhere.io/v1": false,
+		"apis/other.io/v1":     false,
+		"apis/odd.io/v1":       false,
+		"apis/num.io/v1":       false,
+		"apis/apps/V9":         false,
+		"apis/missing/v1":      false,
+	} {
+		if got := r.Canonical(key); got != want {
+			t.Errorf("Canonical(%q) = %v, want %v", key, got, want)
+		}
+	}
+	prefix, err := ParseRoot(
+		t.Context(),
+		[]byte(`{"paths":{"apis/a/v1":{"serverRelativeURL":"/openapi/v3/apis/a/v1x"}}}`),
+	)
+	if err != nil || prefix.Canonical("apis/a/v1") {
+		t.Errorf("a URL that only starts with the key's path is canonical: %v", err)
+	}
+}

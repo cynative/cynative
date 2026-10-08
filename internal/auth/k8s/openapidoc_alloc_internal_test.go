@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -85,5 +86,21 @@ func TestPrepare_ANestedTypeIsNeverMaterialized(t *testing.T) {
 		t.Errorf("preparing %d bytes allocated %d bytes, budget %d", len(body), alloc, nestedTypeBudget)
 	} else {
 		t.Logf("preparing %d bytes allocated %d bytes", len(body), alloc)
+	}
+}
+
+//nolint:paralleltest // testing.AllocsPerRun measures process-wide allocations.
+func TestDocument_SizeAllocatesNothing(t *testing.T) {
+	body, err := os.ReadFile("testdata/openapi/api_v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _ := ParseAPIVersion("v1")
+	d, err := ParseDocument(t.Context(), body, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := testing.AllocsPerRun(10, func() { _ = d.Size(1 << 30) }); n != 0 {
+		t.Errorf("measuring an entry allocated %.0f times", n)
 	}
 }

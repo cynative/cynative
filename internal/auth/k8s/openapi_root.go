@@ -130,6 +130,18 @@ func (r Root) Lookup(key string) (string, bool) {
 	return hash, true
 }
 
+// Canonical reports whether the root publishes key's document under its own path, /openapi/v3/<key>, with or
+// without a query: the only URL form a lookup reads.
+func (r Root) Canonical(key string) bool {
+	var entry map[string]json.RawMessage
+	_ = json.Unmarshal(r.entries[key], &entry) // an entry that is not an object publishes no URL.
+	var url string
+	_ = json.Unmarshal(entry["serverRelativeURL"], &url) // a non-string URL is not canonical.
+	rest, ok := strings.CutPrefix(url, rootPrefix+key)
+
+	return ok && (rest == "" || rest[0] == '?')
+}
+
 // Versions lists, sorted, the model values of the listed keys that are apiVersions of v's group, v itself
 // excluded. Every other key, the root's non-resource documents included, is ignored.
 func (r Root) Versions(v APIVersion) []string {
