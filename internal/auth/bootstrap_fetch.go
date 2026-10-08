@@ -28,7 +28,10 @@ const (
 	// over-deny renamed endpoints: fail-closed, documented). The raw host serves
 	// the body directly (HTTP 200, no redirect to a CDN), so the fetch is a plain
 	// GET.
-	gitlabOpenAPIURL = "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v3.yaml"
+	gitlabOpenAPIURL = gitlabOpenAPIRawBase + "master" + gitlabOpenAPIDocPath
+	// gitlabOpenAPIRawBase and gitlabOpenAPIDocPath frame the git ref in a raw document URL.
+	gitlabOpenAPIRawBase = "https://gitlab.com/gitlab-org/gitlab/-/raw/"
+	gitlabOpenAPIDocPath = "/doc/api/openapi/openapi_v3.yaml"
 	// gitlabFetchTimeout bounds the one-shot spec download (the spec is ~3.3 MB).
 	gitlabFetchTimeout = 60 * time.Second
 
@@ -54,9 +57,23 @@ func newGithubOpenAPIFetcher(e *Egress) func(ctx context.Context) ([]byte, error
 // (gitlab.com is not a pinned host and the gitlab provider's InjectAuth must
 // not run for this anonymous fetch). https-only, no-redirect, size-capped.
 func newGitLabOpenAPIFetcher(e *Egress) func(ctx context.Context) ([]byte, error) {
+	return newGitLabOpenAPIRefFetcher(e, "master")
+}
+
+// gitlabOpenAPIRefURL is the raw OpenAPI document URL at ref. The caller passes "master" or a release tag the
+// version classifier built from parsed numbers, never text the instance sent.
+func gitlabOpenAPIRefURL(ref string) string {
+	return gitlabOpenAPIRawBase + ref + gitlabOpenAPIDocPath
+}
+
+// newGitLabOpenAPIRefFetcher returns the anonymous, https-only, no-redirect, size-capped fetch of the document at
+// ref, routed by the egress policy. newGitLabOpenAPIFetcher is its master form.
+func newGitLabOpenAPIRefFetcher(e *Egress, ref string) func(ctx context.Context) ([]byte, error) {
+	url := gitlabOpenAPIRefURL(ref)
+
 	return newBootstrapSpecFetcher(
-		buildBootstrapFetchClient(gitlabFetchTimeout, e.Route(mustURL(gitlabOpenAPIURL))),
-		gitlabOpenAPIURL, "", "gitlab_hardening",
+		buildBootstrapFetchClient(gitlabFetchTimeout, e.Route(mustURL(url))),
+		url, "", "gitlab_hardening",
 	)
 }
 

@@ -69,9 +69,10 @@ func stubDeps() *registrationDeps {
 				), //nolint:exhaustruct // access.
 			}, nil
 		},
-		validateGitLab: func(context.Context, *gitlabProvider) (string, error) { return "alice", nil },
-		loadAWS:        func(context.Context) (aws.Config, error) { return aws.Config{}, nil }, //nolint:exhaustruct // zero cfg.
-		retrieveAWS:    func(context.Context, aws.Config) error { return nil },
+		validateGitLab:      func(context.Context, *gitlabProvider) (string, error) { return "alice", nil },
+		fetchGitLabMetadata: func(context.Context, *gitlabProvider) metadataOutcome { return metadataOutcome{} },
+		loadAWS:             func(context.Context) (aws.Config, error) { return aws.Config{}, nil }, //nolint:exhaustruct // zero cfg.
+		retrieveAWS:         func(context.Context, aws.Config) error { return nil },
 		validateAWS: func(context.Context, aws.Config) (string, string, string, error) {
 			return "123 · arn:aws:iam::123:user/u", "arn:aws:iam::123:user/u", "123", nil
 		},

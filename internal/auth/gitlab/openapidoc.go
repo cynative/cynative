@@ -28,6 +28,16 @@ const (
 		"version that lacks this operation"
 	docDriftLimit  = "the docs and the gitlab gate's table can be read from different downloads of the document"
 	docNotAdmitted = "rendered path is not admitted by the gitlab gate"
+	// docEditionLimit and docReleaseGateLimit replace the master caveats for a release tag's document: GitLab
+	// publishes one Enterprise Edition file per release, and the gate keeps classifying against master.
+	docEditionLimit = "the document is GitLab's Enterprise Edition file, so it lists EE-only operations a " +
+		"Community Edition instance does not serve"
+	docReleaseGateLimit = "the gitlab gate classifies requests against GitLab's latest (master) document, not " +
+		"this release's"
+	// gateDenies and gateNotChecked are the per-lookup verdicts CheckGate adds against the gate's live table.
+	gateDenies = "the gitlab gate (which uses the latest GitLab spec) does not recognize this path, so requests " +
+		"to it are denied"
+	gateNotChecked = "gate recognition not checked: the gitlab gate's table is not loaded yet"
 	// docPlaceholder fills every label when the rendered path is checked against the gate's table. It is no
 	// literal segment of GitLab's document and has no dot, so the format-suffix strip leaves it whole.
 	docPlaceholder = "x"
@@ -40,6 +50,19 @@ var docLabel = regexp.MustCompile(`\{([^{}]+)\}`)
 // hint. It is separate from the gate's table distiller. It runs when the docs cache loads, which a cold
 // unmatched-request hint does synchronously on the denial path. The docs hash the YAML bytes as fetched.
 func DistillDocs(raw []byte) (*openapidoc.OperationDocs, error) {
+	return distillDocs(raw, true)
+}
+
+// DistillReleaseDocs is DistillDocs for a release tag's document. It records no admission gap: the gate classifies
+// requests against master's document, so a table built from the release's own bytes would answer for the wrong
+// document. The connector checks each lookup against the gate's live table instead.
+func DistillReleaseDocs(raw []byte) (*openapidoc.OperationDocs, error) {
+	return distillDocs(raw, false)
+}
+
+// distillDocs distills raw and, when checkAdmission is set, records a gap on every operation the table built from
+// the same bytes does not admit.
+func distillDocs(raw []byte, checkAdmission bool) (*openapidoc.OperationDocs, error) {
 	js, err := yamlToJSON(raw)
 	if err != nil {
 		return nil, err
@@ -50,7 +73,10 @@ func DistillDocs(raw []byte) (*openapidoc.OperationDocs, error) {
 	}
 	sum := sha256.Sum256(raw)
 	d.SHA256 = hex.EncodeToString(sum[:])
-	admitted := tableAdmits(raw)
+	admitted := func(string, string) bool { return true }
+	if checkAdmission {
+		admitted = tableAdmits(raw)
+	}
 	for id, op := range d.Ops {
 		d.Ops[id] = renderOp(op, admitted)
 	}
@@ -64,10 +90,35 @@ func tableAdmits(raw []byte) func(method, path string) bool {
 	if err != nil {
 		return func(string, string) bool { return false }
 	}
-	return func(method, path string) bool {
-		_, cerr := ClassifyRequest(table, method, docLabel.ReplaceAllString(path, docPlaceholder))
-		return cerr == nil
+	return func(method, path string) bool { return Recognizes(table, method, path) }
+}
+
+// Recognizes reports whether the gate's table classifies a rendered path, every label filled with docPlaceholder,
+// under its method.
+func Recognizes(t *Table, method, path string) bool {
+	_, err := ClassifyRequest(t, method, docLabel.ReplaceAllString(path, docPlaceholder))
+	return err == nil
+}
+
+// CheckGate puts the gate's verdict on a lookup's reference, against t, the gate's live table, or nil when it has
+// not loaded. The live verdict replaces the admission gap master's docs recorded when they were built, since the
+// table the gate now holds may come from a later download: a nil table leaves only the "not checked" limitation,
+// and a loaded one adds its own gap or nothing. It changes only the returned reference, never the docs it was
+// built from.
+func CheckGate(res apiref.Result, t *Table) apiref.Result {
+	ref := res.Reference
+	if ref == nil {
+		return res
 	}
+	ref.Gaps = slices.DeleteFunc(slices.Clone(ref.Gaps), func(g string) bool { return g == docNotAdmitted })
+	switch {
+	case t == nil:
+		ref.Limitations = append(ref.Limitations, gateNotChecked)
+	case !Recognizes(t, ref.Method, ref.PathTemplate):
+		ref.Gaps = append(ref.Gaps, gateDenies)
+	}
+	res.Outcome = apiref.OutcomeOf(ref)
+	return res
 }
 
 // renderOp rewrites one operation's Grape path to the concrete form with every optional group present, keeps the
@@ -138,7 +189,21 @@ func labelParams(path string, params []openapidoc.DocParam) []openapidoc.DocPara
 func Reference(
 	d *openapidoc.OperationDocs, q apiref.Query, endpoint string, refuse func(apiref.Location, string) bool,
 ) apiref.Result {
+	return reference(d, q, docProfile(endpoint, refuse))
+}
+
+// ReleaseReference is Reference over a release tag's document, with that document's limitations in place of
+// master's.
+func ReleaseReference(
+	d *openapidoc.OperationDocs, q apiref.Query, endpoint string, refuse func(apiref.Location, string) bool,
+) apiref.Result {
 	prof := docProfile(endpoint, refuse)
+	prof.Limitations = []string{docEditionLimit, docReleaseGateLimit}
+	return reference(d, q, prof)
+}
+
+// reference looks q up under prof and explains a miss.
+func reference(d *openapidoc.OperationDocs, q apiref.Query, prof openapidoc.Profile) apiref.Result {
 	res := d.Reference(q, prof)
 	if res.Outcome != apiref.OutcomeNotFound {
 		return res

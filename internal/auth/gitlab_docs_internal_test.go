@@ -153,6 +153,7 @@ func newDocsOnlyGitLab(
 		}},
 		host:    host,
 		apiHost: apiHost,
+		egress:  NoProxy(),
 	}
 	p.docs.cache = newGitLabDocsCache(t.TempDir(), fetch)
 
