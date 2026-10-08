@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -72,8 +74,12 @@ func TestParseGitLabMetadata(t *testing.T) {
 				return
 			}
 			if tt.wantErr {
-				if err == nil {
-					t.Errorf("parseGitLabMetadata() expected error containing %q", tt.errMessage)
+				if !errors.Is(err, errGitLabMetadata) || !strings.Contains(err.Error(), tt.errMessage) {
+					t.Errorf(
+						"parseGitLabMetadata() error = %v, want errGitLabMetadata containing %q",
+						err,
+						tt.errMessage,
+					)
 				}
 
 				return
