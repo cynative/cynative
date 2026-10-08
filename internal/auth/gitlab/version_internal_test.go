@@ -266,7 +266,12 @@ func TestClassifyVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotClass, gotRef, gotReason := ClassifyVersion(tt.version, tt.hostname, tt.port)
+			gotClass, gotRef, gotReason := ClassifyVersion(
+				tt.version,
+				tt.hostname,
+				tt.port,
+				func(s string) string { return s },
+			)
 			if gotClass != tt.wantClass {
 				t.Errorf("ClassifyVersion() class = %v, want %v", gotClass, tt.wantClass)
 			}

@@ -26,13 +26,15 @@ type gitlabDocsChoice struct {
 // set, else host). It returns the version's classification too, since a version below the floor also skips the
 // connector. Only a version that parsed is kept, and a ref comes only from the classifier, which builds it from the
 // parsed numbers, so no text the instance sends reaches the document URL.
-func chooseGitLabDocs(md metadataOutcome, served string) (gitlabclass.VersionClassification, gitlabDocsChoice) {
+func chooseGitLabDocs(
+	md metadataOutcome, served string, scrub func(string) string,
+) (gitlabclass.VersionClassification, gitlabDocsChoice) {
 	if !md.ok {
 		return gitlabclass.VersionUnknown, gitlabDocsChoice{
 			unavailable: "the instance's GitLab version could not be read: " + md.reason,
 		}
 	}
-	class, ref, reason := gitlabclass.ClassifyVersion(md.version, stripHostPort(served), portOfAuthority(served))
+	class, ref, reason := gitlabclass.ClassifyVersion(md.version, stripHostPort(served), portOfAuthority(served), scrub)
 	if reason != "" {
 		return class, gitlabDocsChoice{unavailable: reason}
 	}

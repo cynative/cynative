@@ -77,13 +77,17 @@ func (v *parsedVersion) belowFloor() bool {
 // ClassifyVersion classifies a GitLab instance version and returns the
 // classification, the git ref to use for fetching the OpenAPI document, and a
 // reason string for unsupported versions. hostname and port are the served
-// authority (api_host when set, else host), with the port explicit.
-func ClassifyVersion(version, hostname, port string) (VersionClassification, string, string) {
+// authority (api_host when set, else host), with the port explicit. scrub removes known credentials from the
+// instance's text before it is echoed.
+func ClassifyVersion(
+	version, hostname, port string, scrub func(string) string,
+) (VersionClassification, string, string) {
 	parsed, ok := parseVersion(version)
 	if !ok {
-		// The version is the instance's text, so it is quoted and bounded before it reaches a reason.
+		// The version is the instance's text: it is scrubbed, then quoted and bounded, in that order, since a
+		// bound that cuts a credential first leaves a fragment the scrubber can no longer match.
 		return VersionUnknown, "", "instance reports unrecognized version " +
-			apiref.Truncate(strconv.Quote(version), apiref.MaxChoice)
+			apiref.Truncate(strconv.Quote(scrub(version)), apiref.MaxChoice)
 	}
 
 	if parsed.belowFloor() {

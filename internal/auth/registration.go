@@ -495,7 +495,7 @@ func (d *registrationDeps) gitlabOutcome(
 
 	// BELOW_FLOOR is the only metadata outcome that affects registration. Every
 	// other outcome only selects the document api_reference reads.
-	class, choice := chooseGitLabDocs(md, served)
+	class, choice := chooseGitLabDocs(md, served, gl.egress.Scrub)
 	if class == gitlabclass.VersionBelowFloor {
 		return skipOutcome(
 			gitlabProviderName,

@@ -135,7 +135,7 @@ func TestChooseGitLabDocs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			class, got := chooseGitLabDocs(tc.md, tc.served)
+			class, got := chooseGitLabDocs(tc.md, tc.served, noScrub)
 			if class != tc.class || got != tc.want {
 				t.Errorf("class %v choice %+v, want %v %+v", class, got, tc.class, tc.want)
 			}
@@ -154,13 +154,13 @@ func TestChooseGitLabDocs_HostileVersionNeverNamesARef(t *testing.T) {
 		"18.9.0-pre/../x", strings.Repeat("1", 4096),
 	}
 	for _, v := range hostile {
-		_, got := chooseGitLabDocs(metadataOutcome{ok: true, version: v}, "gitlab.com")
+		_, got := chooseGitLabDocs(metadataOutcome{ok: true, version: v}, "gitlab.com", noScrub)
 		if got.ref != "" || got.version != "" || got.unavailable == "" {
 			t.Errorf("%q: choice %+v", v, got)
 		}
 	}
 	for _, v := range []string{"18.9.0-ee", "18.9.0", "9999.9999.9999-ee"} {
-		_, got := chooseGitLabDocs(metadataOutcome{ok: true, version: v}, "gitlab.example")
+		_, got := chooseGitLabDocs(metadataOutcome{ok: true, version: v}, "gitlab.example", noScrub)
 		if !tag.MatchString(got.ref) {
 			t.Errorf("%q: ref %q", v, got.ref)
 		}
@@ -472,7 +472,11 @@ func TestGitLabReference_ScrubsProxyCredentials(t *testing.T) {
 		t.Parallel()
 		p := newDocsOnlyGitLab(t, "gitlab.example", "", nil)
 		p.egress = egress
-		_, choice := chooseGitLabDocs(metadataOutcome{reason: "probe failed: " + proxyErr}, "gitlab.example")
+		_, choice := chooseGitLabDocs(
+			metadataOutcome{reason: "probe failed: " + proxyErr},
+			"gitlab.example",
+			egress.Scrub,
+		)
 		p.useDocs(choice)
 		want := "no GitLab OpenAPI document matches this instance: the instance's GitLab version could not be " +
 			"read: probe failed: " + scrubbed
@@ -514,6 +518,29 @@ func TestGitLabReference_ScrubsProxyCredentials(t *testing.T) {
 			t.Errorf("reason = %q, want %q", res.Reason, want)
 		}
 	})
+}
+
+// TestGitLabReference_ScrubsTheVersionEchoBeforeItsBound pins the order for an unrecognized version: the instance's
+// text is scrubbed before the classifier quotes and bounds it, since a bound that cuts a credential first leaves a
+// fragment the scrubber can no longer match.
+func TestGitLabReference_ScrubsTheVersionEchoBeforeItsBound(t *testing.T) {
+	t.Parallel()
+	egress := mustEgress(t, map[string]string{"HTTPS_PROXY": "http://alice:s3cret@proxy.corp:3128"})
+	// Each pad puts the classifier's MaxChoice cut at another point of the credential, "alice:s3cret".
+	const cred = "alice:s3cret"
+	for kept := 1; kept <= len(cred); kept++ {
+		version := strings.Repeat("x", apiref.MaxChoice-1-kept) + cred + " tail"
+		_, choice := chooseGitLabDocs(metadataOutcome{ok: true, version: version}, "gitlab.example", egress.Scrub)
+		p := newDocsOnlyGitLab(t, "gitlab.example", "", nil)
+		p.egress = egress
+		p.useDocs(choice)
+		res := p.Reference(t.Context(), apiref.Query{Operation: "getApiV4ProjectsId"})
+		echo := strings.ReplaceAll(res.Reason[strings.LastIndex(res.Reason, "xx")+2:], scrubPlaceholder, "")
+		// Two characters of the password or three of the user already identify the credential.
+		if strings.Contains(echo, "s3") || strings.Contains(echo, "ali") {
+			t.Errorf("cut after %d: echo tail %q leaks part of the credential", kept, echo)
+		}
+	}
 }
 
 // TestGitLabReference_NamesAnEmptyDocument pins what api-reference.md says of a document that parses but lists no
@@ -581,3 +608,6 @@ func TestGitLabUseDocs_ReleasesTheHandoff(t *testing.T) {
 		}
 	})
 }
+
+// noScrub is the scrub of an egress with no proxy credentials.
+func noScrub(s string) string { return s }

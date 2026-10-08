@@ -21,7 +21,7 @@ func TestClassifyVersion_BoundsTheEcho(t *testing.T) {
 	for name, version := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			class, ref, reason := ClassifyVersion(version, "gitlab.com", "443")
+			class, ref, reason := ClassifyVersion(version, "gitlab.com", "443", func(s string) string { return s })
 			if class != VersionUnknown || ref != "" {
 				t.Fatalf("class %v ref %q", class, ref)
 			}
