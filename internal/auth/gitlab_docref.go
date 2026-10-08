@@ -45,9 +45,13 @@ func chooseGitLabDocs(md metadataOutcome, served string) (gitlabclass.VersionCla
 
 // useDocs records the choice and, for a release, builds that release's own docs cache. Its file stem names the
 // ref, so docs read for one release, or for master in docs.json, are never served for another. Nothing loads
-// until a lookup needs it. The provider holds one choice for its life, so at most one release cache exists.
+// until a lookup needs it. The provider holds one choice for its life, so at most one release cache exists. A
+// choice other than master never reads master's docs, so the table's download is not kept for them.
 func (p *gitlabProvider) useDocs(c gitlabDocsChoice) {
 	p.docsChoice = c
+	if c.ref != "" || c.unavailable != "" {
+		p.handoff.drop()
+	}
 	if c.ref == "" {
 		return
 	}

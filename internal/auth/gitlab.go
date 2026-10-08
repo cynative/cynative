@@ -166,6 +166,8 @@ type gitlabProvider struct {
 	resolver addrResolver
 	// egress routes the registration probe; set by buildGitLabProvider.
 	egress *Egress
+	// handoff passes the table's download to the master docs; nil for bare providers in tests.
+	handoff *openAPIHandoff
 	// docsFailure keeps the last reason the master docs failed to load; nil when not recorded.
 	docsFailure *loadFailure
 	// docsChoice is the document api_reference reads, set by useDocs at registration.
@@ -592,11 +594,11 @@ func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ au
 }
 
 // newGitLabCaches builds the gate's table cache and the api_reference docs cache over one fetch of the OpenAPI
-// document. One download feeds both on a cold start: the table's fetch hands its bytes to the docs cache once, and
-// the table is never served from the docs.
+// document, and returns the handoff between them. One download feeds both on a cold start: the table's fetch hands
+// its bytes to the docs cache once, and the table is never served from the docs.
 func newGitLabCaches(
 	cfg GitLabHardeningConfig, fetch func(context.Context) ([]byte, error),
-) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs]) {
+) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs], *openAPIHandoff) {
 	handoff := newOpenAPIHandoff(cfg.Config.Clock, cfg.Config.TTL)
 	tables := cache.NewTableCache(cfg.Config, handoff.record(fetch),
 		gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
@@ -605,7 +607,7 @@ func newGitLabCaches(
 		gitlabclass.DistillDocs, (*openapidoc.OperationDocs).Serialize,
 		openapidoc.Unmarshal, openapidoc.Admit)
 
-	return tables, docs
+	return tables, docs, handoff
 }
 
 // Reference answers an api_reference lookup from the cached OpenAPI

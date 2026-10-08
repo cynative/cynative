@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -528,4 +529,55 @@ func TestGitLabReference_NamesAnEmptyDocument(t *testing.T) {
 	if res.Outcome != apiref.OutcomeUnavailable || res.Reason != want {
 		t.Errorf("res = %+v", res)
 	}
+}
+
+// TestGitLabUseDocs_ReleasesTheHandoff pins that a choice other than master frees the table download the handoff
+// keeps for master's docs, which would never take it, whether the table loaded before the choice or after.
+func TestGitLabUseDocs_ReleasesTheHandoff(t *testing.T) {
+	t.Parallel()
+	held := func(h *openAPIHandoff) bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+
+		return h.raw != nil
+	}
+	choices := map[string]gitlabDocsChoice{
+		"release":     {ref: gitlabReleaseRef, version: "18.11.0-ee"},
+		"unavailable": {unavailable: "no version"},
+	}
+	for name, choice := range choices {
+		for _, tableFirst := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/table first %v", name, tableFirst), func(t *testing.T) {
+				t.Parallel()
+				var refs []string
+				p := newVersionedGitLab(t, t.TempDir(), time.Now, releaseDocsFetch(new(atomic.Int32)), &refs)
+				cfg := GitLabHardeningConfig{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now}
+				p.tables, p.docs.cache, p.handoff = newGitLabCaches(cfg, func(context.Context) ([]byte, error) {
+					return []byte(gitlabDocsFixture), nil
+				})
+				if tableFirst && p.tables.Get(t.Context()) == nil {
+					t.Fatal("table failed to load")
+				}
+				p.useDocs(choice)
+				if !tableFirst && p.tables.Get(t.Context()) == nil {
+					t.Fatal("table failed to load")
+				}
+				if held(p.handoff) {
+					t.Error("the handoff still holds the table's download")
+				}
+			})
+		}
+	}
+	t.Run("master keeps it", func(t *testing.T) {
+		t.Parallel()
+		p := newDocsOnlyGitLab(t, "gitlab.com", "", nil)
+		cfg := GitLabHardeningConfig{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now}
+		p.tables, p.docs.cache, p.handoff = newGitLabCaches(cfg, func(context.Context) ([]byte, error) {
+			return []byte(gitlabDocsFixture), nil
+		})
+		p.useDocs(gitlabDocsChoice{version: "19.5.0-pre"})
+		if p.tables.Get(t.Context()) == nil || !held(p.handoff) {
+			t.Error("master's docs lost the table's download")
+		}
+	})
 }
