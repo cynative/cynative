@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +20,8 @@ import (
 	"golang.org/x/oauth2"
 	"google.golang.org/api/container/v1"
 	"google.golang.org/api/option"
+
+	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
 // captureRT records every request it sees and answers each with one fixed status and body, so a test can read the
@@ -96,6 +100,10 @@ func TestManagedClusterIdentifierGrammars(t *testing.T) {
 		{"eks dotted region", eks("prod", "us-east-1.example"), false},
 		{"eks iso region", eks("prod", "us-iso-east-1"), false},
 		{"eks uppercase region", eks("prod", "US-EAST-1"), false},
+		// The SDK rewrites any region containing fips- , -fips- or -fips before resolving its partition.
+		{"eks fips china region", eks("prod", "cn-fips-1"), false},
+		{"eks fips govcloud region", eks("prod", "us-gov-fips-1"), false},
+		{"eks fips suffix region", eks("prod", "us-east-1-fips"), false},
 		{"aks plain", aks(testSubscription, "rg-prod", "aks-1"), true},
 		{"aks resource group with parens and dots", aks(testSubscription, "rg.(team)_x", "aks_1"), true},
 		{"aks unicode resource group", aks(testSubscription, "gruppe-ä", "aks"), true},
@@ -106,6 +114,9 @@ func TestManagedClusterIdentifierGrammars(t *testing.T) {
 		{"aks dot segment cluster", aks(testSubscription, "rg", ".."), false},
 		{"aks slash in cluster", aks(testSubscription, "rg", "a/b"), false},
 		{"aks cluster starts with hyphen", aks(testSubscription, "rg", "-aks"), false},
+		// Azure allows decimal digits only, not other Unicode number forms.
+		{"aks letter-number in resource group", aks(testSubscription, "rg-\u2167", "aks"), false},
+		{"aks superscript in resource group", aks(testSubscription, "rg-\u00b2", "aks"), false},
 		{"aks subscription not a uuid", aks("my-sub", "rg", "aks"), false},
 		{"aks dot segment subscription", aks("..", "rg", "aks"), false},
 	} {
@@ -136,6 +147,12 @@ func TestEKSRegionStaysInTheConfiguredPartition(t *testing.T) {
 		{"us-gov-west-1", "us-gov-east-1", true},
 		{"", "us-east-1", true},
 		{"", "cn-north-1", false},
+		// A configured region outside the three supported partitions fails closed for any model-supplied region; with
+		// no requested region the operator's configured region is used as is.
+		{"fips-us-gov-west-1", "us-east-1", false},
+		{"fips-us-gov-west-1", "us-gov-west-1", false},
+		{"fips-us-gov-west-1", "", true},
+		{"eusc-de-east-1", "us-east-1", false},
 	} {
 		t.Run(tc.configured+"->"+tc.requested, func(t *testing.T) {
 			t.Parallel()
@@ -220,5 +237,81 @@ func TestAKSClientNeverRegistersAResourceProvider(t *testing.T) {
 		`{"error":{"code":"MissingSubscriptionRegistration","message":"not registered"}}`)
 	if len(urls) != 1 {
 		t.Errorf("AKS client sent %d requests, want exactly the credentials POST: %v", len(urls), urls)
+	}
+}
+
+// TestEKSEntryPointsEnforceThePartition pins the partition check at every public entry point that can resolve a
+// cluster or mint a token: a cross-partition region makes no DescribeCluster and no presign call.
+func TestEKSEntryPointsEnforceThePartition(t *testing.T) {
+	t.Parallel()
+	args := providerArgs(eksProviderName, `{"eks_auth":{"cluster_name":"prod","region":"us-east-1"}}`)
+	for name, call := range map[string]func(*eksProvider, *http.Request) error{
+		"AuthorizeAction": func(p *eksProvider, r *http.Request) error {
+			return p.AuthorizeAction(r.Context(), authreq.NewView(r, ""), args)
+		},
+		"AuthorizesHost": func(p *eksProvider, r *http.Request) error {
+			_, err := p.AuthorizesHost(r.Context(), "h.example", args)
+			return err
+		},
+		"AuthorizesAddr": func(p *eksProvider, r *http.Request) error {
+			_, err := p.AuthorizesAddr(r.Context(), netip.MustParseAddr("192.0.2.1"), args)
+			return err
+		},
+		"InjectAuth": func(p *eksProvider, r *http.Request) error { return p.InjectAuth(r, args) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			p := newEKSProvider(
+				aws.Config{Region: "cn-north-1", Credentials: aws.CredentialsProviderFunc(fakeAWSCreds)},
+			)
+			p.describeCluster = func(context.Context, aws.Config, string) (clusterTLS, error) {
+				calls.Add(1)
+				return clusterTLS{host: "h.example", caData: "Y2E="}, nil
+			}
+			p.presign = func(context.Context, aws.Config, string) (string, error) {
+				calls.Add(1)
+				return "https://sts.example", nil
+			}
+			req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://h.example/api/v1/pods", nil)
+			if err := call(p, req); !errors.Is(err, ErrInvalidClusterIdentifier) {
+				t.Errorf("err = %v, want ErrInvalidClusterIdentifier", err)
+			}
+			if n := calls.Load(); n != 0 {
+				t.Errorf("%d resolution or presign calls, want 0", n)
+			}
+		})
+	}
+	// CACertData tolerates bad args and answers empty, but must not resolve either.
+	t.Run("CACertData", func(t *testing.T) {
+		t.Parallel()
+		var calls atomic.Int32
+		p := newEKSProvider(aws.Config{Region: "cn-north-1"})
+		p.describeCluster = func(context.Context, aws.Config, string) (clusterTLS, error) {
+			calls.Add(1)
+			return clusterTLS{host: "h.example", caData: "Y2E="}, nil
+		}
+		if got, err := p.CACertData(t.Context(), args); got != "" || err != nil || calls.Load() != 0 {
+			t.Errorf("CACertData = %q, %v with %d calls, want empty, nil, 0", got, err, calls.Load())
+		}
+	})
+}
+
+// TestEKSAcceptedRegionsBuildTheirPartitionsHost checks that every region shape the grammar accepts resolves, in the
+// pinned SDK, to exactly that region's host in its own partition.
+func TestEKSAcceptedRegionsBuildTheirPartitionsHost(t *testing.T) {
+	t.Parallel()
+	for region, host := range map[string]string{
+		"us-east-1":     "eks.us-east-1.amazonaws.com",
+		"eu-west-1":     "eks.eu-west-1.amazonaws.com",
+		"cn-north-1":    "eks.cn-north-1.amazonaws.com.cn",
+		"us-gov-west-1": "eks.us-gov-west-1.amazonaws.com",
+	} {
+		if (&EKSAuthArgs{ClusterName: "prod", Region: region}).validate() != nil {
+			t.Fatalf("%s rejected", region)
+		}
+		if u := eksRequestURL(t, region, "prod"); u.Host != host || u.EscapedPath() != "/clusters/prod" {
+			t.Errorf("%s: request went to %s, want https://%s/clusters/prod", region, u, host)
+		}
 	}
 }

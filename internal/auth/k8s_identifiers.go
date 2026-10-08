@@ -36,7 +36,7 @@ var (
 	azureSubscriptionID = regexp.MustCompile(`^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$`)
 	// Azure resource group: 1 to 90 letters, digits, underscores, parentheses, hyphens or periods, not ending with a
 	// period (which also rules out "." and "..").
-	azureResourceGroup = regexp.MustCompile(`^[\p{L}\p{N}_().-]{0,89}[\p{L}\p{N}_()-]$`)
+	azureResourceGroup = regexp.MustCompile(`^[\p{L}\p{Nd}_().-]{0,89}[\p{L}\p{Nd}_()-]$`)
 	// AKS cluster name: 1 to 63 letters, digits, hyphens or underscores, starting and ending with a letter or digit.
 	aksClusterName = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,61}[A-Za-z0-9])?$`)
 )
@@ -51,9 +51,13 @@ func checkIdentifier(field, value string, accept ...*regexp.Regexp) error {
 	return fmt.Errorf("%w: %s is outside the vendor's naming rules", ErrInvalidClusterIdentifier, field)
 }
 
-// awsPartition names the partition of a region the AWS gate supports, or "" for any other value.
+// awsPartition names the partition of a region the AWS gate supports, or "" for any other value. A region naming a
+// FIPS variant is never accepted: the SDK rewrites "fips-", "-fips-" and "-fips" out of a region before it resolves
+// the partition (MapFIPSRegion), so the region it resolves would not be the one checked here.
 func awsPartition(region string) string {
 	switch {
+	case strings.Contains(region, "fips"):
+		return ""
 	case awsChinaRegion.MatchString(region):
 		return "aws-cn"
 	case awsGovCloudRegion.MatchString(region):
@@ -66,14 +70,19 @@ func awsPartition(region string) string {
 
 // checkEKSRegionPartition keeps a requested region in the configured region's partition, so the model cannot send
 // the signed DescribeCluster request to another partition's endpoint. An unset configured region counts as the
-// standard partition.
+// standard partition, the SDK default; a configured region outside the three supported partitions admits no
+// model-supplied region at all, since its partition cannot be compared.
 func checkEKSRegionPartition(requested, configured string) error {
 	if requested == "" {
 		return nil
 	}
-	want := awsPartition(strings.TrimSpace(configured))
+	want := "aws"
+	if configured != "" {
+		want = awsPartition(configured)
+	}
 	if want == "" {
-		want = "aws"
+		return fmt.Errorf("%w: eks_auth.region cannot be overridden when the configured region is outside the "+
+			"supported AWS partitions", ErrInvalidClusterIdentifier)
 	}
 	if awsPartition(requested) != want {
 		return fmt.Errorf("%w: eks_auth.region must be a region of the configured partition (%s)",

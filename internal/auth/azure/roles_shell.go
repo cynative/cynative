@@ -64,7 +64,9 @@ func NewRoleClient(cfg RoleClientConfig) (RoleClient, error) {
 var defaultAzureNewRoleDefinitionsClient = func(
 	cred azcore.TokenCredential, cfg RoleClientConfig,
 ) (roleDefinitionsClient, error) {
-	// The role lookup only reads; it must never register a resource provider on a 409.
+	// Never register a resource provider. azcore registers only when a 409's request path parses as a resource ID, and
+	// this client only lists role definitions (a collection path), so today the policy cannot fire; disabling it keeps
+	// a later call from turning a read-only lookup into a provider registration (a write).
 	opts := &arm.ClientOptions{DisableRPRegistration: true} //nolint:exhaustruct // defaults fine; overrides below.
 	switch {
 	case cfg.Endpoint != "":
