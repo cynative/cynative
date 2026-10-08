@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -211,7 +212,10 @@ func Prepare(ctx context.Context, raw []byte, key string) (*Prepared, error) {
 	for id, e := range p.out.Index {
 		slices.SortFunc(
 			e.Routes,
-			func(a, b Route) int { return strings.Compare(a.Method+" "+a.Path, b.Method+" "+b.Path) },
+			// Compared field by field: joining them would copy each path, however long, on every comparison.
+			func(a, b Route) int {
+				return cmp.Or(strings.Compare(a.Method, b.Method), strings.Compare(a.Path, b.Path))
+			},
 		)
 		p.out.Index[id] = e
 	}

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sharedComponentBudget bounds the allocation of preparing a document whose one component parameter is referenced
@@ -102,5 +104,58 @@ func TestDocument_SizeAllocatesNothing(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(10, func() { _ = d.Size(1 << 30) }); n != 0 {
 		t.Errorf("measuring an entry allocated %.0f times", n)
+	}
+}
+
+// requestTypesDeadline bounds one requestTypes call over the most distinct types a document under the element cap can
+// list. Holding every distinct type and checking each new one against all of them took about 34 seconds; the
+// bounded list takes about a second under the race detector.
+const requestTypesDeadline = 15 * time.Second
+
+func TestRequestTypes_KeepsOnlySixWhileScanning(t *testing.T) {
+	t.Parallel()
+	types := make([]string, 99_990)
+	for i := range types {
+		types[i] = fmt.Sprintf("application/t%06d", len(types)-i)
+	}
+	want := []string{
+		"application/t000001", "application/t000002", "application/t000003",
+		"application/t000004", "application/t000005", "application/t000006",
+	}
+	start := time.Now()
+	got := requestTypes(types)
+	if took := time.Since(start); took > requestTypesDeadline {
+		t.Errorf("scanning %d distinct types took %s, deadline %s", len(types), took, requestTypesDeadline)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("requestTypes = %q, want %q", got, want)
+	}
+}
+
+// longRouteBudget bounds the allocation of preparing a document whose one rejected path is 9 MiB long and lists
+// all seven methods under one operationId. Sorting its routes by a joined METHOD and path string allocated two
+// copies of the path per comparison.
+const longRouteBudget = 24 << 20
+
+//nolint:paralleltest // reads process-wide runtime.MemStats, so it cannot share the process with parallel tests.
+func TestPrepare_SortingRoutesCopiesNoPath(t *testing.T) {
+	path := "/" + appsKey + "/" + strings.Repeat("a", 9<<20)
+	var ops []string
+	for _, m := range []string{"get", "put", "post", "delete", "options", "head", "patch"} {
+		ops = append(ops, `"`+m+`":{"operationId":"a"}`)
+	}
+	body := []byte(opDoc(path, strings.Join(ops, ",")))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	p, err := Prepare(t.Context(), body, appsKey)
+	runtime.ReadMemStats(&after)
+	if err != nil || len(p.Index["a"].Routes) != 7 {
+		t.Fatalf("Prepare: %+v %v", p, err)
+	}
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > longRouteBudget {
+		t.Errorf("preparing %d bytes allocated %d bytes, budget %d", len(body), alloc, longRouteBudget)
+	} else {
+		t.Logf("preparing %d bytes allocated %d bytes", len(body), alloc)
 	}
 }

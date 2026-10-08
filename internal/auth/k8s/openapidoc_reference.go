@@ -205,8 +205,9 @@ func validKind(s string) bool {
 	return len(s) <= maxKindBytes && kindPattern.MatchString(s)
 }
 
-// requestTypes validates the request media types, shows */* as application/json, and keeps at most six, sorted
-// and without repeats.
+// requestTypes validates the request media types, shows */* as application/json, and keeps the six that sort first,
+// sorted and without repeats. The list never holds more than seven, so a document listing many thousands of types
+// costs one binary search each.
 func requestTypes(types []string) []string {
 	var out []string
 	for _, mt := range types {
@@ -215,13 +216,17 @@ func requestTypes(types []string) []string {
 		} else if !validMedia(mt) {
 			continue
 		}
-		if !slices.Contains(out, mt) {
-			out = append(out, mt)
+		i, seen := slices.BinarySearch(out, mt)
+		if seen || i == maxRequestTypes {
+			continue
 		}
+		if out == nil {
+			out = make([]string, 0, maxRequestTypes+1)
+		}
+		out = slices.Insert(out, i, mt)[:min(len(out)+1, maxRequestTypes)]
 	}
-	slices.Sort(out)
 
-	return out[:min(len(out), maxRequestTypes)]
+	return out
 }
 
 func validMedia(mt string) bool {
