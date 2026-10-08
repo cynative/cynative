@@ -100,19 +100,24 @@ func Recognizes(t *Table, method, path string) bool {
 	return err == nil
 }
 
-// CheckGate adds the gate's verdict to a lookup's reference, against t, the gate's live table, or nil when it has
-// not loaded. It changes only the returned reference, never the docs it was built from. A path the docs already
-// record as not admitted keeps that one gap.
+// CheckGate puts the gate's verdict on a lookup's reference, against t, the gate's live table, or nil when it has
+// not loaded. The live verdict replaces the admission gap master's docs recorded when they were built, since the
+// table the gate now holds may come from a later download: a nil table leaves only the "not checked" limitation,
+// and a loaded one adds its own gap or nothing. It changes only the returned reference, never the docs it was
+// built from.
 func CheckGate(res apiref.Result, t *Table) apiref.Result {
 	ref := res.Reference
+	if ref == nil {
+		return res
+	}
+	ref.Gaps = slices.DeleteFunc(slices.Clone(ref.Gaps), func(g string) bool { return g == docNotAdmitted })
 	switch {
-	case ref == nil:
 	case t == nil:
 		ref.Limitations = append(ref.Limitations, gateNotChecked)
-	case !Recognizes(t, ref.Method, ref.PathTemplate) && !slices.Contains(ref.Gaps, docNotAdmitted):
+	case !Recognizes(t, ref.Method, ref.PathTemplate):
 		ref.Gaps = append(ref.Gaps, gateDenies)
-		res.Outcome = apiref.OutcomeOf(ref)
 	}
+	res.Outcome = apiref.OutcomeOf(ref)
 	return res
 }
 

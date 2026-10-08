@@ -39,6 +39,22 @@ func gateMasterTable(t *testing.T) *gitlab.Table {
 	return table
 }
 
+// swaggerTable is a live table that, unlike the one built from docsFixture's own bytes, recognizes the swagger
+// route, as a later master download that tags it would.
+func swaggerTable(t *testing.T) *gitlab.Table {
+	t.Helper()
+	table, err := gitlab.DistillOpenAPI([]byte(`openapi: 3.0.0
+paths:
+  /api/v4/swagger_doc:
+    get:
+      tags: [Metadata]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return table
+}
+
 func releaseFixtureDocs(t *testing.T) *openapidoc.OperationDocs {
 	t.Helper()
 	d, err := gitlab.DistillReleaseDocs([]byte(docsFixture))
@@ -123,19 +139,46 @@ func TestCheckGate(t *testing.T) {
 			t.Errorf("res = %+v", res)
 		}
 	})
-	t.Run("a gap master's docs already record", func(t *testing.T) {
-		t.Parallel()
-		master := lookup(t, "getApiV4SwaggerDoc")
-		res := gitlab.CheckGate(master, table)
-		if res.Outcome != apiref.OutcomeIncomplete || !slices.Equal(res.Reference.Gaps, []string{bakedGap}) {
-			t.Errorf("res = %+v", res)
-		}
-	})
 	t.Run("no reference", func(t *testing.T) {
 		t.Parallel()
 		miss := releaseLookup(t, "nope")
 		if res := gitlab.CheckGate(miss, table); res.Outcome != apiref.OutcomeNotFound || res.Reference != nil ||
 			res.Reason != miss.Reason {
+			t.Errorf("res = %+v", res)
+		}
+	})
+}
+
+// TestCheckGate_LiveVerdictWinsOverMastersGap pins that the live table's verdict replaces the admission gap master's
+// docs persisted at distill time, whichever way the live table answers.
+func TestCheckGate_LiveVerdictWinsOverMastersGap(t *testing.T) {
+	t.Parallel()
+	table := gateMasterTable(t)
+	t.Run("a gap master's docs record, on a path the live table lacks", func(t *testing.T) {
+		t.Parallel()
+		master := lookup(t, "getApiV4SwaggerDoc")
+		if !slices.Equal(master.Reference.Gaps, []string{bakedGap}) {
+			t.Fatalf("master gaps = %q, want the persisted gap", master.Reference.Gaps)
+		}
+		res := gitlab.CheckGate(master, table)
+		if res.Outcome != apiref.OutcomeIncomplete || !slices.Equal(res.Reference.Gaps, []string{gateDenies}) {
+			t.Errorf("res = %+v", res)
+		}
+	})
+	t.Run("a gap master's docs record, on a path the live table classifies", func(t *testing.T) {
+		t.Parallel()
+		res := gitlab.CheckGate(lookup(t, "getApiV4SwaggerDoc"), swaggerTable(t))
+		if res.Outcome != apiref.OutcomeFound || len(res.Reference.Gaps) != 0 ||
+			slices.Contains(res.Reference.Limitations, gateNotChecked) {
+			t.Errorf("res = %+v", res)
+		}
+	})
+	t.Run("a gap master's docs record, with the table not loaded", func(t *testing.T) {
+		t.Parallel()
+		res := gitlab.CheckGate(lookup(t, "getApiV4SwaggerDoc"), nil)
+		ref := res.Reference
+		if res.Outcome != apiref.OutcomeFound || len(ref.Gaps) != 0 ||
+			ref.Limitations[len(ref.Limitations)-1] != gateNotChecked {
 			t.Errorf("res = %+v", res)
 		}
 	})
@@ -155,6 +198,21 @@ func TestCheckGate_LeavesTheDocsAlone(t *testing.T) {
 	again := gitlab.ReleaseReference(d, q, testEndpoint, nil)
 	if len(again.Reference.Gaps) != 0 || slices.Contains(again.Reference.Limitations, gateNotChecked) {
 		t.Errorf("again = %+v", again)
+	}
+}
+
+// TestCheckGate_KeepsMastersPersistedGap pins that dropping master's persisted admission gap from a returned
+// reference leaves the cached docs holding it.
+func TestCheckGate_KeepsMastersPersistedGap(t *testing.T) {
+	t.Parallel()
+	d := docsFixtureDocs(t)
+	q := apiref.Query{Operation: "getApiV4SwaggerDoc"}
+	if res := gitlab.CheckGate(gitlab.Reference(d, q, testEndpoint, nil), swaggerTable(t)); len(
+		res.Reference.Gaps) != 0 {
+		t.Fatalf("res = %+v", res)
+	}
+	if gaps := d.Ops["getApiV4SwaggerDoc"].Gaps; !slices.Equal(gaps, []string{bakedGap}) {
+		t.Errorf("docs gaps = %q", gaps)
 	}
 }
 
