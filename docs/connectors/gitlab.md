@@ -63,6 +63,15 @@ When a token is discovered, Cynative **validates it live at startup** with a dia
 
 This matches the GitHub and Kubernetes connectors' validated-live registration.
 
+### Version detection
+
+After the token validates, Cynative reads `GET /api/v4/metadata` once, through the same pinned client and under its own short deadline, to learn the instance's GitLab version. A token with `read_api` or `read_user` scope can read it. The version only selects the documentation `api_reference` reads; the gate always classifies against GitLab's master document.
+
+- **GitLab 18.9 or later is required.** An instance that reports an older version is skipped at startup with `GitLab 18.9 or later required (instance reports "X.Y.Z")`, because `openapi_v3.yaml` first shipped in 18.9. This is the only metadata outcome that affects registration.
+- A release version (`18.11.0-ee`, or `18.11.0` for Community Edition) selects the `v18.11.0-ee` document.
+- gitlab.com reports a `-pre` development version and selects master. A self-managed `-pre` build does not, because its version alone does not say which commit it runs.
+- If the metadata request fails (a timeout, a 403, an answer with no version) or the version is one cynative does not recognize (a release candidate or a custom build), the connector still registers and works. Only `api_reference` is affected: it answers `unavailable` with the reason instead of reading a document for a different version.
+
 > **Keyring supported.** glab users who authenticated with `--use-keyring` store
 > their token in the OS keyring rather than in `config.yml`. Because cynative now
 > delegates to `glab auth credential-helper` (see below), keyring-stored tokens work
@@ -138,7 +147,7 @@ For self-managed instances, replace `gitlab.com` with your configured `host` (or
 
 ### Operation reference
 
-`api_reference` returns the request template, inputs and response format of one GitLab REST operation, named by its OpenAPI `operationId`, for example `{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}`. It reads the cached public OpenAPI document and sends nothing to the instance. A request the gate's table does not know can come back with candidates in its error, including a suggestion when a project or group path was sent unencoded. See [API reference lookup](api-reference.md#gitlab).
+`api_reference` returns the request template, inputs and response format of one GitLab REST operation, named by its OpenAPI `operationId`, for example `{"connector":"gitlab","operation":"getApiV4ProjectsIdMergeRequests"}`. It reads the cached public OpenAPI document for the instance's version (see [Version detection](#version-detection)) and sends nothing to the instance. Each reference names the document's ref and the instance's version, and flags an operation the gate's table cannot classify, since requests to it are denied. A request the gate's table does not know can come back with candidates in its error, including a suggestion when a project or group path was sent unencoded. See [API reference lookup](api-reference.md#gitlab).
 
 ## Hardening
 
