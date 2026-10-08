@@ -70,6 +70,20 @@ func (p *gitlabProvider) selectedDocs() (*openAPIDocs, *loadFailure, string) {
 	return &p.docs, p.docsFailure, ""
 }
 
+// statement names the document a reference was read from and the version the instance reported.
+func (c gitlabDocsChoice) statement() string {
+	ref := c.ref
+	if ref == "" {
+		ref = "master"
+	}
+	version := "the instance's version was not read"
+	if c.version != "" {
+		version = "the instance reports GitLab " + c.version
+	}
+
+	return "documentation read from gitlab-org/gitlab at ref " + ref + "; " + version
+}
+
 // unloadedReason is the reason api_reference gives when the selected docs did not load.
 func (p *gitlabProvider) unloadedReason(failure *loadFailure) string {
 	if p.docsChoice.ref == "" {

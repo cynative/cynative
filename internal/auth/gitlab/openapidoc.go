@@ -28,6 +28,16 @@ const (
 		"version that lacks this operation"
 	docDriftLimit  = "the docs and the gitlab gate's table can be read from different downloads of the document"
 	docNotAdmitted = "rendered path is not admitted by the gitlab gate"
+	// docEditionLimit and docReleaseGateLimit replace the master caveats for a release tag's document: GitLab
+	// publishes one Enterprise Edition file per release, and the gate keeps classifying against master.
+	docEditionLimit = "the document is GitLab's Enterprise Edition file, so it lists EE-only operations a " +
+		"Community Edition instance does not serve"
+	docReleaseGateLimit = "the gitlab gate classifies requests against GitLab's latest (master) document, not " +
+		"this release's"
+	// gateDenies and gateNotChecked are the per-lookup verdicts CheckGate adds against the gate's live table.
+	gateDenies = "the gitlab gate (which uses the latest GitLab spec) does not recognize this path, so requests " +
+		"to it are denied"
+	gateNotChecked = "gate recognition not checked: the gitlab gate's table is not loaded yet"
 	// docPlaceholder fills every label when the rendered path is checked against the gate's table. It is no
 	// literal segment of GitLab's document and has no dot, so the format-suffix strip leaves it whole.
 	docPlaceholder = "x"
@@ -80,10 +90,30 @@ func tableAdmits(raw []byte) func(method, path string) bool {
 	if err != nil {
 		return func(string, string) bool { return false }
 	}
-	return func(method, path string) bool {
-		_, cerr := ClassifyRequest(table, method, docLabel.ReplaceAllString(path, docPlaceholder))
-		return cerr == nil
+	return func(method, path string) bool { return Recognizes(table, method, path) }
+}
+
+// Recognizes reports whether the gate's table classifies a rendered path, every label filled with docPlaceholder,
+// under its method.
+func Recognizes(t *Table, method, path string) bool {
+	_, err := ClassifyRequest(t, method, docLabel.ReplaceAllString(path, docPlaceholder))
+	return err == nil
+}
+
+// CheckGate adds the gate's verdict to a lookup's reference, against t, the gate's live table, or nil when it has
+// not loaded. It changes only the returned reference, never the docs it was built from. A path the docs already
+// record as not admitted keeps that one gap.
+func CheckGate(res apiref.Result, t *Table) apiref.Result {
+	ref := res.Reference
+	switch {
+	case ref == nil:
+	case t == nil:
+		ref.Limitations = append(ref.Limitations, gateNotChecked)
+	case !Recognizes(t, ref.Method, ref.PathTemplate) && !slices.Contains(ref.Gaps, docNotAdmitted):
+		ref.Gaps = append(ref.Gaps, gateDenies)
+		res.Outcome = apiref.OutcomeOf(ref)
 	}
+	return res
 }
 
 // renderOp rewrites one operation's Grape path to the concrete form with every optional group present, keeps the
@@ -154,7 +184,21 @@ func labelParams(path string, params []openapidoc.DocParam) []openapidoc.DocPara
 func Reference(
 	d *openapidoc.OperationDocs, q apiref.Query, endpoint string, refuse func(apiref.Location, string) bool,
 ) apiref.Result {
+	return reference(d, q, docProfile(endpoint, refuse))
+}
+
+// ReleaseReference is Reference over a release tag's document, with that document's limitations in place of
+// master's.
+func ReleaseReference(
+	d *openapidoc.OperationDocs, q apiref.Query, endpoint string, refuse func(apiref.Location, string) bool,
+) apiref.Result {
 	prof := docProfile(endpoint, refuse)
+	prof.Limitations = []string{docEditionLimit, docReleaseGateLimit}
+	return reference(d, q, prof)
+}
+
+// reference looks q up under prof and explains a miss.
+func reference(d *openapidoc.OperationDocs, q apiref.Query, prof openapidoc.Profile) apiref.Result {
 	res := d.Reference(q, prof)
 	if res.Outcome != apiref.OutcomeNotFound {
 		return res

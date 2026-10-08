@@ -635,19 +635,41 @@ func (p *gitlabProvider) Reference(ctx context.Context, q apiref.Query) apiref.R
 		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: p.unloadedReason(failure)}
 	}
 
-	return gitlabclass.Reference(d, q, "https://"+p.servedHost(), gitlabRefusedInput)
+	lookup := gitlabclass.Reference
+	if p.docsChoice.ref != "" {
+		lookup = gitlabclass.ReleaseReference
+	}
+	res := gitlabclass.CheckGate(lookup(d, q, "https://"+p.servedHost(), gitlabRefusedInput), p.liveTable())
+	if res.Reference != nil {
+		res.Reference.Limitations = append(res.Reference.Limitations, p.docsChoice.statement())
+	}
+
+	return res
 }
 
-// Hint suggests operations for a request the gate's table matched to none.
+// liveTable returns the gate's table if a request already loaded it, else nil. It never loads it.
+func (p *gitlabProvider) liveTable() *gitlabclass.Table {
+	if p.tables == nil {
+		return nil
+	}
+
+	return p.tables.Peek()
+}
+
+// Hint suggests operations for a request the gate's table matched to none,
+// from the selected docs and only among the routes that table classifies. The
+// gate loaded the table before it denied the request, so a missing one means
+// there is nothing to check against and nothing is suggested.
 func (p *gitlabProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
 	docs, _, why := p.selectedDocs()
 	if why != "" {
 		return apiref.Hint{}
 	}
 	d := docs.forHint(ctx)
-	if d == nil {
+	table := p.liveTable()
+	if d == nil || table == nil {
 		return apiref.Hint{}
 	}
 
-	return gitlabclass.Hint(d, v)
+	return gitlabclass.RecognizedHint(d, v, table)
 }
