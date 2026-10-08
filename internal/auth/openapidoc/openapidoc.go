@@ -4,6 +4,7 @@
 package openapidoc
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -59,6 +60,14 @@ type Profile struct {
 	// Refuse reports an input the connector rejects whatever the permission level. A refused input is left out of
 	// the inputs and the template, and a required one is a gap. Nil refuses nothing.
 	Refuse func(loc apiref.Location, name string) bool
+	// Keep reports whether an operation is distilled. Nil keeps every operation.
+	Keep func(method, path, operationID string) bool
+	// SkipBodies records every required request body as a gap and every optional one as skipped, without decoding
+	// a schema.
+	SkipBodies bool
+	// MaxTextBytes, when above zero, cuts each summary and description to that many bytes before its markup is
+	// stripped (apiref.StripMarkupCut). Zero strips the whole text.
+	MaxTextBytes int
 }
 
 // DocParam is one documented parameter or required body property.
@@ -106,15 +115,16 @@ type OperationDocs struct {
 	MultiSegment []string `json:"x,omitempty"`
 }
 
-// rawParam keeps every field except $ref untyped, so one parameter with an odd value (a non-string description,
-// say) degrades only that field instead of rejecting the whole document.
+// rawParam keeps every field except $ref as raw JSON, so one parameter with an odd value (a non-string
+// description, say) degrades only that field instead of rejecting the whole document, and a wide schema costs its
+// bytes rather than a tree of Go maps. Each field is converted where it is read.
 type rawParam struct {
-	Ref         string `json:"$ref"`
-	Name        any    `json:"name"`
-	In          any    `json:"in"`
-	Required    any    `json:"required"`
-	Description any    `json:"description"`
-	Schema      any    `json:"schema"`
+	Ref         string          `json:"$ref"`
+	Name        json.RawMessage `json:"name"`
+	In          json.RawMessage `json:"in"`
+	Required    json.RawMessage `json:"required"`
+	Description json.RawMessage `json:"description"`
+	Schema      json.RawMessage `json:"schema"`
 }
 
 type rawProp struct {
@@ -184,17 +194,35 @@ type rawDoc struct {
 	} `json:"components"`
 }
 
+// distiller is one distillation: the decoded document, the profile, and each component parameter converted once
+// and shared by every operation that references it.
+type distiller struct {
+	doc        *rawDoc
+	prof       *Profile
+	components map[string]DocParam
+}
+
 // Distill distills an OpenAPI 3 description, as JSON, into operation docs. It runs when a docs cache loads: on an
 // api_reference lookup, or synchronously on the denial path when an unmatched request needs a hint and the cache is
 // cold.
 func Distill(raw []byte, prof Profile) (*OperationDocs, error) {
+	return DistillContext(context.Background(), raw, prof)
+}
+
+// DistillContext is Distill that checks ctx before each path item. The one decode of the document is not
+// interruptible.
+func DistillContext(ctx context.Context, raw []byte, prof Profile) (*OperationDocs, error) {
 	var doc rawDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrDocsRejected, err)
 	}
 	sum := sha256.Sum256(raw)
 	out := &OperationDocs{Version: doc.Info.Version, SHA256: hex.EncodeToString(sum[:]), Ops: map[string]OperationDoc{}}
+	d := &distiller{doc: &doc, prof: &prof, components: map[string]DocParam{}}
 	for path, item := range doc.Paths {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("openapidoc: distill: %w", err)
+		}
 		ops := map[string]*rawOp{
 			"GET": item.Get, "HEAD": item.Head, "POST": item.Post, "PUT": item.Put,
 			"PATCH": item.Patch, "DELETE": item.Delete, "OPTIONS": item.Options,
@@ -203,7 +231,10 @@ func Distill(raw []byte, prof Profile) (*OperationDocs, error) {
 			if op == nil || op.OperationID == "" {
 				continue
 			}
-			out.Ops[op.OperationID] = distillOp(&doc, &prof, method, path, &item, op)
+			if prof.Keep != nil && !prof.Keep(method, path, op.OperationID) {
+				continue
+			}
+			out.Ops[op.OperationID] = d.op(method, path, &item, op)
 		}
 	}
 	if err := Admit(out); err != nil {
@@ -212,36 +243,56 @@ func Distill(raw []byte, prof Profile) (*OperationDocs, error) {
 	return out, nil
 }
 
-func distillOp(doc *rawDoc, prof *Profile, method, path string, item *rawPathItem, op *rawOp) OperationDoc {
-	d := OperationDoc{
+// text strips markup from a summary or description, cutting it first when the profile bounds text.
+func (p *Profile) text(s string, maxRunes int) string {
+	if p.MaxTextBytes > 0 {
+		return apiref.StripMarkupCut(s, p.MaxTextBytes, maxRunes)
+	}
+	return apiref.StripMarkup(s, maxRunes)
+}
+
+func (d *distiller) op(method, path string, item *rawPathItem, op *rawOp) OperationDoc {
+	out := OperationDoc{
 		Method:  method,
 		Path:    path,
-		Summary: apiref.StripMarkup(op.Summary, apiref.MaxSummary),
-		Params: mergeParams(
-			resolveParams(doc, item.Parameters, prof.ScalarUnion), resolveParams(doc, op.Parameters, prof.ScalarUnion),
-		),
+		Summary: d.prof.text(op.Summary, apiref.MaxSummary),
+		Params:  mergeParams(d.params(item.Parameters), d.params(op.Parameters)),
 	}
-	if prof.Endpoint != "" {
-		if server := serverURL(prof.Endpoint, op.Servers, item.Servers, doc.Servers); server != prof.Endpoint {
-			d.Server = server
+	if d.prof.Endpoint != "" {
+		if server := serverURL(d.prof.Endpoint, op.Servers, item.Servers, d.doc.Servers); server != d.prof.Endpoint {
+			out.Server = server
 		}
 	}
 	if rb := op.RequestBody; rb != nil {
-		fields, ok := bodyFields(doc, rb)
-		switch {
-		case rb.Required && ok:
-			d.BodyFields = fields
-			d.BodyRequired = true
-		case rb.Required:
-			d.BodyGap = bodyGap
-		case !ok || len(fields) > 0:
-			// An optional body never adds inputs or gaps; the template omits it.
-			d.BodySkipped = true
-		}
+		d.body(&out, rb)
 	}
-	d.ResponseType = responseType(op.Responses)
-	d.Paged = prof.Paged(d.Params, okHeaders(op.Responses))
-	return d
+	out.ResponseType = responseType(op.Responses)
+	out.Paged = d.prof.Paged(out.Params, okHeaders(op.Responses))
+	return out
+}
+
+// body records a request body on out: its required fields, a gap, or a skipped optional body. Under SkipBodies no
+// schema is decoded.
+func (d *distiller) body(out *OperationDoc, rb *rawBody) {
+	if d.prof.SkipBodies {
+		if rb.Required {
+			out.BodyGap = bodyGap
+			return
+		}
+		out.BodySkipped = true
+		return
+	}
+	fields, ok := d.bodyFields(rb)
+	switch {
+	case rb.Required && ok:
+		out.BodyFields = fields
+		out.BodyRequired = true
+	case rb.Required:
+		out.BodyGap = bodyGap
+	case !ok || len(fields) > 0:
+		// An optional body never adds inputs or gaps; the template omits it.
+		out.BodySkipped = true
+	}
 }
 
 // serverURL is the first server URL of the first non-empty list, with no trailing slash, or def when every list
@@ -255,60 +306,86 @@ func serverURL(def string, lists ...[]rawServer) string {
 	return def
 }
 
-func resolveParams(doc *rawDoc, in []rawParam, union bool) []DocParam {
+// params converts a parameter list. A reference to a component parameter is converted once per distillation; a
+// reference that is not to a component parameter, or names none, is dropped.
+func (d *distiller) params(in []rawParam) []DocParam {
 	var out []DocParam
 	for _, p := range in {
-		if p.Ref != "" {
-			name, ok := strings.CutPrefix(p.Ref, paramRefPrefix)
-			if !ok {
-				continue
-			}
-			if p, ok = doc.Components.Parameters[name]; !ok {
-				continue
-			}
+		if p.Ref == "" {
+			out = append(out, d.param(p))
+			continue
 		}
-		out = append(out, DocParam{
-			Name:        text(p.Name),
-			In:          text(p.In),
-			Type:        paramType(p.Schema, union),
-			Required:    p.Required == true,
-			Description: apiref.StripMarkup(text(p.Description), apiref.MaxInputDescription),
-		})
+		name, ok := strings.CutPrefix(p.Ref, paramRefPrefix)
+		if !ok {
+			continue
+		}
+		conv, done := d.components[name]
+		if !done {
+			comp, found := d.doc.Components.Parameters[name]
+			if !found {
+				continue
+			}
+			conv = d.param(comp)
+			d.components[name] = conv
+		}
+		out = append(out, conv)
 	}
 	return out
 }
 
-// text returns v when it is a string and "" otherwise.
-func text(v any) string {
-	s, _ := v.(string)
+// param converts one parameter: a non-string name, location, description or type is empty, and only JSON true
+// makes it required.
+func (d *distiller) param(p rawParam) DocParam {
+	return DocParam{
+		Name:        text(p.Name),
+		In:          text(p.In),
+		Type:        paramType(p.Schema, d.prof.ScalarUnion),
+		Required:    string(p.Required) == "true",
+		Description: d.prof.text(text(p.Description), apiref.MaxInputDescription),
+	}
+}
+
+// text returns raw as a string when it is a JSON string and "" otherwise.
+func text(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
 	return s
 }
 
-// schemaType returns the "type" of a parameter schema, or nil when the schema is not an object.
-func schemaType(schema any) any {
-	m, _ := schema.(map[string]any)
-	return m["type"]
+// schemaMembers decodes a schema's members by exact key, the last of repeated keys winning, or nil when it is not
+// an object. It never decodes into a struct, which would also bind a key spelled Type.
+func schemaMembers(raw json.RawMessage) map[string]json.RawMessage {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	return m
 }
 
 // paramType is the parameter schema's type, "string" for a oneOf of exactly a string and an integer when union is
 // set, and "unknown" otherwise.
-func paramType(schema any, union bool) string {
-	if s := text(schemaType(schema)); s != "" {
+func paramType(schema json.RawMessage, union bool) string {
+	m := schemaMembers(schema)
+	if s := text(m["type"]); s != "" {
 		return s
 	}
-	if union && isScalarUnion(schema) {
+	if union && isScalarUnion(m) {
 		return stringType
 	}
 	return unknownType
 }
 
 // isScalarUnion reports a schema that is oneOf exactly two alternatives typed string and integer.
-func isScalarUnion(schema any) bool {
-	m, _ := schema.(map[string]any)
-	alts, _ := m["oneOf"].([]any)
+func isScalarUnion(m map[string]json.RawMessage) bool {
+	var alts []json.RawMessage
+	if json.Unmarshal(m["oneOf"], &alts) != nil {
+		return false
+	}
 	types := make([]string, 0, len(alts))
 	for _, alt := range alts {
-		types = append(types, text(schemaType(alt)))
+		types = append(types, text(schemaMembers(alt)["type"]))
 	}
 	slices.Sort(types)
 	return slices.Equal(types, []string{"integer", stringType})
@@ -330,7 +407,7 @@ func mergeParams(shared, own []DocParam) []DocParam {
 
 // bodyFields returns the required properties of a JSON object body. ok is false when the body is not one the
 // template can render.
-func bodyFields(doc *rawDoc, rb *rawBody) ([]DocParam, bool) {
+func (d *distiller) bodyFields(rb *rawBody) ([]DocParam, bool) {
 	media, hasJSON := rb.Content[jsonMedia]
 	if rb.Ref != "" || !hasJSON {
 		return nil, false
@@ -341,7 +418,7 @@ func bodyFields(doc *rawDoc, rb *rawBody) ([]DocParam, bool) {
 	}
 	if schema.Ref != "" {
 		var ok bool
-		if schema, ok = doc.schema(schema.Ref); !ok {
+		if schema, ok = d.doc.schema(schema.Ref); !ok {
 			return nil, false
 		}
 	}
@@ -358,7 +435,7 @@ func bodyFields(doc *rawDoc, rb *rawBody) ([]DocParam, bool) {
 			In:          string(apiref.LocationBody),
 			Type:        bodyType(prop),
 			Required:    true,
-			Description: apiref.StripMarkup(prop.Description, apiref.MaxInputDescription),
+			Description: d.prof.text(prop.Description, apiref.MaxInputDescription),
 		})
 	}
 	return fields, true
@@ -418,7 +495,11 @@ func responseType(resp map[string]rawResponse) string {
 	return ""
 }
 
+// firstMedia is application/json when the response lists it, otherwise the alphabetically first media type.
 func firstMedia(r rawResponse) string {
+	if _, ok := r.Content[jsonMedia]; ok {
+		return jsonMedia
+	}
 	var types []string
 	for mt := range r.Content {
 		types = append(types, mt)
