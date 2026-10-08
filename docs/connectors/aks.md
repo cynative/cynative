@@ -67,7 +67,7 @@ Use `auth_provider: "aks"` and include:
 }
 ```
 
-`aks_auth.subscription_id`, `aks_auth.resource_group`, and `aks_auth.cluster_name` are required for hardening and TLS resolution.
+`aks_auth.subscription_id`, `aks_auth.resource_group`, and `aks_auth.cluster_name` are required for hardening and TLS resolution. Each must follow Azure's naming rules, checked before cynative calls ARM: `subscription_id` is a GUID, `resource_group` is 1 to 90 letters, digits, underscores, parentheses, hyphens or periods and does not end with a period, and `cluster_name` is 1 to 63 letters, digits, hyphens or underscores, starting and ending with a letter or digit. Any other value is rejected without a request. The ARM client never registers a resource provider on your behalf: a subscription where `Microsoft.ContainerService` is not registered answers with an error.
 
 ### Minimal example
 

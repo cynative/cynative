@@ -123,7 +123,11 @@ func (a *GKEAuthArgs) validate() error {
 		return errors.New("gke_auth.cluster_name, location, and project are required for action authorization")
 	}
 
-	return nil
+	return errors.Join(
+		checkIdentifier("gke_auth.project", a.Project, gcpProjectID, gcpProjectNumber),
+		checkIdentifier("gke_auth.location", a.Location, gcpLocation),
+		checkIdentifier("gke_auth.cluster_name", a.ClusterName, gkeClusterName),
+	)
 }
 
 // InjectAuth sets the Authorization header using the GCP OAuth2 token.

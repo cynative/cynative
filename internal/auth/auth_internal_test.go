@@ -2158,8 +2158,9 @@ func TestAKSProvider_InjectAuth_LocalToken(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	req, _ := http.NewRequestWithContext(
@@ -2194,8 +2195,9 @@ func TestAKSProvider_InjectAuth_LocalmTLS(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	req, _ := http.NewRequestWithContext(
@@ -2225,8 +2227,9 @@ func TestAKSProvider_InjectAuth_ConfigError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	req, _ := http.NewRequestWithContext(
@@ -2260,8 +2263,9 @@ func TestAKSProvider_InjectAuth_ExecPluginFallback(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	req, _ := http.NewRequestWithContext(
@@ -2295,8 +2299,9 @@ func TestAKSProvider_CACertData_Success(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
@@ -2323,8 +2328,9 @@ func TestAKSProvider_CACertData_APIError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"missing","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"missing","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	_, err := p.CACertData(context.Background(), rawArgs)
@@ -2398,8 +2404,9 @@ func TestAKSProvider_CACertData_NoCAData(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
@@ -2422,7 +2429,10 @@ func TestAKSProvider_CACertData_EmptyClusterName(t *testing.T) {
 	// client (none is wired here).
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	rawArgs := providerArgs(aksProviderName, `{"aks_auth":{"resource_group":"my-rg","subscription_id":"sub-123"}}`)
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
+	)
 
 	got, err := p.CACertData(context.Background(), rawArgs)
 	if err != nil {
@@ -2440,7 +2450,10 @@ func TestAKSProvider_ClientCertData_EmptyClusterName(t *testing.T) {
 	// missing cluster_name returns empty/empty/nil without touching the ARM API.
 	p := &aksProvider{credential: mockCredential(azcore.AccessToken{}, nil)}
 
-	rawArgs := providerArgs(aksProviderName, `{"aks_auth":{"resource_group":"my-rg","subscription_id":"sub-123"}}`)
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
+	)
 
 	gotCert, gotKey, err := p.ClientCertData(context.Background(), rawArgs)
 	if err != nil {
@@ -2469,8 +2482,9 @@ func TestAKSProvider_ClientCertData_Success(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	gotCert, gotKey, err := p.ClientCertData(context.Background(), rawArgs)
@@ -2498,8 +2512,9 @@ func TestAKSProvider_ClientCertData_NoCerts(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	gotCert, gotKey, err := p.ClientCertData(context.Background(), rawArgs)
@@ -2572,8 +2587,9 @@ func TestAKSProvider_ClientCertData_APIError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	_, _, err := p.ClientCertData(context.Background(), rawArgs)
@@ -2606,8 +2622,9 @@ func TestAKSProvider_CacheHit(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	rawArgs := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	rawArgs := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	// First call to CA
@@ -2642,7 +2659,7 @@ func TestAKSGetClusterConfig_NoKubeconfigs(t *testing.T) {
 		aksClientFor(srv.URL, srv.Client()),
 		mockCredential(azcore.AccessToken{}, nil),
 		cloud.Configuration{},
-		"sub-123",
+		"00000000-1111-2222-3333-444444444444",
 		"my-rg",
 		"my-cluster",
 	)
@@ -2670,7 +2687,7 @@ func TestAKSGetClusterConfig_InvalidKubeconfig(t *testing.T) {
 		aksClientFor(srv.URL, srv.Client()),
 		mockCredential(azcore.AccessToken{}, nil),
 		cloud.Configuration{},
-		"sub-123",
+		"00000000-1111-2222-3333-444444444444",
 		"my-rg",
 		"my-cluster",
 	)
@@ -2697,7 +2714,7 @@ func TestAKSGetClusterConfig_ClientCreateError(t *testing.T) {
 		newClient,
 		mockCredential(azcore.AccessToken{}, nil),
 		cloud.Configuration{},
-		"sub-123",
+		"00000000-1111-2222-3333-444444444444",
 		"my-rg",
 		"my-cluster",
 	)
@@ -2732,7 +2749,7 @@ func TestDefaultAKSNewManagedClustersClient(t *testing.T) {
 	t.Parallel()
 
 	client, err := defaultAKSNewManagedClustersClient(
-		"sub-123",
+		"00000000-1111-2222-3333-444444444444",
 		mockCredential(azcore.AccessToken{}, nil),
 		NoProxy().azureClientOptions(cloud.Configuration{}),
 	)
@@ -3112,7 +3129,10 @@ func TestGKEProvider_AuthorizesHost(t *testing.T) {
 		}
 	}
 
-	args := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
+	args := providerArgs(
+		gkeProviderName,
+		`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"my-project"}}`,
+	)
 
 	ok, err := newProvider().AuthorizesHost(context.Background(), "34.71.1.2", args)
 	if err != nil || !ok {
@@ -3150,7 +3170,10 @@ func TestGKEProvider_AuthorizesHost_ResolveError(t *testing.T) {
 		},
 	}
 
-	args := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"l","project":"p"}}`)
+	args := providerArgs(
+		gkeProviderName,
+		`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"my-project"}}`,
+	)
 
 	_, err := p.AuthorizesHost(context.Background(), "x", args)
 	if err == nil || !strings.Contains(err.Error(), "get boom") {
@@ -3183,8 +3206,9 @@ func TestAKSProvider_AuthorizesHost(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	args := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	args := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	ok, err := p.AuthorizesHost(context.Background(), "my-cluster-dns.hcp.eastus.azmk8s.io", args)
@@ -3259,8 +3283,9 @@ func TestAKSProvider_AuthorizesHost_ConfigError(t *testing.T) {
 		newClient:  aksClientFor(srv.URL, srv.Client()),
 	}
 
-	args := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"missing","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	args := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"missing","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	_, err := p.AuthorizesHost(context.Background(), "x", args)
@@ -3283,7 +3308,11 @@ func TestAKSAuthArgs_validate(t *testing.T) {
 		{"nil", nil, true},
 		{"only cluster", &AKSAuthArgs{ClusterName: "c"}, true},
 		{"missing sub", &AKSAuthArgs{ClusterName: "c", ResourceGroup: "rg"}, true},
-		{"ok", &AKSAuthArgs{ClusterName: "c", ResourceGroup: "rg", SubscriptionID: "s"}, false},
+		{
+			"ok",
+			&AKSAuthArgs{ClusterName: "c", ResourceGroup: "rg", SubscriptionID: "00000000-1111-2222-3333-444444444444"},
+			false,
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -3926,7 +3955,10 @@ func TestGKEAuthorizeAction(t *testing.T) {
 		return p
 	}
 
-	rawArgs := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
+	rawArgs := providerArgs(
+		gkeProviderName,
+		`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"my-project"}}`,
+	)
 
 	t.Run("allows list deployments", func(t *testing.T) {
 		t.Parallel()
@@ -4007,7 +4039,7 @@ func TestAKSAuthorizeAction(t *testing.T) {
 
 	rawArgs := providerArgs(
 		aksProviderName,
-		`{"aks_auth":{"cluster_name":"c","resource_group":"rg","subscription_id":"sub"}}`,
+		`{"aks_auth":{"cluster_name":"c","resource_group":"rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	t.Run("allows list pods", func(t *testing.T) {
@@ -4202,7 +4234,7 @@ func TestGKEAuthArgs_validate(t *testing.T) {
 		{"nil", nil, true},
 		{"only cluster", &GKEAuthArgs{ClusterName: "c"}, true},
 		{"missing project", &GKEAuthArgs{ClusterName: "c", Location: "l"}, true},
-		{"ok", &GKEAuthArgs{ClusterName: "c", Location: "l", Project: "p"}, false},
+		{"ok", &GKEAuthArgs{ClusterName: "c", Location: "us-central1", Project: "my-project"}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -4373,7 +4405,10 @@ func TestGKEProvider_AuthorizesAddr(t *testing.T) {
 		}
 	}
 
-	args := providerArgs(gkeProviderName, `{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"p"}}`)
+	args := providerArgs(
+		gkeProviderName,
+		`{"gke_auth":{"cluster_name":"c","location":"us-central1","project":"my-project"}}`,
+	)
 
 	t.Run("allows the authoritative cloud IP", func(t *testing.T) {
 		t.Parallel()
@@ -4479,8 +4514,9 @@ func TestAKSProvider_AuthorizesAddr(t *testing.T) {
 		}
 	}
 
-	args := providerArgs(aksProviderName,
-		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"sub-123"}}`,
+	args := providerArgs(
+		aksProviderName,
+		`{"aks_auth":{"cluster_name":"my-cluster","resource_group":"my-rg","subscription_id":"00000000-1111-2222-3333-444444444444"}}`,
 	)
 
 	t.Run("allows an IP in the resolved set", func(t *testing.T) {

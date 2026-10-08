@@ -135,7 +135,11 @@ func (a *AKSAuthArgs) validate() error {
 		return errors.New("cluster_name, resource_group, and subscription_id are required")
 	}
 
-	return nil
+	return errors.Join(
+		checkIdentifier("aks_auth.subscription_id", a.SubscriptionID, azureSubscriptionID),
+		checkIdentifier("aks_auth.resource_group", a.ResourceGroup, azureResourceGroup),
+		checkIdentifier("aks_auth.cluster_name", a.ClusterName, aksClusterName),
+	)
 }
 
 func (p *aksProvider) getClusterConfig(ctx context.Context, args *AKSAuthArgs) (*rest.Config, error) {
@@ -312,7 +316,10 @@ func defaultAKSNewManagedClustersClient(
 	cred azcore.TokenCredential,
 	clientOpts azcore.ClientOptions,
 ) (*armcontainerservice.ManagedClustersClient, error) {
-	opts := &arm.ClientOptions{ClientOptions: clientOpts}
+	// Never register a resource provider: on a 409 MissingSubscriptionRegistration azcore would otherwise POST
+	// .../providers/Microsoft.ContainerService/register (a write) in the model-named subscription. A cluster cannot
+	// exist where its provider is unregistered, so registration never helps resolution.
+	opts := &arm.ClientOptions{ClientOptions: clientOpts, DisableRPRegistration: true}
 	return armcontainerservice.NewManagedClustersClient(subscriptionID, cred, opts)
 }
 
