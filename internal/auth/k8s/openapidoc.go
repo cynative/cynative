@@ -200,10 +200,18 @@ func Prepare(ctx context.Context, raw []byte, key string) (*Prepared, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("k8s: prepare: %w", err)
 		}
+		// The path item's parameters are checked once, when its first operation needs them, and shared by its
+		// methods; a path item with no operation never has them checked.
+		var shared []paramFacts
+		checked := false
 		for method, op := range item.ops() {
-			if op != nil {
-				p.add(method, path, &item, op)
+			if op == nil {
+				continue
 			}
+			if !checked {
+				shared, checked = p.factsOf(item.Parameters), true
+			}
+			p.add(method, path, shared, op)
 		}
 	}
 	for id, op := range p.admitted {
@@ -256,7 +264,7 @@ func checkCaps(doc *prepDoc) error {
 }
 
 // add indexes one operation under its id.
-func (p *prepper) add(method, path string, item *prepPathItem, op *prepOp) {
+func (p *prepper) add(method, path string, shared []paramFacts, op *prepOp) {
 	p.out.operations++
 	id := text(op.OperationID)
 	if !ValidOperationID(id) {
@@ -264,7 +272,7 @@ func (p *prepper) add(method, path string, item *prepPathItem, op *prepOp) {
 		return
 	}
 	labels, pathOK := pathLabels(path, p.key)
-	declared, reason := p.parameters(item, op)
+	declared, reason := parameters(shared, p.factsOf(op.Parameters))
 	// A route is safe to show, as an ambiguity choice among others, only when the whole path form holds: every
 	// label also names a declared path parameter.
 	labelsOK := pathOK && allDeclared(labels, declared)
@@ -288,13 +296,23 @@ func (p *prepper) add(method, path string, item *prepPathItem, op *prepOp) {
 	p.admitted[id] = op
 }
 
-// parameters checks the parameters of one operation. It returns the names of its valid declared path parameters,
-// collected from every parameter whatever its order, and the first reason a parameter cannot be rendered, or "".
-func (p *prepper) parameters(item *prepPathItem, op *prepOp) (map[string]bool, string) {
+// factsOf checks each parameter of a list.
+func (p *prepper) factsOf(list []prepParam) []paramFacts {
+	out := make([]paramFacts, len(list))
+	for i, raw := range list {
+		out[i] = p.facts(raw)
+	}
+
+	return out
+}
+
+// parameters reads the checked parameters of one operation, the path item's then its own. It returns the names of
+// its valid declared path parameters, collected from every parameter whatever its order, and the first reason a
+// parameter cannot be rendered, or "".
+func parameters(shared, own []paramFacts) (map[string]bool, string) {
 	declared, reason := map[string]bool{}, ""
-	for _, list := range [][]prepParam{item.Parameters, op.Parameters} {
-		for _, raw := range list {
-			f := p.facts(raw)
+	for _, list := range [][]paramFacts{shared, own} {
+		for _, f := range list {
 			switch {
 			case f.reason != "":
 				if reason == "" {

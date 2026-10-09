@@ -227,6 +227,9 @@ func DistillContext(ctx context.Context, raw []byte, prof Profile) (*OperationDo
 			"GET": item.Get, "HEAD": item.Head, "POST": item.Post, "PUT": item.Put,
 			"PATCH": item.Patch, "DELETE": item.Delete, "OPTIONS": item.Options,
 		}
+		// The path item's parameters are converted once, when its first kept operation needs them, and shared.
+		var shared []DocParam
+		converted := false
 		for method, op := range ops {
 			if op == nil || op.OperationID == "" {
 				continue
@@ -234,7 +237,10 @@ func DistillContext(ctx context.Context, raw []byte, prof Profile) (*OperationDo
 			if prof.Keep != nil && !prof.Keep(method, path, op.OperationID) {
 				continue
 			}
-			out.Ops[op.OperationID] = d.op(method, path, &item, op)
+			if !converted {
+				shared, converted = d.params(item.Parameters), true
+			}
+			out.Ops[op.OperationID] = d.op(method, path, &item, shared, op)
 		}
 	}
 	if err := Admit(out); err != nil {
@@ -251,12 +257,12 @@ func (p *Profile) text(s string, maxRunes int) string {
 	return apiref.StripMarkup(s, maxRunes)
 }
 
-func (d *distiller) op(method, path string, item *rawPathItem, op *rawOp) OperationDoc {
+func (d *distiller) op(method, path string, item *rawPathItem, shared []DocParam, op *rawOp) OperationDoc {
 	out := OperationDoc{
 		Method:  method,
 		Path:    path,
 		Summary: d.prof.text(op.Summary, apiref.MaxSummary),
-		Params:  mergeParams(d.params(item.Parameters), d.params(op.Parameters)),
+		Params:  mergeParams(shared, d.params(op.Parameters)),
 	}
 	if d.prof.Endpoint != "" {
 		if server := serverURL(d.prof.Endpoint, op.Servers, item.Servers, d.doc.Servers); server != d.prof.Endpoint {

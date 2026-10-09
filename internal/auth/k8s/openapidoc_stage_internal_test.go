@@ -40,6 +40,10 @@ func scalarStringDocument() []byte {
 		strings.Repeat("x ", 3*quarter) + `","schema":{"type":"string"}}]}}}}`)
 }
 
+// methodlessItemBudget bounds the pre-pass over atCapDocument: the parameters of a path item with no operation are
+// never checked. Checked, they cost about 83 MB; unchecked, about 43 MB.
+const methodlessItemBudget = 64 << 20
+
 type stageFigures struct {
 	live, prepAlloc, coreAlloc uint64
 }
@@ -99,6 +103,9 @@ func TestParseDocument_AtTheElementCapWithinItsBudgets(t *testing.T) {
 	}
 	d, f := measureStage(t, body)
 	checkStage(t, "at the element cap", len(body), f)
+	if f.prepAlloc > methodlessItemBudget {
+		t.Errorf("the pre-pass allocated %d bytes, budget %d", f.prepAlloc, methodlessItemBudget)
+	}
 	if res := lookup(d, "a"); res.Outcome != apiref.OutcomeFound {
 		t.Errorf("lookup: %+v", res)
 	}
@@ -155,6 +162,39 @@ func TestParseDocument_ANestedTypeWithinItsBudgets(t *testing.T) {
 	d, f := measureStage(t, body)
 	checkStage(t, "a nested parameter type", len(body), f)
 	if res := lookup(d, "a"); res.Outcome != apiref.OutcomeFound || res.Reference.Inputs[0].Type != "unknown" {
+		t.Errorf("lookup: %+v", res)
+	}
+}
+
+// sharedParameterBudget bounds each pass over sharedPathParameterDocument: a path item's parameters are read once,
+// not once per method, so the schema is copied once. Read per method it cost about 84 MB a pass.
+const sharedParameterBudget = 32 << 20
+
+// sharedPathParameterDocument is just under the document cap: one path item whose single inline query parameter
+// carries a schema description of nearly the whole body, shared by seven methods with distinct ids.
+func sharedPathParameterDocument() []byte {
+	var ops []string
+	for _, m := range []string{"get", "put", "post", "delete", "options", "head", "patch"} {
+		ops = append(ops, `"`+m+`":{"operationId":"`+m+`A"}`)
+	}
+
+	return []byte(`{"paths":{"/apis/apps/v1/a":{"parameters":[{"name":"q","in":"query","schema":{"type":"string",` +
+		`"description":"` + strings.Repeat("x", maxDocumentBytes-1024) + `"}}],` + strings.Join(ops, ",") + `}}}`)
+}
+
+//nolint:paralleltest // reads process-wide runtime.MemStats, so it cannot share the process with parallel tests.
+func TestParseDocument_ASharedPathParameterWithinItsBudgets(t *testing.T) {
+	body := sharedPathParameterDocument()
+	if len(body) >= maxDocumentBytes {
+		t.Fatalf("the shape is %d bytes, over the document cap", len(body))
+	}
+	d, f := measureStage(t, body)
+	checkStage(t, "a shared path parameter", len(body), f)
+	if f.prepAlloc > sharedParameterBudget || f.coreAlloc > sharedParameterBudget {
+		t.Errorf("the pre-pass allocated %d bytes and one core decode %d bytes, budget %d each", f.prepAlloc,
+			f.coreAlloc, sharedParameterBudget)
+	}
+	if res := lookup(d, "getA"); res.Outcome != apiref.OutcomeFound {
 		t.Errorf("lookup: %+v", res)
 	}
 }
