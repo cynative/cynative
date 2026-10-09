@@ -198,3 +198,33 @@ func TestParseDocument_ASharedPathParameterWithinItsBudgets(t *testing.T) {
 		t.Errorf("lookup: %+v", res)
 	}
 }
+
+// largeRefBesideUnusedParametersDocument is just under both caps: an admitted operation whose response schema
+// $ref is nearly the whole body, beside a method-less path item holding most of the counted elements as {}
+// parameters. Each cost alone fits the budget; decoding the unused parameters as well did not.
+func largeRefBesideUnusedParametersDocument() []byte {
+	var b strings.Builder
+	b.WriteString(`{"openapi":"3.0.0","info":{"title":"t","version":"v"},"paths":{"/apis/apps/v1/a":{"get":{` +
+		`"operationId":"a","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"`)
+	b.WriteString(strings.Repeat("r", 10_180_000))
+	b.WriteString(`"}}}}}}},"/apis/apps/v1/p":{"parameters":[{}`)
+	for range MaxDocumentElements - 21 {
+		b.WriteString(`,{}`)
+	}
+	b.WriteString(`]}}}`)
+
+	return []byte(b.String())
+}
+
+//nolint:paralleltest // reads process-wide runtime.MemStats, so it cannot share the process with parallel tests.
+func TestParseDocument_ALargeRefBesideUnusedParametersWithinItsBudgets(t *testing.T) {
+	body := largeRefBesideUnusedParametersDocument()
+	if n, err := Scan(t.Context(), body, MaxDocumentElements); err != nil || len(body) >= maxDocumentBytes {
+		t.Fatalf("the shape is %d bytes and %d elements (%v), want both under their caps", len(body), n, err)
+	}
+	d, f := measureStage(t, body)
+	checkStage(t, "a large $ref beside unused parameters", len(body), f)
+	if res := lookup(d, "a"); res.Outcome != apiref.OutcomeFound {
+		t.Errorf("lookup: %+v", res)
+	}
+}

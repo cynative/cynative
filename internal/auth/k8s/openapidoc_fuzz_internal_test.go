@@ -8,7 +8,8 @@ import (
 
 // FuzzPrepare checks that the pre-pass never panics and admits only an operation whose path passes the path form
 // and stays inside its group-version, with an id in the lookup grammar. The seeds reach every branch: each cap,
-// each unrenderable reason, two invalid parameters before a valid path declaration, a duplicate, an excluded id, each refusal and a component reference.
+// each unrenderable reason, two invalid parameters before a valid path declaration, a duplicate, an excluded id,
+// each refusal (malformed path-item parameters with and without an operation included) and a component reference.
 func FuzzPrepare(f *testing.F) {
 	for _, s := range []string{
 		opDoc("/apis/apps/v1/namespaces/{namespace}", `"parameters":[`+nsParam+`],"get":{"operationId":"a"}`),
@@ -24,6 +25,7 @@ func FuzzPrepare(f *testing.F) {
 			`"components":{"parameters":{"p":{"name":"p","in":"query"}}}}`,
 		opDoc("/apis/apps/v1", `"get":{"operationId":"a","parameters":[`+strings.Repeat(`{},`, 64)+`{}]}`),
 		`{"paths":[]}`, `{"paths":{}}`, `{"paths":{"/a":{"get":{}}}}`,
+		`{"paths":{"/a":{"parameters":{}}}}`, `{"paths":{"/a":{"parameters":{},"get":{}}}}`,
 	} {
 		f.Add(s)
 	}

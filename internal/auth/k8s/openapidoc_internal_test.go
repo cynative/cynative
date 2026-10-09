@@ -229,9 +229,12 @@ func TestPrepare_IndexClasses(t *testing.T) {
 func TestPrepare_Refusals(t *testing.T) {
 	t.Parallel()
 	for doc, want := range map[string]string{
-		`{"paths":[]}`:                       "the document does not decode into the OpenAPI shape this tool reads",
-		`{"paths":{"/a":{"get":5}}}`:         "the document does not decode into the OpenAPI shape this tool reads",
-		`{"paths":{"/a":{"parameters":{}}}}`: "the document does not decode into the OpenAPI shape this tool reads",
+		`{"paths":[]}`:               "the document does not decode into the OpenAPI shape this tool reads",
+		`{"paths":{"/a":{"get":5}}}`: "the document does not decode into the OpenAPI shape this tool reads",
+		// A path item's parameters are decoded only when one of its operations needs them.
+		`{"paths":{"/a":{"parameters":{}}}}`: "the document lists no operation",
+		`{"paths":{"/a":{"parameters":{},"get":{}}}}`: "the document does not decode into the OpenAPI shape this " +
+			"tool reads",
 		`{"paths":{"/a":{"get":{"parameters":[{"$ref":5}]}}}}`: "the document does not decode into the OpenAPI shape " +
 			"this tool reads",
 		`{"paths":{}}`:                                "the document lists no operation",

@@ -142,14 +142,17 @@ type prepOp struct {
 
 // prepPathItem has the core's method fields and JSON names, so encoding/json binds the same method keys in both.
 type prepPathItem struct {
-	Parameters []prepParam `json:"parameters"`
-	Get        *prepOp     `json:"get"`
-	Head       *prepOp     `json:"head"`
-	Post       *prepOp     `json:"post"`
-	Put        *prepOp     `json:"put"`
-	Patch      *prepOp     `json:"patch"`
-	Delete     *prepOp     `json:"delete"`
-	Options    *prepOp     `json:"options"`
+	// RawParameters stays raw until an operation of the item needs it: a path item with no operation can hold most
+	// of a document's counted elements, and decoding them would cost slices nothing reads.
+	RawParameters json.RawMessage `json:"parameters"`
+	Parameters    []prepParam     `json:"-"`
+	Get           *prepOp         `json:"get"`
+	Head          *prepOp         `json:"head"`
+	Post          *prepOp         `json:"post"`
+	Put           *prepOp         `json:"put"`
+	Patch         *prepOp         `json:"patch"`
+	Delete        *prepOp         `json:"delete"`
+	Options       *prepOp         `json:"options"`
 }
 
 func (it *prepPathItem) ops() map[string]*prepOp {
@@ -240,10 +243,17 @@ func Prepare(ctx context.Context, raw []byte, key string) (*Prepared, error) {
 // checkCaps refuses a document over a cap before anything is indexed.
 func checkCaps(doc *prepDoc) error {
 	ops, refs := 0, 0
-	for _, item := range doc.Paths {
+	for path, item := range doc.Paths {
+		decoded := false
 		for _, op := range item.ops() {
 			if op == nil {
 				continue
+			}
+			if !decoded {
+				if len(item.RawParameters) > 0 && json.Unmarshal(item.RawParameters, &item.Parameters) != nil {
+					return ErrShape
+				}
+				doc.Paths[path], decoded = item, true
 			}
 			ops++
 			n := len(item.Parameters) + len(op.Parameters)
