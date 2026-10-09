@@ -359,7 +359,9 @@ func TestReference_UnmarkedWriteBodiesAreGaps(t *testing.T) {
 		`{"name":"name","in":"path","required":true,"schema":{"type":"string"}}],`+
 		`"put":{"operationId":"replace",`+body("Deployment")+`},`+
 		`"patch":{"operationId":"patch",`+body("Deployment")+`},`+
-		`"delete":{"operationId":"remove",`+body("DeleteOptions")+`}}}}`), v)
+		`"delete":{"operationId":"remove",`+body("DeleteOptions")+`},`+
+		`"get":{"operationId":"read",`+body("Deployment")+`},`+
+		`"options":{"operationId":"probe",`+body("Deployment")+`}}}}`), v)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,6 +373,12 @@ func TestReference_UnmarkedWriteBodiesAreGaps(t *testing.T) {
 		if ref := found(t, d, id, apiref.OutcomeIncomplete); !slices.Contains(ref.Gaps, gap) ||
 			slices.Contains(ref.Limitations, "optional request body is not rendered") {
 			t.Errorf("%s: gaps %q limitations %q, want the gap %q", id, ref.Gaps, ref.Limitations, gap)
+		}
+	}
+	// A read that declares an optional body keeps it optional: only create, replace and patch need one.
+	for _, id := range []string{"read", "probe"} {
+		if ref := found(t, d, id, apiref.OutcomeFound); len(ref.Gaps) != 0 {
+			t.Errorf("%s: gaps %q", id, ref.Gaps)
 		}
 	}
 	if ref := found(t, d, "remove", apiref.OutcomeFound); len(ref.Gaps) != 0 ||
