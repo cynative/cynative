@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/cynative/cynative/internal/audit"
+	"github.com/cynative/cynative/internal/auth"
 	"github.com/cynative/cynative/internal/sandbox"
 	"github.com/cynative/cynative/internal/schema"
 )
@@ -56,4 +57,24 @@ func WithCodeSandboxFactory(fn func(map[string]sandbox.ToolFunc, io.Writer, int)
 // WithCodeIDFunc injects the inner call-ID generator for deterministic tests.
 func WithCodeIDFunc(fn func() string) codeExecOption {
 	return func(o *codeExecOptions) { o.newID = fn }
+}
+
+// ReadExecutor re-exports the targeted reader's executor seam for tests.
+type ReadExecutor = readExecutor
+
+// NewAPIReferenceToolWithOpts exposes the api_reference constructor with its seams.
+func NewAPIReferenceToolWithOpts(
+	providers []auth.Provider, egress *auth.Egress, sink audit.Sink, opts ...apiReferenceOption,
+) schema.InvokableTool {
+	return newAPIReferenceTool(providers, egress, sink, opts...)
+}
+
+// WithReferenceExecutor replaces the targeted reader's transport.Client.ExecuteStructured.
+func WithReferenceExecutor(fn ReadExecutor) apiReferenceOption {
+	return func(t *apiReferenceTool) { t.execute = fn }
+}
+
+// WithReferenceIDFunc injects the child record call-ID generator.
+func WithReferenceIDFunc(fn func() string) apiReferenceOption {
+	return func(t *apiReferenceTool) { t.newID = fn }
 }

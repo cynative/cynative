@@ -128,6 +128,10 @@ const resp = await http_request({
 console.log(resp.body);
 ```
 
+## API reference lookups
+
+`api_reference` with `connector` `kubernetes`, `kubernetes_auth` `{}`, `model` set to the apiVersion (`apps/v1`, or `v1` for the core group) and `operation` set to the OpenAPI `operationId` (`listAppsV1NamespacedDeployment`) describes the operation as this cluster serves it, CRDs and aggregated APIs included. It reads `GET /openapi/v3`, then `GET /openapi/v3/<group-version>` with the hash the root published, then `GET /version`, with the connector's credentials and through the same host pin, port pin, read-only gate, dial guard and redaction as `http_request`. It shows no approval prompt. A lookup whose arguments pass is audited with the decision `unprompted`, and each read as a `lookup_read` record carrying the lookup's call ID. It changes nothing the gate allows or denies, and a request it describes still needs an approved `http_request`. See [api-reference.md](api-reference.md#kubernetes-targeted).
+
 ## Hardening
 
 - Cynative reads the cluster endpoint, CA, and credential from the local kubeconfig — never from a cloud API and never by executing an exec plugin.

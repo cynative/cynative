@@ -24,6 +24,8 @@ type Scope struct {
 	SessionID string
 	RunID     string
 	Depth     int
+	// CallID is the dispatch loop's call ID for the tool call, so a tool's child records can name their parent.
+	CallID string
 }
 
 // WithScope attaches s to ctx.
@@ -47,6 +49,9 @@ type Decision struct {
 	// Session is set when the approval came from a pre-existing per-tool session
 	// grant (the operator's earlier [a]) rather than a fresh prompt for this call.
 	Session bool
+	// Unprompted is set by an ungated tool whose call could use a connector's
+	// credentials for metadata reads (a targeted api_reference lookup).
+	Unprompted bool
 }
 
 // WithDecision installs a fresh Decision recorder on ctx and returns it.
@@ -71,6 +76,15 @@ func RecordDecision(ctx context.Context, approved bool) {
 func RecordSessionApproval(ctx context.Context) {
 	if d, ok := ctx.Value(decisionKey).(*Decision); ok {
 		d.Decided, d.Approved, d.Session = true, true, true
+	}
+}
+
+// RecordUnprompted marks the call as one that may use a connector's
+// credentials without a prompt, so the loop labels it unprompted rather than
+// ungated. It is a no-op when no recorder is installed.
+func RecordUnprompted(ctx context.Context) {
+	if d, ok := ctx.Value(decisionKey).(*Decision); ok {
+		d.Unprompted = true
 	}
 }
 

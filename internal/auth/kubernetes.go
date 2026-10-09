@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
@@ -401,6 +402,10 @@ type kubernetesProvider struct {
 	cluster  resolvedCluster
 	resolver addrResolver
 	readFile func(string) ([]byte, error)
+	// refs caches the distilled /openapi/v3 documents targeted lookups read, for this session.
+	refs *kubeRefCache
+	// now stamps when a lookup read its document.
+	now func() time.Time
 }
 
 var (
@@ -422,6 +427,8 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 		cluster:  cluster,
 		resolver: defaultResolveAddrs,
 		readFile: defaultReadFile,
+		refs:     &kubeRefCache{},
+		now:      time.Now,
 	}
 	p.fetchView = p.defaultFetchView // branch-free; body in kubernetes_shell.go.
 	p.cacheKey = func(*KubernetesAuthArgs) string { return "self" }
@@ -446,7 +453,9 @@ func (p *kubernetesProvider) Description() string {
 			"(KUBECONFIG / ~/.kube/config, current-context). Targets the single configured cluster at "+
 			"https://%s, which is the only authority accepted: send every request to that host AND port. "+
 			"Pass auth_provider=\"kubernetes\". The CA and credentials are resolved from the kubeconfig; "+
-			"do NOT provide them.", p.cluster.authority,
+			"do NOT provide them. For an operation's request template as this cluster serves it, call "+
+			"api_reference with connector \"kubernetes\", kubernetes_auth {}, model set to the apiVersion and "+
+			"the operationId.", p.cluster.authority,
 	)
 }
 

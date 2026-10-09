@@ -29,6 +29,32 @@ func StripMarkup(s string, maxRunes int) string {
 	return Truncate(strings.Join(strings.Fields(html.UnescapeString(b.String())), " "), maxRunes)
 }
 
+// StripMarkupCut is StripMarkup for text of any length. When s is longer than maxBytes it is first cut at the last
+// rune boundary at or below maxBytes, so the stripping and the field split work on at most maxBytes bytes, and the
+// result then always ends with the ellipsis, even when the stripped prefix is short: a tag left open by the cut
+// drops the rest of the prefix, as an open tag does in StripMarkup. A maxRunes below the ellipsis length keeps the
+// first max(maxRunes, 0) runes with no ellipsis, as Truncate does.
+func StripMarkupCut(s string, maxBytes, maxRunes int) string {
+	if len(s) <= maxBytes {
+		return StripMarkup(s, maxRunes)
+	}
+	end := maxBytes
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	// The stripped text of at most maxBytes bytes has at most maxBytes runes, so this call never truncates.
+	runes := []rune(StripMarkup(s[:end], maxBytes))
+	if maxRunes < len(ellipsis) {
+		// As Truncate does, a bound below the ellipsis length keeps the first runes and no ellipsis.
+		return string(runes[:min(len(runes), max(maxRunes, 0))])
+	}
+	if keep := maxRunes - len(ellipsis); len(runes) > keep {
+		runes = runes[:keep]
+	}
+
+	return string(runes) + ellipsis
+}
+
 // Truncate cuts s to at most maxRunes runes, replacing the tail with an
 // ellipsis when it cuts. When maxRunes is below the ellipsis length the first
 // max(maxRunes, 0) runes are returned with no ellipsis.
@@ -41,4 +67,11 @@ func Truncate(s string, maxRunes int) string {
 		return string(runes[:max(maxRunes, 0)])
 	}
 	return string(runes[:maxRunes-len(ellipsis)]) + ellipsis
+}
+
+// Bounded cuts head so that head followed by suffix fits in MaxReason runes. The cut falls in head, never in suffix,
+// so host guidance appended after an echo of model or cluster text survives any echo length. suffix must itself fit
+// in MaxReason runes; a longer one is returned whole.
+func Bounded(head, suffix string) string {
+	return Truncate(head, MaxReason-utf8.RuneCountInString(suffix)) + suffix
 }

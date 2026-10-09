@@ -124,6 +124,12 @@ type Source struct {
 	Document string `json:"document"`
 	Version  string `json:"version,omitempty"`
 	SHA256   string `json:"sha256,omitempty"`
+	// Target names the endpoint a targeted lookup read the document from.
+	Target string `json:"target,omitempty"`
+	// ServerHash is the document hash the server confirmed, empty when the document was read without one.
+	ServerHash string `json:"server_hash,omitempty"`
+	// ObservedAt is the RFC 3339 UTC time the document was read.
+	ObservedAt string `json:"observed_at,omitempty"`
 }
 
 // Reference is the full description of one operation.
