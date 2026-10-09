@@ -96,3 +96,13 @@ func TestBounded(t *testing.T) {
 		t.Errorf("long head: %d runes, %q", utf8.RuneCountInString(got), got[len(got)-60:])
 	}
 }
+
+func TestStripMarkupCut_BelowEllipsisLength(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("ab ", 100)
+	for n, want := range map[int]string{-1: "", 0: "", 1: "a", 2: "ab", 3: "..."} {
+		if got := apiref.StripMarkupCut(long, 16, n); got != want {
+			t.Errorf("maxRunes %d: %q, want %q", n, got, want)
+		}
+	}
+}

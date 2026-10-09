@@ -12,7 +12,7 @@ import (
 // out-of-range number.
 func FuzzScan(f *testing.F) {
 	for _, s := range []string{
-		``, `5`, `"x"`, `{}`, `[]`, `{"a":[1,{"b":null}]}`, `{"a":`, `{"a" 1}`, `{} {}`, `[1]]`,
+		``, `5`, `"x"`, `{}`, `[]`, `}`, `]`, `{"a":[1,{"b":null}]}`, `{"a":`, `{"a" 1}`, `{} {}`, `[1]]`,
 		`{"components":{"schemas":{"A":{"x":[1,2]}}}}`, `{"Components":{"SCHEMAS":{"A":{}}}}`,
 		`{"components":[{"schemas":{}}]}`, `{"x-n":1e400}`, string(nested(MaxScanDepth + 1)), string(members(3)),
 		`{"` + strings.Repeat("k", MaxKeyBytes+1) + `":1}`,

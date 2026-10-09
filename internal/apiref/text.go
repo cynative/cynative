@@ -32,7 +32,8 @@ func StripMarkup(s string, maxRunes int) string {
 // StripMarkupCut is StripMarkup for text of any length. When s is longer than maxBytes it is first cut at the last
 // rune boundary at or below maxBytes, so the stripping and the field split work on at most maxBytes bytes, and the
 // result then always ends with the ellipsis, even when the stripped prefix is short: a tag left open by the cut
-// drops the rest of the prefix, as an open tag does in StripMarkup. maxRunes is at least the ellipsis length.
+// drops the rest of the prefix, as an open tag does in StripMarkup. A maxRunes below the ellipsis length keeps the
+// first max(maxRunes, 0) runes with no ellipsis, as Truncate does.
 func StripMarkupCut(s string, maxBytes, maxRunes int) string {
 	if len(s) <= maxBytes {
 		return StripMarkup(s, maxRunes)
@@ -43,6 +44,10 @@ func StripMarkupCut(s string, maxBytes, maxRunes int) string {
 	}
 	// The stripped text of at most maxBytes bytes has at most maxBytes runes, so this call never truncates.
 	runes := []rune(StripMarkup(s[:end], maxBytes))
+	if maxRunes < len(ellipsis) {
+		// As Truncate does, a bound below the ellipsis length keeps the first runes and no ellipsis.
+		return string(runes[:min(len(runes), max(maxRunes, 0))])
+	}
 	if keep := maxRunes - len(ellipsis); len(runes) > keep {
 		runes = runes[:keep]
 	}
