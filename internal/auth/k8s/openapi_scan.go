@@ -20,6 +20,10 @@ const (
 	MaxDocumentElements = 100_000
 	// MaxRootElements bounds the counted elements of the /openapi/v3 root.
 	MaxRootElements = 10_000
+	// MaxKeyBytes bounds every decoded object key at any depth. Keys become paths, media types and parameter and
+	// header names that later steps copy, compare and render per operation and per lookup; the longest key in the
+	// live documents of a 1.34 cluster is 90 bytes.
+	MaxKeyBytes = 4096
 	// maxCountedDepth is the deepest container whose members or elements are counted. The pre-pass and the core
 	// decode a document into maps, slices and structs no deeper than this; every deeper value they read is held as
 	// raw JSON or decoded into a string, so it costs its bytes and no Go values.
@@ -44,11 +48,11 @@ type scanFrame struct {
 	key        string
 }
 
-// Scan reads body token by token, keeping only the stack of open containers, and refuses it when it nests deeper
-// than MaxScanDepth, when it counts more than maxElements elements, or when it is not one JSON value. A counted
-// element is an object member or an array element in a container at depth maxCountedDepth or less, except
-// anything below a member of components.schemas. Numbers are kept as text (UseNumber), so an out-of-range literal
-// in a subtree no decode reads does not fail the pass. It returns the count.
+// Scan reads body token by token, keeping only the stack of open containers, and refuses it when it nests deeper than
+// MaxScanDepth, when an object key is longer than MaxKeyBytes, when it counts more than maxElements elements, or when
+// it is not one JSON value. A counted element is an object member or an array element in a container at depth
+// maxCountedDepth or less, except anything below a member of components.schemas. Numbers are kept as text (UseNumber),
+// so an out-of-range literal in a subtree no decode reads does not fail the pass. It returns the count.
 func Scan(ctx context.Context, body []byte, maxElements int) (int, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
@@ -112,6 +116,9 @@ func scanStep(stack []scanFrame, tok json.Token) ([]scanFrame, bool, error) {
 	if top.object && top.wantKey {
 		// encoding/json returns every object key as a string token.
 		top.key, _ = tok.(string)
+		if len(top.key) > MaxKeyBytes {
+			return stack, false, fmt.Errorf("%w: an object key longer than %d bytes", ErrScanRefused, MaxKeyBytes)
+		}
 		top.wantKey = false
 
 		return stack, countable(top), nil

@@ -39,6 +39,25 @@ func TestScan_Depth(t *testing.T) {
 	}
 }
 
+func TestScan_KeyLength(t *testing.T) {
+	t.Parallel()
+	doc := func(key string) []byte { return []byte(`{"paths":{"/p":{"x":[{"` + key + `":1}]}}}`) }
+	if _, err := Scan(t.Context(), doc(strings.Repeat("k", MaxKeyBytes)), MaxDocumentElements); err != nil {
+		t.Fatalf("a %d-byte key: %v", MaxKeyBytes, err)
+	}
+	// The cap applies to the decoded key at any depth, counted or not, so an escaped spelling is no shorter.
+	for _, key := range []string{strings.Repeat("k", MaxKeyBytes+1), strings.Repeat(`\u006b`, MaxKeyBytes+1)} {
+		deep := []byte(string(nested(12)[:12]) + `{"` + key + `":1}` + string(nested(12)[12:]))
+		for _, body := range [][]byte{doc(key), deep} {
+			_, err := Scan(t.Context(), body, MaxDocumentElements)
+			if !errors.Is(err, ErrScanRefused) || err.Error() != fmt.Sprintf(
+				"refused by the streaming pass: an object key longer than %d bytes", MaxKeyBytes) {
+				t.Errorf("a %d-byte body: err = %v", len(body), err)
+			}
+		}
+	}
+}
+
 func TestScan_ElementCaps(t *testing.T) {
 	t.Parallel()
 	for _, limit := range []int{MaxRootElements, MaxDocumentElements} {
