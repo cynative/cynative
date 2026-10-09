@@ -328,3 +328,23 @@ func TestPrepare_TheFirstInvalidParameterNamesTheReason(t *testing.T) {
 		}
 	}
 }
+
+// TestPrepare_AnOperationParameterOverridesTheShared pins OpenAPI's override rule, which the core's merge applies:
+// an operation parameter with the same name and location replaces the path item's, so a shared definition the
+// tool cannot render does not count against an operation that overrides it.
+func TestPrepare_AnOperationParameterOverridesTheShared(t *testing.T) {
+	t.Parallel()
+	const bad = `{"name":"q","in":"query","schema":{"type":"file"}}`
+	p := prepare(t, opDoc("/apis/apps/v1/a", `"parameters":[`+bad+`],`+
+		`"get":{"operationId":"over","parameters":[{"name":"q","in":"query","schema":{"type":"string"}}]},`+
+		`"put":{"operationId":"other","parameters":[{"name":"q","in":"header","schema":{"type":"string"}}]},`+
+		`"post":{"operationId":"plain"}`))
+	if e := p.Index["over"]; e.Class != ClassAdmitted {
+		t.Errorf("an overridden shared parameter still counted: %+v", e)
+	}
+	for _, id := range []string{"other", "plain"} {
+		if e := p.Index[id]; e.Class != ClassUnrenderable || e.Reason != reasonType {
+			t.Errorf("%s: %+v, want the shared parameter's type reason", id, e)
+		}
+	}
+}

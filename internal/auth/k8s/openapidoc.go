@@ -320,9 +320,18 @@ func (p *prepper) factsOf(list []prepParam) []paramFacts {
 // its valid declared path parameters, collected from every parameter whatever its order, and the first reason a
 // parameter cannot be rendered, or "".
 func parameters(shared, own []paramFacts) (map[string]bool, string) {
+	// An operation parameter replaces the path item's with the same name and location, as the core's merge does,
+	// so a shared definition it overrides is not checked against the operation.
+	overridden := map[[2]string]bool{}
+	for _, f := range own {
+		overridden[[2]string{f.name, f.in}] = true
+	}
 	declared, reason := map[string]bool{}, ""
-	for _, list := range [][]paramFacts{shared, own} {
+	for i, list := range [][]paramFacts{shared, own} {
 		for _, f := range list {
+			if i == 0 && overridden[[2]string{f.name, f.in}] {
+				continue
+			}
 			switch {
 			case f.reason != "":
 				if reason == "" {
