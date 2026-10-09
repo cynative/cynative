@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.14.0](https://github.com/cynative/cynative/compare/v1.13.0...v1.14.0) (2026-10-09)
+
+
+### Features
+
+* add api_reference and unmatched hints for the gcp connector ([#378](https://github.com/cynative/cynative/issues/378)) ([2333a03](https://github.com/cynative/cynative/commit/2333a03d91b1ecb52a1d4506de7dcb5b4385ad5a))
+* add api_reference and unmatched hints for the gitlab connector ([#370](https://github.com/cynative/cynative/issues/370)) ([0407265](https://github.com/cynative/cynative/commit/0407265a1b5f7fcded08e7cd538dfa497697e2c8))
+* add targeted api_reference lookups for the kubernetes connector ([#385](https://github.com/cynative/cynative/issues/385)) ([13b9c61](https://github.com/cynative/cynative/commit/13b9c619eb0065c90cac1955549d3c02514f2ac0))
+* match GitLab api_reference to the instance's version ([#384](https://github.com/cynative/cynative/issues/384)) ([bd1ebaf](https://github.com/cynative/cynative/commit/bd1ebaf418d567b1f503b730f3275a76ce98645f))
+
+
+### Bug Fixes
+
+* validate managed-cluster identifiers and never register Azure resource providers ([#383](https://github.com/cynative/cynative/issues/383)) ([df9e67c](https://github.com/cynative/cynative/commit/df9e67ca2000fa35760d3adbe9485c5bdad39098))
+
+
+### Dependencies
+
+* bump github.com/dlclark/regexp2/v2 from 2.8.2 to 2.8.3 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/go-git/go-git/v5 from 5.19.2 to 5.19.3 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/go-openapi/analysis from 1.0.0 to 1.0.1 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/go-openapi/runtime from 0.33.2 to 0.33.3 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/go-openapi/runtime/server-middleware from 0.33.2 to 0.33.3 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/go-openapi/strfmt from 0.27.2 to 0.27.3 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/mattn/go-colorable from 0.1.15 to 0.1.16 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/maximhq/bifrost/core from 1.11.1 to 1.11.3 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/Microsoft/go-winio from 0.6.2 to 0.6.3 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/molecule-man/go-brrr from 1.1.1 to 1.2.0 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/pierrec/lz4/v4 from 4.1.32 to 4.1.33 ([54e93a1](https://github.com/cynative/cynative/commit/54e93a1c10c289de4be94cfb7ceec19a7d9f0e3e))
+* bump github.com/shopspring/decimal from 1.4.0 to 1.5.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/slack-go/slack from 0.29.0 to 0.30.0 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/slack-go/slack from 0.30.0 to 0.30.1 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/spiffe/go-spiffe/v2 from 2.8.2 to 2.9.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/tidwall/gjson from 1.19.0 to 1.19.1 ([54e93a1](https://github.com/cynative/cynative/commit/54e93a1c10c289de4be94cfb7ceec19a7d9f0e3e))
+* bump github.com/tidwall/gjson from 1.19.1 to 1.20.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/uudashr/gocognit from 1.2.1 to 1.2.2 ([92b0540](https://github.com/cynative/cynative/commit/92b05403c1c765d9d373d42a3d693e9b0f040440))
+* bump github.com/uudashr/gocognit from 1.2.2 to 1.3.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump github.com/valyala/fasthttp from 1.74.0 to 1.75.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump golang.org/x/arch from 0.31.0 to 0.32.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump golang.org/x/sync from 0.23.0 to 0.24.0 ([20c23a9](https://github.com/cynative/cynative/commit/20c23a91a6ac3f974e781159cfb0c811688f6254))
+* bump golang.org/x/tools from 0.50.0 to 0.51.0 ([54e93a1](https://github.com/cynative/cynative/commit/54e93a1c10c289de4be94cfb7ceec19a7d9f0e3e))
+
 ## [1.13.0](https://github.com/cynative/cynative/compare/v1.12.3...v1.13.0) (2026-10-05)
 
 
