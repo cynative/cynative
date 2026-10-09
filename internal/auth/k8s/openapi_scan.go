@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 )
 
 // Streaming-pass bounds. The pass runs on every root and document body before anything decodes it into maps,
@@ -48,12 +49,17 @@ type scanFrame struct {
 	key        string
 }
 
-// Scan reads body token by token, keeping only the stack of open containers, and refuses it when it nests deeper than
+// Scan reads body token by token, keeping only the stack of open containers, and refuses it when it is not UTF-8, when it nests deeper than
 // MaxScanDepth, when an object key is longer than MaxKeyBytes, when it counts more than maxElements elements, or when
 // it is not one JSON value. A counted element is an object member or an array element in a container at depth
 // maxCountedDepth or less, except anything below a member of components.schemas. Numbers are kept as text (UseNumber),
 // so an out-of-range literal in a subtree no decode reads does not fail the pass. It returns the count.
 func Scan(ctx context.Context, body []byte, maxElements int) (int, error) {
+	// The decoder replaces each invalid byte with a three-byte U+FFFD, and its unquoting buffers grow past that, so
+	// a body of invalid bytes costs many times its size. JSON is UTF-8 (RFC 8259); anything else is refused first.
+	if !utf8.Valid(body) {
+		return 0, fmt.Errorf("%w: not UTF-8", ErrScanRefused)
+	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	var stack []scanFrame

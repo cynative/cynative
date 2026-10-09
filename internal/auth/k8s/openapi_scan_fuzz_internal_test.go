@@ -8,7 +8,7 @@ import (
 )
 
 // FuzzScan checks that the streaming pass never panics, accepts only one valid JSON value, and refuses only with
-// its own sentinel. The seeds reach every branch: each refusal (an over-long key included), the pruning rule, a top-level scalar and an
+// its own sentinel. The seeds reach every branch: each refusal (an over-long key and invalid UTF-8 included), the pruning rule, a top-level scalar and an
 // out-of-range number.
 func FuzzScan(f *testing.F) {
 	for _, s := range []string{
@@ -16,6 +16,7 @@ func FuzzScan(f *testing.F) {
 		`{"components":{"schemas":{"A":{"x":[1,2]}}}}`, `{"Components":{"SCHEMAS":{"A":{}}}}`,
 		`{"components":[{"schemas":{}}]}`, `{"x-n":1e400}`, string(nested(MaxScanDepth + 1)), string(members(3)),
 		`{"` + strings.Repeat("k", MaxKeyBytes+1) + `":1}`,
+		"{\"a\":\"\xff\"}",
 	} {
 		f.Add([]byte(s))
 	}

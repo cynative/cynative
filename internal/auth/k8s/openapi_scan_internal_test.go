@@ -58,6 +58,23 @@ func TestScan_KeyLength(t *testing.T) {
 	}
 }
 
+func TestScan_RefusesInvalidUTF8(t *testing.T) {
+	t.Parallel()
+	for _, body := range []string{`{"a":"` + "\xff" + `"}`, `{"` + "\xc3" + `":1}`, "\xef\xbb\xbf{}"} {
+		_, err := Scan(t.Context(), []byte(body), MaxDocumentElements)
+		want := "refused by the streaming pass: not UTF-8"
+		if body == "\xef\xbb\xbf{}" {
+			want = "refused by the streaming pass: not JSON"
+		}
+		if !errors.Is(err, ErrScanRefused) || err.Error() != want {
+			t.Errorf("%q: err = %v, want %q", body, err, want)
+		}
+	}
+	if _, err := Scan(t.Context(), []byte(`{"a":"é ☃ \u00e9"}`), MaxDocumentElements); err != nil {
+		t.Errorf("valid UTF-8: %v", err)
+	}
+}
+
 func TestScan_ElementCaps(t *testing.T) {
 	t.Parallel()
 	for _, limit := range []int{MaxRootElements, MaxDocumentElements} {
