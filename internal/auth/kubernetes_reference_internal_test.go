@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 	"weak"
 
 	"github.com/cynative/cynative/internal/apiref"
@@ -481,7 +482,7 @@ func TestKubernetesRecipe_ReadFailures(t *testing.T) {
 		{"document 404 published elsewhere", map[string][]scripted{
 			"/openapi/v3": {ok(rootWith("https://elsewhere.example/doc"))}, metricsP: {status(http.StatusNotFound)},
 		}, "the root lists metrics.k8s.io/v1beta1 but GET " + metricsP + " answered 404; the cluster published that " +
-			"document's URL outside " + metricsP + ", which this tool does not follow"},
+			"document's URL outside the canonical path, which this tool does not follow"},
 		{"document truncated", map[string][]scripted{
 			"/openapi/v3":                 {ok(hashedRoot(refHash))},
 			metricsP + "?hash=" + refHash: {{resp: MetadataResponse{Status: 200, Body: "{", Truncated: true}}},
@@ -854,4 +855,42 @@ func TestKubeRefCache_EvictionReleasesTheDocument(t *testing.T) {
 		t.Error("the evicted document is still reachable")
 	}
 	runtime.KeepAlive(c)
+}
+
+// TestKubernetesRecipe_LongReasonsKeepTheirGuidance pins that a reason echoing the longest group and several
+// listed versions is cut before its guidance, never through it, and that the choices are bounded first.
+func TestKubernetesRecipe_LongReasonsKeepTheirGuidance(t *testing.T) {
+	t.Parallel()
+	// A 253-byte group name, the longest the apiVersion grammar takes.
+	longGroup := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." +
+		strings.Repeat("d", 61)
+	var entries []string
+	for i := range 7 {
+		k := fmt.Sprintf("apis/%s/v%d", longGroup, i+1)
+		entries = append(entries, `"`+k+`":{"serverRelativeURL":"/openapi/v3/`+k+`"}`)
+	}
+	root := `{"paths":{` + strings.Join(entries, ",") + `}}`
+	rd := &scriptReader{t: t, script: map[string][]scripted{"/openapi/v3": {ok(root)}}}
+	l := prepared(t, refProvider(), longGroup+"/v99", listOp)
+	tgt, _ := l.Resolve(t.Context())
+	res := l.Answer(t.Context(), tgt, rd)
+	if res.Outcome != apiref.OutcomeNotFound || len(res.Choices) != apiref.MaxChoices ||
+		!strings.HasSuffix(res.Reason, "; "+reasonLeftOut) || utf8.RuneCountInString(res.Reason) > apiref.MaxReason {
+		t.Errorf("not listed: %d choices, %d runes, %q", len(res.Choices), utf8.RuneCountInString(res.Reason),
+			res.Reason)
+	}
+	doc := "/openapi/v3/apis/" + longGroup + "/v1"
+	rd = &scriptReader{t: t, script: map[string][]scripted{
+		"/openapi/v3": {ok(`{"paths":{"apis/` + longGroup + `/v1":{"serverRelativeURL":"https://elsewhere.example/` +
+			strings.Repeat("x", 200) + `"}}}`)},
+		doc: {status(http.StatusNotFound)},
+	}}
+	l = prepared(t, refProvider(), longGroup+"/v1", listOp)
+	tgt, _ = l.Resolve(t.Context())
+	res = l.Answer(t.Context(), tgt, rd)
+	if want := "; the cluster published that document's URL outside the canonical path, which this tool does not " +
+		"follow"; res.Outcome != apiref.OutcomeUnavailable || !strings.HasSuffix(res.Reason, want) ||
+		utf8.RuneCountInString(res.Reason) > apiref.MaxReason {
+		t.Errorf("missing: %d runes, %q", utf8.RuneCountInString(res.Reason), res.Reason)
+	}
 }

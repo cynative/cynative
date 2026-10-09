@@ -2,11 +2,13 @@ package k8s
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/apiref"
 )
@@ -374,5 +376,49 @@ func TestReference_UnmarkedWriteBodiesAreGaps(t *testing.T) {
 	if ref := found(t, d, "remove", apiref.OutcomeFound); len(ref.Gaps) != 0 ||
 		!slices.Contains(ref.Limitations, "optional request body is not rendered") {
 		t.Errorf("remove: gaps %q limitations %q", ref.Gaps, ref.Limitations)
+	}
+}
+
+func TestLookup_DuplicateChoicesStopAtTheBound(t *testing.T) {
+	t.Parallel()
+	var paths []string
+	for i := range 7 {
+		paths = append(paths, fmt.Sprintf(`"/apis/apps/v1/p%d":{"get":{"operationId":"dup"}}`, i))
+	}
+	v, _ := ParseAPIVersion("apps/v1")
+	d, err := ParseDocument(t.Context(), []byte(`{"paths":{"/apis/apps/v1/a":{"get":{"operationId":"a"}},`+
+		strings.Join(paths, ",")+`}}`), v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"GET /apis/apps/v1/p0", "GET /apis/apps/v1/p1", "GET /apis/apps/v1/p2", "GET /apis/apps/v1/p3",
+		"GET /apis/apps/v1/p4",
+	}
+	if res := lookup(d, "dup"); res.Outcome != apiref.OutcomeAmbiguous || !slices.Equal(res.Choices, want) {
+		t.Errorf("lookup: %+v", res)
+	}
+}
+
+func TestLookup_ALongNotFoundReasonKeepsItsGuidance(t *testing.T) {
+	t.Parallel()
+	group := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + "." +
+		strings.Repeat("d", 61)
+	v, err := ParseAPIVersion(group + "/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := "/apis/" + group + "/v1"
+	d, err := ParseDocument(t.Context(), []byte(`{"paths":{"`+prefix+`/a":{"get":{"operationId":"a"}},`+
+		`"`+prefix+`/b":{"get":{"operationId":"1b"}}}}`), v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := lookup(d, "z"+strings.Repeat("q", 199))
+	want := "; operation ids look like listAppsV1NamespacedDeployment; the document also lists 1 operations this " +
+		"tool cannot look up"
+	if res.Outcome != apiref.OutcomeNotFound || !strings.HasSuffix(res.Reason, want) ||
+		utf8.RuneCountInString(res.Reason) > apiref.MaxReason {
+		t.Errorf("%d runes: %q", utf8.RuneCountInString(res.Reason), res.Reason)
 	}
 }

@@ -279,8 +279,12 @@ func (d *Document) Lookup(q Lookup) apiref.Result {
 	switch e.Class {
 	case ClassAdmitted:
 	case ClassDuplicate:
+		// The routes are sorted, so the first valid ones are the choices; later ones are never built.
 		var choices []string
 		for _, r := range e.Routes {
+			if len(choices) == apiref.MaxChoices {
+				break
+			}
 			if r.PathOK {
 				choices = append(choices, r.Method+" "+r.Path)
 			}
@@ -303,11 +307,12 @@ func (d *Document) Lookup(q Lookup) apiref.Result {
 
 // notFound answers an id no indexed id matches, with up to five admitted ids sharing its longest case-folded prefix.
 func (d *Document) notFound(id string) apiref.Result {
-	reason := fmt.Sprintf("no operation %q in %s as this cluster serves it; operation ids look like "+
-		"listAppsV1NamespacedDeployment", id, d.APIVersion.Model())
+	guidance := "; operation ids look like listAppsV1NamespacedDeployment"
 	if d.Excluded > 0 {
-		reason += fmt.Sprintf("; the document also lists %d operations this tool cannot look up", d.Excluded)
+		guidance += fmt.Sprintf("; the document also lists %d operations this tool cannot look up", d.Excluded)
 	}
+	reason := apiref.Bounded(fmt.Sprintf("no operation %q in %s as this cluster serves it", id, d.APIVersion.Model()),
+		guidance)
 	best, choices := minChoicePrefix, []string(nil)
 	for other, e := range d.Index {
 		if e.Class != ClassAdmitted {

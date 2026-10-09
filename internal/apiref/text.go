@@ -63,3 +63,9 @@ func Truncate(s string, maxRunes int) string {
 	}
 	return string(runes[:maxRunes-len(ellipsis)]) + ellipsis
 }
+
+// Bounded cuts head so that head followed by suffix fits in MaxReason runes. The cut falls in head, never in suffix,
+// so host guidance appended after an echo of model or cluster text survives any echo length.
+func Bounded(head, suffix string) string {
+	return Truncate(head, MaxReason-utf8.RuneCountInString(suffix)) + suffix
+}

@@ -255,16 +255,17 @@ func (r *kubeRecipe) root(ctx context.Context) (string, apiref.Result, bool) {
 func (r *kubeRecipe) notListed(root k8sauthz.Root) apiref.Result {
 	v := r.l.version
 	choices := root.Versions(v)
-	reason := v.Model() + " is not listed in this cluster's /openapi/v3"
+	choices = choices[:min(len(choices), apiref.MaxChoices)]
+	head := v.Model() + " is not listed in this cluster's /openapi/v3"
 	if len(choices) > 0 {
-		reason += "; it lists " + strings.Join(choices, ", ")
+		head += "; it lists " + strings.Join(choices, ", ")
 	}
-	reason += "; " + reasonLeftOut
+	guidance := "; " + reasonLeftOut
 	if v.Group == "core" || v.Group == "api" {
-		reason += "; " + reasonCoreGroup
+		guidance += "; " + reasonCoreGroup
 	}
 
-	return apiref.Result{Outcome: apiref.OutcomeNotFound, Reason: reason, Choices: choices}
+	return apiref.Result{Outcome: apiref.OutcomeNotFound, Reason: apiref.Bounded(head, guidance), Choices: choices}
 }
 
 // document reads this lookup's document, with ?hash= when hash is set. On a 200 it returns the distilled
@@ -307,12 +308,13 @@ func (r *kubeRecipe) missingReason(status int) string {
 	if status == http.StatusNotFound {
 		what = "404"
 	}
-	where := "the cluster published that document's URL in the canonical form"
+	where := "; the cluster published that document's URL in the canonical form"
 	if !r.canonical {
-		where = "the cluster published that document's URL outside " + r.l.docPath() + ", which this tool does not follow"
+		where = "; the cluster published that document's URL outside the canonical path, which this tool does not follow"
 	}
 
-	return fmt.Sprintf("the root lists %s but GET %s answered %s; %s", r.l.version.Model(), r.l.docPath(), what, where)
+	return apiref.Bounded(fmt.Sprintf("the root lists %s but GET %s answered %s", r.l.version.Model(), r.l.docPath(),
+		what), where)
 }
 
 // finish reads /version, stores the entry when the 200 answered a hashed read, and answers.

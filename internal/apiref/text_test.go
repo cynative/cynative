@@ -1,7 +1,9 @@
 package apiref_test
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/apiref"
 )
@@ -80,5 +82,17 @@ func TestStripMarkupCut(t *testing.T) {
 				t.Errorf("StripMarkupCut(%q, %d, %d) = %q, want %q", tc.in, tc.maxBytes, tc.maxRunes, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBounded(t *testing.T) {
+	t.Parallel()
+	const suffix = "; guidance the cut must keep"
+	if got := apiref.Bounded("short", suffix); got != "short"+suffix {
+		t.Errorf("short head: %q", got)
+	}
+	got := apiref.Bounded(strings.Repeat("é", 2*apiref.MaxReason), suffix)
+	if !strings.HasSuffix(got, "..."+suffix) || utf8.RuneCountInString(got) != apiref.MaxReason {
+		t.Errorf("long head: %d runes, %q", utf8.RuneCountInString(got), got[len(got)-60:])
 	}
 }
