@@ -149,6 +149,11 @@ func postProcess(v APIVersion, op *openapidoc.OperationDoc, x Extras) opRules {
 	if validKind(x.Kind) {
 		kind = x.Kind
 	}
+	if op.BodySkipped && op.Method != http.MethodDelete {
+		// Not every cluster marks a create, replace or patch body required (the v1.23 document marks none), but the
+		// API server rejects the call without one. Only a delete's options body is optional.
+		op.BodySkipped, op.BodyGap = false, gapWholeBody
+	}
 	if op.BodyGap != "" {
 		op.BodyGap = fmt.Sprintf(gapWholeBody, kind)
 		if op.Method == http.MethodPatch {

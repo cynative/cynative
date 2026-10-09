@@ -336,3 +336,43 @@ func TestDocument_Size(t *testing.T) {
 		}
 	}
 }
+
+// TestReference_UnmarkedWriteBodiesAreGaps pins the shape of clusters whose document marks no request body required:
+// a create, replace or patch still needs its object, so its body is a gap, while a delete's optional options body
+// is left out.
+func TestReference_UnmarkedWriteBodiesAreGaps(t *testing.T) {
+	t.Parallel()
+	body := func(kind string) string {
+		return `"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/x"}}}},` +
+			`"x-kubernetes-group-version-kind":{"group":"apps","version":"v1","kind":"` + kind + `"}`
+	}
+	v, err := ParseAPIVersion("apps/v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := ParseDocument(t.Context(), []byte(`{"paths":{`+
+		`"/apis/apps/v1/namespaces/{namespace}/deployments":{"parameters":[`+nsParam+`],`+
+		`"post":{"operationId":"create",`+body("Deployment")+`}},`+
+		`"/apis/apps/v1/namespaces/{namespace}/deployments/{name}":{"parameters":[`+nsParam+`,`+
+		`{"name":"name","in":"path","required":true,"schema":{"type":"string"}}],`+
+		`"put":{"operationId":"replace",`+body("Deployment")+`},`+
+		`"patch":{"operationId":"patch",`+body("Deployment")+`},`+
+		`"delete":{"operationId":"remove",`+body("DeleteOptions")+`}}}}`), v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, gap := range map[string]string{
+		"create":  "request body is a whole Deployment object, which the template does not render",
+		"replace": "request body is a whole Deployment object, which the template does not render",
+		"patch":   "request body is a patch of Deployment, which the template does not render",
+	} {
+		if ref := found(t, d, id, apiref.OutcomeIncomplete); !slices.Contains(ref.Gaps, gap) ||
+			slices.Contains(ref.Limitations, "optional request body is not rendered") {
+			t.Errorf("%s: gaps %q limitations %q, want the gap %q", id, ref.Gaps, ref.Limitations, gap)
+		}
+	}
+	if ref := found(t, d, "remove", apiref.OutcomeFound); len(ref.Gaps) != 0 ||
+		!slices.Contains(ref.Limitations, "optional request body is not rendered") {
+		t.Errorf("remove: gaps %q limitations %q", ref.Gaps, ref.Limitations)
+	}
+}
