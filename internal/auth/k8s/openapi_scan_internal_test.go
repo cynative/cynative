@@ -75,6 +75,35 @@ func TestScan_RefusesInvalidUTF8(t *testing.T) {
 	}
 }
 
+func TestScan_DuplicateKeys(t *testing.T) {
+	t.Parallel()
+	const want = "refused by the streaming pass: a duplicate object key"
+	for _, body := range []string{
+		`{"paths":{"/a":{"parameters":[],"parameters":[]}}}`,
+		`{"paths":{"/a":{"parameters":[],"Parameters":[]}}}`,
+		// encoding/json folds K and the Kelvin sign alike when it binds a key to a field.
+		`{"paths":{"/a":{"get":{"K":1,"` + "\u212a" + `":2}}}}`,
+		`{"a":1,"a":2}`,
+	} {
+		if _, err := Scan(t.Context(), []byte(body), MaxDocumentElements); !errors.Is(err, ErrScanRefused) ||
+			err.Error() != want {
+			t.Errorf("%s: err = %v, want %q", body, err, want)
+		}
+	}
+	for _, body := range []string{
+		`{"paths":{"/a":{},"/b":{}},"x":{"paths":1}}`,
+		// Below the counted depth, and under components.schemas, values are read raw or not at all.
+		string(nested(12)[:12]) + `{"a":1,"a":2}` + string(nested(12)[12:]),
+		`{"components":{"schemas":{"S":{"a":1,"a":2}}}}`,
+		// Sibling objects each have their own keys.
+		`{"paths":{"/a":{"get":{"operationId":"a"}},"/b":{"get":{"operationId":"b"}}}}`,
+	} {
+		if _, err := Scan(t.Context(), []byte(body), MaxDocumentElements); err != nil {
+			t.Errorf("%s: %v", body, err)
+		}
+	}
+}
+
 func TestScan_ElementCaps(t *testing.T) {
 	t.Parallel()
 	for _, limit := range []int{MaxRootElements, MaxDocumentElements} {

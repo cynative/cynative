@@ -422,3 +422,17 @@ func TestLookup_ALongNotFoundReasonKeepsItsGuidance(t *testing.T) {
 		t.Errorf("%d runes: %q", utf8.RuneCountInString(res.Reason), res.Reason)
 	}
 }
+
+// TestParseDocument_RefusesDuplicateParameterLists pins the shape where the two passes once read different
+// parameters: the pre-pass checked the second list while the core merged it into the first and rendered a component
+// parameter no check had passed.
+func TestParseDocument_RefusesDuplicateParameterLists(t *testing.T) {
+	t.Parallel()
+	v, _ := ParseAPIVersion("apps/v1")
+	body := `{"components":{"parameters":{"p":{"name":"bad!name","in":"query","schema":{"type":"string"}}}},` +
+		`"paths":{"/apis/apps/v1/a":{"parameters":[{"$ref":"#/components/parameters/p"}],` +
+		`"parameters":[{"name":"q","in":"query","schema":{"type":"string"}}],"get":{"operationId":"a"}}}}`
+	if _, err := ParseDocument(t.Context(), []byte(body), v); !errors.Is(err, ErrScanRefused) {
+		t.Errorf("err = %v, want the streaming pass to refuse it", err)
+	}
+}

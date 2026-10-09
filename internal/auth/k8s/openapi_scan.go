@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -47,6 +48,8 @@ type scanFrame struct {
 	components bool
 	schemas    bool
 	key        string
+	// seen holds the folded keys of a counted object, so a repeated key is refused.
+	seen map[string]struct{}
 }
 
 // Scan reads body token by token, keeping only the stack of open containers, and refuses it when it is not UTF-8, when it nests deeper than
@@ -125,6 +128,9 @@ func scanStep(stack []scanFrame, tok json.Token) ([]scanFrame, bool, error) {
 		if len(top.key) > MaxKeyBytes {
 			return stack, false, fmt.Errorf("%w: an object key longer than %d bytes", ErrScanRefused, MaxKeyBytes)
 		}
+		if err := top.firstKey(); err != nil {
+			return stack, false, err
+		}
 		top.wantKey = false
 
 		return stack, countable(top), nil
@@ -133,6 +139,45 @@ func scanStep(stack []scanFrame, tok json.Token) ([]scanFrame, bool, error) {
 	stack, _, err := openValue(stack, top, tok)
 
 	return stack, counted, err
+}
+
+// firstKey refuses a key f already holds. The pre-pass and the core decode the counted containers into structs,
+// slices and maps, and encoding/json binds a repeated key, or one that differs only by case, to the same field: a
+// raw field keeps the last value while a slice or struct merges it into the earlier one, so the two passes could
+// read different values. Keys are compared folded as encoding/json folds them; only counted objects are tracked.
+func (f *scanFrame) firstKey() error {
+	if !countable(f) {
+		return nil
+	}
+	k := foldKey(f.key)
+	if _, dup := f.seen[k]; dup {
+		return fmt.Errorf("%w: a duplicate object key", ErrScanRefused)
+	}
+	if f.seen == nil {
+		f.seen = map[string]struct{}{}
+	}
+	f.seen[k] = struct{}{}
+
+	return nil
+}
+
+// foldKey folds a key as encoding/json does when it matches a key to a field: ASCII letters to upper case, any
+// other rune to the smallest rune of its case-folding orbit.
+func foldKey(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < utf8.RuneSelf {
+			b.WriteRune(unicode.ToUpper(r))
+			continue
+		}
+		low := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			low = min(low, f)
+		}
+		b.WriteRune(low)
+	}
+
+	return b.String()
 }
 
 // countable reports whether a member or element of f is counted.
