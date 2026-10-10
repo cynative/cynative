@@ -39,6 +39,8 @@ func (t *apiReferenceTool) targeted(
 	// From here the call can reach the connector's credentials, so it is audited unprompted.
 	audit.RecordUnprompted(ctx)
 	ctx, fatal := audit.WithFatal(ctx)
+	scope, _ := audit.ScopeFrom(ctx)
+	ctx = auth.WithBootstrapObserver(ctx, &bootstrapRecorder{tool: t, scope: scope, fatal: fatal})
 	ctx, cancel := context.WithTimeout(ctx, auth.TargetLookupDeadline)
 	defer cancel()
 	target, err := lookup.Resolve(ctx)
@@ -174,16 +176,68 @@ func (m *metadataReader) arguments(r auth.MetadataRead) string {
 }
 
 // log writes one child record when audit is enabled, latching a failed write.
-func (m *metadataReader) log(rec audit.Record) error {
-	if m.tool.sink == nil {
+func (m *metadataReader) log(rec audit.Record) error { return m.tool.logChild(m.fatal, rec) }
+
+// logChild writes one of a lookup's child records when audit is enabled, latching a failed write on fatal.
+func (t *apiReferenceTool) logChild(fatal *audit.Fatal, rec audit.Record) error {
+	if t.sink == nil {
 		return nil
 	}
-	if err := m.tool.sink.Log(rec); err != nil {
-		m.fatal.Set(err)
+	if err := t.sink.Log(rec); err != nil {
+		fatal.Set(err)
 		return err
 	}
 
 	return nil
+}
+
+// bootstrapOK is a bootstrap result record's result when the call succeeded.
+const bootstrapOK = "ok"
+
+// bootstrapRecorder is one lookup's BootstrapObserver: it writes a lookup_bootstrap attempt record before each
+// control-plane call its resolution triggers and a result record after, and latches any failed write.
+type bootstrapRecorder struct {
+	tool  *apiReferenceTool
+	scope audit.Scope
+	fatal *audit.Fatal
+}
+
+// bootstrapArgs is a bootstrap record's arguments. It carries no url and no auth_provider, so the release-gate
+// parser never reads one as a request.
+type bootstrapArgs struct {
+	Connector string `json:"connector"`
+	Call      string `json:"call"`
+	Target    string `json:"target"`
+}
+
+// Begin refuses the call once the latch is set or when its attempt record cannot be written, so a call is never
+// sent without its attempt on record. The end it returns writes the result record, possibly after the lookup has
+// returned; a failure then latches in the Logger too, which the run's audit closer reports.
+func (b *bootstrapRecorder) Begin(connector, call, target string) (func(error), error) {
+	if err := b.fatal.Err(); err != nil {
+		return nil, err
+	}
+	// bootstrapArgs is three strings, so json.Marshal cannot fail on it.
+	args, _ := json.Marshal(bootstrapArgs{Connector: connector, Call: call, Target: target})
+	rec := audit.Record{ //nolint:exhaustruct // an attempt carries no decision, outcome or result.
+		SessionID: b.scope.SessionID, RunID: b.scope.RunID, CallID: b.tool.newID(), ParentCallID: b.scope.CallID,
+		Depth: b.scope.Depth, Phase: audit.PhaseAttempt, Via: audit.ViaAPIReference,
+		Tool: audit.ToolLookupBootstrap, Arguments: args, RedactArgs: true,
+	}
+	if err := b.tool.logChild(b.fatal, rec); err != nil {
+		return nil, err
+	}
+
+	return func(callErr error) {
+		rec.Phase, rec.Decision, rec.Outcome, rec.Result = audit.PhaseResult, audit.DecisionUnprompted,
+			audit.OutcomeOK, bootstrapOK
+		if callErr != nil {
+			rec.Outcome = audit.OutcomeError
+			rec.Result = apiref.Truncate(b.tool.egress.ScrubError(callErr).Error(), apiref.MaxReason)
+		}
+		// Nothing waits on this error: logChild latched it on fatal, and the Logger keeps it for the closer.
+		_ = b.tool.logChild(b.fatal, rec)
+	}, nil
 }
 
 // readOutcome classifies a read for its result record: ok below 400, error at 400 or more or on a transport

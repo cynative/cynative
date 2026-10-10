@@ -101,13 +101,20 @@ func WithBootstrapObserver(ctx context.Context, o BootstrapObserver) context.Con
 	return context.WithValue(ctx, bootstrapObserverKey{}, o)
 }
 
+// BootstrapObserverFrom returns the observer attached to ctx, if any.
+func BootstrapObserverFrom(ctx context.Context) (BootstrapObserver, bool) {
+	o, ok := ctx.Value(bootstrapObserverKey{}).(BootstrapObserver)
+
+	return o, ok
+}
+
 // observeBootstrap runs one control-plane call under the observer ctx carries, if any; target is built only then.
 // It runs inside a syncCache fetch, which runs under the first caller's context values, so only the caller that
 // starts a call reports it: a call served from the cache or joined in flight reports nothing.
 func observeBootstrap[T any](
 	ctx context.Context, connector, call string, target func() string, fetch func() (T, error),
 ) (T, error) {
-	o, ok := ctx.Value(bootstrapObserverKey{}).(BootstrapObserver)
+	o, ok := BootstrapObserverFrom(ctx)
 	if !ok {
 		return fetch()
 	}

@@ -91,6 +91,9 @@ const (
 	// ToolLookupRead is the tool name of a child record for one credentialed read a targeted api_reference
 	// lookup made.
 	ToolLookupRead = "lookup_read"
+	// ToolLookupBootstrap is the tool name of a child record for one control-plane call a targeted api_reference
+	// lookup triggered while it resolved its target: a cluster resolution or the ClusterRole fetch.
+	ToolLookupBootstrap = "lookup_bootstrap"
 )
 
 // ErrLog wraps any audit write/marshal failure. [errors.Is](err, ErrLog) marks a
