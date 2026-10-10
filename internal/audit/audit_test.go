@@ -285,3 +285,99 @@ func TestLog_ParentCallIDFollowsCallIDAndIsOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("child record: %s", lines[1])
 	}
 }
+
+// flakyWriter fails exactly its failOn-th write (1-based) and accepts every other one.
+type flakyWriter struct {
+	buf    bytes.Buffer
+	n      int
+	failOn int
+}
+
+func (w *flakyWriter) Write(p []byte) (int, error) {
+	w.n++
+	if w.n == w.failOn {
+		return 0, errors.New("disk full")
+	}
+
+	return w.buf.Write(p)
+}
+
+// TestLogger_Log_LatchesTheFirstFailure pins the sticky latch: once a write fails, every later Log returns that
+// same error and writes nothing, even when the writer would accept the line, and Err reports it.
+func TestLogger_Log_LatchesTheFirstFailure(t *testing.T) {
+	t.Parallel()
+
+	w := &flakyWriter{failOn: 2}
+	l := audit.New(w)
+	rec := audit.Record{Tool: "x", Phase: audit.PhaseAttempt} //nolint:exhaustruct // Logger stamps the rest.
+	if err := l.Log(rec); err != nil || l.Err() != nil {
+		t.Fatalf("first Log = %v, Err = %v, want both nil", err, l.Err())
+	}
+	first := l.Log(rec)
+	if !errors.Is(first, audit.ErrLog) {
+		t.Fatalf("second Log = %v, want ErrLog", first)
+	}
+	later := l.Log(rec)
+	if !errors.Is(later, first) || !errors.Is(l.Err(), first) {
+		t.Errorf("later Log = %v and Err = %v, want the latched %v", later, l.Err(), first)
+	}
+	if w.n != 2 || strings.Count(w.buf.String(), "\n") != 1 {
+		t.Errorf("writer saw %d writes and kept %q, want two writes and one line", w.n, w.buf.String())
+	}
+}
+
+// TestLogger_Log_LatchesAMarshalFailure pins that a marshal failure latches as a write failure does.
+func TestLogger_Log_LatchesAMarshalFailure(t *testing.T) {
+	t.Parallel()
+
+	w := &flakyWriter{}
+	l := audit.New(w)
+	bad := audit.Record{Tool: "x", Arguments: json.RawMessage(`{`)} //nolint:exhaustruct // Logger stamps the rest.
+	first := l.Log(bad)
+	if !errors.Is(first, audit.ErrLog) {
+		t.Fatalf("Log = %v, want ErrLog", first)
+	}
+	good := audit.Record{Tool: "x", Phase: audit.PhaseAttempt} //nolint:exhaustruct // Logger stamps the rest.
+	if err := l.Log(good); !errors.Is(err, first) || !errors.Is(l.Err(), first) || w.n != 0 {
+		t.Errorf("Log after a marshal failure = %v, Err = %v, %d writes; want the latched %v and none",
+			err, l.Err(), w.n, first)
+	}
+}
+
+// TestLogger_Closer pins the closer the composition root returns: it always closes, reports the latched audit
+// failure ahead of any close error, and the close error otherwise.
+func TestLogger_Closer(t *testing.T) {
+	t.Parallel()
+
+	closeErr := errors.New("flush failed")
+	for _, tc := range []struct {
+		name    string
+		latched bool
+		close   error
+		want    string
+	}{
+		{"clean", false, nil, ""},
+		{"close error only", false, closeErr, "flush failed"},
+		{"latched", true, nil, "audit: log write failed: write: disk full"},
+		{"latched beats the close error", true, closeErr, "audit: log write failed: write: disk full"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := &flakyWriter{}
+			if tc.latched {
+				w.failOn = 1
+			}
+			l := audit.New(w)
+			_ = l.Log(audit.Record{Tool: "x"}) //nolint:exhaustruct // Logger stamps the rest.
+			closed := false
+			err := l.Closer(func() error { closed = true; return tc.close })()
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if !closed || got != tc.want {
+				t.Errorf("closer = %q (closed %v), want %q", got, closed, tc.want)
+			}
+		})
+	}
+}

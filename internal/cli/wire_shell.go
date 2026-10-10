@@ -114,7 +114,9 @@ func newAuditSinkShell(cfg config.Config, prov *audit.AgentProvenance) (audit.Si
 		opts = append(opts, audit.WithAgent(*prov))
 	}
 
-	return audit.New(w, opts...), w.Close, nil
+	l := audit.New(w, opts...)
+
+	return l, l.Closer(w.Close), nil
 }
 
 // openAgentCatalogShell builds the production agent catalog from the operator's

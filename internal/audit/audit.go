@@ -111,6 +111,11 @@ type redactor interface {
 // Logger serializes Records as one JSON object per line to w. It is safe for
 // concurrent use: every Log call is serialized under mu, so concurrent inner
 // sandbox workers and the verifier panel can share one Logger.
+//
+// The first write or marshal failure latches: every later Log returns that same
+// error, writes nothing and spends no sequence number. A record written from a
+// goroutine that outlives its tool call can fail after the loop's last write, so
+// the latch keeps that failure for the closer to report.
 type Logger struct {
 	mu       sync.Mutex
 	w        io.Writer
@@ -119,6 +124,7 @@ type Logger struct {
 	actor    string
 	agent    *AgentProvenance
 	seq      uint64
+	err      error
 }
 
 // Option configures a Logger at construction.
@@ -160,6 +166,10 @@ func (l *Logger) Log(rec Record) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if l.err != nil {
+		return l.err
+	}
+
 	l.seq++
 	rec.Seq = l.seq
 	rec.Time = l.clock()
@@ -179,14 +189,42 @@ func (l *Logger) Log(rec Record) error {
 
 	line, err := json.Marshal(rec)
 	if err != nil {
-		return fmt.Errorf("%w: marshal: %w", ErrLog, err)
+		l.err = fmt.Errorf("%w: marshal: %w", ErrLog, err)
+
+		return l.err
 	}
 	line = append(line, '\n')
 	if _, werr := l.w.Write(line); werr != nil {
-		return fmt.Errorf("%w: write: %w", ErrLog, werr)
+		l.err = fmt.Errorf("%w: write: %w", ErrLog, werr)
+
+		return l.err
 	}
 
 	return nil
+}
+
+// Err returns the latched write or marshal failure, or nil while every write has
+// succeeded.
+func (l *Logger) Err() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.err
+}
+
+// Closer wraps the audit writer's close for the composition root. It always
+// closes, then returns the latched failure when there is one and the close error
+// otherwise, so a failed write that no later record reported still ends the run
+// with an error.
+func (l *Logger) Closer(closeWriter func() error) func() error {
+	return func() error {
+		cerr := closeWriter()
+		if err := l.Err(); err != nil {
+			return err
+		}
+
+		return cerr
+	}
 }
 
 // RawArgs returns s as a [json.RawMessage] when it is valid JSON, otherwise a
