@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"time"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
@@ -46,6 +47,15 @@ type k8sGate[A any] struct {
 	// fetch. Constructors default it to NoProxy; the registration shell sets
 	// the real one.
 	egress *Egress
+
+	// connector is the connector's name, as the model selects it in
+	// auth_provider. A targeted lookup names it in its reference and reasons.
+	connector string
+
+	// refs caches the distilled /openapi/v3 documents targeted lookups read,
+	// for this session, and now stamps when a lookup read its document.
+	refs *kubeRefCache
+	now  func() time.Time
 }
 
 // authorizeAction enforces the configured read-only ClusterRole posture for a

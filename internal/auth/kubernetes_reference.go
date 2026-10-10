@@ -51,9 +51,6 @@ const (
 	reasonCoreGroup = `the core group's apiVersion is "v1"`
 )
 
-// errKubeService rejects a service, which a kubernetes lookup does not take.
-var errKubeService = errors.New(`service must be empty for kubernetes: the group goes in model, as in "apps/v1"`)
-
 // errKubeOperation rejects an operation outside the lookup grammar.
 var errKubeOperation = errors.New("operation must be an OpenAPI operationId: a letter, then letters, digits or " +
 	"underscores, at most 200 characters, such as listAppsV1NamespacedDeployment")
@@ -69,47 +66,77 @@ var (
 	_ TargetLookup     = (*kubeLookup)(nil)
 )
 
-// PrepareLookup validates a kubernetes lookup with no I/O: the block decodes into KubernetesAuthArgs, whose
-// canonical form is always {}; service is empty; model is an apiVersion and operation an operationId, both used
-// exactly as sent.
+// PrepareLookup validates a kubernetes lookup with no I/O. The block's canonical form is always {}, and the target
+// is the authority the kubeconfig names, which the host and port gates pin.
 func (p *kubernetesProvider) PrepareLookup(q apiref.Query, raw json.RawMessage) (TargetLookup, error) {
-	var args KubernetesAuthArgs
+	return prepareKubeLookup(&p.k8sGate, q, raw, errKubeBlock,
+		func(context.Context, *KubernetesAuthArgs) (Target, error) {
+			a := p.cluster.authority
+
+			return Target{Endpoint: "https://" + a, Identity: "kubernetes/" + a}, nil
+		})
+}
+
+// prepareKubeLookup validates a lookup for one of the Kubernetes connectors with no I/O: raw decodes into A, the
+// gate's own validate accepts it, and its re-marshal is the canonical block; service is empty; model is an
+// apiVersion and operation an operationId, both used exactly as sent. blockErr answers a block that does not
+// decode, and resolve finds the target the decoded block names.
+func prepareKubeLookup[A any](
+	g *k8sGate[A], q apiref.Query, raw json.RawMessage, blockErr error,
+	resolve func(context.Context, *A) (Target, error),
+) (TargetLookup, error) {
+	var args A
 	if json.Unmarshal(raw, &args) != nil {
-		return nil, errKubeBlock
+		return nil, blockErr
 	}
-	// KubernetesAuthArgs has no fields, so json.Marshal cannot fail on it.
+	if err := g.validate(&args); err != nil {
+		return nil, err
+	}
+	// A is a connector's auth struct, whose fields are all strings (KubernetesAuthArgs has none), so json.Marshal
+	// cannot fail on it.
 	block, _ := json.Marshal(args)
 	if q.Service != "" {
-		return nil, errKubeService
+		return nil, fmt.Errorf(`service must be empty for %s: the group goes in model, as in "apps/v1"`, g.connector)
 	}
 	v, err := k8sauthz.ParseAPIVersion(q.Model)
 	if err != nil {
-		return nil, fmt.Errorf("kubernetes: %w", err)
+		return nil, fmt.Errorf("%s: %w", g.connector, err)
 	}
 	if !k8sauthz.ValidOperationID(q.Operation) {
 		return nil, errKubeOperation
 	}
 
-	return &kubeLookup{p: p, version: v, operation: q.Operation, block: block}, nil
+	return &kubeLookup{
+		connector: g.connector, block: block, clusterRole: g.clusterRole, refs: g.refs, now: g.now,
+		resolve: func(ctx context.Context) (Target, error) { return resolve(ctx, &args) },
+		version: v, operation: q.Operation,
+	}, nil
 }
 
-// kubeLookup is one validated kubernetes lookup. Nothing in it changes after PrepareLookup returns it.
+// kubeTarget is what one connector gives the shared recipe: its name, the canonical block, how to resolve the
+// target, the configured ClusterRole, and the connector's document cache and clock.
+type kubeTarget struct {
+	connector   string
+	block       json.RawMessage
+	resolve     func(context.Context) (Target, error)
+	clusterRole string
+	refs        *kubeRefCache
+	now         func() time.Time
+}
+
+// kubeLookup is one validated lookup. Nothing in it changes after prepareKubeLookup returns it.
 type kubeLookup struct {
-	p         *kubernetesProvider
+	kubeTarget
+
 	version   k8sauthz.APIVersion
 	operation string
-	block     json.RawMessage
 }
 
-// Block returns a copy of the canonical block, {}.
+// Block returns a copy of the canonical block.
 func (l *kubeLookup) Block() json.RawMessage { return slices.Clone(l.block) }
 
-// Resolve makes no I/O: the target is the authority the kubeconfig names, which the host and port gates pin.
-func (l *kubeLookup) Resolve(context.Context) (Target, error) {
-	a := l.p.cluster.authority
-
-	return Target{Endpoint: "https://" + a, Identity: "kubernetes/" + a}, nil
-}
+// Resolve returns the target the block names.
+func (l *kubeLookup) Resolve(ctx context.Context) (Target, error) { return l.resolve(ctx) }
 
 // Admit admits exactly /version, /openapi/v3 and this lookup's own document, the last with an optional valid
 // hash, each with no block of its own.
@@ -160,7 +187,7 @@ func (r *kubeRecipe) run(ctx context.Context) apiref.Result {
 		r.limitations = append(r.limitations, limitNoHash)
 		return r.fetch(ctx)
 	}
-	if e, hit := r.l.p.refs.get(r.t.Endpoint, r.l.version.Key, hash); hit {
+	if e, hit := r.l.refs.get(r.t.Identity, r.l.version.Key, hash); hit {
 		return r.answer(e)
 	}
 	got, res, ok := r.document(ctx, hash)
@@ -178,7 +205,7 @@ func (r *kubeRecipe) run(ctx context.Context) apiref.Result {
 	case h2 == "" || h2 == hash:
 		return r.unhashed(ctx)
 	}
-	if e, hit := r.l.p.refs.get(r.t.Endpoint, r.l.version.Key, h2); hit {
+	if e, hit := r.l.refs.get(r.t.Identity, r.l.version.Key, h2); hit {
 		return r.answer(e)
 	}
 	if got, res, ok = r.document(ctx, h2); !ok {
@@ -298,7 +325,7 @@ func (r *kubeRecipe) document(ctx context.Context, hash string) (*kubeDoc, apire
 
 	return &kubeDoc{
 		doc: doc, sha: hex.EncodeToString(sum[:]), hash: hash,
-		observedAt: r.l.p.now().UTC().Format(time.RFC3339),
+		observedAt: r.l.now().UTC().Format(time.RFC3339),
 	}, apiref.Result{}, true
 }
 
@@ -325,7 +352,7 @@ func (r *kubeRecipe) finish(ctx context.Context, got *kubeDoc) apiref.Result {
 	}
 	e := kubeRefEntry{doc: got.doc, version: version, observedAt: got.observedAt, sha: got.sha, hash: got.hash}
 	if got.hash != "" {
-		r.l.p.refs.put(r.t.Endpoint, r.l.version.Key, e)
+		r.l.refs.put(r.t.Identity, r.l.version.Key, e)
 	}
 
 	return r.answer(e)
@@ -355,7 +382,7 @@ func (r *kubeRecipe) answer(e kubeRefEntry) apiref.Result {
 	res := e.doc.Lookup(k8sauthz.Lookup{
 		Operation:   r.l.operation,
 		Endpoint:    r.t.Endpoint,
-		ClusterRole: r.l.p.clusterRole,
+		ClusterRole: r.l.clusterRole,
 		Source: apiref.Source{
 			Name: kubeSourceName, Document: r.l.docPath(), Version: e.version, SHA256: e.sha,
 			Target: r.t.Identity, ServerHash: e.hash, ObservedAt: e.observedAt,
@@ -413,20 +440,21 @@ type kubeRefEntry struct {
 }
 
 // kubeRefCache holds distilled documents for one provider, so for one session: at most kubeCacheEntries entries
-// and kubeCacheBytes bytes, the oldest evicted first. It is keyed by endpoint, document key and the hash the
-// server confirmed, so a changed document misses.
+// and kubeCacheBytes bytes, the oldest evicted first. It is keyed by the target's identity, document key and the
+// hash the server confirmed, so a changed document misses. The identity, not the endpoint, names the cluster:
+// private managed clusters can share one control-plane address, and a hit answers without reading /version.
 type kubeRefCache struct {
 	mu      sync.Mutex
 	entries []kubeRefEntry
 	bytes   int
 }
 
-func kubeCacheKey(endpoint, key, hash string) string { return endpoint + "\x00" + key + "\x00" + hash }
+func kubeCacheKey(identity, key, hash string) string { return identity + "\x00" + key + "\x00" + hash }
 
-func (c *kubeRefCache) get(endpoint, key, hash string) (kubeRefEntry, bool) {
+func (c *kubeRefCache) get(identity, key, hash string) (kubeRefEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	k := kubeCacheKey(endpoint, key, hash)
+	k := kubeCacheKey(identity, key, hash)
 	for _, e := range c.entries {
 		if e.key == k {
 			return e, true
@@ -438,8 +466,8 @@ func (c *kubeRefCache) get(endpoint, key, hash string) (kubeRefEntry, bool) {
 
 // put stores e unless it is over kubeCacheMaxEntry, then evicts the oldest entries until both bounds hold. The
 // size is a walk that stops once it passes the entry limit, so nothing is serialized to measure it.
-func (c *kubeRefCache) put(endpoint, key string, e kubeRefEntry) {
-	e.key = kubeCacheKey(endpoint, key, e.hash)
+func (c *kubeRefCache) put(identity, key string, e kubeRefEntry) {
+	e.key = kubeCacheKey(identity, key, e.hash)
 	e.size = len(e.key) + len(e.version) + len(e.observedAt) + len(e.sha) + e.doc.Size(kubeCacheMaxEntry)
 	if e.size > kubeCacheMaxEntry {
 		return
