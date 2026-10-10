@@ -76,6 +76,8 @@ func newAKSProvider(credential azcore.TokenCredential, sdkCloud cloud.Configurat
 	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.resolver = defaultResolveAddrs
+	p.connector = aksProviderName
+	p.target = func(a *AKSAuthArgs) string { return aksProviderName + "/" + p.cacheKey(a) }
 
 	return p
 }
@@ -150,9 +152,18 @@ func (p *aksProvider) getClusterConfig(ctx context.Context, args *AKSAuthArgs) (
 	cacheKey := args.SubscriptionID + "/" + args.ResourceGroup + "/" + args.ClusterName
 
 	return p.creds.get(ctx, cacheKey, func(ctx context.Context) (*rest.Config, error) {
-		return aksGetClusterConfig(
-			ctx, p.newClient, p.credential, p.sdkCloud, args.SubscriptionID, args.ResourceGroup, args.ClusterName,
-		)
+		return observeBootstrap(ctx, aksProviderName, callListUserCredentials, func() string { return p.target(args) },
+			func() (*rest.Config, error) {
+				return aksGetClusterConfig(
+					ctx,
+					p.newClient,
+					p.credential,
+					p.sdkCloud,
+					args.SubscriptionID,
+					args.ResourceGroup,
+					args.ClusterName,
+				)
+			})
 	})
 }
 

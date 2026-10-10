@@ -76,6 +76,53 @@ type MetadataReader interface {
 	Read(ctx context.Context, r MetadataRead) (MetadataResponse, error)
 }
 
+// The control-plane calls a lookup can trigger while its target resolves, as a BootstrapObserver names them.
+const (
+	callDescribeCluster     = "DescribeCluster"
+	callClustersGet         = "clusters.get"
+	callListUserCredentials = "ListClusterUserCredentials"
+	callClusterRole         = "clusterrole"
+	clusterRoleTargetPrefix = " clusterroles/"
+)
+
+// BootstrapObserver is told about each control-plane call a targeted lookup triggers: a managed connector's
+// cluster resolution and the ClusterRole fetch. The api_reference tool attaches one to the lookup's context;
+// nothing else does, so the calls an http_request triggers are not reported.
+type BootstrapObserver interface {
+	// Begin reports a call about to start. An error refuses the call, which then fails with that error before
+	// anything is sent. end reports how the call ended, and can run after the lookup has returned.
+	Begin(connector, call, target string) (end func(error), err error)
+}
+
+type bootstrapObserverKey struct{}
+
+// WithBootstrapObserver attaches o to ctx.
+func WithBootstrapObserver(ctx context.Context, o BootstrapObserver) context.Context {
+	return context.WithValue(ctx, bootstrapObserverKey{}, o)
+}
+
+// observeBootstrap runs one control-plane call under the observer ctx carries, if any; target is built only then.
+// It runs inside a syncCache fetch, which runs under the first caller's context values, so only the caller that
+// starts a call reports it: a call served from the cache or joined in flight reports nothing.
+func observeBootstrap[T any](
+	ctx context.Context, connector, call string, target func() string, fetch func() (T, error),
+) (T, error) {
+	o, ok := ctx.Value(bootstrapObserverKey{}).(BootstrapObserver)
+	if !ok {
+		return fetch()
+	}
+	end, err := o.Begin(connector, call, target())
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+	v, err := fetch()
+	end(err)
+
+	return v, err
+}
+
 // TargetDocumenterFor finds the provider named name, case-insensitively, as every dispatcher does. It returns the
 // provider, the provider as a TargetDocumenter or nil when it implements none, and ErrUnknownProvider when no
 // provider of that name is configured.

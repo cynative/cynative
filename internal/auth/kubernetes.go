@@ -431,6 +431,7 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 	p.egress = NoProxy()
 	p.expectedPort = defaultedPort(cluster.port)
 	p.connector = kubernetesProviderName
+	p.target = func(*KubernetesAuthArgs) string { return kubernetesProviderName + "/" + cluster.authority }
 	p.refs = &kubeRefCache{}
 	p.now = time.Now
 

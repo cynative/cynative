@@ -68,6 +68,8 @@ func newEKSProvider(cfg aws.Config) *eksProvider {
 	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.resolver = defaultResolveAddrs
+	p.connector = eksProviderName
+	p.target = func(a *EKSAuthArgs) string { return eksProviderName + "/" + p.cacheKey(a) }
 
 	return p
 }
@@ -161,7 +163,8 @@ func (p *eksProvider) resolveCluster(ctx context.Context, args *EKSAuthArgs) (cl
 	cacheKey := cfg.Region + "/" + args.ClusterName
 
 	return p.cluster.get(ctx, cacheKey, func(ctx context.Context) (clusterTLS, error) {
-		return p.describeCluster(ctx, cfg, args.ClusterName)
+		return observeBootstrap(ctx, eksProviderName, callDescribeCluster, func() string { return p.target(args) },
+			func() (clusterTLS, error) { return p.describeCluster(ctx, cfg, args.ClusterName) })
 	})
 }
 

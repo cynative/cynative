@@ -69,6 +69,8 @@ func newGKEProvider(tokenSource oauth2.TokenSource) *gkeProvider {
 	p.clusterRole = defaultClusterRole
 	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
+	p.connector = gkeProviderName
+	p.target = func(a *GKEAuthArgs) string { return gkeProviderName + "/" + p.cacheKey(a) }
 
 	return p
 }
@@ -150,7 +152,10 @@ func (p *gkeProvider) resolveCluster(ctx context.Context, args *GKEAuthArgs) (cl
 	cacheKey := args.Project + "/" + args.Location + "/" + args.ClusterName
 
 	return p.cluster.get(ctx, cacheKey, func(ctx context.Context) (clusterTLS, error) {
-		return p.getCluster(ctx, p.tokenSource, args.Project, args.Location, args.ClusterName)
+		return observeBootstrap(ctx, gkeProviderName, callClustersGet, func() string { return p.target(args) },
+			func() (clusterTLS, error) {
+				return p.getCluster(ctx, p.tokenSource, args.Project, args.Location, args.ClusterName)
+			})
 	})
 }
 
