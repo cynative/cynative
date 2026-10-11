@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -111,6 +112,13 @@ func newAuditSinkShell(cfg config.Config, prov *audit.AgentProvenance) (audit.Si
 
 	opts := []audit.Option{
 		audit.WithActor(cfg.LLM.Provider + "/" + cfg.LLM.Model), audit.WithDrain(auth.BootstrapDrainTimeout),
+		audit.WithDrainNotice(func(d time.Duration) {
+			_, _ = fmt.Fprintf(
+				os.Stderr,
+				"cynative: waiting up to %s for a cluster call to write its audit record\n",
+				d,
+			)
+		}),
 	}
 	if prov != nil {
 		opts = append(opts, audit.WithAgent(*prov))

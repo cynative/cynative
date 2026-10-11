@@ -322,3 +322,90 @@ func TestAPIReferenceTargeted_ARefusedBootstrapReleasesItsHold(t *testing.T) {
 			time.Since(start), sent)
 	}
 }
+
+// gatedWriter accepts writes until it is armed; the next write then blocks until released, so a test can hold a
+// late record mid-write and see what the closer does meanwhile.
+type gatedWriter struct {
+	mu      sync.Mutex
+	armed   bool
+	writing chan struct{}
+	release chan struct{}
+}
+
+func (w *gatedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	armed := w.armed
+	w.armed = false
+	w.mu.Unlock()
+	if armed {
+		close(w.writing)
+		<-w.release
+	}
+
+	return len(p), nil
+}
+
+// TestAPIReferenceTargeted_TheLogClosesOnlyAfterTheLateResultIsWritten pins the order inside the hold: the hold is
+// released only once the late result record is written, so the writer is never closed under it.
+func TestAPIReferenceTargeted_TheLogClosesOnlyAfterTheLateResultIsWritten(t *testing.T) {
+	t.Parallel()
+	end := make(chan struct{})
+	p := newTarget("eks", func(context.Context, auth.MetadataReader) apiref.Result {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: "resolving the target timed out"}
+	})
+	p.lookup.resolve = func(ctx context.Context) error {
+		o, _ := auth.BootstrapObserverFrom(ctx)
+		done, err := o.Begin("eks", "DescribeCluster", "eks/us-east-1/c")
+		if err != nil {
+			return err
+		}
+		go func() {
+			<-end
+			done(nil)
+		}()
+
+		return nil
+	}
+	w := &gatedWriter{writing: make(chan struct{}), release: make(chan struct{})}
+	l := audit.New(w, audit.WithDrain(time.Minute))
+	if r := runTargeted(t.Context(), t, []auth.Provider{p}, l, &fakeExec{}, eksLookup); r.err != nil {
+		t.Fatalf("Run = %v", r.err)
+	}
+	w.mu.Lock()
+	w.armed = true
+	w.mu.Unlock()
+	closedEarly := make(chan struct{}, 1)
+	closed := make(chan error, 1)
+	go func() {
+		closed <- l.Closer(func() error {
+			select {
+			case <-w.writing:
+				select {
+				case <-w.release:
+				default:
+					closedEarly <- struct{}{}
+				}
+			default:
+			}
+			return nil
+		})()
+	}()
+	close(end)
+	<-w.writing
+	// The late result is mid-write now. Give a closer that does not wait for it time to reach the writer.
+	time.Sleep(100 * time.Millisecond)
+	close(w.release)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Errorf("closer = %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the closer never returned")
+	}
+	select {
+	case <-closedEarly:
+		t.Error("the writer was closed while the late result record was still being written")
+	default:
+	}
+}

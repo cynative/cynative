@@ -11,11 +11,13 @@ import (
 func TestPendingAfter_FollowsAHoldTakenAfterTheCountReachedZero(t *testing.T) {
 	t.Parallel()
 
-	l := New(nil, WithDrain(time.Minute))
+	waiting := make(chan struct{})
+	l := New(nil, WithDrain(time.Minute), WithDrainNotice(func(time.Duration) { close(waiting) }))
 	l.Hold()
 	got := make(chan int, 1)
 	go func() { got <- l.pendingAfter() }()
-	time.Sleep(20 * time.Millisecond)
+	// The notice comes after the waiter read the first channel and before it waits on it.
+	<-waiting
 	l.holdMu.Lock()
 	close(l.drained)
 	l.drained = make(chan struct{})

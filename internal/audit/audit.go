@@ -132,6 +132,7 @@ type Logger struct {
 	// drain bounds how long the closer waits for held records; holds counts them, and drained is closed when the
 	// count returns to zero. They have their own lock, so a record written by a holder never waits on a closer.
 	drain   time.Duration
+	notice  func(time.Duration)
 	holdMu  sync.Mutex
 	holds   int
 	drained chan struct{}
@@ -144,6 +145,29 @@ type Option func(*Logger)
 func WithDrain(d time.Duration) Option {
 	return func(l *Logger) { l.drain = d }
 }
+
+// WithDrainNotice sets a function the closer calls once, with the bound, when it is about to wait for a held
+// record, so a run that pauses at exit can say why.
+func WithDrainNotice(notice func(time.Duration)) Option {
+	return func(l *Logger) { l.notice = notice }
+}
+
+// PendingRecordsError reports records held (Hold) that were not written before the log closed. It matches ErrLog,
+// since the log is missing records.
+type PendingRecordsError struct {
+	Records int
+}
+
+func (e *PendingRecordsError) Error() string {
+	if e.Records == 1 {
+		return ErrLog.Error() + ": 1 record was not written before the log closed"
+	}
+
+	return fmt.Sprintf("%s: %d records were not written before the log closed", ErrLog, e.Records)
+}
+
+// Is reports that a PendingRecordsError is an ErrLog.
+func (e *PendingRecordsError) Is(target error) bool { return target == ErrLog }
 
 // WithActor sets the actor identity stamped on every record (e.g. provider/model).
 func WithActor(a string) Option {
@@ -261,6 +285,7 @@ func (l *Logger) Hold() func() {
 // re-reads the holds after every wake, so a hold taken after the count reached zero is waited for too.
 func (l *Logger) pendingAfter() int {
 	deadline := time.Now().Add(l.drain)
+	noticed := false
 	for {
 		n, drained := l.held()
 		if n == 0 {
@@ -270,6 +295,10 @@ func (l *Logger) pendingAfter() int {
 		if wait <= 0 {
 			return n
 		}
+		if !noticed && l.notice != nil {
+			l.notice(l.drain)
+		}
+		noticed = true
 		timer := time.NewTimer(wait)
 		select {
 		case <-drained:
@@ -293,9 +322,13 @@ func (l *Logger) held() (int, chan struct{}) {
 // the run with an error.
 func (l *Logger) Closer(closeWriter func() error) func() error {
 	return func() error {
-		pending := l.pendingAfter()
+		// A latched failure is what the closer returns whatever a held record does, so it does not wait for one.
+		pending := 0
+		if l.Err() == nil {
+			pending = l.pendingAfter()
+		}
 		cerr := closeWriter()
-		// A hold taken once the wait was over can only write to the closed writer, so it is a missing record too.
+		// A hold taken once the wait was over may not land before the process exits, so it counts as missing too.
 		if late, _ := l.held(); late > pending {
 			pending = late
 		}
@@ -303,7 +336,7 @@ func (l *Logger) Closer(closeWriter func() error) func() error {
 			return err
 		}
 		if pending > 0 {
-			return fmt.Errorf("%w: %d held records were still pending after %s", ErrLog, pending, l.drain)
+			return &PendingRecordsError{Records: pending}
 		}
 
 		return cerr

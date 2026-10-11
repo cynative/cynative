@@ -433,7 +433,7 @@ func TestLogger_CloserReportsARecordStillHeldAtTheBound(t *testing.T) {
 	closed := false
 	err := l.Closer(func() error { closed = true; return nil })()
 	if !errors.Is(err, audit.ErrLog) || !closed ||
-		err.Error() != "audit: log write failed: 1 held records were still pending after 10ms" {
+		err.Error() != "audit: log write failed: 1 record was not written before the log closed" {
 		t.Errorf("closer = %v (closed %v), want 1 pending record reported", err, closed)
 	}
 }
@@ -459,7 +459,60 @@ func TestLogger_CloserReportsAHoldTakenAfterItsWait(t *testing.T) {
 	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Minute))
 	err := l.Closer(func() error { l.Hold(); return nil })()
 	if !errors.Is(err, audit.ErrLog) ||
-		err.Error() != "audit: log write failed: 1 held records were still pending after 1m0s" {
+		err.Error() != "audit: log write failed: 1 record was not written before the log closed" {
 		t.Errorf("closer = %v, want the late hold reported", err)
+	}
+}
+
+// TestLogger_CloserNamesHowManyRecordsAreMissing pins the pending error's wording for more than one record and that
+// it still matches ErrLog, so the run treats it as an audit failure.
+func TestLogger_CloserNamesHowManyRecordsAreMissing(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Millisecond))
+	l.Hold()
+	l.Hold()
+	err := l.Closer(func() error { return nil })()
+	var pending *audit.PendingRecordsError
+	if !errors.Is(err, audit.ErrLog) || !errors.As(err, &pending) || pending.Records != 2 ||
+		err.Error() != "audit: log write failed: 2 records were not written before the log closed" {
+		t.Errorf("closer = %v", err)
+	}
+}
+
+// TestLogger_CloserTellsWhenItWaits pins the notice: it is given once, before the first wait, and only when a
+// record is actually held.
+func TestLogger_CloserTellsWhenItWaits(t *testing.T) {
+	t.Parallel()
+
+	var notices []time.Duration
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Millisecond),
+		audit.WithDrainNotice(func(d time.Duration) { notices = append(notices, d) }))
+	_ = l.Closer(func() error { return nil })()
+	if len(notices) != 0 {
+		t.Fatalf("notices with nothing held: %v", notices)
+	}
+	l.Hold()
+	_ = l.Closer(func() error { return nil })()
+	if len(notices) != 1 || notices[0] != time.Millisecond {
+		t.Errorf("notices = %v, want one, naming the bound", notices)
+	}
+}
+
+// TestLogger_CloserDoesNotWaitOnceTheLogFailed pins that a latched failure ends the wait before it starts: the
+// closer returns that failure whatever a held record would do, so waiting would only delay the exit.
+func TestLogger_CloserDoesNotWaitOnceTheLogFailed(t *testing.T) {
+	t.Parallel()
+
+	noticed := false
+	l := audit.New(&flakyWriter{failOn: 1}, audit.WithDrain(2*time.Second),
+		audit.WithDrainNotice(func(time.Duration) { noticed = true }))
+	_ = l.Log(audit.Record{Tool: "x"}) //nolint:exhaustruct // Logger stamps the rest.
+	l.Hold()
+	start := time.Now()
+	err := l.Closer(func() error { return nil })()
+	if !errors.Is(err, audit.ErrLog) || noticed || time.Since(start) > time.Second {
+		t.Errorf("closer = %v after %s (noticed %v), want the latched failure at once", err, time.Since(start),
+			noticed)
 	}
 }
