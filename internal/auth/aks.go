@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
@@ -76,6 +77,10 @@ func newAKSProvider(credential azcore.TokenCredential, sdkCloud cloud.Configurat
 	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.resolver = defaultResolveAddrs
+	p.connector = aksProviderName
+	p.refs = &kubeRefCache{}
+	p.now = time.Now
+	p.target = func(a *AKSAuthArgs) string { return aksProviderName + "/" + p.cacheKey(a) }
 
 	return p
 }
@@ -86,7 +91,9 @@ func (p *aksProvider) Name() string {
 
 func (p *aksProvider) Description() string {
 	return "AKS Kubernetes auth supporting both Entra ID (Azure AD) and Local Accounts (mTLS/Token). " +
-		"Requires aks_auth.cluster_name, resource_group, and subscription_id."
+		"Requires aks_auth.cluster_name, resource_group, and subscription_id. " +
+		"For an operation's request template as this cluster serves it, call api_reference with connector \"aks\", " +
+		"the same aks_auth, model set to the apiVersion and the operationId."
 }
 
 // aksClusterTLSMaterial base64-encodes the cluster CA and (for local-account
@@ -150,9 +157,18 @@ func (p *aksProvider) getClusterConfig(ctx context.Context, args *AKSAuthArgs) (
 	cacheKey := args.SubscriptionID + "/" + args.ResourceGroup + "/" + args.ClusterName
 
 	return p.creds.get(ctx, cacheKey, func(ctx context.Context) (*rest.Config, error) {
-		return aksGetClusterConfig(
-			ctx, p.newClient, p.credential, p.sdkCloud, args.SubscriptionID, args.ResourceGroup, args.ClusterName,
-		)
+		return observeBootstrap(ctx, aksProviderName, callListUserCredentials, func() string { return p.target(args) },
+			func() (*rest.Config, error) {
+				return aksGetClusterConfig(
+					ctx,
+					p.newClient,
+					p.credential,
+					p.sdkCloud,
+					args.SubscriptionID,
+					args.ResourceGroup,
+					args.ClusterName,
+				)
+			})
 	})
 }
 

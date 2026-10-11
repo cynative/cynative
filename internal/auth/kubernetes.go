@@ -402,10 +402,6 @@ type kubernetesProvider struct {
 	cluster  resolvedCluster
 	resolver addrResolver
 	readFile func(string) ([]byte, error)
-	// refs caches the distilled /openapi/v3 documents targeted lookups read, for this session.
-	refs *kubeRefCache
-	// now stamps when a lookup read its document.
-	now func() time.Time
 }
 
 var (
@@ -427,8 +423,6 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 		cluster:  cluster,
 		resolver: defaultResolveAddrs,
 		readFile: defaultReadFile,
-		refs:     &kubeRefCache{},
-		now:      time.Now,
 	}
 	p.fetchView = p.defaultFetchView // branch-free; body in kubernetes_shell.go.
 	p.cacheKey = func(*KubernetesAuthArgs) string { return "self" }
@@ -436,6 +430,10 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 	p.clusterRole = defaultClusterRole
 	p.egress = NoProxy()
 	p.expectedPort = defaultedPort(cluster.port)
+	p.connector = kubernetesProviderName
+	p.target = func(*KubernetesAuthArgs) string { return kubernetesProviderName + "/" + cluster.authority }
+	p.refs = &kubeRefCache{}
+	p.now = time.Now
 
 	return p
 }

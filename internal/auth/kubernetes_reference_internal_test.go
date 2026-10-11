@@ -431,7 +431,7 @@ func checkStale(
 		t.Errorf("limitations %q lack %q", res.Reference.Limitations, limit)
 	}
 	for _, h := range []string{refHash, refHash2} {
-		if _, hit := p.refs.get("https://10.0.0.1:6443", metricsK, h); hit != (h == cached) {
+		if _, hit := p.refs.get("kubernetes/10.0.0.1:6443", metricsK, h); hit != (h == cached) {
 			t.Errorf("cache under %s...: %v", h[:4], hit)
 		}
 	}
@@ -892,5 +892,89 @@ func TestKubernetesRecipe_LongReasonsKeepTheirGuidance(t *testing.T) {
 		"follow"; res.Outcome != apiref.OutcomeUnavailable || !strings.HasSuffix(res.Reason, want) ||
 		utf8.RuneCountInString(res.Reason) > apiref.MaxReason {
 		t.Errorf("missing: %d runes, %q", utf8.RuneCountInString(res.Reason), res.Reason)
+	}
+}
+
+// lookupAt prepares a lookup on g whose target is endpoint under identity, so two lookups can share an endpoint
+// and differ in the cluster they name.
+func lookupAt(t *testing.T, g *k8sGate[KubernetesAuthArgs], endpoint, identity string) TargetLookup {
+	t.Helper()
+	l, err := prepareKubeLookup(g, apiref.Query{Model: "metrics.k8s.io/v1beta1", Operation: listOp},
+		json.RawMessage(`{}`), errKubeBlock, func(context.Context, *KubernetesAuthArgs) (Target, error) {
+			return Target{Endpoint: endpoint, Identity: identity}, nil
+		})
+	if err != nil {
+		t.Fatalf("prepareKubeLookup: %v", err)
+	}
+
+	return l
+}
+
+// TestKubernetesRecipe_TwoClustersAtOneEndpointShareNoEntry pins that the document cache is keyed by the target's
+// identity: private managed clusters can share one control-plane address, so a second cluster at the same
+// endpoint whose root publishes the same hash still reads its own document, and the first cluster's next lookup
+// hits its own entry.
+func TestKubernetesRecipe_TwoClustersAtOneEndpointShareNoEntry(t *testing.T) {
+	t.Parallel()
+	g := &refProvider().k8sGate
+	full := []string{"/openapi/v3", metricsP + "?hash=" + refHash, "/version"}
+	for _, tc := range []struct {
+		identity string
+		reads    []string
+	}{
+		{"gke/p/l/a@172.16.0.2", full},
+		{"gke/p/l/b@172.16.0.2", full},
+		{"gke/p/l/a@172.16.0.2", []string{"/openapi/v3"}},
+	} {
+		rd := &scriptReader{t: t, script: map[string][]scripted{
+			"/openapi/v3":                 {ok(hashedRoot(refHash))},
+			metricsP + "?hash=" + refHash: {ok(metricsDoc(t))},
+			"/version":                    {ok(versionBody)},
+		}}
+		l := lookupAt(t, g, "https://172.16.0.2", tc.identity)
+		tgt, _ := l.Resolve(t.Context())
+		res := l.Answer(t.Context(), tgt, rd)
+		if res.Outcome != apiref.OutcomeFound || res.Reference.Source.Target != tc.identity ||
+			!slices.Equal(rd.paths(), tc.reads) {
+			t.Errorf("%s: outcome %s, reads %q, want reads %q", tc.identity, res.Outcome, rd.paths(), tc.reads)
+		}
+	}
+	if len(g.refs.entries) != 2 {
+		t.Errorf("%d cache entries, want one per cluster", len(g.refs.entries))
+	}
+}
+
+// prepTestArgs is an auth block with one required field, for the shared preparation's validation.
+type prepTestArgs struct {
+	Name string `json:"name"`
+}
+
+// TestPrepareKubeLookup_ValidatesTheDecodedBlock pins that the shared preparation runs the gate's own validate on
+// the decoded block before anything else about the query, and that the canonical block is the re-marshal of what
+// was validated.
+func TestPrepareKubeLookup_ValidatesTheDecodedBlock(t *testing.T) {
+	t.Parallel()
+	errNoName := errors.New("name is required")
+	var seen []prepTestArgs
+	g := &k8sGate[prepTestArgs]{connector: "test", validate: func(a *prepTestArgs) error {
+		seen = append(seen, *a)
+		if a.Name == "" {
+			return errNoName
+		}
+
+		return nil
+	}}
+	q := apiref.Query{Service: "bad", Model: "v1", Operation: "a"}
+	if _, err := prepareKubeLookup(g, q, json.RawMessage(`{"name":""}`), errKubeBlock, nil); !errors.Is(err,
+		errNoName) {
+		t.Errorf("an invalid block: err = %v, want the gate's validate error", err)
+	}
+	q.Service = ""
+	l, err := prepareKubeLookup(g, q, json.RawMessage(`{"NAME":"x","extra":1}`), errKubeBlock, nil)
+	if err != nil || string(l.Block()) != `{"name":"x"}` {
+		t.Fatalf("a valid block: %v, block %s", err, l.Block())
+	}
+	if !slices.Equal(seen, []prepTestArgs{{}, {Name: "x"}}) {
+		t.Errorf("validate saw %+v", seen)
 	}
 }

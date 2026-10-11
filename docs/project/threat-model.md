@@ -62,14 +62,22 @@ cannot move any of these lines.
   lower-cased host, so the two would not always pick the same interface.
   Spellings that name the same host are still admitted, so ASCII case
   varies freely and the cloud host gates also admit a trailing dot.
-- **Unprompted metadata reads** - `api_reference` runs without an approval prompt. For the `kubernetes`
-  connector it reads the configured cluster's metadata with the connector's credentials: `GET /version`,
+- **Unprompted metadata reads** - `api_reference` runs without an approval prompt. For the Kubernetes
+  connectors it reads the target cluster's metadata with the connector's credentials: `GET /version`,
   `GET /openapi/v3` and `GET /openapi/v3/<group-version>`, at paths cynative builds from validated names,
   never at a URL the model wrote, through the same host pinning, read-only gate, dial guard and redaction as
-  `http_request`. The lookup is audited with the decision `unprompted`, and each read as a record carrying the
-  lookup's call ID. So without a prompt the model can learn the cluster's server version and API schema, CRDs
-  included. The documents are cluster-controlled text: the result is validated, bounded and fenced, and nothing
-  in it feeds an authorization decision.
+  `http_request`. Before its first read of an `eks`, `gke` or `aks` cluster the connector resolves the cluster
+  with its own credentials (`DescribeCluster`, `clusters.get`, or `ListClusterUserCredentials`, a POST action
+  that returns cluster credentials to the process and appears in the Activity Log as the operator's) and the
+  gate fetches the configured ClusterRole. Every value that names the cluster must match the vendor's
+  identifier grammar before any of these calls, so the model picks a cluster, never a control-plane URL. A
+  cluster that does not resolve is not cached, so each lookup naming it repeats the call. The lookup is audited
+  with the decision `unprompted`, and each read, resolution call and ClusterRole fetch it triggers as a record
+  carrying the lookup's call ID; credential retrieval is not audited (GCP and Entra ID token refreshes, AWS
+  credential-provider calls such as STS). So without a prompt the model can make
+  cynative contact any cluster the operator's credentials can name, and learn its endpoint, server version and
+  API schema, CRDs included. The documents are cluster-controlled text: the result is validated, bounded and
+  fenced, and nothing in it feeds an authorization decision.
 - **Repository-supplied prompts** - agents are read only from
   `~/.cynative/agents/` and the binary, never from the working directory.
   Selection is always explicit by name and the model never chooses an

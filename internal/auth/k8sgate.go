@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"time"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
 	k8sauthz "github.com/cynative/cynative/internal/auth/k8s"
@@ -46,6 +47,20 @@ type k8sGate[A any] struct {
 	// fetch. Constructors default it to NoProxy; the registration shell sets
 	// the real one.
 	egress *Egress
+
+	// connector is the connector's name, as the model selects it in
+	// auth_provider. A targeted lookup names it in its reference and reasons.
+	connector string
+
+	// target names the cluster args select, as "<connector>/..." (the
+	// lookup's identity before its "@<host>", and the bootstrap records'
+	// target), set by each provider constructor.
+	target func(*A) string
+
+	// refs caches the distilled /openapi/v3 documents targeted lookups read,
+	// for this session, and now stamps when a lookup read its document.
+	refs *kubeRefCache
+	now  func() time.Time
 }
 
 // authorizeAction enforces the configured read-only ClusterRole posture for a
@@ -88,7 +103,9 @@ func (g *k8sGate[A]) authorizeAction(ctx context.Context, v authreq.View, args *
 // resolveViewPolicy fetches (and caches per cluster) the parsed ClusterRole policy.
 func (g *k8sGate[A]) resolveViewPolicy(ctx context.Context, args *A) (*k8sauthz.ViewPolicy, error) {
 	return g.viewPolicy.get(ctx, g.cacheKey(args), func(ctx context.Context) (*k8sauthz.ViewPolicy, error) {
-		return g.fetchView(ctx, args)
+		return observeBootstrap(ctx, g.connector, callClusterRole,
+			func() string { return g.target(args) + clusterRoleTargetPrefix + g.clusterRole },
+			func() (*k8sauthz.ViewPolicy, error) { return g.fetchView(ctx, args) })
 	})
 }
 
