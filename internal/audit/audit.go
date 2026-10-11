@@ -257,25 +257,34 @@ func (l *Logger) Hold() func() {
 	}
 }
 
-// pendingAfter waits up to the drain bound for every hold to be released and returns how many are still held.
+// pendingAfter waits up to the drain bound for every hold to be released and returns how many are still held. It
+// re-reads the holds after every wake, so a hold taken after the count reached zero is waited for too.
 func (l *Logger) pendingAfter() int {
-	l.holdMu.Lock()
-	n, drained := l.holds, l.drained
-	l.holdMu.Unlock()
-	if n == 0 {
-		return 0
+	deadline := time.Now().Add(l.drain)
+	for {
+		n, drained := l.held()
+		if n == 0 {
+			return 0
+		}
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			return n
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-drained:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
-	timer := time.NewTimer(l.drain)
-	defer timer.Stop()
-	select {
-	case <-drained:
-		return 0
-	case <-timer.C:
-		l.holdMu.Lock()
-		defer l.holdMu.Unlock()
+}
 
-		return l.holds
-	}
+// held returns the open holds and the channel closed when they reach zero.
+func (l *Logger) held() (int, chan struct{}) {
+	l.holdMu.Lock()
+	defer l.holdMu.Unlock()
+
+	return l.holds, l.drained
 }
 
 // Closer wraps the audit writer's close for the composition root. It first waits, up to the drain bound, for the
@@ -286,6 +295,10 @@ func (l *Logger) Closer(closeWriter func() error) func() error {
 	return func() error {
 		pending := l.pendingAfter()
 		cerr := closeWriter()
+		// A hold taken once the wait was over can only write to the closed writer, so it is a missing record too.
+		if late, _ := l.held(); late > pending {
+			pending = late
+		}
 		if err := l.Err(); err != nil {
 			return err
 		}

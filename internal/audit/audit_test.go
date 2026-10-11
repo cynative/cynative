@@ -450,3 +450,16 @@ func TestLogger_CloserWithNothingHeldDoesNotWait(t *testing.T) {
 		t.Errorf("closer = %v after %s", err, time.Since(start))
 	}
 }
+
+// TestLogger_CloserReportsAHoldTakenAfterItsWait pins the check after the close: a hold taken once the wait is over
+// is a record that can only land on a closed writer, so it is reported as missing.
+func TestLogger_CloserReportsAHoldTakenAfterItsWait(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Minute))
+	err := l.Closer(func() error { l.Hold(); return nil })()
+	if !errors.Is(err, audit.ErrLog) ||
+		err.Error() != "audit: log write failed: 1 held records were still pending after 1m0s" {
+		t.Errorf("closer = %v, want the late hold reported", err)
+	}
+}
