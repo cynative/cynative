@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"golang.org/x/oauth2"
 	container "google.golang.org/api/container/v1"
@@ -70,6 +71,8 @@ func newGKEProvider(tokenSource oauth2.TokenSource) *gkeProvider {
 	p.egress = NoProxy()
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.connector = gkeProviderName
+	p.refs = &kubeRefCache{}
+	p.now = time.Now
 	p.target = func(a *GKEAuthArgs) string { return gkeProviderName + "/" + p.cacheKey(a) }
 
 	return p
@@ -107,7 +110,9 @@ func (p *gkeProvider) Name() string {
 func (p *gkeProvider) Description() string {
 	return "GKE Kubernetes bearer-token auth via GCP Application Default Credentials. " +
 		"First resolve the cluster endpoint via the GCP Container API (auth_provider=gcp), then use this provider. " +
-		"The CA certificate is auto-resolved from the GKE API; do NOT provide it."
+		"The CA certificate is auto-resolved from the GKE API; do NOT provide it. " +
+		"For an operation's request template as this cluster serves it, call api_reference with connector \"gke\", " +
+		"the same gke_auth, model set to the apiVersion and the operationId."
 }
 
 // gkeClusterConn assembles the cluster connection for the GKE view fetch. GKE

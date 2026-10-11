@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -69,6 +70,8 @@ func newEKSProvider(cfg aws.Config) *eksProvider {
 	p.expectedPort = httpsPort // the endpoint this connector resolves is reached on the https default.
 	p.resolver = defaultResolveAddrs
 	p.connector = eksProviderName
+	p.refs = &kubeRefCache{}
+	p.now = time.Now
 	p.target = func(a *EKSAuthArgs) string { return eksProviderName + "/" + p.cacheKey(a) }
 
 	return p
@@ -81,7 +84,9 @@ func (p *eksProvider) Name() string {
 func (p *eksProvider) Description() string {
 	return "EKS Kubernetes bearer-token auth via STS. Requires eks_auth.cluster_name. " +
 		"First resolve the cluster endpoint via the EKS API (auth_provider=aws), then use this provider. " +
-		"The CA certificate is auto-resolved from the EKS DescribeCluster API; do NOT provide it."
+		"The CA certificate is auto-resolved from the EKS DescribeCluster API; do NOT provide it. " +
+		"For an operation's request template as this cluster serves it, call api_reference with connector \"eks\", " +
+		"the same eks_auth, model set to the apiVersion and the operationId."
 }
 
 // eksBearerToken assembles the k8s-aws-v1 bearer token from a presigned STS URL.

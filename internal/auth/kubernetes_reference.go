@@ -93,8 +93,14 @@ func prepareKubeLookup[A any](
 		return nil, err
 	}
 	// A is a connector's auth struct, whose fields are all strings (KubernetesAuthArgs has none), so json.Marshal
-	// cannot fail on it.
+	// cannot fail on it, and its output decodes into a map of strings.
 	block, _ := json.Marshal(args)
+	var fields map[string]string
+	_ = json.Unmarshal(block, &fields)
+	authField := ""
+	if len(fields) > 0 {
+		authField = g.connector + "_auth"
+	}
 	if q.Service != "" {
 		return nil, fmt.Errorf(`service must be empty for %s: the group goes in model, as in "apps/v1"`, g.connector)
 	}
@@ -107,17 +113,22 @@ func prepareKubeLookup[A any](
 	}
 
 	return &kubeLookup{
-		connector: g.connector, block: block, clusterRole: g.clusterRole, refs: g.refs, now: g.now,
+		connector: g.connector, block: block, authField: authField, authArgs: fields, clusterRole: g.clusterRole,
+		refs: g.refs, now: g.now,
 		resolve: func(ctx context.Context) (Target, error) { return resolve(ctx, &args) },
 		version: v, operation: q.Operation,
 	}, nil
 }
 
 // kubeTarget is what one connector gives the shared recipe: its name, the canonical block, how to resolve the
-// target, the configured ClusterRole, and the connector's document cache and clock.
+// target, the configured ClusterRole, and the connector's document cache and clock. authField and authArgs name
+// the block in a reference's template when it has fields, so the model sends http_request the same block;
+// kubernetes's has none and its template stays without one.
 type kubeTarget struct {
 	connector   string
 	block       json.RawMessage
+	authField   string
+	authArgs    map[string]string
 	resolve     func(context.Context) (Target, error)
 	clusterRole string
 	refs        *kubeRefCache
@@ -390,6 +401,10 @@ func (r *kubeRecipe) answer(e kubeRefEntry) apiref.Result {
 	})
 	if res.Reference == nil {
 		return res
+	}
+	res.Reference.Connector = r.l.connector
+	if r.l.authField != "" {
+		res.Reference.AuthField, res.Reference.AuthArgs = r.l.authField, r.l.authArgs
 	}
 	res.Reference.Limitations = append(res.Reference.Limitations, r.limitations...)
 	if e.version == "" {

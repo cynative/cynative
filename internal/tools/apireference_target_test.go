@@ -677,3 +677,34 @@ func TestAPIReferenceTargeted_InstallsTheLookupDeadline(t *testing.T) {
 			auth.TargetLookupDeadline, start, end)
 	}
 }
+
+// TestAPIReferenceTargeted_RoutesTheManagedBlocks pins the routing for eks, gke and aks: each connector's own
+// block reaches its PrepareLookup exactly as sent, and a call without it, or with only another connector's
+// block, is answered before any lookup with the block the connector needs.
+func TestAPIReferenceTargeted_RoutesTheManagedBlocks(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, block, other string }{
+		{"eks", `{"cluster_name":"c","Region":"us-east-1"}`, "gke_auth"},
+		{"gke", `{"project":"proj-1","location":"l","cluster_name":"c"}`, "aks_auth"},
+		{"aks", `{"subscription_id":"s","resource_group":"rg","cluster_name":"c"}`, "eks_auth"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base := `{"connector":"` + tc.name + `","model":"v1","operation":"listCoreV1Namespace"`
+			p := newTarget(tc.name, readsAndAnswers(nil, nil))
+			r := runTargeted(t.Context(), t, []auth.Provider{p}, nil, &fakeExec{},
+				base+`,"`+strings.ToUpper(tc.name)+`_AUTH":`+tc.block+`}`)
+			if r.parsed.Outcome != "found" || !slices.Equal(p.raw, []string{tc.block}) || !r.decision.Unprompted {
+				t.Errorf("own block: %s, PrepareLookup got %q", r.out, p.raw)
+			}
+			want := tc.name + "_auth is required: pass the block http_request takes, naming the cluster"
+			for _, args := range []string{base + `}`, base + `,"` + tc.other + `":` + tc.block + `}`} {
+				r = runTargeted(t.Context(), t, []auth.Provider{p}, nil, &fakeExec{}, args)
+				if r.parsed.Outcome != "not_found" || r.parsed.Reason != want || len(p.raw) != 1 ||
+					r.decision.Unprompted {
+					t.Errorf("%s: %s, PrepareLookup got %q", args, r.out, p.raw)
+				}
+			}
+		})
+	}
+}

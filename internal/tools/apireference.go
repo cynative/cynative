@@ -22,15 +22,15 @@ var _ schema.InvokableTool = (*apiReferenceTool)(nil)
 const apiReferenceDescription = "Look up one connector API operation by exact name and get its protocol, inputs, " +
 	"an http_request template with <placeholders>, response parsing and pagination. Read-only. Supported: aws " +
 	"(restXml, restJson1, awsQuery, awsJson), github, gitlab and gcp, from public vendor metadata, sending " +
-	"nothing to the connector; and kubernetes. GitLab operation IDs are generated from the path, so an ID changes " +
-	"when its path does. GCP operations are Discovery method ids such as compute.instances.list, and model picks " +
-	"the Discovery version. kubernetes reads the configured cluster's own /openapi/v3 document with the " +
-	"connector's credentials, so CRDs and aggregated APIs are covered: pass kubernetes_auth {}, model as the " +
-	"apiVersion (apps/v1, or v1 for the core group) and operation as the operationId. Not covered: discovery " +
+	"nothing to the connector; and kubernetes, eks, gke and aks. GitLab operation IDs are generated from the path, " +
+	"so an ID changes when its path does. GCP operations are Discovery method ids such as compute.instances.list, " +
+	"and model picks the Discovery version. The Kubernetes connectors read the target cluster's own /openapi/v3 " +
+	"document with the connector's credentials, so CRDs and aggregated APIs are covered: pass kubernetes_auth {} " +
+	"for kubernetes, or the eks_auth, gke_auth or aks_auth block naming the cluster, as in http_request; model as " +
+	"the apiVersion (apps/v1, or v1 for the core group) and operation as the operationId. Not covered: discovery " +
 	"documents (/version, /api, /apis), operations without an operationId or outside the form this tool renders, " +
 	"documents published outside /openapi/v3/<group-version>, over 10 MiB or over 100000 elements, aggregated " +
-	"APIs whose server is not answering, and lookup by resource or verb. eks, gke and aks lookups are not " +
-	"available yet."
+	"APIs whose server is not answering, and lookup by resource or verb."
 
 const (
 	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values and every path value " +
@@ -49,18 +49,18 @@ const (
 // apiReferenceArgs is the tool's schema. The auth blocks reuse http_request's structs and JSON names; Run never
 // decodes them into these types (see lookupArgs and lookupBlocks).
 type apiReferenceArgs struct {
-	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github', 'gitlab', 'gcp' or 'kubernetes'."`
+	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github', 'gitlab', 'gcp', 'kubernetes', 'eks', 'gke' or 'aks'."`                                                                                                                                                                                                                             //nolint:lll // struct tags are indivisible
 	Service   string `json:"service,omitempty" jsonschema_description:"AWS: the endpoint prefix from the request host, e.g. 'route53' or 'iam'. GCP, optional: the Discovery API name when the method id does not start with it, e.g. 'sqladmin' for 'sql.instances.list'. Kubernetes: leave empty."`                                                                                       //nolint:lll // struct tags are indivisible
 	Model     string `json:"model,omitempty"   jsonschema_description:"AWS: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices). GCP: the Discovery version label, e.g. 'v1' or 'beta'; without it the lookup searches the API's vN versions. Kubernetes, required: the apiVersion, e.g. 'apps/v1', or 'v1' for the core group."` //nolint:lll // struct tags are indivisible
 	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get'), GitLab (e.g. 'getApiV4ProjectsIdMergeRequests') and Kubernetes (e.g. 'listAppsV1NamespacedDeployment'), the Discovery method id for GCP (e.g. 'compute.instances.list')."`            //nolint:lll // struct tags are indivisible
 
-	AWSAuth        *auth.AWSAuthArgs        `json:"aws_auth,omitempty"        jsonschema_description:"Same shape as http_request's. The aws lookup reads public metadata and ignores it."`                                                 //nolint:lll // struct tags are indivisible
-	GCPAuth        *auth.GCPAuthArgs        `json:"gcp_auth,omitempty"        jsonschema_description:"Same shape as http_request's. The gcp lookup reads public metadata and ignores it."`                                                 //nolint:lll // struct tags are indivisible
-	EKSAuth        *auth.EKSAuthArgs        `json:"eks_auth,omitempty"        jsonschema_description:"Same shape as http_request's. eks lookups are not available yet."`                                                                   //nolint:lll // struct tags are indivisible
-	GKEAuth        *auth.GKEAuthArgs        `json:"gke_auth,omitempty"        jsonschema_description:"Same shape as http_request's. gke lookups are not available yet."`                                                                   //nolint:lll // struct tags are indivisible
-	AKSAuth        *auth.AKSAuthArgs        `json:"aks_auth,omitempty"        jsonschema_description:"Same shape as http_request's. aks lookups are not available yet."`                                                                   //nolint:lll // struct tags are indivisible
-	KubernetesAuth *auth.KubernetesAuthArgs `json:"kubernetes_auth,omitempty" jsonschema_description:"Required for a kubernetes lookup: pass {}. The lookup reads the configured cluster's /openapi/v3 with the connector's credentials."` //nolint:lll // struct tags are indivisible
-	AzureAuth      *auth.AzureAuthArgs      `json:"azure_auth,omitempty"      jsonschema_description:"Same shape as http_request's. azure lookups are not available yet."`                                                                 //nolint:lll // struct tags are indivisible
+	AWSAuth        *auth.AWSAuthArgs        `json:"aws_auth,omitempty"        jsonschema_description:"Same shape as http_request's. The aws lookup reads public metadata and ignores it."`                                                                                            //nolint:lll // struct tags are indivisible
+	GCPAuth        *auth.GCPAuthArgs        `json:"gcp_auth,omitempty"        jsonschema_description:"Same shape as http_request's. The gcp lookup reads public metadata and ignores it."`                                                                                            //nolint:lll // struct tags are indivisible
+	EKSAuth        *auth.EKSAuthArgs        `json:"eks_auth,omitempty"        jsonschema_description:"Required for an eks lookup: the same block as http_request's, naming the cluster. The lookup resolves the cluster and reads its /openapi/v3 with the connector's credentials."` //nolint:lll // struct tags are indivisible
+	GKEAuth        *auth.GKEAuthArgs        `json:"gke_auth,omitempty"        jsonschema_description:"Required for a gke lookup: the same block as http_request's, naming the cluster. The lookup resolves the cluster and reads its /openapi/v3 with the connector's credentials."`  //nolint:lll // struct tags are indivisible
+	AKSAuth        *auth.AKSAuthArgs        `json:"aks_auth,omitempty"        jsonschema_description:"Required for an aks lookup: the same block as http_request's, naming the cluster. The lookup resolves the cluster and reads its /openapi/v3 with the connector's credentials."` //nolint:lll // struct tags are indivisible
+	KubernetesAuth *auth.KubernetesAuthArgs `json:"kubernetes_auth,omitempty" jsonschema_description:"Required for a kubernetes lookup: pass {}. The lookup reads the configured cluster's /openapi/v3 with the connector's credentials."`                                            //nolint:lll // struct tags are indivisible
+	AzureAuth      *auth.AzureAuthArgs      `json:"azure_auth,omitempty"      jsonschema_description:"Same shape as http_request's. azure lookups are not available yet."`                                                                                                            //nolint:lll // struct tags are indivisible
 }
 
 // lookupArgs is what Run decodes before routing: the four strings every connector shares.
@@ -187,10 +187,7 @@ func (t *apiReferenceTool) Run(ctx context.Context, argumentsInJSON string) (str
 		case td != nil && own != nil:
 			return t.targeted(ctx, p.Name(), td, q, own)
 		case td != nil && !public:
-			return rejected(
-				ctx,
-				p.Name()+"_auth is required for a "+p.Name()+" lookup; pass {} as in http_request",
-			), nil
+			return rejected(ctx, missingBlock(p.Name())), nil
 		case !public && own != nil:
 			return t.answer(ctx, apiref.Result{
 				Outcome: apiref.OutcomeUnsupported, Reason: "targeted lookups for this connector are not available yet",
@@ -199,6 +196,15 @@ func (t *apiReferenceTool) Run(ctx context.Context, argumentsInJSON string) (str
 	}
 
 	return t.answer(ctx, auth.LookupReference(ctx, t.providers, q)), nil
+}
+
+// missingBlock answers a targeted connector's lookup that sent no block of its own.
+func missingBlock(name string) string {
+	if name == "kubernetes" {
+		return "kubernetes_auth is required for a kubernetes lookup; pass {} as in http_request"
+	}
+
+	return name + "_auth is required: pass the block http_request takes, naming the cluster"
 }
 
 // answer marks the call's progress or failure by its outcome and renders it within the output budget.

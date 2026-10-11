@@ -163,8 +163,20 @@ func TestAPIReference_Info(t *testing.T) {
 		t.Errorf("gcp missing from the description or schema: %s %s", info.Desc, raw)
 	}
 	if !strings.Contains(info.Desc, "pass kubernetes_auth {}") || !strings.Contains(string(raw), `"kubernetes_auth"`) ||
-		!strings.Contains(info.Desc, "eks, gke and aks lookups are not available yet") {
-		t.Errorf("kubernetes missing from the description or schema: %s %s", info.Desc, raw)
+		!strings.Contains(info.Desc, "and kubernetes, eks, gke and aks.") ||
+		!strings.Contains(info.Desc, "or the eks_auth, gke_auth or aks_auth block naming the cluster") ||
+		strings.Contains(info.Desc, "not available yet") || strings.Count(string(raw), "not available yet") != 1 {
+		t.Errorf("the Kubernetes connectors missing from the description or schema: %s %s", info.Desc, raw)
+	}
+	for _, want := range []string{
+		"'kubernetes', 'eks', 'gke' or 'aks'",
+		"Required for an eks lookup: the same block as http_request's, naming the cluster.",
+		"Required for a gke lookup: the same block as http_request's, naming the cluster.",
+		"Required for an aks lookup: the same block as http_request's, naming the cluster.",
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("schema lacks %q: %s", want, raw)
+		}
 	}
 	for _, block := range []string{"aws_auth", "gcp_auth", "eks_auth", "gke_auth", "aks_auth", "azure_auth"} {
 		if !strings.Contains(string(raw), `"`+block+`"`) {
