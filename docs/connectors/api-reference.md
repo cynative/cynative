@@ -171,6 +171,6 @@ Because the GitHub and GitLab hints read the connector's docs cache, the first u
 ## Limits
 
 - Lookup is by exact name. There is no search or listing of operations.
-- Other connectors answer `unsupported`; `eks`, `gke` and `aks` answer `unsupported` for now, even with their block.
+- Other connectors answer `unsupported`; `azure` answers `unsupported` for now, even with its block.
 - Schemas are not expanded beyond the rules above, and XML request bodies are not generated.
 - The reference is only as current as the cached vendor metadata.
