@@ -409,3 +409,23 @@ func TestAPIReferenceTargeted_TheLogClosesOnlyAfterTheLateResultIsWritten(t *tes
 	default:
 	}
 }
+
+// TestAPIReferenceTargeted_NoBootstrapCallStartsOnceTheLogIsClosing pins the refusal at the tool: a control-plane
+// call that reaches Begin after the run's audit closer finished waiting is refused before anything is sent, so it
+// never runs without a record the log can still take.
+func TestAPIReferenceTargeted_NoBootstrapCallStartsOnceTheLogIsClosing(t *testing.T) {
+	t.Parallel()
+	var sent []bool
+	p := newTarget("eks", func(context.Context, auth.MetadataReader) apiref.Result {
+		return apiref.Result{Outcome: apiref.OutcomeFound}
+	})
+	p.lookup.resolve = bootstrapsThen([]bootstrapStep{{connector: "eks", call: "DescribeCluster", target: "t"}}, &sent)
+	l := audit.New(&switchWriter{}, audit.WithDrain(time.Minute))
+	if err := l.Closer(func() error { return nil })(); err != nil {
+		t.Fatalf("closer = %v", err)
+	}
+	r := runTargeted(t.Context(), t, []auth.Provider{p}, l, &fakeExec{}, eksLookup)
+	if !slices.Equal(sent, []bool{false}) || !errors.Is(r.err, audit.ErrLog) {
+		t.Errorf("sent %v, Run = %v; want the call refused and the run aborted", sent, r.err)
+	}
+}

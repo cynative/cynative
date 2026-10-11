@@ -13,9 +13,11 @@ func TestPendingAfter_FollowsAHoldTakenAfterTheCountReachedZero(t *testing.T) {
 
 	waiting := make(chan struct{})
 	l := New(nil, WithDrain(time.Minute), WithDrainNotice(func(time.Duration) { close(waiting) }))
-	l.Hold()
+	if _, err := l.Hold(); err != nil {
+		t.Fatal(err)
+	}
 	got := make(chan int, 1)
-	go func() { got <- l.pendingAfter() }()
+	go func() { got <- l.pendingAfter(time.Minute) }()
 	// The notice comes after the waiter read the first channel and before it waits on it.
 	<-waiting
 	l.holdMu.Lock()

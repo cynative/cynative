@@ -136,6 +136,7 @@ type Logger struct {
 	holdMu  sync.Mutex
 	holds   int
 	drained chan struct{}
+	closing bool
 }
 
 // Option configures a Logger at construction.
@@ -253,16 +254,27 @@ func (l *Logger) Err() error {
 
 // Holder is a Sink that can be asked, at close, to wait for a record still to be written. *Logger implements it.
 type Holder interface {
-	Hold() (release func())
+	Hold() (release func(), err error)
 }
+
+// errClosing refuses a hold once the closer has stopped waiting: a record it covers could land after the log
+// closed.
+var errClosing = fmt.Errorf("%w: the audit log is closing", ErrLog)
 
 var _ Holder = (*Logger)(nil)
 
 // Hold reports a record that will be written later, by a call that can outlive the tool call that started it: a
 // targeted lookup's control-plane call runs on after the lookup returns when it times out. The closer waits for
-// every hold to be released before it closes. The release it returns counts once, however often it is called.
-func (l *Logger) Hold() func() {
+// every hold to be released before it closes. Once the closer has stopped waiting, Hold refuses with an ErrLog
+// error, so the call it would cover is never started. The release it returns counts once, however often it is
+// called.
+func (l *Logger) Hold() (func(), error) {
 	l.holdMu.Lock()
+	if l.closing {
+		l.holdMu.Unlock()
+
+		return nil, errClosing
+	}
 	if l.holds == 0 {
 		l.drained = make(chan struct{})
 	}
@@ -278,23 +290,26 @@ func (l *Logger) Hold() func() {
 				close(l.drained)
 			}
 		})
-	}
+	}, nil
 }
 
-// pendingAfter waits up to the drain bound for every hold to be released and returns how many are still held. It
-// re-reads the holds after every wake, so a hold taken after the count reached zero is waited for too.
-func (l *Logger) pendingAfter() int {
-	deadline := time.Now().Add(l.drain)
+// pendingAfter waits up to bound for every hold to be released and returns how many are still held. It re-reads
+// the holds after every wake, so a hold taken while it waits is waited for too, and it marks the log closing in the
+// same critical section as its last read, so no hold can be taken after it stops waiting.
+func (l *Logger) pendingAfter(bound time.Duration) int {
+	deadline := time.Now().Add(bound)
 	noticed := false
 	for {
-		n, drained := l.held()
-		if n == 0 {
-			return 0
-		}
+		l.holdMu.Lock()
+		n, drained := l.holds, l.drained
 		wait := time.Until(deadline)
-		if wait <= 0 {
+		if n == 0 || wait <= 0 {
+			l.closing = true
+			l.holdMu.Unlock()
+
 			return n
 		}
+		l.holdMu.Unlock()
 		if !noticed && l.notice != nil {
 			l.notice(l.drain)
 		}
@@ -308,14 +323,6 @@ func (l *Logger) pendingAfter() int {
 	}
 }
 
-// held returns the open holds and the channel closed when they reach zero.
-func (l *Logger) held() (int, chan struct{}) {
-	l.holdMu.Lock()
-	defer l.holdMu.Unlock()
-
-	return l.holds, l.drained
-}
-
 // Closer wraps the audit writer's close for the composition root. It first waits, up to the drain bound, for the
 // records still held, then always closes. It returns the latched failure when there is one, then a held record
 // that never arrived, then the close error, so a failed or missing write that no later record reported still ends
@@ -323,15 +330,12 @@ func (l *Logger) held() (int, chan struct{}) {
 func (l *Logger) Closer(closeWriter func() error) func() error {
 	return func() error {
 		// A latched failure is what the closer returns whatever a held record does, so it does not wait for one.
-		pending := 0
-		if l.Err() == nil {
-			pending = l.pendingAfter()
+		bound := l.drain
+		if l.Err() != nil {
+			bound = 0
 		}
+		pending := l.pendingAfter(bound)
 		cerr := closeWriter()
-		// A hold taken once the wait was over may not land before the process exits, so it counts as missing too.
-		if late, _ := l.held(); late > pending {
-			pending = late
-		}
 		if err := l.Err(); err != nil {
 			return err
 		}

@@ -217,8 +217,14 @@ func (b *bootstrapRecorder) Begin(connector, call, target string) (func(error), 
 	if err := b.fatal.Err(); err != nil {
 		return nil, err
 	}
-	// The result record can be written after the lookup returns, so the call holds the log open until it is.
-	release := hold(b.tool.sink)
+	// The result record can be written after the lookup returns, so the call holds the log open until it is. A log
+	// that is closing refuses the hold, and the call is never sent.
+	release, err := hold(b.tool.sink)
+	if err != nil {
+		b.fatal.Set(err)
+
+		return nil, err
+	}
 	// bootstrapArgs is three strings, so json.Marshal cannot fail on it.
 	args, _ := json.Marshal(bootstrapArgs{Connector: connector, Call: call, Target: target})
 	rec := audit.Record{ //nolint:exhaustruct // an attempt carries no decision, outcome or result.
@@ -226,7 +232,7 @@ func (b *bootstrapRecorder) Begin(connector, call, target string) (func(error), 
 		Depth: b.scope.Depth, Phase: audit.PhaseAttempt, Via: audit.ViaAPIReference,
 		Tool: audit.ToolLookupBootstrap, Arguments: args, RedactArgs: true,
 	}
-	if err := b.tool.logChild(b.fatal, rec); err != nil {
+	if err = b.tool.logChild(b.fatal, rec); err != nil {
 		release()
 
 		return nil, err
@@ -247,12 +253,12 @@ func (b *bootstrapRecorder) Begin(connector, call, target string) (func(error), 
 
 // hold takes a hold on sink when it can wait for a late record at close (audit.Holder), and returns its release;
 // any other sink, nil included, holds nothing.
-func hold(sink audit.Sink) func() {
+func hold(sink audit.Sink) (func(), error) {
 	if h, ok := sink.(audit.Holder); ok {
 		return h.Hold()
 	}
 
-	return func() {}
+	return func() {}, nil
 }
 
 // readOutcome classifies a read for its result record: ok below 400, error at 400 or more or on a transport
