@@ -109,7 +109,9 @@ func newAuditSinkShell(cfg config.Config, prov *audit.AgentProvenance) (audit.Si
 		return nil, nil, err // runResearch wraps with "open audit log:".
 	}
 
-	opts := []audit.Option{audit.WithActor(cfg.LLM.Provider + "/" + cfg.LLM.Model)}
+	opts := []audit.Option{
+		audit.WithActor(cfg.LLM.Provider + "/" + cfg.LLM.Model), audit.WithDrain(auth.BootstrapDrainTimeout),
+	}
 	if prov != nil {
 		opts = append(opts, audit.WithAgent(*prov))
 	}

@@ -128,10 +128,22 @@ type Logger struct {
 	agent    *AgentProvenance
 	seq      uint64
 	err      error
+
+	// drain bounds how long the closer waits for held records; holds counts them, and drained is closed when the
+	// count returns to zero. They have their own lock, so a record written by a holder never waits on a closer.
+	drain   time.Duration
+	holdMu  sync.Mutex
+	holds   int
+	drained chan struct{}
 }
 
 // Option configures a Logger at construction.
 type Option func(*Logger)
+
+// WithDrain sets how long the closer waits for records still held (Hold) before it closes the writer.
+func WithDrain(d time.Duration) Option {
+	return func(l *Logger) { l.drain = d }
+}
 
 // WithActor sets the actor identity stamped on every record (e.g. provider/model).
 func WithActor(a string) Option {
@@ -215,15 +227,70 @@ func (l *Logger) Err() error {
 	return l.err
 }
 
-// Closer wraps the audit writer's close for the composition root. It always
-// closes, then returns the latched failure when there is one and the close error
-// otherwise, so a failed write that no later record reported still ends the run
-// with an error.
+// Holder is a Sink that can be asked, at close, to wait for a record still to be written. *Logger implements it.
+type Holder interface {
+	Hold() (release func())
+}
+
+var _ Holder = (*Logger)(nil)
+
+// Hold reports a record that will be written later, by a call that can outlive the tool call that started it: a
+// targeted lookup's control-plane call runs on after the lookup returns when it times out. The closer waits for
+// every hold to be released before it closes. The release it returns counts once, however often it is called.
+func (l *Logger) Hold() func() {
+	l.holdMu.Lock()
+	if l.holds == 0 {
+		l.drained = make(chan struct{})
+	}
+	l.holds++
+	l.holdMu.Unlock()
+	var once sync.Once
+
+	return func() {
+		once.Do(func() {
+			l.holdMu.Lock()
+			defer l.holdMu.Unlock()
+			if l.holds--; l.holds == 0 {
+				close(l.drained)
+			}
+		})
+	}
+}
+
+// pendingAfter waits up to the drain bound for every hold to be released and returns how many are still held.
+func (l *Logger) pendingAfter() int {
+	l.holdMu.Lock()
+	n, drained := l.holds, l.drained
+	l.holdMu.Unlock()
+	if n == 0 {
+		return 0
+	}
+	timer := time.NewTimer(l.drain)
+	defer timer.Stop()
+	select {
+	case <-drained:
+		return 0
+	case <-timer.C:
+		l.holdMu.Lock()
+		defer l.holdMu.Unlock()
+
+		return l.holds
+	}
+}
+
+// Closer wraps the audit writer's close for the composition root. It first waits, up to the drain bound, for the
+// records still held, then always closes. It returns the latched failure when there is one, then a held record
+// that never arrived, then the close error, so a failed or missing write that no later record reported still ends
+// the run with an error.
 func (l *Logger) Closer(closeWriter func() error) func() error {
 	return func() error {
+		pending := l.pendingAfter()
 		cerr := closeWriter()
 		if err := l.Err(); err != nil {
 			return err
+		}
+		if pending > 0 {
+			return fmt.Errorf("%w: %d held records were still pending after %s", ErrLog, pending, l.drain)
 		}
 
 		return cerr

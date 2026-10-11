@@ -381,3 +381,72 @@ func TestLogger_Closer(t *testing.T) {
 		})
 	}
 }
+
+// TestLogger_CloserWaitsForAHeldRecord pins that the closer waits for a record still to be written before it
+// closes, so a late write lands in the log and a late write that fails is reported.
+func TestLogger_CloserWaitsForAHeldRecord(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		failOn int
+		want   string
+	}{
+		{"the late write succeeds", 0, ""},
+		{"the late write fails", 1, "audit: log write failed: write: disk full"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := &flakyWriter{failOn: tc.failOn}
+			// The bound is far longer than the late write takes, so the closer can only return through the release.
+			l := audit.New(w, audit.WithDrain(time.Minute))
+			release := l.Hold()
+			var closedAfter int
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				_ = l.Log(audit.Record{Tool: "late"}) //nolint:exhaustruct // Logger stamps the rest.
+				release()
+			}()
+			err := l.Closer(func() error { closedAfter = w.n; return nil })()
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != tc.want || closedAfter != w.n {
+				t.Errorf("closer = %q, closed after %d of %d writes; want %q after the late one", got, closedAfter,
+					w.n, tc.want)
+			}
+		})
+	}
+}
+
+// TestLogger_CloserReportsARecordStillHeldAtTheBound pins the fail-closed end of the wait: a record still held when
+// the bound passes is reported as missing, after the writer is closed, and a release called twice counts once.
+func TestLogger_CloserReportsARecordStillHeldAtTheBound(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(10*time.Millisecond))
+	released := l.Hold()
+	released()
+	released()
+	_ = l.Hold()
+	closed := false
+	err := l.Closer(func() error { closed = true; return nil })()
+	if !errors.Is(err, audit.ErrLog) || !closed ||
+		err.Error() != "audit: log write failed: 1 held records were still pending after 10ms" {
+		t.Errorf("closer = %v (closed %v), want 1 pending record reported", err, closed)
+	}
+}
+
+// TestLogger_CloserWithNothingHeldDoesNotWait pins that a run with no record in flight closes at once, whatever
+// the bound.
+func TestLogger_CloserWithNothingHeldDoesNotWait(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Hour))
+	l.Hold()()
+	start := time.Now()
+	if err := l.Closer(func() error { return nil })(); err != nil || time.Since(start) > time.Minute {
+		t.Errorf("closer = %v after %s", err, time.Since(start))
+	}
+}

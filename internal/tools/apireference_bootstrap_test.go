@@ -256,3 +256,69 @@ func TestAPIReferenceTargeted_BootstrapResultIsScrubbed(t *testing.T) {
 		t.Errorf("records %+v, want the result scrubbed", sink.recs)
 	}
 }
+
+// TestAPIReferenceTargeted_TheCloserWaitsForALateBootstrapResult pins the hold a control-plane call takes on the
+// Logger: the run's audit closer does not return while a call that outlived its lookup is still running, and once
+// the call ends its result is written before the log closes.
+func TestAPIReferenceTargeted_TheCloserWaitsForALateBootstrapResult(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	p := newTarget("eks", func(context.Context, auth.MetadataReader) apiref.Result {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: "resolving the target timed out"}
+	})
+	p.lookup.resolve = func(ctx context.Context) error {
+		o, _ := auth.BootstrapObserverFrom(ctx)
+		end, err := o.Begin("eks", "DescribeCluster", "eks/us-east-1/c")
+		if err != nil {
+			return err
+		}
+		go func() {
+			<-release
+			end(nil)
+		}()
+
+		return nil
+	}
+	w := &switchWriter{}
+	l := audit.New(w, audit.WithDrain(time.Minute))
+	if r := runTargeted(t.Context(), t, []auth.Provider{p}, l, &fakeExec{}, eksLookup); r.err != nil {
+		t.Fatalf("Run = %v", r.err)
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- l.Closer(func() error { return nil })() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("the closer returned %v while the control-plane call was still running", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Errorf("closer = %v after the late result was written", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the closer never returned after the call ended")
+	}
+}
+
+// TestAPIReferenceTargeted_ARefusedBootstrapReleasesItsHold pins that a call refused because its attempt record
+// could not be written holds nothing, so the closer reports the latched failure at once instead of waiting.
+func TestAPIReferenceTargeted_ARefusedBootstrapReleasesItsHold(t *testing.T) {
+	t.Parallel()
+	var sent []bool
+	p := newTarget("eks", func(context.Context, auth.MetadataReader) apiref.Result {
+		return apiref.Result{Outcome: apiref.OutcomeFound}
+	})
+	p.lookup.resolve = bootstrapsThen([]bootstrapStep{{connector: "eks", call: "DescribeCluster", target: "t"}}, &sent)
+	w := &switchWriter{}
+	l := audit.New(w, audit.WithDrain(time.Minute))
+	w.failNow()
+	_ = runTargeted(t.Context(), t, []auth.Provider{p}, l, &fakeExec{}, eksLookup)
+	start := time.Now()
+	err := l.Closer(func() error { return nil })()
+	if !errors.Is(err, audit.ErrLog) || time.Since(start) > 10*time.Second || slices.Contains(sent, true) {
+		t.Errorf("closer = %v after %s, sent %v; want the latched failure at once and no call sent", err,
+			time.Since(start), sent)
+	}
+}
