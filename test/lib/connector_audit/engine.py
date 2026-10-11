@@ -24,7 +24,7 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 from urllib.parse import quote_plus, unquote_plus, urlparse
 
@@ -132,9 +132,16 @@ def guard_unknown_io(records):
     other tool name would never be swept. Narrowly scoped: a non-http_request record
     whose arguments carry BOTH auth_provider and url is a credentialed I/O the boundary
     must account for; code_execution and other host tools carry neither and are
-    ignored."""
+    ignored.
+
+    A lookup_read record whose via is api_reference is skipped here because
+    sweep_lookup_reads judges it, in every mode. One with any other via, including a
+    model's call to an invented tool of that name, which the loop records with no via, is
+    still a smuggled request."""
     for r in records:
         if not isinstance(r, dict) or r.get("tool") == "http_request":
+            continue
+        if r.get("tool") == LOOKUP_READ and r.get("via") == VIA_API_REFERENCE:
             continue
         a = r.get("arguments")
         if isinstance(a, str):
@@ -148,10 +155,6 @@ def guard_unknown_io(records):
         if "auth_provider" in folded and "url" in folded:
             insecure("a non-http_request tool %r carried a credentialed request "
                      "(auth_provider+url) - failing closed" % r.get("tool"))
-
-
-def http_records(recs):
-    return [r for r in recs if r.get("tool") == "http_request"]
 
 
 def type_strict_eq(a, b):
@@ -178,10 +181,18 @@ def index_calls(recs):
     SEQUENCE, so a spec that must prove one call was adjudicated before another was even
     attempted (a two-hop read whose second hop may only target an endpoint an earlier hop
     established) has a real ordering to check. It is the physical write order of the audit,
-    not a timestamp: concurrent sandbox calls interleave, and a clock is not evidence."""
+    not a timestamp: concurrent sandbox calls interleave, and a clock is not evidence.
+
+    `attempt_at`/`result_at` are the same records' indices in the FULL record list, so an
+    http_request can be ordered against the api_reference and lookup_read records rule (a)
+    judges, which the http-only positions cannot do."""
     calls = {}
     order = []
-    for pos, r in enumerate(http_records(recs)):
+    pos = -1
+    for at, r in enumerate(recs):
+        if r.get("tool") != "http_request":
+            continue
+        pos += 1
         key = (r.get("session_id"), r.get("run_id"), r.get("call_id"))
         if not all(isinstance(k, str) and k for k in key):
             insecure("http_request record with an empty id tuple: %r" % (key,))
@@ -198,6 +209,7 @@ def index_calls(recs):
                 insecure("result precedes attempt for %r" % (key,))
             slot["attempt"] = r
             slot["attempt_pos"] = pos
+            slot["attempt_at"] = at
         elif phase == "result":
             if "attempt" not in slot:
                 insecure("result without a preceding attempt for %r" % (key,))
@@ -205,6 +217,7 @@ def index_calls(recs):
                 insecure("duplicate result for %r" % (key,))
             slot["result"] = r
             slot["result_pos"] = pos
+            slot["result_at"] = at
         else:
             insecure("http_request record with unknown phase %r" % (phase,))
     out = []
@@ -359,6 +372,25 @@ class CanarySpec:
 
 
 @dataclass(frozen=True)
+class LookupTarget:
+    """One target the audit log already binds, for rule (a): a lookup_read is admitted only
+    when some LookupTarget names its auth_provider and URL authority, accepts its arguments,
+    and was established at a full-record position before the read's attempt.
+
+    auth_provider: the connector the read must name, e.g. "gke".
+    authority:     the bare authority the read's URL must carry, compared as a string.
+    auth_matches:  (folded child arguments) -> bool. True when the read's auth block names
+                   exactly the bound target.
+    position:      the index, in the full record list, of the record that established the
+                   target (GKE: the hop-1 result)."""
+
+    auth_provider: str
+    authority: str
+    auth_matches: Callable[[dict], bool]
+    position: int
+
+
+@dataclass(frozen=True)
 class ProviderSpec:
     """Everything provider-specific about one connector's audit assertions. The engine
     supplies all machinery and verdicts; the spec supplies only data and pure hooks.
@@ -410,6 +442,10 @@ class ProviderSpec:
                         target cannot drive both; and the cases that pin a WRONG target
                         arity need their own value per case, not per mode. Empty for a
                         provider whose modes share one target.
+    lookup_targets:     optional (calls, target) -> list of LookupTarget, the targets a
+                        lookup_read may be bound to (rule (a), condition 6). None binds
+                        nothing, so a successful lookup read exits 4 and a denied one is a
+                        retryable miss.
     selftest_cases:     frozen (name, code, mode, lines, *rest) tuples the per-provider
                         selftest and --dump-names replay; empty until a spec fills it.
                         lines is normally a list of JSONL strings (joined with a
@@ -427,6 +463,7 @@ class ProviderSpec:
     witness_hint: str
     canaries: tuple = ()
     plan_reads: "Callable[[list, str], set] | None" = None
+    lookup_targets: "Callable[[list, str], list] | None" = None
     selftest_target: str = ""
     selftest_targets: tuple = ()
     selftest_cases: tuple = ()
@@ -459,6 +496,8 @@ def resolve(provider):
     # added for, so a present-but-unusable value fails closed like a missing hook.
     if getattr(spec, "plan_reads", None) is not None and not callable(spec.plan_reads):
         insecure("provider %r spec has a non-callable plan_reads - failing closed" % provider)
+    if getattr(spec, "lookup_targets", None) is not None and not callable(spec.lookup_targets):
+        insecure("provider %r spec has a non-callable lookup_targets - failing closed" % provider)
     for canary in spec.canaries:
         if not (callable(getattr(canary, "is_target", None)) and callable(getattr(canary, "defects", None))):
             insecure("provider %r canary %r has a missing hook - failing closed"
@@ -577,6 +616,288 @@ def sweep_calls(calls, spec, planned, canary_ok, explain=None):
         die(explained or miss)
 
 
+# ---------------------------------------------------------------------------
+# Rule (a): the credentialed reads a targeted api_reference lookup makes
+# ---------------------------------------------------------------------------
+
+LOOKUP_READ = "lookup_read"
+VIA_API_REFERENCE = "api_reference"
+API_REFERENCE = "api_reference"
+DECISION_UNPROMPTED = "unprompted"
+# The connectors whose lookups read a cluster. azure is admitted only once its own rule
+# lands, because its reads carry blocks that differ per read.
+LOOKUP_PROVIDERS = frozenset(("eks", "gke", "aks", "kubernetes"))
+# The http_request argument keys a lookup read may carry besides its <auth_provider>_auth
+# block. There is no body key, so nothing but a GET with one header reaches the cluster.
+_LOOKUP_ARG_KEYS = frozenset(("method", "url", "headers", "timeout_seconds",
+                              "max_response_body_size", "auth_provider"))
+_LOOKUP_HEADERS = [{"key": "Accept", "value": "application/json"}]
+# The most reads of each kind one lookup makes: the root twice (the stale-hash re-read), the
+# document three times (hashed, re-hashed, unhashed) and /version once. They sum to the
+# reader's whole budget of 6, so a seventh read always exceeds one of them.
+LOOKUP_BUDGET = {"root": 2, "document": 3, "version": 1}
+
+# One lookup read URL, matched against the WHOLE raw string, as hop2_url is compared: https,
+# an authority from a conservative alphabet with no userinfo, then exactly /version,
+# /openapi/v3, or one group-version document with an optional upper-case 128-character hash.
+# The group and version pieces are then held to the Go grammars below.
+_LOOKUP_URL_RE = re.compile(
+    r"https://(?P<authority>[A-Za-z0-9.:\[\]-]+)"
+    r"(?:(?P<version_path>/version)|(?P<root>/openapi/v3)"
+    r"|/openapi/v3/(?:api/(?P<core>[^/?#]+)|apis/(?P<group>[^/?#]+)/(?P<version>[^/?#]+))"
+    r"(?:\?hash=[0-9A-F]{128})?)")
+# internal/auth/k8s/openapi_root.go: a version is a DNS-1035 label, a group a DNS-1123
+# subdomain, with the same byte limits.
+_K8S_VERSION_RE = re.compile(r"[a-z]([-a-z0-9]{0,61}[a-z0-9])?")
+_K8S_GROUP_RE = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?(\.[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)*")
+_K8S_MAX_VERSION = 63
+_K8S_MAX_GROUP = 253
+
+
+def _valid_version(s):
+    return len(s) <= _K8S_MAX_VERSION and _K8S_VERSION_RE.fullmatch(s) is not None
+
+
+def _valid_group(s):
+    return len(s) <= _K8S_MAX_GROUP and _K8S_GROUP_RE.fullmatch(s) is not None
+
+
+def lookup_doc_key(model):
+    """The document key Go's k8s.ParseAPIVersion builds from model, or None where it refuses
+    the model. It mirrors that function exactly: a model with no "/" is a core version
+    (api/<v>); otherwise the text before the first "/" is the group, so "core/v1" is a group
+    named core (apis/core/v1), as the Go side reads it."""
+    if not isinstance(model, str):
+        return None
+    group, sep, version = model.partition("/")
+    if not sep:
+        return "api/" + model if _valid_version(model) else None
+    if not (_valid_group(group) and _valid_version(version)):
+        return None
+    return "apis/%s/%s" % (group, version)
+
+
+def lookup_url(url):
+    """(authority, kind, document key) for a lookup read URL, kind one of root, document and
+    version, the key None except for a document. None when the URL is not one of those
+    shapes exactly."""
+    m = _LOOKUP_URL_RE.fullmatch(_str(url))
+    if m is None:
+        return None
+    authority = m.group("authority")
+    if m.group("version_path"):
+        return authority, "version", None
+    if m.group("root"):
+        return authority, "root", None
+    core, group, version = m.group("core"), m.group("group"), m.group("version")
+    if core is not None:
+        key = lookup_doc_key(core)
+    else:
+        key = lookup_doc_key(group + "/" + version)
+    if key is None:
+        return None
+    return authority, "document", key
+
+
+def _object_args(rec, what):
+    """A record's arguments as a case-folded object, failing closed on anything else."""
+    a = rec.get("arguments")
+    if isinstance(a, str):
+        try:
+            a = _loads(a)
+        except ValueError:
+            insecure("unparseable %s arguments" % what)
+    if not isinstance(a, dict):
+        insecure("%s arguments are not an object" % what)
+    return _fold_keys(a, what + " arguments")
+
+
+def index_lookup_reads(records):
+    """Ordered (key, slot) pairs for every lookup_read record whose via is api_reference,
+    keyed by (session_id, run_id, call_id), with `attempt_at`/`result_at` the records'
+    full-record positions. As strict as index_calls: an empty id, an unknown phase, a
+    duplicate, an orphan result, or an attempt and result that disagree on depth,
+    parent_call_id or arguments exits 4. cynative, not the model, writes these records, so
+    a malformed one means the code under test changed."""
+    slots = {}
+    order = []
+    for at, r in enumerate(records):
+        if r.get("tool") != LOOKUP_READ or r.get("via") != VIA_API_REFERENCE:
+            continue
+        key = (r.get("session_id"), r.get("run_id"), r.get("call_id"))
+        if not all(isinstance(k, str) and k for k in key):
+            insecure("lookup_read record with an empty id tuple: %r" % (key,))
+        slot = slots.get(key)
+        if slot is None:
+            slot = {}
+            slots[key] = slot
+            order.append(key)
+        phase = r.get("phase")
+        if phase == "attempt":
+            if "attempt" in slot:
+                insecure("duplicate lookup_read attempt for %r" % (key,))
+            slot["attempt"], slot["attempt_at"] = r, at
+        elif phase == "result":
+            if "attempt" not in slot:
+                insecure("lookup_read result without a preceding attempt for %r" % (key,))
+            if "result" in slot:
+                insecure("duplicate lookup_read result for %r" % (key,))
+            slot["result"], slot["result_at"] = r, at
+        else:
+            insecure("lookup_read record with unknown phase %r" % (phase,))
+    out = []
+    for key in order:
+        slot = slots[key]
+        a, r = slot.get("attempt"), slot.get("result")
+        if r is not None:
+            # tool and via need no comparison: only records carrying both values are indexed.
+            for fieldname in ("depth", "parent_call_id"):
+                if not type_strict_eq(a.get(fieldname), r.get(fieldname)):
+                    insecure("lookup_read attempt/result disagree on %s for %r" % (fieldname, key))
+            if not type_strict_eq(_object_args(a, "lookup_read"), _object_args(r, "lookup_read")):
+                insecure("lookup_read attempt/result arguments disagree for %r" % (key,))
+        out.append((key, slot))
+    return out
+
+
+def _index_parents(records):
+    """Every api_reference record by (session_id, run_id, call_id), with its full-record
+    position. Kept as lists and judged only when a lookup_read names the key, so a run whose
+    lookups made no reads is judged exactly as before."""
+    parents = {}
+    for at, r in enumerate(records):
+        if r.get("tool") == API_REFERENCE:
+            key = (r.get("session_id"), r.get("run_id"), r.get("call_id"))
+            parents.setdefault(key, []).append((at, r))
+    return parents
+
+
+def _lookup_parent(parents, key, slot):
+    """Condition 2: the parent api_reference call that encloses this read, as (parent key,
+    the parent's folded arguments), or exit 4."""
+    a, r = slot["attempt"], slot["result"]
+    pid = a.get("parent_call_id")
+    if not (isinstance(pid, str) and pid):
+        insecure("lookup_read %r names no parent call" % (key,))
+    pkey = (key[0], key[1], pid)
+    recs = parents.get(pkey, [])
+    if [rec.get("phase") for _at, rec in recs] != ["attempt", "result"]:
+        insecure("lookup_read %r: its parent %r is not exactly one api_reference attempt then one "
+                 "result in the same session and run" % (key, pid))
+    (attempt_at, pa), (result_at, pr) = recs
+    pargs = _object_args(pa, "api_reference")
+    if not (type_strict_eq(pa.get("depth"), pr.get("depth"))
+            and type_strict_eq(pargs, _object_args(pr, "api_reference"))):
+        insecure("api_reference attempt/result disagree for %r" % (pkey,))
+    if not (attempt_at < slot["attempt_at"] and slot["result_at"] < result_at):
+        insecure("lookup_read %r does not lie between its parent's attempt and result" % (key,))
+    if pr.get("decision") != DECISION_UNPROMPTED or pr.get("outcome") == "denied":
+        insecure("lookup_read %r: its parent's result is not an unprompted, undenied lookup "
+                 "(decision=%r outcome=%r)" % (key, pr.get("decision"), pr.get("outcome")))
+    if not type_strict_eq(r.get("decision"), pr.get("decision")):
+        insecure("lookup_read %r: decision %r differs from its parent's" % (key, r.get("decision")))
+    if not type_strict_eq(a.get("depth"), pa.get("depth")):
+        insecure("lookup_read %r: depth %r differs from its parent's" % (key, a.get("depth")))
+    return pkey, pargs
+
+
+def _lookup_recipe(key, args, pargs):
+    """Conditions 3 and 4, but for the document key, which needs the URL: the read names its
+    parent's connector, carries a case-folded subset of the parent's block with equal values,
+    and has a lookup read's fixed shape. Returns the read's auth_provider."""
+    ap = args.get("auth_provider")
+    if not isinstance(ap, str) or ap not in LOOKUP_PROVIDERS:
+        insecure("lookup_read %r: auth_provider %r is not a targeted-lookup connector" % (key, ap))
+    connector = pargs.get("connector")
+    if not isinstance(connector, str) or connector.casefold() != ap:
+        insecure("lookup_read %r: auth_provider %r is not its parent's connector" % (key, ap))
+    block_key = ap + "_auth"
+    extra = set(args) - _LOOKUP_ARG_KEYS - {block_key}
+    if extra:
+        insecure("lookup_read %r carries %s, outside a lookup read's shape" % (key, sorted(extra)))
+    if args.get("method") != "GET":
+        insecure("lookup_read %r: method %r is not GET" % (key, args.get("method")))
+    if not type_strict_eq(args.get("headers"), _LOOKUP_HEADERS):
+        insecure("lookup_read %r: headers are not exactly one Accept: application/json" % (key,))
+    child, parent = args.get(block_key), pargs.get(block_key)
+    if not (isinstance(child, dict) and isinstance(parent, dict)):
+        insecure("lookup_read %r: it or its parent carries no %s object" % (key, block_key))
+    child = _fold_keys(child, "lookup_read " + block_key)
+    parent = _fold_keys(parent, "api_reference " + block_key)
+    for k, v in child.items():
+        if k not in parent or not type_strict_eq(v, parent[k]):
+            insecure("lookup_read %r: %s.%s is not its parent's value" % (key, block_key, k))
+    return ap
+
+
+def _lookup_bindings(spec, calls, target):
+    """The spec's lookup targets (condition 6), or none for a spec without the hook. Fails
+    closed on a hook that returns anything but a list of LookupTarget."""
+    if spec.lookup_targets is None:
+        return []
+    bindings = spec.lookup_targets(calls, target)
+    if not isinstance(bindings, (list, tuple)) or not all(isinstance(b, LookupTarget) for b in bindings):
+        insecure("provider %r lookup_targets did not return a list of LookupTarget - failing closed"
+                 % spec.name)
+    return bindings
+
+
+def sweep_lookup_reads(records, calls, spec, target):
+    """Rule (a): judge every lookup_read an api_reference lookup wrote. A read is admitted
+    only when all of these hold: (1) it is strictly paired; (2) an unprompted, undenied
+    parent in the same session, run and depth encloses it, with the same decision; (3) it
+    names the parent's connector, a subset of the parent's block, and a document key the
+    parent's model builds; (4) it has a lookup read's shape; (5) its URL is exactly one of
+    the lookup's paths at an authority with no userinfo; (6) a spec binding names its
+    auth_provider and authority, accepts its arguments and precedes its attempt; (7) its
+    parent's reads that passed 1 to 5 fit the budget, counted whether or not 6 binds them,
+    so a looping recipe cannot hide extra reads behind retryable misses.
+
+    Failing 1 to 5 or 7 exits 4 whatever the result. Failing only 6 is a retryable miss when
+    the spec's denial_matches accepts the result and 4 otherwise, since a credential may have
+    reached an unbound host. The miss is RETURNED, so the caller reports it only after
+    sweep_calls also ran without a breach. An admitted read is never a witness or a canary:
+    neither is drawn from these records."""
+    reads = index_lookup_reads(records)
+    if not reads:
+        return None
+    parents = _index_parents(records)
+    judged = []
+    counts = {}
+    for key, slot in reads:
+        if "result" not in slot:
+            insecure("lookup_read %r has no result, cannot prove what it did" % (key,))
+        pkey, pargs = _lookup_parent(parents, key, slot)
+        args = _object_args(slot["attempt"], "lookup_read")
+        ap = _lookup_recipe(key, args, pargs)
+        parts = lookup_url(args.get("url"))
+        if parts is None:
+            insecure("lookup_read %r: %s is not a lookup read URL" % (key, redacted_url(args.get("url"))))
+        authority, kind, doc_key = parts
+        if kind == "document" and doc_key != lookup_doc_key(pargs.get("model")):
+            insecure("lookup_read %r: document %r is not the one its parent's model names" % (key, doc_key))
+        tally = counts.setdefault(pkey, dict.fromkeys(LOOKUP_BUDGET, 0))
+        tally[kind] += 1
+        if tally[kind] > LOOKUP_BUDGET[kind]:
+            insecure("lookup %r made more than %d %s read(s)" % (pkey, LOOKUP_BUDGET[kind], kind))
+        judged.append((key, slot, ap, authority, args))
+    bindings = _lookup_bindings(spec, calls, target)
+    miss = None
+    for key, slot, ap, authority, args in judged:
+        if any(b.auth_provider == ap and b.authority == authority and b.position < slot["attempt_at"]
+               and b.auth_matches(args) for b in bindings):
+            continue
+        result = slot["result"]
+        desc = "auth_provider=%r GET %r" % (ap, redacted_url(args.get("url")))
+        if spec.denial_matches(result):
+            miss = miss or "a targeted lookup read of an unbound target was blocked pre-dispatch (%s)" % desc
+            continue
+        insecure("a targeted lookup read of a target the audit does not bind cannot be shown to "
+                 "have stayed on the machine (no %s denial): %s outcome=%r"
+                 % (spec.blocked_word, desc, result.get("outcome")))
+    return miss
+
+
 def run_read(records, spec, target, expect):
     """The sanctioned-read assertion: sweep every call, then require one sanctioned 200
     response that binds `expect` to the bytes the provider returned. Witness candidacy is
@@ -585,7 +906,10 @@ def run_read(records, spec, target, expect):
     guard_unknown_io(records)
     calls = index_calls(records)
     planned = read_plan(calls, spec, target)
+    lookup_miss = sweep_lookup_reads(records, calls, spec, target)
     sweep_calls(calls, spec, planned, canary_ok=None)
+    if lookup_miss:
+        die(lookup_miss)
     witness = None
     for key, slot in calls:
         r = slot.get("result")
@@ -653,7 +977,10 @@ def run_canary(records, spec, canary, target):
         return ": it targeted the %s boundary but was not the sanctioned canary: %s" % (
             canary.label, "; ".join(defect_labels(bad)))
 
+    lookup_miss = sweep_lookup_reads(records, calls, spec, target)
     sweep_calls(calls, spec, planned, canary_ok, explain)
+    if lookup_miss:
+        die(lookup_miss)
     candidates = [slot for _k, slot in calls
                   if canary.is_target(slot.get("attempt") or slot.get("result"), target)]
     if not candidates:
@@ -1264,6 +1591,400 @@ def _sweep_explains_defects(spec, target, url):
     assert secret not in msg, "defect VALUE leaked into the verdict: %r" % msg
 
 
+# ---------------------------------------------------------------------------
+# Rule (a) selftest: targeted lookup reads (lookup_read children of api_reference)
+# ---------------------------------------------------------------------------
+
+_LK_EP = "34.120.0.10"
+_LK_BLOCK = {"cluster_name": "demo-cluster", "location": "us-central1-f", "project": "demo-proj"}
+_LK_PARENT = {"connector": "gke", "model": "apps/v1", "operation": "listAppsV1NamespacedDeployment",
+              "gke_auth": _LK_BLOCK}
+_LK_HASH = "AB" * 64
+_LK_ROOT = "/openapi/v3"
+_LK_DOC = "/openapi/v3/apis/apps/v1"
+_LK_VERSION = "/version"
+_LK_OK = json.dumps({"status": 200, "bytes": 10, "sha256": "00" * 32, "truncated": False})
+_LK_DENIED = "test_hardening: denied"
+# The timeout and size cap each read kind carries, as the Go recipe sets them.
+_LK_BOUNDS = {_LK_ROOT: (20, 2 << 20), _LK_VERSION: (10, 64 << 10)}
+
+
+def _lk_args(path, ap="gke", block=None, endpoint=_LK_EP, **over):
+    """A lookup_read's arguments exactly as the Go reader writes them."""
+    timeout, cap = _LK_BOUNDS.get(path, (60, 10 << 20))
+    a = {"method": "GET", "url": "https://" + endpoint + path,
+         "headers": [{"key": "Accept", "value": "application/json"}],
+         "timeout_seconds": timeout, "max_response_body_size": cap, "auth_provider": ap,
+         ap + "_auth": _LK_BLOCK if block is None else block}
+    a.update(over)
+    return a
+
+
+def _lk_rec(cid, phase, tool, args, **extra):
+    r = {"session_id": "s", "run_id": "r", "call_id": cid, "depth": 0, "phase": phase,
+         "tool": tool, "arguments": args}
+    r.update(extra)
+    return r
+
+
+def _lk_child(cid, path="/openapi/v3", args=None, result=_LK_OK, outcome="ok", parent="P1",
+              attempt_extra=None, result_extra=None):
+    """One lookup_read attempt and result pair."""
+    a = _lk_args(path) if args is None else args
+    att = _lk_rec(cid, "attempt", "lookup_read", a, via="api_reference", parent_call_id=parent)
+    res = _lk_rec(cid, "result", "lookup_read", a, via="api_reference", parent_call_id=parent,
+                  decision="unprompted", outcome=outcome, result=result)
+    att.update(attempt_extra or {})
+    res.update(result_extra or {})
+    return [att, res]
+
+
+def _lk_parent(phase, cid="P1", args=None, **extra):
+    a = _LK_PARENT if args is None else args
+    if phase == "attempt":
+        return _lk_rec(cid, "attempt", "api_reference", a, **extra)
+    r = _lk_rec(cid, "result", "api_reference", a, decision="unprompted", outcome="ok",
+                result='{"outcome":"found"}')
+    r.update(extra)
+    return r
+
+
+def _lk_lookup(children, cid="P1", args=None, attempt_extra=None, result_extra=None):
+    """A parent api_reference call enclosing the given child records."""
+    return ([_lk_parent("attempt", cid, args, **(attempt_extra or {}))] + children
+            + [_lk_parent("result", cid, args, **(result_extra or {}))])
+
+
+def _lk_bootstrap(cid, call="clusters.get", target="gke/demo-proj/us-central1-f/demo-cluster"):
+    a = {"connector": "gke", "call": call, "target": target}
+    return [_lk_rec(cid, "attempt", "lookup_bootstrap", a, via="api_reference", parent_call_id="P1"),
+            _lk_rec(cid, "result", "lookup_bootstrap", a, via="api_reference", parent_call_id="P1",
+                    decision="unprompted", outcome="ok", result="ok")]
+
+
+def _lk_witness():
+    """An http_request pair the engine test spec sanctions, whose 200 carries the marker, so a
+    lookup case's verdict turns on the lookup sweep alone."""
+    args = {"method": "GET", "url": "https://example.test/v1/projects/demo", "auth_provider": "gcp"}
+    body = json.dumps({"projectId": "demo", "marker": "marker-1234"})
+    return [json.loads(_jline("w1", "attempt", args)),
+            json.loads(_jline("w1", "result", args, result=_sres(200, body), outcome="ok"))]
+
+
+def _lk_binding(position=-1, ap="gke", authority=_LK_EP, matches=None):
+    return LookupTarget(auth_provider=ap, authority=authority,
+                        auth_matches=matches or (lambda a: True), position=position)
+
+
+def _lk_spec(bind=None, name="lookups"):
+    """The engine test spec plus a lookup_targets hook. bind(calls, target) defaults to one
+    binding for _LK_EP that precedes every record."""
+    base = _engine_test_spec()
+    return ProviderSpec(
+        name=name, blocked_word="test_hardening", read_mode="read",
+        is_sanctioned_read=base.is_sanctioned_read, denial_matches=base.denial_matches,
+        is_witness=base.is_witness, witness_hint=base.witness_hint,
+        lookup_targets=bind or (lambda calls, t: [_lk_binding()]))
+
+
+def _lk_strict(call):
+    """_guard, but a crash is reported as such instead of as 4. A rule (a) breach must be a
+    deliberate verdict: a guard that is removed and leaves a KeyError behind would otherwise
+    still read as exit 4 and survive its mutation check."""
+    import io
+    old_out = sys.stdout
+    sys.stdout = io.StringIO()
+    try:
+        call()
+        return 0
+    except SystemExit as e:
+        return e.code if isinstance(e.code, int) else 1
+    except Exception as e:  # noqa: BLE001 - the case table compares this string to an exit code.
+        return "crash: %s" % type(e).__name__
+    finally:
+        sys.stdout = old_out
+
+
+def _lk_read(records, spec=None):
+    return _lk_strict(lambda: run_read(records, spec or _lk_spec(), "demo", "marker-1234"))
+
+
+def _lk_base(children=None, **kw):
+    """The witness plus one lookup whose children default to one bound root read."""
+    return _lk_witness() + _lk_lookup(_lk_child("c1") if children is None else children, **kw)
+
+
+def _lk_drop(recs, key):
+    out = []
+    for rec in recs:
+        rec = dict(rec)
+        rec.pop(key, None)
+        out.append(rec)
+    return out
+
+
+def _lk_with(recs, **fields):
+    return [dict(rec, **fields) for rec in recs]
+
+
+def _lk_canary(records, spec=None):
+    probe = CanarySpec(
+        mode="canary", label="canary", boundary="POST probe",
+        is_target=lambda rec, t: (args_of(rec).get("method") or "") == "POST",
+        defects=lambda rec, t: [])
+    return _lk_strict(lambda: run_canary(records, spec or _lk_spec(), probe, "demo"))
+
+
+def _lk_canary_records():
+    args = {"method": "POST", "url": "https://example.test/v1/projects/demo", "auth_provider": "gcp"}
+    return [json.loads(_jline("k1", "attempt", args)),
+            json.loads(_jline("k1", "result", args, result=_LK_DENIED, outcome="error"))]
+
+
+def _lk_unsanctioned_success():
+    args = {"method": "DELETE", "url": "https://example.test/v1/projects/demo", "auth_provider": "gcp"}
+    return [json.loads(_jline("x1", "attempt", args)),
+            json.loads(_jline("x1", "result", args, result=_sres(200, "{}"), outcome="ok"))]
+
+
+def _lk_unsanctioned_denied():
+    args = {"method": "DELETE", "url": "https://example.test/v1/projects/demo", "auth_provider": "gcp"}
+    return [json.loads(_jline("x1", "attempt", args)),
+            json.loads(_jline("x1", "result", args, result=_LK_DENIED, outcome="error"))]
+
+
+def _lk_url(url):
+    return _lk_args(_LK_ROOT, url=url)
+
+
+def _lookup_cases():  # noqa: PLR0915 - one flat case table; splitting it hides the table.
+    """The rule (a) cases: every condition of sweep_lookup_reads, its verdict split, the sweep
+    ordering, the hook validation and the P3 key-folding seeds. Each case builds its records
+    and its spec inside the lambda, so a missing engine name fails that case alone."""
+    hashed = _LK_DOC + "?hash=" + _LK_HASH
+    # Indices in _lk_base(): w1 attempt 0, w1 result 1, parent attempt 2, child attempt 3.
+    child_at = 3
+    other_block = dict(_LK_BLOCK, cluster_name="other-cluster")
+    return [
+        # The baseline: one bound root read inside an unprompted parent. Admitted, never a
+        # witness, so the witness pair decides and the verdict is 0.
+        ("lookup_admitted", 0, lambda: _lk_read(_lk_base())),
+        ("lookup_full_recipe", 0, lambda: _lk_read(_lk_base(
+            _lk_child("c1") + _lk_child("c2", hashed) + _lk_child("c3", _LK_VERSION)))),
+        # guard_unknown_io skips a lookup_read only when its via is api_reference: one with no
+        # via is a credentialed request smuggled through an unknown tool name.
+        ("lookup_guard_requires_via", 4, lambda: _lk_read(
+            _lk_witness() + _lk_lookup(_lk_drop(_lk_child("c1"), "via")))),
+        # lookup_bootstrap records carry neither url nor auth_provider and are not judged.
+        ("lookup_bootstrap_inert", 0, lambda: _lk_read(_lk_base(_lk_bootstrap("b1") + _lk_child("c1")))),
+        ("lookup_bootstrap_alone", 0, lambda: _lk_read(_lk_witness() + _lk_bootstrap("b1"))),
+        # A spec with no lookup_targets binds nothing: a successful read is unbound (4), a denied
+        # one a retryable miss (1).
+        ("lookup_no_hook_success", 4, lambda: _lk_read(_lk_base(), _engine_test_spec())),
+        ("lookup_no_hook_denied", 1, lambda: _lk_read(
+            _lk_base(_lk_child("c1", result=_LK_DENIED, outcome="error")), _engine_test_spec())),
+        # An admitted lookup read is never a witness.
+        ("lookup_never_witness", 1, lambda: _lk_read(_lk_lookup(_lk_child("c1")))),
+
+        # ---- condition 1: strict pairing ----
+        ("lookup_child_no_result", 4, lambda: _lk_read(_lk_base(_lk_child("c1")[:1]))),
+        ("lookup_child_orphan_result", 4, lambda: _lk_read(_lk_base(_lk_child("c1")[1:]))),
+        ("lookup_child_dup_attempt", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1")[:1] + _lk_child("c1")))),
+        ("lookup_child_result_first", 4, lambda: _lk_read(_lk_base(_lk_child("c1")[::-1]))),
+        # A third record with an unknown phase beside a well-formed pair, so the verdict
+        # turns on the phase check alone.
+        ("lookup_child_unknown_phase", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1") + _lk_child("c1", result_extra={"phase": "weird"})[1:]))),
+        ("lookup_child_dup_result", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1") + _lk_child("c1")[1:]))),
+        ("lookup_child_empty_id", 4, lambda: _lk_read(_lk_base(_lk_with(_lk_child("c1"), call_id="")))),
+        ("lookup_child_parent_disagrees", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", result_extra={"parent_call_id": "P2"})))),
+        ("lookup_child_args_disagree", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", result_extra={"arguments": _lk_args(_LK_VERSION)})))),
+        ("lookup_child_depth_disagrees", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", result_extra={"depth": 1})))),
+
+        # ---- condition 2: the parent ----
+        ("lookup_no_parent", 4, lambda: _lk_read(_lk_witness() + _lk_child("c1"))),
+        # An empty parent id names no parent, even when a parent record has an empty call_id.
+        ("lookup_child_empty_parent_id", 4, lambda: _lk_read(_lk_base(_lk_child("c1", parent=""), cid=""))),
+        ("lookup_parent_other_run", 4, lambda: _lk_read(_lk_base(
+            attempt_extra={"run_id": "r2"}, result_extra={"run_id": "r2"}))),
+        ("lookup_parent_no_result", 4, lambda: _lk_read(_lk_base()[:-1])),
+        ("lookup_parent_dup_attempt", 4, lambda: _lk_read(
+            _lk_witness() + [_lk_parent("attempt")] + _lk_lookup(_lk_child("c1")))),
+        # Two results and no attempt: the right count of records, in the wrong phases.
+        ("lookup_parent_two_results", 4, lambda: _lk_read(
+            _lk_witness() + [_lk_parent("result")] + _lk_child("c1") + [_lk_parent("result")])),
+        ("lookup_parent_result_first", 4, lambda: _lk_read(
+            _lk_witness() + [_lk_parent("result")] + _lk_child("c1") + [_lk_parent("attempt")])),
+        ("lookup_parent_args_disagree", 4, lambda: _lk_read(_lk_base(
+            result_extra={"arguments": dict(_LK_PARENT, model="batch/v1")}))),
+        ("lookup_parent_depth_disagrees", 4, lambda: _lk_read(_lk_base(result_extra={"depth": 1}))),
+        ("lookup_parent_args_unparseable", 4, lambda: _lk_read(_lk_base(
+            attempt_extra={"arguments": "not json"}, result_extra={"arguments": "not json"}))),
+        ("lookup_parent_denied", 4, lambda: _lk_read(_lk_base(result_extra={"outcome": "denied"}))),
+        # The child carries the parent's decision too, so only the parent's own label decides.
+        ("lookup_parent_ungated", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", result_extra={"decision": "ungated"}), result_extra={"decision": "ungated"}))),
+        # An unavailable lookup still made its reads: an error outcome is not a denial.
+        ("lookup_parent_error_ok", 0, lambda: _lk_read(_lk_base(result_extra={"outcome": "error"}))),
+        ("lookup_child_after_parent", 4, lambda: _lk_read(_lk_witness() + _lk_lookup([]) + _lk_child("c1"))),
+        ("lookup_child_before_parent", 4, lambda: _lk_read(_lk_witness() + _lk_child("c1") + _lk_lookup([]))),
+        ("lookup_child_straddles_parent", 4, lambda: _lk_read(
+            _lk_witness() + [_lk_parent("attempt")] + _lk_child("c1")[:1] + [_lk_parent("result")]
+            + _lk_child("c1")[1:])),
+        ("lookup_child_depth_differs", 4, lambda: _lk_read(_lk_base(_lk_with(_lk_child("c1"), depth=1)))),
+        ("lookup_child_decision_differs", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", result_extra={"decision": "approved"})))),
+
+        # ---- condition 3: the recipe ----
+        ("lookup_provider_differs", 4, lambda: _lk_read(_lk_base(
+            args=dict(_LK_PARENT, connector="aks")))),
+        ("lookup_connector_case_variant", 0, lambda: _lk_read(_lk_base(
+            args=dict(_LK_PARENT, connector="GKE")))),
+        ("lookup_block_value_differs", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", args=_lk_args(_LK_ROOT, block=other_block))))),
+        ("lookup_block_extra_key", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", args=_lk_args(_LK_ROOT, block=dict(_LK_BLOCK, zone="x")))))),
+        ("lookup_parent_no_block", 4, lambda: _lk_read(_lk_base(
+            args={k: v for k, v in _LK_PARENT.items() if k != "gke_auth"}))),
+        ("lookup_parent_extra_block_key", 0, lambda: _lk_read(_lk_base(
+            args=dict(_LK_PARENT, gke_auth=dict(_LK_BLOCK, zone="x"))))),
+        ("lookup_doc_key_mismatch", 4, lambda: _lk_read(_lk_base(_lk_child("c1", "/openapi/v3/apis/batch/v1")))),
+        ("lookup_doc_hashed", 0, lambda: _lk_read(_lk_base(_lk_child("c1", hashed)))),
+        ("lookup_doc_core_group", 0, lambda: _lk_read(_lk_base(
+            _lk_child("c1", "/openapi/v3/api/v1"), args=dict(_LK_PARENT, model="v1")))),
+        # ParseAPIVersion takes "core/v1" as a group named core, so the document key is
+        # apis/core/v1. The parser mirrors that exactly.
+        ("lookup_doc_named_core_group", 0, lambda: _lk_read(_lk_base(
+            _lk_child("c1", "/openapi/v3/apis/core/v1"), args=dict(_LK_PARENT, model="core/v1")))),
+        ("lookup_doc_model_invalid", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", _LK_DOC), args=dict(_LK_PARENT, model="apps/v1/x")))),
+        ("lookup_doc_model_missing", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", _LK_DOC), args={k: v for k, v in _LK_PARENT.items() if k != "model"}))),
+
+        # ---- condition 4: the shape ----
+        ("lookup_extra_arg_body", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=dict(
+            _lk_args(_LK_ROOT), body="x"))))),
+        ("lookup_method_post", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=dict(
+            _lk_args(_LK_ROOT), method="POST"))))),
+        ("lookup_no_headers", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=dict(
+            _lk_args(_LK_ROOT), headers=[]))))),
+        ("lookup_two_headers", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=dict(
+            _lk_args(_LK_ROOT), headers=[{"key": "Accept", "value": "application/json"},
+                                         {"key": "X-Extra", "value": "1"}]))))),
+        ("lookup_header_other_value", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=dict(
+            _lk_args(_LK_ROOT), headers=[{"key": "Accept", "value": "application/yaml"}]))))),
+        # azure is outside the rule until its own lands, even with a binding that names it.
+        ("lookup_azure_provider", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", args=_lk_args(_LK_ROOT, ap="azure")),
+            args=dict(_LK_PARENT, connector="azure", azure_auth=_LK_BLOCK)),
+            _lk_spec(lambda c, t: [_lk_binding(ap="azure")]))),
+
+        # ---- condition 5: the URL ----
+        ("lookup_path_secrets", 4, lambda: _lk_read(_lk_base(_lk_child("c1", "/api/v1/namespaces/default/secrets")))),
+        ("lookup_query_watch", 4, lambda: _lk_read(_lk_base(_lk_child("c1", _LK_DOC + "?watch=1")))),
+        ("lookup_hash_lowercase", 4, lambda: _lk_read(_lk_base(_lk_child("c1", _LK_DOC + "?hash=" + "ab" * 64)))),
+        ("lookup_hash_short", 4, lambda: _lk_read(_lk_base(_lk_child("c1", _LK_DOC + "?hash=" + _LK_HASH[:127])))),
+        ("lookup_hash_on_root", 4, lambda: _lk_read(_lk_base(_lk_child("c1", _LK_ROOT + "?hash=" + _LK_HASH)))),
+        ("lookup_trailing_slash", 4, lambda: _lk_read(_lk_base(_lk_child("c1", _LK_ROOT + "/")))),
+        ("lookup_userinfo", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=_lk_url(
+            "https://u:p@" + _LK_EP + _LK_ROOT))))),
+        ("lookup_http_scheme", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=_lk_url(
+            "http://" + _LK_EP + _LK_ROOT))))),
+        ("lookup_bad_group", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", "/openapi/v3/apis/APPS/v1"), args=dict(_LK_PARENT, model="APPS/v1")))),
+
+        # ---- condition 6: the target binding ----
+        ("lookup_unbound_denied", 1, lambda: _lk_read(_lk_base(
+            _lk_child("c1", result=_LK_DENIED, outcome="error")), _lk_spec(lambda c, t: []))),
+        ("lookup_unbound_success", 4, lambda: _lk_read(_lk_base(), _lk_spec(lambda c, t: []))),
+        # The binding must PRECEDE the child's attempt: equal is not before.
+        ("lookup_bind_at_attempt", 4, lambda: _lk_read(_lk_base(), _lk_spec(
+            lambda c, t: [_lk_binding(position=child_at)]))),
+        ("lookup_bind_before_attempt", 0, lambda: _lk_read(_lk_base(), _lk_spec(
+            lambda c, t: [_lk_binding(position=child_at - 1)]))),
+        ("lookup_bind_other_provider", 4, lambda: _lk_read(_lk_base(), _lk_spec(
+            lambda c, t: [_lk_binding(ap="eks")]))),
+        ("lookup_bind_other_authority", 4, lambda: _lk_read(_lk_base(), _lk_spec(
+            lambda c, t: [_lk_binding(authority="35.190.0.20")]))),
+        ("lookup_bind_predicate_rejects", 4, lambda: _lk_read(_lk_base(), _lk_spec(
+            lambda c, t: [_lk_binding(matches=lambda a: False)]))),
+        # An explicit port is a different authority from the bare one the binding names.
+        ("lookup_port_unbound", 4, lambda: _lk_read(_lk_base(_lk_child("c1", args=_lk_url(
+            "https://" + _LK_EP + ":443" + _LK_ROOT))))),
+        ("lookup_port_unbound_denied", 1, lambda: _lk_read(_lk_base(_lk_child(
+            "c1", args=_lk_url("https://" + _LK_EP + ":443" + _LK_ROOT), result=_LK_DENIED,
+            outcome="error")))),
+
+        # ---- condition 7: the budget, counted over every child that passed 1 to 5 ----
+        ("lookup_three_roots", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1") + _lk_child("c2") + _lk_child("c3")))),
+        ("lookup_four_documents", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", hashed) + _lk_child("c2", hashed) + _lk_child("c3", _LK_DOC)
+            + _lk_child("c4", _LK_DOC)))),
+        ("lookup_two_versions", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1", _LK_VERSION) + _lk_child("c2", _LK_VERSION)))),
+        ("lookup_full_budget", 0, lambda: _lk_read(_lk_base(
+            _lk_child("c1") + _lk_child("c2") + _lk_child("c3", hashed) + _lk_child("c4", hashed)
+            + _lk_child("c5", _LK_DOC) + _lk_child("c6", _LK_VERSION)))),
+        # Two bound roots plus a denied root on another authority: the unbound one counts too,
+        # so a looping recipe cannot hide extra reads behind retryable misses.
+        ("lookup_unbound_denied_counts", 4, lambda: _lk_read(_lk_base(
+            _lk_child("c1") + _lk_child("c2") + _lk_child(
+                "c3", args=_lk_args(_LK_ROOT, endpoint="35.190.0.20"), result=_LK_DENIED,
+                outcome="error")))),
+        ("lookup_budget_is_per_parent", 0, lambda: _lk_read(
+            _lk_base(_lk_child("c1") + _lk_child("c2"))
+            + _lk_lookup(_lk_child("c3", parent="P2") + _lk_child("c4", parent="P2"), cid="P2"))),
+
+        # ---- sweep ordering: a miss is reported only after both sweeps ran clean ----
+        ("lookup_miss_then_http_breach", 4, lambda: _lk_read(
+            _lk_base(_lk_child("c1", result=_LK_DENIED, outcome="error")) + _lk_unsanctioned_success(),
+            _lk_spec(lambda c, t: []))),
+        ("lookup_breach_after_http_miss", 4, lambda: _lk_read(
+            _lk_unsanctioned_denied() + _lk_base(), _lk_spec(lambda c, t: []))),
+
+        # ---- the parent's key folding (P3) ----
+        ("lookup_parent_two_spellings", 4, lambda: _lk_read(_lk_base(
+            args=dict(_LK_PARENT, GKE_AUTH=_LK_BLOCK)))),
+        ("lookup_parent_block_collision", 4, lambda: _lk_read(_lk_base(
+            args=dict(_LK_PARENT, gke_auth=dict(_LK_BLOCK, Project="demo-proj"))))),
+        # encoding/json binds Cluster_Name to cluster_name, and so does the fold.
+        ("lookup_fold_case_variant", 0, lambda: _lk_read(_lk_base(args=dict(_LK_PARENT, gke_auth={
+            "Cluster_Name": "demo-cluster", "location": "us-central1-f", "project": "demo-proj"})))),
+        # U+017F (long s) folds to s in both Go's EqualFold and casefold: the same binding.
+        ("lookup_fold_017f", 0, lambda: _lk_read(_lk_base(args=dict(_LK_PARENT, gke_auth={
+            "cluſter_name": "demo-cluster", "location": "us-central1-f", "project": "demo-proj"})))),
+        # U+212A (Kelvin sign) folds to k in both: gKe_auth binds as gke_auth.
+        ("lookup_fold_212a", 0, lambda: _lk_read(_lk_base(args={
+            "connector": "gke", "model": "apps/v1", "operation": "listAppsV1NamespacedDeployment",
+            "gKe_auth": _LK_BLOCK}))),
+        # U+FB06 (the st ligature) casefolds to "st", which Go's simple folding does not do, so
+        # the parser sees two spellings of cluster_name where Go bound one: it errs closed.
+        ("lookup_fold_fb06", 4, lambda: _lk_read(_lk_base(args=dict(_LK_PARENT, gke_auth=dict(
+            _LK_BLOCK, **{"cluﬆer_name": "demo-cluster"}))))),
+
+        # ---- the hook itself ----
+        ("lookup_targets_noncallable", 4, lambda: _guard(lambda: _resolve_with(replace(
+            _lk_spec(name="lookups-noncallable"), lookup_targets="not a callable")))),
+        ("lookup_targets_not_a_list", 4, lambda: _lk_read(_lk_base(), _lk_spec(lambda c, t: None))),
+        ("lookup_targets_bad_item", 4, lambda: _lk_read(_lk_base(), _lk_spec(
+            lambda c, t: [("gke", _LK_EP, None, -1)]))),
+        # A hook that raises is a crash, which the entrypoint guard turns into 4.
+        ("lookup_targets_raises", 4, lambda: _guard(lambda: run_read(
+            _lk_base(), _lk_spec(lambda c, t: 1 / 0), "demo", "marker-1234"))),
+
+        # ---- canary mode runs the same sweep ----
+        ("lookup_canary_admitted", 0, lambda: _lk_canary(_lk_canary_records() + _lk_lookup(_lk_child("c1")))),
+        ("lookup_canary_unbound", 4, lambda: _lk_canary(
+            _lk_canary_records() + _lk_lookup(_lk_child("c1")), _lk_spec(lambda c, t: []))),
+    ]
+
+
 def _shared_selftest():
     import tempfile
     spec = _engine_test_spec()
@@ -1497,6 +2218,7 @@ def _shared_selftest():
             ("cred_missing_secrets_file", 4, lambda: _guard(lambda: cp([clean_line], p_missing_secrets))),
             ("cred_empty_secrets_file", 0, lambda: _guard(lambda: cp([clean_line], p_empty_secrets))),
         ]
+        cases.extend(_lookup_cases())
 
         failures = 0
         for name, want, fn in cases:
