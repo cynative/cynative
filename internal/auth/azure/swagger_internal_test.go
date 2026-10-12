@@ -207,17 +207,17 @@ func TestRefResolverResolve(t *testing.T) {
 		t.Fatalf("add: %v", adderr)
 	}
 	ctx := context.Background()
-	if raw, from, readerr := r.resolve(ctx, testOpFile, "#/parameters/Local"); readerr != nil || from != testOpFile ||
-		!strings.Contains(string(raw), `"l"`) {
-		t.Fatalf("local ref = %s, %q, %v", raw, from, readerr)
+	if key, readerr := r.target(ctx, testOpFile, "#/parameters/Local"); readerr != nil || key.file != testOpFile ||
+		!strings.Contains(string(r.raw(key)), `"l"`) {
+		t.Fatalf("local ref = %+v, %v", key, readerr)
 	}
-	if _, _, readerr := r.resolve(ctx, testOpFile, "#/definitions/D"); readerr != nil {
+	if _, readerr := r.target(ctx, testOpFile, "#/definitions/D"); readerr != nil {
 		t.Fatalf("local definition: %v", readerr)
 	}
 	remote := "../../../../../../common-types/resource-management/v5/types.json#/parameters/ApiVersionParameter"
 	for range 2 {
-		if _, from, readerr := r.resolve(ctx, testOpFile, remote); readerr != nil || from != commonFile {
-			t.Fatalf("remote ref = %q, %v", from, readerr)
+		if key, readerr := r.target(ctx, testOpFile, remote); readerr != nil || key.file != commonFile {
+			t.Fatalf("remote ref = %+v, %v", key, readerr)
 		}
 	}
 	if n := files.count(commonFile); n != 1 {
@@ -231,7 +231,7 @@ func TestRefResolverResolve(t *testing.T) {
 		"../../common/v1/common.json#/parameters/X": ErrSpecsRejected,
 	}
 	for ref, want := range cases {
-		if _, _, readerr := r.resolve(ctx, testOpFile, ref); !errors.Is(readerr, want) {
+		if _, readerr := r.target(ctx, testOpFile, ref); !errors.Is(readerr, want) {
 			t.Errorf("resolve(%q) error = %v, want %v", ref, readerr, want)
 		}
 	}
@@ -251,7 +251,7 @@ func TestRefResolverLoadLimits(t *testing.T) {
 	r := newRefResolver(newSpecFakeFiles(bodies), ix, NewBudget(1<<20))
 	// Files 1..16 should resolve successfully.
 	for i := range 16 {
-		if _, _, err := r.resolve(
+		if _, err := r.target(
 			ctx,
 			testOpFile,
 			fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", i),
@@ -260,7 +260,7 @@ func TestRefResolverLoadLimits(t *testing.T) {
 		}
 	}
 	// File 17 should fail with errRefLimit.
-	if _, _, err := r.resolve(
+	if _, err := r.target(
 		ctx,
 		testOpFile,
 		fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", 16),
@@ -276,12 +276,12 @@ func TestRefResolverLoadLimits(t *testing.T) {
 	files.fail[commonFile] = sentinel
 	r = newRefResolver(files, refIndex(testOpFile, commonFile), NewBudget(1<<20))
 	ref := "../../../../../../common-types/resource-management/v5/types.json#/parameters/X"
-	if _, _, err := r.resolve(ctx, testOpFile, ref); !errors.Is(err, sentinel) || refGap(err) {
+	if _, err := r.target(ctx, testOpFile, ref); !errors.Is(err, sentinel) || refGap(err) {
 		t.Fatalf("load error = %v (gap %v), want the sentinel, not a gap", err, refGap(err))
 	}
 	r = newRefResolver(newSpecFakeFiles(map[string]string{commonFile: `{"parameters":{}}`}),
 		refIndex(testOpFile, commonFile), NewBudget(4))
-	if _, _, err := r.resolve(ctx, testOpFile, ref); !errors.Is(err, ErrBudgetExceeded) || refGap(err) {
+	if _, err := r.target(ctx, testOpFile, ref); !errors.Is(err, ErrBudgetExceeded) || refGap(err) {
 		t.Fatalf("budget error = %v (gap %v), want ErrBudgetExceeded, not a gap", err, refGap(err))
 	}
 }
@@ -535,5 +535,110 @@ func TestRefGap(t *testing.T) {
 		if refGap(err) {
 			t.Errorf("refGap(%v) = true", err)
 		}
+	}
+}
+
+// repeatedParents is a definitions table whose body schema VM lists the definition Big n times as an allOf parent.
+// Big holds one inline property of size bytes, so each time a part is merged that property is decoded again.
+func repeatedParents(n, size int) string {
+	parents := strings.TrimSuffix(strings.Repeat(`{"$ref":"#/definitions/Big"},`, n), ",")
+
+	return `{"VM":{"allOf":[` + parents + `]},"Big":{"required":["p"],"properties":{"p":{` +
+		`"type":"string","description":"` + strings.Repeat("d", size) + `"}}}}`
+}
+
+// TestRefResolverBody_RepeatedParentsAreBounded pins the decode bound: a body that names one definition a thousand
+// times, about 64 MiB of decoding from a file of 100 KB, stops at maxDecodedSchema with a gap error.
+func TestRefResolverBody_RepeatedParentsAreBounded(t *testing.T) {
+	t.Parallel()
+	own, err := decodeSwagger([]byte(`{"definitions":` + repeatedParents(1000, 64<<10) + `}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	if r.maxDecoded != 16<<20 {
+		t.Fatalf("maxDecoded = %d, want 16 MiB", r.maxDecoded)
+	}
+	if err = r.add(testOpFile, own); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	_, err = r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/VM"}`))
+	if !errors.Is(err, errRefLimit) || !refGap(err) {
+		t.Fatalf("body of 1000 repeated parents: err = %v, want errRefLimit as a gap", err)
+	}
+	if r.decoded > r.maxDecoded+(64<<10)+64 {
+		t.Errorf("decoded %d bytes, want the stop within one object of %d", r.decoded, r.maxDecoded)
+	}
+}
+
+// TestRefResolverBody_DecodesEachTargetOnce pins the memo: a definition named a hundred times is decoded once, so a
+// bound that fits one copy and the refs, but not a hundred copies, is never reached.
+func TestRefResolverBody_DecodesEachTargetOnce(t *testing.T) {
+	t.Parallel()
+	parents := strings.TrimSuffix(strings.Repeat(`{"$ref":"#/definitions/Base"},`, 100), ",")
+	own, err := decodeSwagger([]byte(`{"definitions":{"VM":{"allOf":[` + parents + `]},"Base":{"type":"object",` +
+		`"description":"` + strings.Repeat("d", 4<<10) + `"}}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	r.maxDecoded = 64 << 10
+	if err = r.add(testOpFile, own); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if shape, berr := r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/VM"}`)); berr != nil ||
+		!shape.object {
+		t.Fatalf("body = %+v, %v; want an object within the bound", shape, berr)
+	}
+}
+
+// cancelOnFile cancels a context when the file at path is read, then serves it.
+type cancelOnFile struct {
+	*specFakeFiles
+
+	path   string
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnFile) File(ctx context.Context, sha string, f IndexFile) ([]byte, error) {
+	if f.Path == c.path {
+		c.cancel()
+	}
+
+	return c.specFakeFiles.File(ctx, sha, f)
+}
+
+// TestRefResolverBody_StopsWhenCancelled pins both context checks of the merge: the context is cancelled while the
+// common file loads, for an allOf parent with no properties and for a property, and the parts and properties that
+// follow, all in the operation's own file, are never merged.
+func TestRefResolverBody_StopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	common := "../../../../../../common-types/resource-management/v5/types.json#/definitions/"
+	defs := `{"definitions":{
+		"Parents":{"allOf":[{"$ref":"` + common + `Base"},{"$ref":"#/definitions/Local"}]},
+		"Props":{"properties":{"a":{"$ref":"` + common + `Base"},"b":{"type":"string"}}},
+		"Local":{"type":"object"}}}`
+	for name, def := range map[string]string{"allOf parent": "Parents", "property": "Props"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			own, err := decodeSwagger([]byte(defs))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			src := &cancelOnFile{
+				specFakeFiles: newSpecFakeFiles(map[string]string{commonFile: `{"definitions":{"Base":{}}}`}),
+				path:          commonFile, cancel: cancel,
+			}
+			r := newRefResolver(src, refIndex(testOpFile, commonFile), NewBudget(1<<20))
+			if err = r.add(testOpFile, own); err != nil {
+				t.Fatalf("add: %v", err)
+			}
+			_, err = r.body(ctx, testOpFile, json.RawMessage(`{"$ref":"#/definitions/`+def+`"}`))
+			if !errors.Is(err, context.Canceled) || refGap(err) {
+				t.Fatalf("err = %v, want context.Canceled, not a gap", err)
+			}
+		})
 	}
 }

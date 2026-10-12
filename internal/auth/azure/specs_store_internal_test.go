@@ -733,6 +733,26 @@ func TestSpecStore_WriteAtomicFailures(t *testing.T) {
 	})
 }
 
+// TestSpecStore_WriteAtomicRemovesAPartialWrite pins that a write failing after some bytes reached the temp file
+// removes it, since evict never counts or removes a temp file.
+func TestSpecStore_WriteAtomicRemovesAPartialWrite(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t, newRawServer(), nil)
+	s.writeFile = func(name string, data []byte, perm os.FileMode) error {
+		if err := os.WriteFile(name, data[:len(data)/2], perm); err != nil {
+			return err
+		}
+
+		return errors.New("disk full")
+	}
+	if err := s.writeAtomic("x.json", []byte("0123456789")); err == nil {
+		t.Fatal("writeAtomic with a failing write succeeded")
+	}
+	if entries, _ := os.ReadDir(s.filesDir); len(entries) != 0 {
+		t.Errorf("a failed write left %d entries, want none", len(entries))
+	}
+}
+
 // TestSpecStore_EvictsLeastRecentlyUsed pins the cache cap: the oldest files go first, a read refreshes a file's
 // place, and in-flight temp files are never evicted.
 func TestSpecStore_EvictsLeastRecentlyUsed(t *testing.T) {

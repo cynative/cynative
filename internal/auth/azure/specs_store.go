@@ -80,6 +80,8 @@ type SpecStore struct {
 	failure   *cache.LoadFailure
 	maxFile   int64
 	maxCache  int64
+	// writeFile writes a temp file; tests replace it to fail after some bytes are written.
+	writeFile func(name string, data []byte, perm os.FileMode) error
 	// joined runs when a caller joins a download already in flight, and leading when a caller starts one; tests
 	// use them to order goroutines and to fill the cache in between.
 	joined, leading func()
@@ -136,6 +138,7 @@ func NewSpecStore(cfg SpecStoreConfig) *SpecStore {
 		failure:   cache.RecordLoadFailure(tc),
 		maxFile:   maxFileBytes,
 		maxCache:  maxFileCacheBytes,
+		writeFile: os.WriteFile,
 		joined:    func() {},
 		leading:   func() {},
 		flights:   map[string]*flight{},
@@ -358,7 +361,7 @@ func (s *SpecStore) rawURL(sha, path string) string {
 }
 
 // writeAtomic writes name in the files dir through a temp file beside it and a rename, so a reader never sees
-// half a file.
+// half a file. A failed write or rename removes the temp file, which evict never counts or removes.
 func (s *SpecStore) writeAtomic(name string, data []byte) error {
 	if err := os.MkdirAll(s.filesDir, cache.DirPerm); err != nil {
 		return err
@@ -366,7 +369,9 @@ func (s *SpecStore) writeAtomic(name string, data []byte) error {
 	final := filepath.Join(s.filesDir, name)
 	tmp := filepath.Join(filepath.Dir(final),
 		fmt.Sprintf("%s%s.%d.%d.tmp", tempPrefix, filepath.Base(name), os.Getpid(), s.seq.Add(1)))
-	if err := os.WriteFile(tmp, data, cache.FilePerm); err != nil {
+	if err := s.writeFile(tmp, data, cache.FilePerm); err != nil {
+		_ = os.Remove(tmp)
+
 		return err
 	}
 	if err := os.Rename(tmp, final); err != nil {

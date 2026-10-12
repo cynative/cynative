@@ -13,11 +13,14 @@ import (
 	"strings"
 )
 
-// The bounds on $ref resolution in one lookup: distinct files loaded, the operation's own included, and the length
-// of one chain of refs.
+// The bounds on $ref resolution in one lookup: distinct files loaded, the operation's own included, the length of
+// one chain of refs, and the bytes of parameter and schema objects decoded. The last bounds expansion: a file that
+// names one large definition many times stays inside the file bounds, and each ref target is decoded once, but the
+// inline objects a target holds are decoded again for every place that reaches them.
 const (
-	maxRefFiles = 16
-	maxRefDepth = 8
+	maxRefFiles      = 16
+	maxRefDepth      = 8
+	maxDecodedSchema = 16 << 20
 )
 
 // The ref tables the reader follows; responses, examples and every other pointer are not followed.
@@ -28,7 +31,7 @@ const (
 
 // The errors that turn a parameter or a body into a gap rather than failing the lookup.
 var (
-	errRefConfined = errors.New("the ref target is not a spec file of this commit")
+	errRefConfined = errors.New("the ref target is outside the spec trees the index admits")
 	errRefLimit    = errors.New("the ref limit was reached")
 	errRefKind     = errors.New("only parameters and definitions refs are followed")
 	errRefMissing  = errors.New("the ref target does not exist")
@@ -104,17 +107,29 @@ type fileSource interface {
 }
 
 // refResolver follows $refs for one lookup, loading each file at most once and charging what it parses to the
-// lookup's budget.
+// lookup's budget. It decodes each ref target at most once and counts every object it decodes against maxDecoded.
 type refResolver struct {
-	src    fileSource
-	ix     *Index
-	budget *Budget
-	docs   map[string]*swaggerDoc
+	src        fileSource
+	ix         *Index
+	budget     *Budget
+	docs       map[string]*swaggerDoc
+	params     map[refKey]swaggerParam
+	schemas    map[refKey]swaggerSchema
+	decoded    int64
+	maxDecoded int64
+}
+
+// refKey names one ref target: a file and an entry of its parameters or definitions table.
+type refKey struct {
+	file, table, name string
 }
 
 // newRefResolver builds the resolver for one lookup.
 func newRefResolver(src fileSource, ix *Index, b *Budget) *refResolver {
-	return &refResolver{src: src, ix: ix, budget: b, docs: map[string]*swaggerDoc{}}
+	return &refResolver{
+		src: src, ix: ix, budget: b, docs: map[string]*swaggerDoc{}, params: map[refKey]swaggerParam{},
+		schemas: map[refKey]swaggerSchema{}, maxDecoded: maxDecodedSchema,
+	}
 }
 
 // decodeSwagger decodes a spec file.
@@ -218,11 +233,12 @@ func (r *refResolver) add(p string, d *swaggerDoc) error {
 // param resolves one parameter object, following a $ref chain of at most maxRefDepth links. It returns the
 // parameter, the file it lives in and whether it came through a $ref (the shared-parameter shape).
 func (r *refResolver) param(ctx context.Context, from string, raw json.RawMessage) (swaggerParam, string, bool, error) {
+	var p swaggerParam
+	err := r.decode(raw, &p, errBadParam)
 	shared := false
 	for depth := 0; ; depth++ {
-		var p swaggerParam
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return swaggerParam{}, "", shared, fmt.Errorf("%w: %w", errBadParam, err)
+		if err != nil {
+			return swaggerParam{}, "", shared, err
 		}
 		if p.Ref == "" {
 			if p.Name == "" || p.In == "" {
@@ -234,11 +250,12 @@ func (r *refResolver) param(ctx context.Context, from string, raw json.RawMessag
 		if depth == maxRefDepth {
 			return swaggerParam{}, "", shared, fmt.Errorf("%w: a chain longer than %d", errRefLimit, maxRefDepth)
 		}
-		next, file, err := r.resolve(ctx, from, p.Ref)
-		if err != nil {
-			return swaggerParam{}, "", shared, err
+		var key refKey
+		key, err = r.target(ctx, from, p.Ref)
+		if err == nil {
+			p, err = targetOf(r, r.params, key, errBadParam)
 		}
-		raw, from, shared = next, file, true
+		from, shared = key.file, true
 	}
 }
 
@@ -247,11 +264,12 @@ func (r *refResolver) param(ctx context.Context, from string, raw json.RawMessag
 // link marking it read-only makes the property read-only, so a required one is dropped from the body, never sent)
 // and description (the outermost one wins).
 func (r *refResolver) schema(ctx context.Context, from string, raw json.RawMessage) (swaggerSchema, string, error) {
+	var s swaggerSchema
+	err := r.decode(raw, &s, errBadSchema)
 	readOnly, desc := false, ""
 	for depth := 0; ; depth++ {
-		var s swaggerSchema
-		if err := json.Unmarshal(raw, &s); err != nil {
-			return swaggerSchema{}, "", fmt.Errorf("%w: %w", errBadSchema, err)
+		if err != nil {
+			return swaggerSchema{}, "", err
 		}
 		readOnly = readOnly || s.ReadOnly
 		desc = cmp.Or(desc, s.Description)
@@ -263,16 +281,19 @@ func (r *refResolver) schema(ctx context.Context, from string, raw json.RawMessa
 		if depth == maxRefDepth {
 			return swaggerSchema{}, "", fmt.Errorf("%w: a chain longer than %d", errRefLimit, maxRefDepth)
 		}
-		next, file, err := r.resolve(ctx, from, s.Ref)
-		if err != nil {
-			return swaggerSchema{}, "", err
+		var key refKey
+		key, err = r.target(ctx, from, s.Ref)
+		if err == nil {
+			s, err = targetOf(r, r.schemas, key, errBadSchema)
 		}
-		raw, from = next, file
+		from = key.file
 	}
 }
 
-// body resolves a body schema and merges its allOf parents one level deep: required names in order, the schema's own
-// properties before its parents', each property resolved through its own $ref so its type and readOnly are known.
+// body resolves a body schema and merges its allOf parents one level deep, one part at a time: required names in
+// order, the schema's own properties before its parents', each property resolved through its own $ref so its type
+// and readOnly are known. It checks the context before each part and each property, since a cached ref target costs
+// no read that would.
 func (r *refResolver) body(ctx context.Context, from string, raw json.RawMessage) (bodyShape, error) {
 	s, file, err := r.schema(ctx, from, raw)
 	if err != nil {
@@ -281,59 +302,110 @@ func (r *refResolver) body(ctx context.Context, from string, raw json.RawMessage
 	if s.Type != "object" && (s.Type != "" || (len(s.Properties) == 0 && len(s.AllOf) == 0)) {
 		return bodyShape{}, nil
 	}
-	parts, files := []swaggerSchema{s}, []string{file}
+	shape := bodyShape{object: true, props: map[string]swaggerSchema{}}
+	if err = r.merge(ctx, &shape, s, file); err != nil {
+		return bodyShape{}, err
+	}
 	for _, a := range s.AllOf {
+		if err = ctx.Err(); err != nil {
+			return bodyShape{}, err
+		}
 		ps, pf, perr := r.schema(ctx, file, a)
 		if perr != nil {
 			return bodyShape{}, perr
 		}
-		parts, files = append(parts, ps), append(files, pf)
-	}
-	shape := bodyShape{object: true, props: map[string]swaggerSchema{}}
-	for i, part := range parts {
-		shape.required = append(shape.required, part.Required...)
-		for _, name := range slices.Sorted(maps.Keys(part.Properties)) {
-			prop, _, perr := r.schema(ctx, files[i], part.Properties[name])
-			if perr != nil {
-				return bodyShape{}, perr
-			}
-			if _, seen := shape.props[name]; !seen {
-				shape.props[name] = prop
-			}
+		if err = r.merge(ctx, &shape, ps, pf); err != nil {
+			return bodyShape{}, err
 		}
 	}
 
 	return shape, nil
 }
 
-// resolve follows one $ref written in file from and returns the target object and the file it lives in.
-func (r *refResolver) resolve(ctx context.Context, from, ref string) (json.RawMessage, string, error) {
+// merge adds one part's required names and the properties shape does not have yet, each resolved from file.
+func (r *refResolver) merge(ctx context.Context, shape *bodyShape, part swaggerSchema, file string) error {
+	shape.required = append(shape.required, part.Required...)
+	for _, name := range slices.Sorted(maps.Keys(part.Properties)) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		prop, _, err := r.schema(ctx, file, part.Properties[name])
+		if err != nil {
+			return err
+		}
+		if _, seen := shape.props[name]; !seen {
+			shape.props[name] = prop
+		}
+	}
+
+	return nil
+}
+
+// decode decodes raw into v after counting its bytes against maxDecoded; malformed wraps a decode error.
+func (r *refResolver) decode(raw json.RawMessage, v any, malformed error) error {
+	r.decoded += int64(len(raw))
+	if r.decoded > r.maxDecoded {
+		return fmt.Errorf("%w: more than %d bytes of parameters and schemas decoded", errRefLimit, r.maxDecoded)
+	}
+	if err := json.Unmarshal(raw, v); err != nil {
+		return fmt.Errorf("%w: %w", malformed, err)
+	}
+
+	return nil
+}
+
+// targetOf returns the decoded ref target key names, decoding it on its first use in the lookup only.
+func targetOf[T any](r *refResolver, cache map[refKey]T, key refKey, malformed error) (T, error) {
+	if v, ok := cache[key]; ok {
+		return v, nil
+	}
+	var v T
+	if err := r.decode(r.raw(key), &v, malformed); err != nil {
+		return v, err
+	}
+	cache[key] = v
+
+	return v, nil
+}
+
+// raw returns the object key names in its file, which target has already loaded.
+func (r *refResolver) raw(key refKey) json.RawMessage {
+	d := r.docs[key.file]
+	if key.table == refTableDefinitions {
+		return d.Definitions[key.name]
+	}
+
+	return d.Parameters[key.name]
+}
+
+// target follows one $ref written in file from, loading the file it names, and returns the target's key once the
+// target is known to exist.
+func (r *refResolver) target(ctx context.Context, from, ref string) (refKey, error) {
 	file, pointer, found := strings.Cut(ref, "#")
 	if !found {
-		return nil, "", fmt.Errorf("%w: %q has no JSON pointer", errRefKind, ref)
+		return refKey{}, fmt.Errorf("%w: %q has no JSON pointer", errRefKind, ref)
 	}
 	target, err := refPath(from, file, r.ix)
 	if err != nil {
-		return nil, "", err
+		return refKey{}, err
 	}
 	table, name, err := refPointer(pointer)
 	if err != nil {
-		return nil, "", err
+		return refKey{}, err
 	}
 	d, err := r.load(ctx, target)
 	if err != nil {
-		return nil, "", err
+		return refKey{}, err
 	}
 	entries := d.Parameters
 	if table == refTableDefinitions {
 		entries = d.Definitions
 	}
-	raw, ok := entries[name]
-	if !ok {
-		return nil, "", fmt.Errorf("%w: %q", errRefMissing, ref)
+	if _, ok := entries[name]; !ok {
+		return refKey{}, fmt.Errorf("%w: %q", errRefMissing, ref)
 	}
 
-	return raw, target, nil
+	return refKey{file: target, table: table, name: name}, nil
 }
 
 // load returns the decoded file at p, reading and charging it once per lookup.

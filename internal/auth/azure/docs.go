@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
 
@@ -26,8 +25,8 @@ const (
 	lookupDeadline     = 120 * time.Second
 	lookupBudget       = 160 << 20
 	maxLookupDownloads = 8
-	// maxNearestEcho bounds each nearest operation id a reason lists. A longer id is left out, never cut, since a
-	// cut id is not an operation the caller can retry with.
+	// maxNearestEcho bounds each nearest operation id a reason lists, quoted. A longer id is left out before any
+	// scoring, never cut, since a cut id is not an operation the caller can retry with.
 	maxNearestEcho = 100
 	// maxNearest bounds how many nearest operation ids a reason lists.
 	maxNearest = 5
@@ -49,10 +48,12 @@ const (
 
 // The lookup's reasons and guidance.
 const (
-	namespaceFormat = "a namespace looks like Microsoft.Compute"
-	modelGuidance   = "; pass an api-version dir name such as 2024-07-01, or a choice from an ambiguous result"
-	operationFormat = "; names are Swagger operationIds such as VirtualMachines_List"
-	olderGuidance   = "; model can name an api-version dir outside the default search"
+	namespaceFormat  = "a namespace looks like Microsoft.Compute"
+	modelGuidance    = "; pass an api-version dir name such as 2024-07-01, or a choice from an ambiguous result"
+	operationFormat  = "; names are Swagger operationIds such as VirtualMachines_List"
+	operationGrammar = "; an operationId is letters, digits, '_', '.' and '-', at most 200, such as " +
+		"VirtualMachines_List"
+	olderGuidance = "; model can name an api-version dir outside the default search"
 	// gateNotLoaded says the lookup could not compare the template with the gate's catalog.
 	gateNotLoaded = "gate recognition not checked: the azure gate's catalog is not loaded yet"
 )
@@ -102,7 +103,15 @@ func (d *Docs) Reference(ctx context.Context, q apiref.Query) apiref.Result {
 			"; "+namespaceFormat))
 	}
 
-	return newSearch(d, ix, ns, q).run(ctx, m)
+	s := newSearch(d, ix, ns, q)
+	out := s.run(ctx, m)
+	// Every outcome passes here. A context that ends during the last read or the render meets no later check, so a
+	// lookup that ended answers as stopped, whatever the search had reached.
+	if ctx.Err() != nil {
+		return s.failure(ctx, ctx.Err())
+	}
+
+	return out
 }
 
 // ContextReason is the unavailable reason for a lookup whose context is done. Its text is auth.ContextReason's,
@@ -143,7 +152,7 @@ func (s selector) String() string {
 	return out
 }
 
-// parseQuery checks service and model against their grammars before any I/O.
+// parseQuery checks service, operation and model against their grammars before any I/O.
 func parseQuery(q apiref.Query) (lookupModel, *apiref.Result) {
 	switch {
 	case q.Service == "":
@@ -154,6 +163,11 @@ func parseQuery(q apiref.Query) (lookupModel, *apiref.Result) {
 	case !validNamespace(q.Service):
 		res := notFound(apiref.Bounded("service "+echo(q.Service)+" is not a resource-provider namespace",
 			"; "+namespaceFormat))
+
+		return lookupModel{}, &res
+	case !validOperation(q.Operation):
+		res := notFound(apiref.Bounded("operation "+echo(q.Operation)+" is not a Swagger operationId",
+			operationGrammar))
 
 		return lookupModel{}, &res
 	case q.Model == "":
@@ -647,25 +661,31 @@ func (s *search) failure(ctx context.Context, err error) apiref.Result {
 	if n := len(s.searched); n > 0 {
 		suffix += ", the last " + s.searched[n-1]
 	}
-	suffix += s.nearest() + "; pass model with an api-version dir name to search one version"
+	// A done lookup does no more work, scoring included.
+	if ctx.Err() == nil {
+		suffix += s.nearest()
+	}
+	suffix += "; pass model with an api-version dir name to search one version"
 
 	return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: apiref.Bounded(head, suffix)}
 }
 
-// nearest lists up to maxNearest operation ids seen in the search, nearest first.
+// nearest lists up to maxNearest operation ids seen in the search, nearest first. Only ids in the operation grammar
+// whose quoted form fits maxNearestEcho are scored, so the edit distances cost at most 200 by 100 bytes each.
 func (s *search) nearest() string {
-	near := apiref.Nearest(slices.Sorted(maps.Keys(s.ids)), s.q.Operation, maxNearest)
+	var ids []string
+	for id := range s.ids {
+		if validOperation(id) && len(strconv.Quote(id)) <= maxNearestEcho {
+			ids = append(ids, id)
+		}
+	}
+	near := apiref.Nearest(ids, s.q.Operation, maxNearest)
 	if len(near) == 0 {
 		return ""
 	}
 	quoted := make([]string, 0, len(near))
 	for _, id := range near {
-		if q := strconv.Quote(id); utf8.RuneCountInString(q) <= maxNearestEcho {
-			quoted = append(quoted, q)
-		}
-	}
-	if len(quoted) == 0 {
-		return ""
+		quoted = append(quoted, strconv.Quote(id))
 	}
 
 	return "; nearest operation ids: " + strings.Join(quoted, ", ")

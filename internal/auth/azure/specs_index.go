@@ -34,6 +34,8 @@ var (
 	versionPattern   = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}(-[a-z][a-z0-9.]*)?$`)
 	groupPartPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 	fileNamePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.json$`)
+	// operationPattern admits every stable operationId of 2026-10-12 (117,672, the longest 96 bytes).
+	operationPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$`)
 	// refSegmentPattern admits any segment an operation file's path can hold: the longest file name is 180 bytes
 	// (bound by the selector check) and the longest namespace is 205 bytes (the selector check does not touch the
 	// namespace segment, so fileNamePattern's 205-byte limit applies), so no file the operation grammar admits
@@ -298,6 +300,8 @@ func validVersion(s string) bool { return versionPattern.MatchString(s) }
 func validGroupPart(s string) bool { return groupPartPattern.MatchString(s) }
 
 func validFileName(s string) bool { return fileNamePattern.MatchString(s) }
+
+func validOperation(s string) bool { return operationPattern.MatchString(s) }
 
 func validSHA(s string) bool { return shaPattern.MatchString(s) }
 

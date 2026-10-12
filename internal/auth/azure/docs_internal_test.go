@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -433,16 +434,85 @@ func TestDocsReference_Finish(t *testing.T) {
 }
 
 // TestDocsReference_CancelAfterTheSearch pins the render's own context check: the context is cancelled while the
-// last summary is read, so the search finishes and only the render can notice.
+// last summary is read, so the search finishes and only the render can notice, before it reads the file. The one
+// read the fake counts is the summary's own.
 func TestDocsReference_CancelAfterTheSearch(t *testing.T) {
 	t.Parallel()
-	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
+	files := []fixtureFile{{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")}}
+	f := specFixture(files...)
 	ctx, cancel := context.WithCancel(context.Background())
 	f.onSummary = cancel
 	res := NewDocs(f, "e", func() Catalog { return nil }).Reference(ctx,
 		apiref.Query{Service: "Microsoft.Test", Operation: "Things_Get"})
 	if res.Outcome != apiref.OutcomeUnavailable || !strings.HasPrefix(res.Reason, "the lookup was interrupted") {
 		t.Fatalf("cancelled after the search = %+v", res)
+	}
+	if n := f.count(files[0].path()); n != 1 {
+		t.Errorf("the file was read %d times, want 1 (the summary's read, none by the render)", n)
+	}
+}
+
+// cancelOnRender cancels a context when the render reads a file, then serves it: Summary reads through the
+// embedded fake and never reaches this File.
+type cancelOnRender struct {
+	*fakeSpecs
+
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnRender) File(ctx context.Context, sha string, f IndexFile) ([]byte, error) {
+	c.cancel()
+
+	return c.fakeSpecs.File(ctx, sha, f)
+}
+
+// TestDocsReference_CancelledLookupsAnswerUnavailable pins the check at the lookup's exit: a lookup whose context
+// ends during its last summary read or its last file read answers unavailable, never the outcome it had reached.
+func TestDocsReference_CancelledLookupsAnswerUnavailable(t *testing.T) {
+	t.Parallel()
+	stable := func(ids ...string) fixtureFile {
+		return fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", ids...)}
+	}
+	cases := map[string]struct {
+		file     fixtureFile
+		op       string
+		atCall   int32 // the summary call that cancels; 0 cancels on the render's file read
+		original apiref.Outcome
+	}{
+		"last preview summary": {
+			fixtureFile{"A", kindPreview, "2024-01-01-preview", "a.json", specOps("2024-01-01-preview", "New_Get")},
+			"New_Get", 1, apiref.OutcomeAmbiguous,
+		},
+		"folded miss":     {stable("Other_Get"), "Nope_Get", 2, apiref.OutcomeNotFound},
+		"case ambiguity":  {stable("things_get", "THINGS_GET"), "Things_Get", 2, apiref.OutcomeAmbiguous},
+		"final file read": {stable("Things_Get"), "Things_Get", 0, apiref.OutcomeFound},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if res := lookup(t, specFixture(tc.file), tc.op, ""); res.Outcome != tc.original {
+				t.Fatalf("uncancelled = %+v, want %s", res, tc.original)
+			}
+			f := specFixture(tc.file)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var calls atomic.Int32
+			f.onSummary = func() {
+				if calls.Add(1) == tc.atCall {
+					cancel()
+				}
+			}
+			var store specSource = f
+			if tc.atCall == 0 {
+				store = &cancelOnRender{fakeSpecs: f, cancel: cancel}
+			}
+			res := NewDocs(store, "e", func() Catalog { return nil }).Reference(ctx,
+				apiref.Query{Service: "Microsoft.Test", Operation: tc.op})
+			if res.Outcome != apiref.OutcomeUnavailable ||
+				!strings.HasPrefix(res.Reason, "the lookup was interrupted") {
+				t.Fatalf("cancelled = %+v, want unavailable", res)
+			}
+		})
 	}
 }
 
@@ -550,7 +620,8 @@ func TestDocsReference_ChoicesCap(t *testing.T) {
 }
 
 // TestDocsReference_OperationEcho pins that the echoed operation is quoted and bounded before the text after it,
-// so a long, escape-heavy operation cannot push the namespace or the guidance out of the reason.
+// so a long, escape-heavy operation cannot push the namespace or the guidance out of the reason: outside the
+// operation grammar it is refused with the grammar, and at the grammar's longest it is searched for.
 func TestDocsReference_OperationEcho(t *testing.T) {
 	t.Parallel()
 	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
@@ -559,12 +630,47 @@ func TestDocsReference_OperationEcho(t *testing.T) {
 		if res.Outcome != apiref.OutcomeNotFound || utf8.RuneCountInString(res.Reason) > apiref.MaxReason {
 			t.Fatalf("%.20q = %s %q", op, res.Outcome, res.Reason)
 		}
-		if !strings.HasPrefix(res.Reason, "no operation "+strconv.Quote(op)[:20]) {
+		if !strings.HasPrefix(res.Reason, "operation "+strconv.Quote(op)[:20]) {
 			t.Errorf("%.20q: the operation was not quoted: %q", op, res.Reason)
 		}
-		if !strings.Contains(res.Reason, " in Microsoft.Test (1 version dirs searched in groups test/A)") ||
-			!strings.HasSuffix(res.Reason, olderGuidance) {
+		if !strings.HasSuffix(res.Reason, " is not a Swagger operationId"+operationGrammar) {
 			t.Errorf("%.20q: the text after the echo did not survive: %q", op, res.Reason)
+		}
+	}
+	op := strings.Repeat("x", 200)
+	res := lookup(t, f, op, "")
+	if res.Outcome != apiref.OutcomeNotFound || utf8.RuneCountInString(res.Reason) > apiref.MaxReason ||
+		!strings.HasPrefix(res.Reason, "no operation "+strconv.Quote(op)[:20]) {
+		t.Fatalf("a 200-byte operation = %s %q", res.Outcome, res.Reason)
+	}
+	if !strings.Contains(res.Reason, " in Microsoft.Test (1 version dirs searched in groups test/A)") ||
+		!strings.HasSuffix(res.Reason, olderGuidance) {
+		t.Errorf("a 200-byte operation: the text after the echo did not survive: %q", res.Reason)
+	}
+}
+
+// TestDocsReference_OperationGrammar pins the operation grammar's edges: 200 bytes is searched, 201 and a character
+// outside the grammar are refused before any store call.
+func TestDocsReference_OperationGrammar(t *testing.T) {
+	t.Parallel()
+	for op, searched := range map[string]bool{
+		"A" + strings.Repeat("b", 199): true,
+		"A" + strings.Repeat("b", 200): false,
+		"Things Get":                   false,
+		"Things/Get":                   false,
+		"_Things":                      false,
+		"":                             false,
+		"0.Things-Get_x":               true,
+	} {
+		f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
+		res := lookup(t, f, op, "")
+		refused := strings.HasSuffix(res.Reason, operationGrammar)
+		if res.Outcome != apiref.OutcomeNotFound || refused == searched || (f.indexCount() > 0) != searched {
+			t.Errorf("%.20q: %s %q after %d index loads; want searched %v", op, res.Outcome, res.Reason,
+				f.indexCount(), searched)
+		}
+		if !searched && (len(f.calls) != 0 || len(f.summaries) != 0) {
+			t.Errorf("%.20q: a refused operation read %d files and %d summaries", op, len(f.calls), len(f.summaries))
 		}
 	}
 }
@@ -750,5 +856,59 @@ func TestDocsReference_NearestAndGroups(t *testing.T) {
 	want = "(7 version dirs searched in groups test/A, test/B, test/C, test/D, test/E and 2 more)"
 	if res.Outcome != apiref.OutcomeNotFound || !strings.Contains(res.Reason, want) {
 		t.Fatalf("groups = %+v, want %s", res, want)
+	}
+}
+
+// TestDocsReference_NearestScoresOnlyListableIDs pins that an id the reason could not list, too long or outside the
+// operation grammar, is dropped before scoring: five long ids nearer the operation than a short one never crowd it
+// out of the list.
+func TestDocsReference_NearestScoresOnlyListableIDs(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("L", 120)
+	ids := []string{"Short_Get"}
+	for _, c := range "ABCDE" {
+		ids = append(ids, long+"_"+string(c))
+	}
+	body := specOps("2024-01-01", ids...)
+	// An id with a space is outside the grammar; it is as near as the long ones.
+	body = strings.Replace(body, `"operationId":"`+long+`_E"`, `"operationId":"`+long+` E"`, 1)
+	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", body})
+	res := lookup(t, f, long+"_X", "")
+	if res.Outcome != apiref.OutcomeNotFound || !strings.Contains(res.Reason, `; nearest operation ids: "Short_Get";`) {
+		t.Fatalf("nearest = %+v, want only the short id listed", res)
+	}
+}
+
+// TestDocsReference_NoNearestAfterTheLookupEnds pins that a stopped lookup scores nothing: the context ends while the
+// first dir's summary is read, after which the search stops with ids already seen and lists none of them.
+func TestDocsReference_NoNearestAfterTheLookupEnds(t *testing.T) {
+	t.Parallel()
+	f := specFixture(
+		fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")},
+		fixtureFile{"A", kindStable, "2023-01-01", "a.json", specOps("2023-01-01", "Other_Get")},
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	f.onSummary = cancel
+	res := NewDocs(f, "e", func() Catalog { return nil }).Reference(ctx,
+		apiref.Query{Service: "Microsoft.Test", Operation: "Thingz_Get"})
+	if res.Outcome != apiref.OutcomeUnavailable || !strings.HasPrefix(res.Reason, "the lookup was interrupted") ||
+		strings.Contains(res.Reason, "nearest") {
+		t.Fatalf("a stopped lookup = %+v, want no nearest ids", res)
+	}
+}
+
+// TestDocsReference_RepeatedParentsAnswerAGap pins what a lookup makes of the decode bound: the body of an operation
+// that names one large definition a thousand times is a gap, and the rest of the reference is rendered.
+func TestDocsReference_RepeatedParentsAnswerAGap(t *testing.T) {
+	t.Parallel()
+	body := `{"name":"body","in":"body","required":true,"schema":{"$ref":"#/definitions/VM"}}`
+	spec := `{"info":{"version":"2024-01-01"},"paths":{` +
+		`"/subscriptions/{subscriptionId}/providers/Microsoft.Test/things/x":{"put":{"operationId":"Things_Put",` +
+		`"parameters":[` + pSub + `,` + pVersion + `,` + body + `]}}},"definitions":` +
+		repeatedParents(1000, 64<<10) + `}`
+	res := lookup(t, specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", spec}), "Things_Put", "")
+	if res.Outcome != apiref.OutcomeIncomplete || !slices.Contains(res.Reference.Gaps, refBodyGap) ||
+		res.Reference.Operation != "Things_Put" {
+		t.Fatalf("repeated parents = %+v, want incomplete with the body gap", res)
 	}
 }
