@@ -8,7 +8,9 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -50,6 +52,10 @@ type TTLCache[T any] struct {
 	Clock    func() time.Time
 	Fetch    func(ctx context.Context) ([]byte, error)
 	Parse    func([]byte) (*T, error)
+
+	// MaxDiskBytes, when positive, bounds the persisted payload: a larger file is treated as absent before it is
+	// read, so a corrupted or planted cache file cannot make a load read it whole.
+	MaxDiskBytes int64
 
 	mu     sync.Mutex
 	loaded bool
@@ -103,7 +109,7 @@ func (c *TTLCache[T]) load(ctx context.Context) *T {
 
 // tryLoadDisk reads + parses the persisted payload and returns its age.
 func (c *TTLCache[T]) tryLoadDisk() (*T, time.Duration, bool) {
-	raw, err := os.ReadFile(c.DataPath)
+	raw, err := c.readData()
 	if err != nil {
 		return nil, 0, false
 	}
@@ -120,6 +126,32 @@ func (c *TTLCache[T]) tryLoadDisk() (*T, time.Duration, bool) {
 		return nil, 0, false
 	}
 	return parsed, c.Clock().Sub(meta.FetchedAt), true
+}
+
+// errPayloadTooLarge reports a persisted payload over MaxDiskBytes.
+var errPayloadTooLarge = errors.New("cache: persisted payload over MaxDiskBytes")
+
+// readData reads the persisted payload. With MaxDiskBytes positive the read itself is capped at one byte past the
+// bound, so a file that is larger, or that grows or is replaced while it is read, is refused without being read
+// whole; a Stat before an unbounded read would leave that window open.
+func (c *TTLCache[T]) readData() ([]byte, error) {
+	if c.MaxDiskBytes <= 0 {
+		return os.ReadFile(c.DataPath)
+	}
+	f, err := os.Open(c.DataPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, c.MaxDiskBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > c.MaxDiskBytes {
+		return nil, errPayloadTooLarge
+	}
+
+	return raw, nil
 }
 
 // persistDisk writes the raw payload + meta sidecar best-effort.

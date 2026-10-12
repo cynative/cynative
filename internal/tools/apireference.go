@@ -278,72 +278,18 @@ func capped(out referenceOutput) string {
 	})
 }
 
-// placeholder names an input, marking one the reference could not render.
-func placeholder(in apiref.Input) string {
-	if !in.Renderable {
-		return "<" + in.Name + ":unrendered>"
-	}
-
-	return "<" + in.Name + ">"
-}
-
-// pathPlaceholder names a path label, keeping the '+' of a greedy label so the note can say its value spans
-// segments, and marking it when the first path input of that name could not be rendered.
-func pathPlaceholder(ref *apiref.Reference, name string, greedy bool) string {
-	label := name
-	if greedy {
-		label += "+"
-	}
-	for _, in := range ref.Inputs {
-		if in.Location == apiref.LocationPath && in.Name == name {
-			if !in.Renderable {
-				return "<" + label + ":unrendered>"
-			}
-
-			break
-		}
-	}
-
-	return "<" + label + ">"
-}
-
-// requiredAt lists the required inputs at a location.
-func requiredAt(ref *apiref.Reference, loc apiref.Location) []apiref.Input {
-	var out []apiref.Input
-	for _, in := range ref.Inputs {
-		if in.Required && in.Location == loc {
-			out = append(out, in)
-		}
-	}
-
-	return out
-}
-
-func paramPairs(ps []apiref.Param) []string {
-	out := make([]string, 0, len(ps))
-	for _, p := range ps {
-		if p.Value == "" {
-			out = append(out, p.Key)
-		} else {
-			out = append(out, p.Key+"="+p.Value)
-		}
-	}
-
-	return out
-}
-
 func buildTemplate(ref *apiref.Reference) map[string]any {
 	tpl := map[string]any{
 		"method":        ref.Method,
-		"url":           buildURL(ref),
+		"url":           apiref.TemplateURL(ref),
 		"auth_provider": ref.Connector,
 	}
 	var headers []map[string]string
 	for _, h := range ref.FixedHeaders {
 		headers = append(headers, map[string]string{"key": h.Key, "value": h.Value})
 	}
-	for _, in := range requiredAt(ref, apiref.LocationHeader) {
-		headers = append(headers, map[string]string{"key": in.WireName, "value": placeholder(in)})
+	for _, in := range apiref.RequiredAt(ref, apiref.LocationHeader) {
+		headers = append(headers, map[string]string{"key": in.WireName, "value": apiref.Placeholder(in)})
 	}
 	if len(headers) > 0 {
 		tpl["headers"] = headers
@@ -356,46 +302,6 @@ func buildTemplate(ref *apiref.Reference) map[string]any {
 	}
 
 	return tpl
-}
-
-func buildURL(ref *apiref.Reference) string {
-	segs := strings.Split(ref.PathTemplate, "/")
-	for i, s := range segs {
-		segs[i] = segmentPlaceholders(ref, s)
-	}
-	query := paramPairs(ref.FixedQuery)
-	for _, in := range requiredAt(ref, apiref.LocationQuery) {
-		query = append(query, in.WireName+"="+placeholder(in))
-	}
-	u := ref.Endpoint + strings.Join(segs, "/")
-	if len(query) > 0 {
-		u += "?" + strings.Join(query, "&")
-	}
-
-	return u
-}
-
-// segmentPlaceholders replaces every {label} in one path segment with its placeholder: a whole-segment label as in
-// /things/{Id}, or one inside literal text as in GitLab's {file_name}.tgz.
-func segmentPlaceholders(ref *apiref.Reference, seg string) string {
-	var b strings.Builder
-	for {
-		open := strings.IndexByte(seg, '{')
-		if open < 0 {
-			break
-		}
-		end := strings.IndexByte(seg[open:], '}')
-		if end < 0 {
-			break
-		}
-		name, greedy := strings.CutSuffix(seg[open+1:open+end], "+")
-		b.WriteString(seg[:open])
-		b.WriteString(pathPlaceholder(ref, name, greedy))
-		seg = seg[open+end+1:]
-	}
-	b.WriteString(seg)
-
-	return b.String()
 }
 
 // bareTypes are the input types whose JSON placeholder is unquoted, so the substituted value stays a number or
@@ -414,7 +320,7 @@ func jsonBody(req []apiref.Input) string {
 	slices.SortStableFunc(sorted, func(a, b apiref.Input) int { return strings.Compare(a.WireName, b.WireName) })
 	members := make([]string, 0, len(sorted))
 	for _, in := range sorted {
-		holder := placeholder(in)
+		holder := apiref.Placeholder(in)
 		if !bareTypes[in.Type] || !in.Renderable {
 			holder = encode(holder)
 		}
@@ -425,12 +331,12 @@ func jsonBody(req []apiref.Input) string {
 }
 
 func buildBody(ref *apiref.Reference) string {
-	req := requiredAt(ref, apiref.LocationBody)
+	req := apiref.RequiredAt(ref, apiref.LocationBody)
 	switch ref.BodyEncoding {
 	case apiref.BodyForm:
-		pairs := paramPairs(ref.FixedForm)
+		pairs := apiref.ParamPairs(ref.FixedForm)
 		for _, in := range req {
-			pairs = append(pairs, in.WireName+"="+placeholder(in))
+			pairs = append(pairs, in.WireName+"="+apiref.Placeholder(in))
 		}
 
 		return strings.Join(pairs, "&")
@@ -441,7 +347,7 @@ func buildBody(ref *apiref.Reference) string {
 	// No encoding: required body members have no wire form, so list their placeholders.
 	holders := make([]string, 0, len(req))
 	for _, in := range req {
-		holders = append(holders, placeholder(in))
+		holders = append(holders, apiref.Placeholder(in))
 	}
 
 	return strings.Join(holders, " ")

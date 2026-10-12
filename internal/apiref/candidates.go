@@ -1,6 +1,7 @@
 package apiref
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -184,11 +185,11 @@ func withinEditDistance(a, b string) bool {
 	if ca-cb > maxEditDistance || cb-ca > maxEditDistance {
 		return false
 	}
-	return editDistance(a, b) <= maxEditDistance
+	return EditDistance(a, b) <= maxEditDistance
 }
 
-// editDistance is the Levenshtein distance between a and b, by rune.
-func editDistance(a, b string) int {
+// EditDistance is the Levenshtein distance between a and b, by rune.
+func EditDistance(a, b string) int {
 	ra, rb := []rune(a), []rune(b)
 	prev, cur := make([]int, len(rb)+1), make([]int, len(rb)+1)
 	for j := range prev {
@@ -206,4 +207,33 @@ func editDistance(a, b string) int {
 		prev, cur = cur, prev
 	}
 	return prev[len(rb)]
+}
+
+// Nearest returns at most n distinct ids closest to target by EditDistance, compared case-insensitively, nearest
+// first and then in byte order of the id, so one input always gives one answer. A negative n is 0.
+func Nearest(ids []string, target string, n int) []string {
+	type scored struct {
+		id   string
+		dist int
+	}
+	want := strings.ToLower(target)
+	seen := make(map[string]bool, len(ids))
+	all := make([]scored, 0, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			all = append(all, scored{id: id, dist: EditDistance(strings.ToLower(id), want)})
+		}
+	}
+	slices.SortFunc(
+		all,
+		func(a, b scored) int { return cmp.Or(cmp.Compare(a.dist, b.dist), strings.Compare(a.id, b.id)) },
+	)
+	keep := min(max(n, 0), len(all))
+	out := make([]string, 0, keep)
+	for _, s := range all[:keep] {
+		out = append(out, s.id)
+	}
+
+	return out
 }

@@ -286,3 +286,46 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+// TestEditDistance pins the exported Levenshtein distance, counted by rune.
+func TestEditDistance(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"", "", 0},
+		{"abc", "abc", 0},
+		{"abc", "abd", 1},
+		{"VirtualMachines_List", "VirtualMachine_List", 1},
+		{"é", "e", 1},
+		{"", "abc", 3},
+	}
+	for _, tc := range cases {
+		if got := apiref.EditDistance(tc.a, tc.b); got != tc.want {
+			t.Errorf("EditDistance(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// TestNearest pins the order (distance, then byte order), case-insensitive scoring, de-duplication and the bound.
+func TestNearest(t *testing.T) {
+	t.Parallel()
+	ids := []string{"Disks_List", "VirtualMachines_List", "virtualMachines_Get", "VirtualMachines_List", "Zones_List"}
+	cases := []struct {
+		target string
+		n      int
+		want   []string
+	}{
+		{"virtualmachines_lst", 2, []string{"VirtualMachines_List", "virtualMachines_Get"}},
+		{"Disks_List", 1, []string{"Disks_List"}},
+		{"x", 10, []string{"Disks_List", "Zones_List", "virtualMachines_Get", "VirtualMachines_List"}},
+		{"x", 0, []string{}},
+		{"x", -1, []string{}},
+	}
+	for _, tc := range cases {
+		if got := apiref.Nearest(ids, tc.target, tc.n); !slices.Equal(got, tc.want) {
+			t.Errorf("Nearest(%q, %d) = %q, want %q", tc.target, tc.n, got, tc.want)
+		}
+	}
+}
