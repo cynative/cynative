@@ -472,12 +472,7 @@ func TestWalkPack_Refusals(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			pack, sha := tc.build(t)
-			lim := walkLimits{
-				entries:      maxTreeEntries,
-				depth:        maxTreeDepth,
-				path:         maxPathBytes,
-				listingBytes: maxListingBytes,
-			}
+			lim := defaultWalkLimits()
 			if tc.lim != nil {
 				lim = tc.lim(lim)
 			}
@@ -679,7 +674,8 @@ func TestBounds_EdgePairs(t *testing.T) {
 		c := r.commit(r.files("a.json", "b.json"))
 		pack := r.pack(0, false)
 		const entryCount = 2
-		lim := walkLimits{entries: entryCount, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes}
+		lim := defaultWalkLimits()
+		lim.entries = entryCount
 		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
 			t.Fatalf("at limit: %v", err)
 		}
@@ -698,7 +694,8 @@ func TestBounds_EdgePairs(t *testing.T) {
 		c := r.commit(h)
 		pack := r.pack(0, false)
 		const maxDepth = 3
-		lim := walkLimits{entries: maxTreeEntries, depth: maxDepth, path: maxPathBytes, listingBytes: maxListingBytes}
+		lim := defaultWalkLimits()
+		lim.depth = maxDepth
 		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
 			t.Fatalf("at limit: %v", err)
 		}
@@ -714,7 +711,8 @@ func TestBounds_EdgePairs(t *testing.T) {
 		c := r.commit(r.files("a.json"))
 		pack := r.pack(0, false)
 		const pathLen = 6 // "a.json"
-		lim := walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: pathLen, listingBytes: maxListingBytes}
+		lim := defaultWalkLimits()
+		lim.path = pathLen
 		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
 			t.Fatalf("at limit: %v", err)
 		}
@@ -730,7 +728,8 @@ func TestBounds_EdgePairs(t *testing.T) {
 		c := r.commit(r.files("a.json", "b.json"))
 		pack := r.pack(0, false)
 		const listingBytes = 92
-		lim := walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: listingBytes}
+		lim := defaultWalkLimits()
+		lim.listingBytes = listingBytes
 		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
 			t.Fatalf("at limit: %v", err)
 		}
@@ -757,7 +756,8 @@ func TestWalkPack_SharedTreeExpansion(t *testing.T) {
 	pack := r.pack(0, false)
 	// With 100 parents each with path "dNNN/f.json" (10 bytes), listing bytes = 100 * (10 + 40) = 5000.
 	// Set listing cap to 4999 (under the total) and entries cap to 200 (above the total of 101 entries).
-	lim := walkLimits{entries: 200, depth: maxTreeDepth, path: maxPathBytes, listingBytes: 4999}
+	lim := defaultWalkLimits()
+	lim.entries, lim.listingBytes = 200, 4999
 	_, err := walkWith(t.Context(), pack, c.String(), lim)
 	if !errors.Is(err, ErrSpecsRejected) || !strings.Contains(err.Error(), "listing bytes") {
 		t.Fatalf("err = %v, want ErrSpecsRejected with listing bytes", err)
@@ -779,82 +779,40 @@ func TestCtxReader_ChecksContext(t *testing.T) {
 	}
 }
 
-// TestWalkWith_ContextCancelledDuringIndexing pins that cancelling the context during the pack index phase (before
-// delta resolution) stops the parse with [context.Canceled]. The test uses walkWith's testReaderHook to cancel after
-// N reads and counts total reads. With ctxReader wired in walkWith, the parse stops quickly; without it (mutation),
-// reads continue past cancellation and the parse completes or reads far more.
+// TestWalkWith_ContextCancelledDuringIndexing pins that walkWith reads the pack through ctxReader. The inner reader
+// serves one byte per Read, so the parser has to come back for more, and cancels the context on its second Read.
+// Through ctxReader no Read reaches the inner reader after that. Without ctxReader the parser keeps reading until the
+// observer's next callback sees the cancelled context, so the inner reader sees Reads after the cancel.
 func TestWalkWith_ContextCancelledDuringIndexing(t *testing.T) {
 	t.Parallel()
 	r, commit := deltaRepo(t)
-	pack := r.pack(10, false)
-	// First, count how many reads a successful walkWith makes.
-	var successReads int
-	_, err := walkWith(t.Context(), pack, commit.String(), walkLimits{
-		entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes,
-		testReaderHook: func(r io.ReadSeeker) io.ReadSeeker { return &readCounter{r: r, count: &successReads} },
-	})
-	if err != nil {
-		t.Fatalf("baseline walkWith: %v", err)
-	}
-	if successReads < 5 {
-		t.Fatalf("baseline read count %d too low; test fixture may be wrong", successReads)
-	}
-	// Now cancel after 2 reads (well before completion) and assert walkWith stops with context.Canceled.
 	ctx, cancel := context.WithCancel(t.Context())
-	var cancelledReads int
-	_, err = walkWith(ctx, pack, commit.String(), walkLimits{
-		entries:      maxTreeEntries,
-		depth:        maxTreeDepth,
-		path:         maxPathBytes,
-		listingBytes: maxListingBytes,
-		testReaderHook: func(r io.ReadSeeker) io.ReadSeeker {
-			return &cancelAfterNReads{r: r, cancel: cancel, cancelAfter: 2, count: &cancelledReads}
-		},
-	})
-	if !errors.Is(err, context.Canceled) {
+	src := &cancelOnRead{cancel: cancel, cancelAt: 2}
+	lim := defaultWalkLimits()
+	lim.wrapReader = func(r io.ReadSeeker) io.ReadSeeker { src.r = r; return src }
+	if _, err := walkWith(ctx, r.pack(10, false), commit.String(), lim); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	// Reads should stop well before completion. Allow a few extra reads for buffering.
-	if cancelledReads >= successReads {
-		t.Fatalf(
-			"read %d times, reached success (%d); parse did not stop during indexing",
-			cancelledReads,
-			successReads,
-		)
+	if src.reads != src.cancelAt {
+		t.Fatalf("inner reader saw %d Reads, want %d: Reads reached it after the cancel", src.reads, src.cancelAt)
 	}
 }
 
-// readCounter counts Read calls.
-type readCounter struct {
-	r     io.ReadSeeker
-	count *int
+// cancelOnRead serves one byte per Read and cancels its context on Read number cancelAt.
+type cancelOnRead struct {
+	r        io.ReadSeeker
+	cancel   context.CancelFunc
+	cancelAt int
+	reads    int
 }
 
-func (c *readCounter) Read(p []byte) (int, error) {
-	*c.count++
-	return c.r.Read(p)
-}
-
-func (c *readCounter) Seek(offset int64, whence int) (int64, error) { return c.r.Seek(offset, whence) }
-
-// cancelAfterNReads cancels the context after cancelAfter reads.
-type cancelAfterNReads struct {
-	r           io.ReadSeeker
-	cancel      context.CancelFunc
-	cancelAfter int
-	count       *int
-	cancelled   bool
-}
-
-func (c *cancelAfterNReads) Read(p []byte) (int, error) {
-	*c.count++
-	if *c.count == c.cancelAfter && !c.cancelled {
-		c.cancelled = true
+func (c *cancelOnRead) Read(p []byte) (int, error) {
+	c.reads++
+	if c.reads == c.cancelAt {
 		c.cancel()
 	}
-	return c.r.Read(p)
+
+	return c.r.Read(p[:min(1, len(p))])
 }
 
-func (c *cancelAfterNReads) Seek(offset int64, whence int) (int64, error) {
-	return c.r.Seek(offset, whence)
-}
+func (c *cancelOnRead) Seek(offset int64, whence int) (int64, error) { return c.r.Seek(offset, whence) }

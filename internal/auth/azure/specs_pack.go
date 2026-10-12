@@ -71,10 +71,21 @@ type packLimits struct {
 // walkLimits bounds the tree walk.
 type walkLimits struct {
 	entries, depth, path, listingBytes int
-	// testReaderHook wraps the pack reader before ctxReader wraps it; nil in production, set only in tests that need
-	// to inject cancellation or counting during the parse.
-	testReaderHook func(io.ReadSeeker) io.ReadSeeker
+	// wrapReader wraps the pack reader before ctxReader wraps it. Production passes the reader through unchanged, and
+	// tests replace it to count reads or cancel the context during the parse.
+	wrapReader func(io.ReadSeeker) io.ReadSeeker
 }
+
+// defaultWalkLimits returns the production bounds with a pass-through wrapReader.
+func defaultWalkLimits() walkLimits {
+	return walkLimits{
+		entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes,
+		wrapReader: passThroughReader,
+	}
+}
+
+// passThroughReader returns r unchanged.
+func passThroughReader(r io.ReadSeeker) io.ReadSeeker { return r }
 
 // FetchListing lists the specs tree at the commit repoURL's main points at, with one deadline over the fetch, the
 // preflight and the walk.
@@ -234,10 +245,7 @@ func (w *headWriter) Write(p []byte) (int, error) {
 
 // walkPack parses a preflighted pack into memory and lists the tree of commit sha within the production bounds.
 func walkPack(ctx context.Context, pack []byte, sha string) (*Listing, error) {
-	return walkWith(
-		ctx, pack, sha,
-		walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes},
-	)
+	return walkWith(ctx, pack, sha, defaultWalkLimits())
 }
 
 // walkWith parses pack into memory storage and walks the commit's tree with lim.
@@ -246,12 +254,8 @@ func walkWith(ctx context.Context, pack []byte, sha string, lim walkLimits) (*Li
 	// NewParserWithStorage fails only for an unseekable source with no storage; the context-checking wrapper below
 	// makes reads return ctx.Err() once the context is done, and it still seeks. The observer checks the context
 	// during delta resolution; the wrapper checks it during the index phase before resolution.
-	r := io.ReadSeeker(bytes.NewReader(pack))
-	if lim.testReaderHook != nil {
-		r = lim.testReaderHook(r)
-	}
 	p, _ := packfile.NewParserWithStorage(
-		packfile.NewScanner(&ctxReader{ctx: ctx, r: r}), st, ctxObserver{ctx: ctx},
+		packfile.NewScanner(&ctxReader{ctx: ctx, r: lim.wrapReader(bytes.NewReader(pack))}), st, ctxObserver{ctx: ctx},
 	)
 	if _, err := p.Parse(); err != nil {
 		if cerr := ctx.Err(); cerr != nil {
