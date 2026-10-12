@@ -71,6 +71,9 @@ type packLimits struct {
 // walkLimits bounds the tree walk.
 type walkLimits struct {
 	entries, depth, path, listingBytes int
+	// testReaderHook wraps the pack reader before ctxReader wraps it; nil in production, set only in tests that need
+	// to inject cancellation or counting during the parse.
+	testReaderHook func(io.ReadSeeker) io.ReadSeeker
 }
 
 // FetchListing lists the specs tree at the commit repoURL's main points at, with one deadline over the fetch, the
@@ -243,8 +246,12 @@ func walkWith(ctx context.Context, pack []byte, sha string, lim walkLimits) (*Li
 	// NewParserWithStorage fails only for an unseekable source with no storage; the context-checking wrapper below
 	// makes reads return ctx.Err() once the context is done, and it still seeks. The observer checks the context
 	// during delta resolution; the wrapper checks it during the index phase before resolution.
+	r := io.ReadSeeker(bytes.NewReader(pack))
+	if lim.testReaderHook != nil {
+		r = lim.testReaderHook(r)
+	}
 	p, _ := packfile.NewParserWithStorage(
-		packfile.NewScanner(&ctxReader{ctx: ctx, r: bytes.NewReader(pack)}), st, ctxObserver{ctx: ctx},
+		packfile.NewScanner(&ctxReader{ctx: ctx, r: r}), st, ctxObserver{ctx: ctx},
 	)
 	if _, err := p.Parse(); err != nil {
 		if cerr := ctx.Err(); cerr != nil {

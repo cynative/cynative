@@ -17,7 +17,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/packfile"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/go-git/go-git/v5/storage/memory"
 )
 
 // testPackLimits are the production bounds; each test lowers one.
@@ -781,50 +780,58 @@ func TestCtxReader_ChecksContext(t *testing.T) {
 }
 
 // TestWalkWith_ContextCancelledDuringIndexing pins that cancelling the context during the pack index phase (before
-// delta resolution) stops the parse with [context.Canceled]. A wrapper that cancels after N reads and counts total
-// reads proves ctxReader stopped indexing, not another context check.
+// delta resolution) stops the parse with [context.Canceled]. The test uses walkWith's testReaderHook to cancel after
+// N reads and counts total reads. With ctxReader wired in walkWith, the parse stops quickly; without it (mutation),
+// reads continue past cancellation and the parse completes or reads far more.
 func TestWalkWith_ContextCancelledDuringIndexing(t *testing.T) {
 	t.Parallel()
-	r, _ := deltaRepo(t)
+	r, commit := deltaRepo(t)
 	pack := r.pack(10, false)
-	// First, count how many reads a successful parse makes.
+	// First, count how many reads a successful walkWith makes.
 	var successReads int
-	counter := &readCounter{r: bytes.NewReader(pack)}
-	st := memory.NewStorage()
-	p, _ := packfile.NewParserWithStorage(
-		packfile.NewScanner(&ctxReader{ctx: t.Context(), r: counter}), st, ctxObserver{ctx: t.Context()},
-	)
-	if _, err := p.Parse(); err != nil {
-		t.Fatalf("baseline parse: %v", err)
+	_, err := walkWith(t.Context(), pack, commit.String(), walkLimits{
+		entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes,
+		testReaderHook: func(r io.ReadSeeker) io.ReadSeeker { return &readCounter{r: r, count: &successReads} },
+	})
+	if err != nil {
+		t.Fatalf("baseline walkWith: %v", err)
 	}
-	successReads = counter.count
-	if successReads < 1 {
-		t.Fatalf("baseline read count %d; test fixture may be wrong", successReads)
+	if successReads < 5 {
+		t.Fatalf("baseline read count %d too low; test fixture may be wrong", successReads)
 	}
-	// Now cancel after 1 read (during or just after the first read) and assert parsing stops.
+	// Now cancel after 2 reads (well before completion) and assert walkWith stops with context.Canceled.
 	ctx, cancel := context.WithCancel(t.Context())
-	hook := &cancelAfterNReads{r: bytes.NewReader(pack), cancel: cancel, cancelAfter: 1}
-	st2 := memory.NewStorage()
-	p2, _ := packfile.NewParserWithStorage(
-		packfile.NewScanner(&ctxReader{ctx: ctx, r: hook}), st2, ctxObserver{ctx: ctx},
-	)
-	_, err := p2.Parse()
+	var cancelledReads int
+	_, err = walkWith(ctx, pack, commit.String(), walkLimits{
+		entries:      maxTreeEntries,
+		depth:        maxTreeDepth,
+		path:         maxPathBytes,
+		listingBytes: maxListingBytes,
+		testReaderHook: func(r io.ReadSeeker) io.ReadSeeker {
+			return &cancelAfterNReads{r: r, cancel: cancel, cancelAfter: 2, count: &cancelledReads}
+		},
+	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
-	if hook.count >= successReads {
-		t.Fatalf("read %d times, same as success (%d); parse completed despite cancellation", hook.count, successReads)
+	// Reads should stop well before completion. Allow a few extra reads for buffering.
+	if cancelledReads >= successReads {
+		t.Fatalf(
+			"read %d times, reached success (%d); parse did not stop during indexing",
+			cancelledReads,
+			successReads,
+		)
 	}
 }
 
 // readCounter counts Read calls.
 type readCounter struct {
 	r     io.ReadSeeker
-	count int
+	count *int
 }
 
 func (c *readCounter) Read(p []byte) (int, error) {
-	c.count++
+	*c.count++
 	return c.r.Read(p)
 }
 
@@ -835,13 +842,13 @@ type cancelAfterNReads struct {
 	r           io.ReadSeeker
 	cancel      context.CancelFunc
 	cancelAfter int
-	count       int
+	count       *int
 	cancelled   bool
 }
 
 func (c *cancelAfterNReads) Read(p []byte) (int, error) {
-	c.count++
-	if c.count == c.cancelAfter && !c.cancelled {
+	*c.count++
+	if *c.count == c.cancelAfter && !c.cancelled {
 		c.cancelled = true
 		c.cancel()
 	}
