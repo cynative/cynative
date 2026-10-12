@@ -9,9 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
@@ -816,3 +819,140 @@ func (c *cancelOnRead) Read(p []byte) (int, error) {
 }
 
 func (c *cancelOnRead) Seek(offset int64, whence int) (int64, error) { return c.r.Seek(offset, whence) }
+
+// headerPack is a pack header that declares count objects, followed only by a checksum trailer.
+func headerPack(count uint32) []byte {
+	var b bytes.Buffer
+	b.WriteString("PACK")
+	_ = binary.Write(&b, binary.BigEndian, uint32(2)) // A bytes.Buffer write cannot fail.
+	_ = binary.Write(&b, binary.BigEndian, count)     // A bytes.Buffer write cannot fail.
+	sum := sha1.Sum(b.Bytes())
+	b.Write(sum[:])
+
+	return b.Bytes()
+}
+
+// leb128 is a delta header size varint: 7 bits a byte, low bits first.
+func leb128(n int64) []byte {
+	var out []byte
+	for ; n >= 0x80; n >>= 7 {
+		out = append(out, byte(n&0x7f)|0x80)
+	}
+
+	return append(out, byte(n))
+}
+
+// inflatingPack is a 10-byte tree and 128 OFS deltas on it whose declared sizes, streams and targets add up to
+// exactly total: 127 targets of 1 MiB and a last one that makes up the rest.
+func inflatingPack(t *testing.T, total int64) []byte {
+	t.Helper()
+	const treeOffset = 12 // after the 12-byte pack header
+	tree := rawObject(t, plumbing.TreeObject, 0, []byte("0123456789"))
+	objs := [][]byte{tree}
+	off, sum := int64(treeOffset+len(tree)), int64(10)
+	for i := range 128 {
+		target := int64(1 << 20)
+		if i == 127 {
+			target = total - sum - int64(len(leb128(1<<20))) - 1
+		}
+		data := append([]byte{10}, leb128(target)...)
+		delta := rawObject(t, plumbing.OFSDeltaObject, off-treeOffset, data)
+		objs = append(objs, delta)
+		off += int64(len(delta))
+		sum += int64(len(data)) + target
+	}
+	if sum != total {
+		t.Fatalf("the fixture inflates to %d, want %d", sum, total)
+	}
+
+	return rawPack(objs...)
+}
+
+// TestPreflightPack_ProductionBounds pins the production limits at their literal values, through preflightPack:
+// 200,000 objects, 1 MiB per object and 128 MiB inflated in total, each accepted at the limit and refused past it.
+// A pack accepted by a bound fails later for holding no commit.
+func TestPreflightPack_ProductionBounds(t *testing.T) {
+	t.Parallel()
+	const noCommit = "pack holds 0 commits"
+	cases := map[string]struct {
+		pack func(t *testing.T) []byte
+		want string
+	}{
+		"200,000 objects": {func(*testing.T) []byte { return headerPack(200_000) }, "pack object header"},
+		"200,001 objects": {
+			func(*testing.T) []byte { return headerPack(200_001) }, "pack holds 200001 objects, over 200000",
+		},
+		"an object of 1 MiB": {func(t *testing.T) []byte {
+			t.Helper()
+
+			return rawPack(rawObject(t, plumbing.TreeObject, 0, make([]byte, 1<<20)))
+		}, noCommit},
+		"an object of 1 MiB and 1 byte": {func(t *testing.T) []byte {
+			t.Helper()
+
+			return rawPack(rawObject(t, plumbing.TreeObject, 0, make([]byte, 1<<20+1)))
+		}, "pack object of 1048577 bytes, over 1048576"},
+		"128 MiB in total": {func(t *testing.T) []byte {
+			t.Helper()
+
+			return inflatingPack(t, 128<<20)
+		}, noCommit},
+		"128 MiB and 1 byte in total": {func(t *testing.T) []byte {
+			t.Helper()
+
+			return inflatingPack(t, 128<<20+1)
+		}, "pack objects inflate past 134217728 bytes"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			err := preflightPack(t.Context(), tc.pack(t))
+			if !errors.Is(err, ErrSpecsRejected) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// deadlineRecorder records how far each request's context deadline is, then hands the request on.
+type deadlineRecorder struct {
+	base http.RoundTripper
+	mu   sync.Mutex
+	left []time.Duration
+}
+
+func (d *deadlineRecorder) RoundTrip(r *http.Request) (*http.Response, error) {
+	dl, ok := r.Context().Deadline()
+	d.mu.Lock()
+	if ok {
+		d.left = append(d.left, time.Until(dl))
+	} else {
+		d.left = append(d.left, -1)
+	}
+	d.mu.Unlock()
+
+	return d.base.RoundTrip(r)
+}
+
+// TestFetchListing_SixtySecondDeadline pins the listing's deadline as the transport sees it: both requests carry a
+// context whose deadline is about 60 seconds away, though the caller set none.
+func TestFetchListing_SixtySecondDeadline(t *testing.T) {
+	t.Parallel()
+	commit, pack := smallRepo(t)
+	rec := &deadlineRecorder{
+		base: newGitServer(advertisement(t, commit, fullCaps()...), uploadResponse(t, commit, pack)),
+	}
+	if _, err := FetchListing(context.Background(), clientFor(rec), testRepoURL); err != nil {
+		t.Fatalf("FetchListing: %v", err)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.left) != 2 {
+		t.Fatalf("%d requests, want 2", len(rec.left))
+	}
+	for i, left := range rec.left {
+		if left < 59*time.Second || left > 60*time.Second {
+			t.Errorf("request %d: the deadline was %v away, want 60s", i, left)
+		}
+	}
+}

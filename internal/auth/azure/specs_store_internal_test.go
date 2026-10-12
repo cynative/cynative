@@ -840,3 +840,55 @@ func TestSpecStore_ScrubDefaultsToIdentity(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestSpecStore_FileScrubsDownloadErrors pins that a spec file's download error passes through the scrubber, as a
+// proxy credential in a transport error would.
+func TestSpecStore_FileScrubsDownloadErrors(t *testing.T) {
+	t.Parallel()
+	srv := newRawServer()
+	srv.err = fmt.Errorf("dial proxy user:hunter2@proxy: %w", errTransport)
+	s := NewSpecStore(SpecStoreConfig{
+		Cache:  cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		Client: &http.Client{Transport: srv}, RepoURL: testRepoURL, RawBase: testRawBase,
+		Summarize: (&summaries{}).summarize,
+		Scrub: func(err error) error {
+			return &scrubbedTestError{text: strings.ReplaceAll(err.Error(), "hunter2", "***"), err: err}
+		},
+	})
+	_, err := s.File(t.Context(), testSHA, fileOf(computeNew))
+	if !errors.Is(err, errTransport) || strings.Contains(err.Error(), "hunter2") ||
+		!strings.Contains(err.Error(), "***") {
+		t.Fatalf("err = %v, want the transport error scrubbed", err)
+	}
+}
+
+// TestSpecStore_ReadSummaryBounds pins the two checks on a cached summary record that the other refusals do not
+// reach: a record over the per-file bound is not read, and a valid record copied from another blob is refused.
+func TestSpecStore_ReadSummaryBounds(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t, newRawServer(), nil)
+	blob := fakeBlob(computeNew).String()
+	if _, err := s.Summary(t.Context(), testSHA, fileOf(computeNew), NewBudget(1<<20)); err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	rec, err := os.ReadFile(filepath.Join(s.filesDir, blob+summarySuffix))
+	if err != nil {
+		t.Fatalf("read the record: %v", err)
+	}
+	s.maxFile = int64(len(rec))
+	if _, ok := s.readSummary(blob); !ok {
+		t.Fatalf("a record of exactly the bound was refused")
+	}
+	s.maxFile = int64(len(rec)) - 1
+	if _, ok := s.readSummary(blob); ok {
+		t.Fatalf("a record over the bound was read")
+	}
+	s.maxFile = maxFileBytes
+	other := fakeBlob(diskNew).String()
+	if err = os.WriteFile(filepath.Join(s.filesDir, other+summarySuffix), rec, cache.FilePerm); err != nil {
+		t.Fatalf("copy the record: %v", err)
+	}
+	if _, ok := s.readSummary(other); ok {
+		t.Fatalf("a record copied from blob %s was served for blob %s", blob, other)
+	}
+}

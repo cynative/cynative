@@ -912,3 +912,47 @@ func TestDocsReference_RepeatedParentsAnswerAGap(t *testing.T) {
 		t.Fatalf("repeated parents = %+v, want incomplete with the body gap", res)
 	}
 }
+
+// TestDocsReference_RenderChargesTheBudget pins the budget charge for the file the render reads, with a file that
+// refs nothing, so no other read can trip the budget: the summary takes all but one byte, and the render's read of
+// the same file is refused.
+func TestDocsReference_RenderChargesTheBudget(t *testing.T) {
+	t.Parallel()
+	inline := `{"info":{"version":"2024-01-01"},"paths":{` +
+		`"/subscriptions/{subscriptionId}/providers/Microsoft.Test/things":{"get":{"operationId":"Things_List",` +
+		`"parameters":[{"name":"subscriptionId","in":"path","required":true,"type":"string"},` +
+		`{"name":"api-version","in":"query","required":true,"type":"string"}]}}}}`
+	files := []fixtureFile{{"A", kindStable, "2024-01-01", "a.json", inline}}
+	if res := lookup(t, specFixture(files...), "Things_List", ""); res.Outcome != apiref.OutcomeFound {
+		t.Fatalf("within the budget = %+v", res)
+	}
+	d := NewDocs(specFixture(files...), "e", func() Catalog { return nil })
+	d.budget = int64(len(inline) + 1)
+	res := d.Reference(context.Background(), apiref.Query{Service: "Microsoft.Test", Operation: "Things_List"})
+	if res.Outcome != apiref.OutcomeUnavailable ||
+		!strings.HasPrefix(res.Reason, "the search stopped at the per-lookup "+
+			"budget") {
+		t.Fatalf("render over the budget = %+v", res)
+	}
+}
+
+// TestDocsReference_PassOneReadsOnlyTheNewestDir pins pass 1's bound: a group whose newest stable dir lacks the
+// operation is not searched further while another group's newest dir defines it, so the older dir's differing
+// request never joins the candidates.
+func TestDocsReference_PassOneReadsOnlyTheNewestDir(t *testing.T) {
+	t.Parallel()
+	other := strings.Replace(specOps("2023-01-01", "Things_Get"), "things/Things_Get", "other/Things_Get", 1)
+	f := specFixture(
+		fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")},
+		fixtureFile{"B", kindStable, "2024-02-01", "b.json", specOps("2024-02-01", "Else_Get")},
+		fixtureFile{"B", kindStable, "2023-01-01", "b.json", other},
+	)
+	res := lookup(t, f, "Things_Get", "")
+	if res.Outcome != apiref.OutcomeFound || res.Reference.Model != "test/A@stable/2024-01-01" {
+		t.Fatalf("pass 1 = %+v, want found in test/A@stable/2024-01-01", res)
+	}
+	older := fixtureFile{"B", kindStable, "2023-01-01", "b.json", ""}.path()
+	if n := f.summaryCount(older); n != 0 {
+		t.Errorf("pass 1 read group B's older dir %d times", n)
+	}
+}
