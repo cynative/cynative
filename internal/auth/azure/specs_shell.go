@@ -19,3 +19,13 @@ func openUploadSession(client *http.Client, repoURL string) (transport.UploadPac
 		RedirectPolicy: githttp.NoFollowRedirects,
 	}).NewUploadPackSession(ep, nil)
 }
+
+// NewSpecsHTTPClient returns a copy of base that hands every redirect back unfollowed and keeps no cookie jar, for
+// the anonymous specs fetches. base itself is not changed.
+func NewSpecsHTTPClient(base *http.Client) *http.Client {
+	c := *base
+	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.Jar = nil
+
+	return &c
+}
