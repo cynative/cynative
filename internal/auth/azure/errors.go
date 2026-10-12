@@ -22,4 +22,7 @@ var (
 	ErrTenantUnresolved        = errors.New("azure_hardening: target tenant could not be resolved")
 	ErrRoleFetchFailed         = errors.New("azure_hardening: role definition fetch failed")
 	ErrModelSuppliedCredential = errors.New("azure_hardening: model-supplied credential (SAS) rejected")
+	// ErrSpecsRejected marks Azure specs metadata the api_reference index refused: a bound passed, a capability
+	// missing, a malformed pack or tree, a file that does not match its blob id, or an index that fails admission.
+	ErrSpecsRejected = errors.New("azure specs: rejected")
 )
