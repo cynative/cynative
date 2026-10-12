@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,8 +12,8 @@ import (
 	"github.com/cynative/cynative/internal/auth/authreq"
 )
 
-// gateCheckData is a small real-shaped catalog: Microsoft.Compute with two registered types and their reads, and the
-// Microsoft.Resources reads the provider-less routes need.
+// gateCheckData is a small real-shaped catalog: Microsoft.Compute with two registered types, their reads and the
+// virtual machine start action, and the Microsoft.Resources reads the provider-less routes need.
 func gateCheckData() CatalogData {
 	return CatalogData{
 		Clouds: map[string]CloudEndpoints{"AzureCloud": {ResourceManager: "management.azure.com"}},
@@ -21,6 +22,7 @@ func gateCheckData() CatalogData {
 				ResourceTypes: []string{"virtualMachines", "locations"},
 				Operations: []ProviderOperation{
 					{Name: "Microsoft.Compute/virtualMachines/read"},
+					{Name: "Microsoft.Compute/virtualMachines/start/action"},
 					{Name: "Microsoft.Compute/locations/read"},
 				},
 			},
@@ -67,6 +69,7 @@ func TestStaticShape(t *testing.T) {
 		{"/{scope}/providers/Microsoft.Authorization/roleAssignments", true},
 		{"/{scope+}/providers/Microsoft.Authorization/roleAssignments", false},
 		{"/{roleAssignmentId+}", false},
+		{"/subscriptions/{s}/providers/Microsoft.Web/sites/{name}/hybridconnection/{entityName+}", false},
 		{"/{tenant}/subscriptions", false},
 		{"/subscriptions/{s}/providers/Microsoft.Web/sites/{name}/config{suffix}/web", false},
 		{"/subscriptions/{s}/providers/Microsoft.Web/sites/{name}/config/web{suffix}", true},
@@ -125,6 +128,21 @@ func TestCheckGate(t *testing.T) {
 			"/subscriptions/{s}/providers/Microsoft.Nope/things",
 			true,
 			ErrCatalogUnavailable,
+		},
+		// A POST admits through the catalog's action, which the same path checked as a GET would deny.
+		{
+			"admitted action",
+			"POST",
+			"/subscriptions/{s}/providers/Microsoft.Compute/virtualMachines/{vm}/start",
+			true,
+			nil,
+		},
+		{
+			"write absent from catalog",
+			"PUT",
+			"/subscriptions/{s}/providers/Microsoft.Compute/virtualMachines/{vm}",
+			true,
+			ErrActionUnresolved,
 		},
 		{"dynamic shape", "GET", "/{scope+}/providers/Microsoft.Authorization/roleAssignments", false, nil},
 		{
@@ -247,5 +265,25 @@ func TestDocsFinish_GateVerdictSetsTheOutcome(t *testing.T) {
 	})
 	if admitted.Outcome != apiref.OutcomeFound || len(admitted.Reference.Gaps) != 0 {
 		t.Fatalf("admitted = %+v", admitted)
+	}
+}
+
+// TestApplyGateCheck_MissingNamespace pins that a namespace absent from a loaded catalog is the gate's denial, never
+// the not-loaded limitation.
+func TestApplyGateCheck_MissingNamespace(t *testing.T) {
+	t.Parallel()
+	d := NewDocs(specFixture(), "https://management.azure.com", func() Catalog { return gateCheckSnapshot(t) })
+	res := d.finish(
+		t.Context(),
+		&apiref.Reference{Method: "GET", PathTemplate: "/subscriptions/{s}/providers/Microsoft.Nope/things"},
+	)
+	if res.Outcome != apiref.OutcomeIncomplete || len(res.Reference.Gaps) != 1 ||
+		!strings.HasPrefix(res.Reference.Gaps[0], gateDeniesPrefix) ||
+		!strings.Contains(res.Reference.Gaps[0], "Microsoft.Nope") {
+		t.Fatalf("result %+v gaps %q", res, res.Reference.Gaps)
+	}
+	if slices.Contains(res.Reference.Limitations, gateNotLoaded) ||
+		!slices.Equal(res.Reference.Limitations, []string{gateRoleNotChecked}) {
+		t.Fatalf("limitations %q", res.Reference.Limitations)
 	}
 }
