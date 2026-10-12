@@ -242,15 +242,15 @@ func TestRefResolverLoadLimits(t *testing.T) {
 	ctx := context.Background()
 	paths := []string{testOpFile}
 	bodies := map[string]string{}
-	for i := range maxRefFiles + 1 {
+	for i := range 17 {
 		p := fmt.Sprintf("specification/test/resource-manager/Microsoft.Test/Test/common/v1/f%02d.json", i)
 		paths = append(paths, p)
 		bodies[p] = `{"parameters":{"X":{"name":"x","in":"query"}}}`
 	}
 	ix := refIndex(paths...)
 	r := newRefResolver(newSpecFakeFiles(bodies), ix, NewBudget(1<<20))
-	// Files 1..maxRefFiles should resolve successfully.
-	for i := range maxRefFiles {
+	// Files 1..16 should resolve successfully.
+	for i := range 16 {
 		if _, _, err := r.resolve(
 			ctx,
 			testOpFile,
@@ -259,16 +259,16 @@ func TestRefResolverLoadLimits(t *testing.T) {
 			t.Fatalf("file %d error = %v, want nil", i+1, err)
 		}
 	}
-	// File maxRefFiles+1 should fail with errRefLimit.
+	// File 17 should fail with errRefLimit.
 	if _, _, err := r.resolve(
 		ctx,
 		testOpFile,
-		fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", maxRefFiles),
+		fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", 16),
 	); !errors.Is(
 		err,
 		errRefLimit,
 	) {
-		t.Fatalf("file %d error = %v, want errRefLimit", maxRefFiles+1, err)
+		t.Fatalf("file 17 error = %v, want errRefLimit", err)
 	}
 
 	sentinel := errors.New("load failed")
@@ -326,17 +326,16 @@ func TestRefResolverParam(t *testing.T) {
 	}
 }
 
-// TestRefResolverParamDepth pins the maxRefDepth bound: a chain of exactly maxRefDepth links resolves, maxRefDepth+1
-// is refused with errRefLimit.
+// TestRefResolverParamDepth pins the maxRefDepth bound: a chain of 8 links resolves, 9 is refused with errRefLimit.
 func TestRefResolverParamDepth(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Build a chain: P0 -> P1 -> ... -> P6 -> Leaf (8 resolves: depth 0-7).
 	var params strings.Builder
 	params.WriteString(`{"parameters":{"Leaf":{"name":"leaf","in":"query"}`)
-	for i := maxRefDepth - 2; i >= 0; i-- {
+	for i := 6; i >= 0; i-- {
 		next := "Leaf"
-		if i < maxRefDepth-2 {
+		if i < 6 {
 			next = fmt.Sprintf("P%d", i+1)
 		}
 		fmt.Fprintf(&params, `,"P%d":{"$ref":"#/parameters/%s"}`, i, next)
@@ -350,17 +349,17 @@ func TestRefResolverParamDepth(t *testing.T) {
 	if adderr := r.add(testOpFile, own); adderr != nil {
 		t.Fatalf("add: %v", adderr)
 	}
-	// Chain of maxRefDepth resolves should succeed (depth 0..maxRefDepth-1, then return at depth maxRefDepth).
+	// Chain of 8 resolves should succeed (depth 0..7, then return at depth 8).
 	if p, _, _, perr := r.param(ctx, testOpFile, json.RawMessage(`{"$ref":"#/parameters/P0"}`)); perr != nil ||
 		p.Name != "leaf" {
-		t.Fatalf("param chain depth %d: %+v, %v", maxRefDepth, p, perr)
+		t.Fatalf("param chain depth 8: %+v, %v", p, perr)
 	}
-	// Chain of maxRefDepth+1 resolves should fail (hits depth == maxRefDepth with another $ref to follow).
+	// Chain of 9 resolves should fail (hits depth == 8 with another $ref to follow).
 	var params9 strings.Builder
 	params9.WriteString(`{"parameters":{"Leaf":{"name":"leaf","in":"query"},"P7":{"$ref":"#/parameters/P0"}`)
-	for i := maxRefDepth - 2; i >= 0; i-- {
+	for i := 6; i >= 0; i-- {
 		next := "Leaf"
-		if i < maxRefDepth-2 {
+		if i < 6 {
 			next = fmt.Sprintf("P%d", i+1)
 		}
 		fmt.Fprintf(&params9, `,"P%d":{"$ref":"#/parameters/%s"}`, i, next)
@@ -382,20 +381,20 @@ func TestRefResolverParamDepth(t *testing.T) {
 		perr,
 		errRefLimit,
 	) {
-		t.Fatalf("param chain depth %d error = %v, want errRefLimit", maxRefDepth+1, perr)
+		t.Fatalf("param chain depth 9 error = %v, want errRefLimit", perr)
 	}
 }
 
-// TestRefResolverSchemaDepth pins the maxRefDepth bound for schema resolution.
+// TestRefResolverSchemaDepth pins the maxRefDepth bound for schema resolution: 8 links resolve, 9 refused.
 func TestRefResolverSchemaDepth(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Build a chain: D0 -> D1 -> ... -> D6 -> Leaf (8 resolves: depth 0-7).
 	var defs strings.Builder
 	defs.WriteString(`{"definitions":{"Leaf":{"type":"string"}`)
-	for i := maxRefDepth - 2; i >= 0; i-- {
+	for i := 6; i >= 0; i-- {
 		next := "Leaf"
-		if i < maxRefDepth-2 {
+		if i < 6 {
 			next = fmt.Sprintf("D%d", i+1)
 		}
 		fmt.Fprintf(&defs, `,"D%d":{"$ref":"#/definitions/%s"}`, i, next)
@@ -409,17 +408,17 @@ func TestRefResolverSchemaDepth(t *testing.T) {
 	if adderr := r.add(testOpFile, own); adderr != nil {
 		t.Fatalf("add: %v", adderr)
 	}
-	// Chain of maxRefDepth resolves should succeed (depth 0..maxRefDepth-1, then return at depth maxRefDepth).
+	// Chain of 8 resolves should succeed (depth 0..7, then return at depth 8).
 	if s, _, serr := r.schema(ctx, testOpFile, json.RawMessage(`{"$ref":"#/definitions/D0"}`)); serr != nil ||
 		s.Type != "string" {
-		t.Fatalf("schema chain depth %d: %+v, %v", maxRefDepth, s, serr)
+		t.Fatalf("schema chain depth 8: %+v, %v", s, serr)
 	}
-	// Chain of maxRefDepth+1 resolves should fail (hits depth == maxRefDepth with another $ref to follow).
+	// Chain of 9 resolves should fail (hits depth == 8 with another $ref to follow).
 	var defs9 strings.Builder
 	defs9.WriteString(`{"definitions":{"Leaf":{"type":"string"},"D7":{"$ref":"#/definitions/D0"}`)
-	for i := maxRefDepth - 2; i >= 0; i-- {
+	for i := 6; i >= 0; i-- {
 		next := "Leaf"
-		if i < maxRefDepth-2 {
+		if i < 6 {
 			next = fmt.Sprintf("D%d", i+1)
 		}
 		fmt.Fprintf(&defs9, `,"D%d":{"$ref":"#/definitions/%s"}`, i, next)
@@ -441,16 +440,16 @@ func TestRefResolverSchemaDepth(t *testing.T) {
 		serr,
 		errRefLimit,
 	) {
-		t.Fatalf("schema chain depth %d error = %v, want errRefLimit", maxRefDepth+1, serr)
+		t.Fatalf("schema chain depth 9 error = %v, want errRefLimit", serr)
 	}
 }
 
-// TestRefResolverAdd pins that registered operation files count toward the per-lookup file bound, and that
-// registering a file again is free.
+// TestRefResolverAdd pins that registered operation files count toward the per-lookup file bound: 16 files succeed,
+// 17th fails with errRefLimit, and registering a file again is free.
 func TestRefResolverAdd(t *testing.T) {
 	t.Parallel()
 	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
-	for i := range maxRefFiles {
+	for i := range 16 {
 		if err := r.add(fmt.Sprintf("specification/x/f%02d.json", i), &swaggerDoc{}); err != nil {
 			t.Fatalf("add %d: %v", i, err)
 		}
