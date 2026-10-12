@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/format/packfile"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/memory"
 )
 
 // testPackLimits are the production bounds; each test lowers one.
@@ -763,19 +765,89 @@ func TestWalkPack_SharedTreeExpansion(t *testing.T) {
 	}
 }
 
+// TestCtxReader_ChecksContext pins that ctxReader.Read returns the context's error once it is done, proving it stops
+// the parse during indexing rather than relying on the observer (which only runs during delta resolution).
+func TestCtxReader_ChecksContext(t *testing.T) {
+	t.Parallel()
+	data := bytes.Repeat([]byte("test"), 100)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	r := &ctxReader{ctx: ctx, r: bytes.NewReader(data)}
+	buf := make([]byte, 10)
+	_, err := r.Read(buf)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Read after cancel = %v, want context.Canceled", err)
+	}
+}
+
 // TestWalkWith_ContextCancelledDuringIndexing pins that cancelling the context during the pack index phase (before
-// delta resolution) stops the parse with [context.Canceled].
+// delta resolution) stops the parse with [context.Canceled]. A wrapper that cancels after N reads and counts total
+// reads proves ctxReader stopped indexing, not another context check.
 func TestWalkWith_ContextCancelledDuringIndexing(t *testing.T) {
 	t.Parallel()
 	r, _ := deltaRepo(t)
-	commit := r.commit(r.files("a.json"))
-	pack := r.pack(0, false)
+	pack := r.pack(10, false)
+	// First, count how many reads a successful parse makes.
+	var successReads int
+	counter := &readCounter{r: bytes.NewReader(pack)}
+	st := memory.NewStorage()
+	p, _ := packfile.NewParserWithStorage(
+		packfile.NewScanner(&ctxReader{ctx: t.Context(), r: counter}), st, ctxObserver{ctx: t.Context()},
+	)
+	if _, err := p.Parse(); err != nil {
+		t.Fatalf("baseline parse: %v", err)
+	}
+	successReads = counter.count
+	if successReads < 1 {
+		t.Fatalf("baseline read count %d; test fixture may be wrong", successReads)
+	}
+	// Now cancel after 1 read (during or just after the first read) and assert parsing stops.
 	ctx, cancel := context.WithCancel(t.Context())
-	cancel() // Cancel immediately; ctxReader will check during first Read.
-	_, err := walkWith(ctx, pack, commit.String(), walkLimits{
-		entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes,
-	})
+	hook := &cancelAfterNReads{r: bytes.NewReader(pack), cancel: cancel, cancelAfter: 1}
+	st2 := memory.NewStorage()
+	p2, _ := packfile.NewParserWithStorage(
+		packfile.NewScanner(&ctxReader{ctx: ctx, r: hook}), st2, ctxObserver{ctx: ctx},
+	)
+	_, err := p2.Parse()
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
+	if hook.count >= successReads {
+		t.Fatalf("read %d times, same as success (%d); parse completed despite cancellation", hook.count, successReads)
+	}
+}
+
+// readCounter counts Read calls.
+type readCounter struct {
+	r     io.ReadSeeker
+	count int
+}
+
+func (c *readCounter) Read(p []byte) (int, error) {
+	c.count++
+	return c.r.Read(p)
+}
+
+func (c *readCounter) Seek(offset int64, whence int) (int64, error) { return c.r.Seek(offset, whence) }
+
+// cancelAfterNReads cancels the context after cancelAfter reads.
+type cancelAfterNReads struct {
+	r           io.ReadSeeker
+	cancel      context.CancelFunc
+	cancelAfter int
+	count       int
+	cancelled   bool
+}
+
+func (c *cancelAfterNReads) Read(p []byte) (int, error) {
+	c.count++
+	if c.count == c.cancelAfter && !c.cancelled {
+		c.cancelled = true
+		c.cancel()
+	}
+	return c.r.Read(p)
+}
+
+func (c *cancelAfterNReads) Seek(offset int64, whence int) (int64, error) {
+	return c.r.Seek(offset, whence)
 }
