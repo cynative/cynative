@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,13 +21,37 @@ var errTransport = errors.New("transport down")
 
 func clientFor(rt http.RoundTripper) *http.Client { return &http.Client{Transport: rt} }
 
+// parseWantLineCaps extracts the capability tokens from the first pkt-line of an upload-pack request.
+func parseWantLineCaps(body string) []string {
+	if len(body) < 4 {
+		return nil
+	}
+	// Read the pkt-line length.
+	n := 0
+	for _, c := range body[:4] {
+		n = n<<4 | strings.IndexByte("0123456789abcdef", byte(c))
+	}
+	if n < 4 || n > len(body) {
+		return nil
+	}
+	line := body[4:n]
+	// The want line is "want <hash> <cap1> <cap2> ... <capN>\n".
+	parts := strings.Fields(line)
+	if len(parts) < 3 || parts[0] != "want" {
+		return nil
+	}
+
+	return parts[2:] // Skip "want" and the hash.
+}
+
 // TestFetchPack_FetchesMainShallowAndBlobless pins the request the fetch sends (want main, depth 1, filter
 // blob:none, with the shallow, filter and side-band-64k capabilities) and that it returns main's SHA and the pack
 // exactly as served on side-band 1, the progress frame dropped.
 func TestFetchPack_FetchesMainShallowAndBlobless(t *testing.T) {
 	t.Parallel()
 	commit, pack := smallRepo(t)
-	srv := newGitServer(advertisement(t, commit, fullCaps()...), uploadResponse(t, commit, pack))
+	caps := append(fullCaps(), capability.ThinPack)
+	srv := newGitServer(advertisement(t, commit, caps...), uploadResponse(t, commit, pack))
 	sha, got, err := fetchPack(t.Context(), clientFor(srv), testRepoURL)
 	if err != nil {
 		t.Fatalf("fetchPack: %v", err)
@@ -35,16 +60,19 @@ func TestFetchPack_FetchesMainShallowAndBlobless(t *testing.T) {
 		t.Fatalf("sha %s (want %s), pack %d bytes (want %d)", sha, commit, len(got), len(pack))
 	}
 	body := srv.uploadBody()
-	for _, want := range []string{
-		"want " + commit.String(), "shallow", "filter", "side-band-64k", "deepen 1",
-		"filter blob:none", "done",
-	} {
+	wantCaps := parseWantLineCaps(body)
+	for _, want := range []string{"shallow", "filter", "side-band-64k"} {
+		if !slices.Contains(wantCaps, want) {
+			t.Errorf("want-line capabilities lack %q: %v\nfull body:\n%s", want, wantCaps, body)
+		}
+	}
+	for _, want := range []string{"want " + commit.String(), "deepen 1", "filter blob:none", "done"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("upload-pack request lacks %q:\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, "thin-pack") {
-		t.Errorf("upload-pack request asks for a thin pack:\n%s", body)
+	if slices.Contains(wantCaps, "thin-pack") {
+		t.Errorf("want-line asks for a thin pack: %v\nfull body:\n%s", wantCaps, body)
 	}
 }
 
