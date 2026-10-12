@@ -71,7 +71,7 @@ const (
 func TestSummarize(t *testing.T) {
 	t.Parallel()
 	body := `{"info":{"version":"2024-01-01"},
-		"paths":{"/b":{"parameters":[],"x-ext":{},"put":{"operationId":"B_Put"},"get":{"operationId":"B_Get"}},
+		"paths":{"/b":{"parameters":[],"x-ext":{},"x-foo":{"operationId":"NotAnOp"},"put":{"operationId":"B_Put"},"get":{"operationId":"B_Get"}},
 			"/a":{"get":{"operationId":"A_Get"},"post":{},"delete":{"operationId":7}}},
 		"x-ms-paths":{"/a?op=x":{"post":{"operationId":"A_Do"}}}}`
 	got, err := Summarize([]byte(body))
@@ -124,6 +124,9 @@ func TestOperation(t *testing.T) {
 		{ID: "A", Method: "GET", Path: "/bad"},
 		{ID: "C", Method: "GET", Path: "/badcommon"},
 		{ID: "Other_Get", Method: "GET", Path: "/a"}, // a summary that names the wrong operation
+		{ID: "", Method: "GET", Path: "/a"},          // empty ID
+		{ID: "A_Get", Method: "INVALID", Path: "/a"}, // invalid method
+		{ID: "A_Get", Method: "x-foo", Path: "/a"},   // non-method key
 	} {
 		if _, _, operr := d.operation(s); !errors.Is(operr, ErrSpecsRejected) {
 			t.Errorf("operation(%+v) error = %v, want ErrSpecsRejected", s, operr)
@@ -146,12 +149,20 @@ func TestRefPath(t *testing.T) {
 			t.Errorf("refPath(%q) = %q, %v, want %q", file, got, err, want)
 		}
 	}
+	// Empty file with from not in Index.Refs should fail.
+	if _, err := refPath("other/notarget.json", "", ix); !errors.Is(err, errRefConfined) {
+		t.Errorf("refPath from not in index error = %v, want errRefConfined", err)
+	}
 	for _, file := range []string{
 		"/specification/common-types/resource-management/v5/types.json",
 		"https://example.com/types.json",
 		`..\..\common\v1\common.json`,
 		"../../common/v1/common.json?x=1",
+		"a.json?",
+		"//h/x.json",
 		"../../../../../../../../../etc/passwd",
+		"../../../../../../other/svc/resource-manager/Microsoft.X/stable/2024-07-01/a.json",
+		"../../../../../../dev/common-types/resource-management/v1/types.json",
 		"missing.json",
 		"%zz",
 	} {
@@ -238,12 +249,26 @@ func TestRefResolverLoadLimits(t *testing.T) {
 	}
 	ix := refIndex(paths...)
 	r := newRefResolver(newSpecFakeFiles(bodies), ix, NewBudget(1<<20))
-	var last error
-	for i := range maxRefFiles + 1 {
-		_, _, last = r.resolve(ctx, testOpFile, fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", i))
+	// Files 1..maxRefFiles should resolve successfully.
+	for i := range maxRefFiles {
+		if _, _, err := r.resolve(
+			ctx,
+			testOpFile,
+			fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", i),
+		); err != nil {
+			t.Fatalf("file %d error = %v, want nil", i+1, err)
+		}
 	}
-	if !errors.Is(last, errRefLimit) {
-		t.Fatalf("file %d error = %v, want errRefLimit", maxRefFiles+1, last)
+	// File maxRefFiles+1 should fail with errRefLimit.
+	if _, _, err := r.resolve(
+		ctx,
+		testOpFile,
+		fmt.Sprintf("../../common/v1/f%02d.json#/parameters/X", maxRefFiles),
+	); !errors.Is(
+		err,
+		errRefLimit,
+	) {
+		t.Fatalf("file %d error = %v, want errRefLimit", maxRefFiles+1, err)
 	}
 
 	sentinel := errors.New("load failed")
@@ -298,6 +323,125 @@ func TestRefResolverParam(t *testing.T) {
 			!refGap(paramerr) {
 			t.Errorf("param(%s) error = %v, want %v as a gap", raw, paramerr, want)
 		}
+	}
+}
+
+// TestRefResolverParamDepth pins the maxRefDepth bound: a chain of exactly maxRefDepth links resolves, maxRefDepth+1
+// is refused with errRefLimit.
+func TestRefResolverParamDepth(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Build a chain: P0 -> P1 -> ... -> P6 -> Leaf (8 resolves: depth 0-7).
+	var params strings.Builder
+	params.WriteString(`{"parameters":{"Leaf":{"name":"leaf","in":"query"}`)
+	for i := maxRefDepth - 2; i >= 0; i-- {
+		next := "Leaf"
+		if i < maxRefDepth-2 {
+			next = fmt.Sprintf("P%d", i+1)
+		}
+		fmt.Fprintf(&params, `,"P%d":{"$ref":"#/parameters/%s"}`, i, next)
+	}
+	params.WriteString(`}}`)
+	own, err := decodeSwagger([]byte(params.String()))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	if adderr := r.add(testOpFile, own); adderr != nil {
+		t.Fatalf("add: %v", adderr)
+	}
+	// Chain of maxRefDepth resolves should succeed (depth 0..maxRefDepth-1, then return at depth maxRefDepth).
+	if p, _, _, perr := r.param(ctx, testOpFile, json.RawMessage(`{"$ref":"#/parameters/P0"}`)); perr != nil ||
+		p.Name != "leaf" {
+		t.Fatalf("param chain depth %d: %+v, %v", maxRefDepth, p, perr)
+	}
+	// Chain of maxRefDepth+1 resolves should fail (hits depth == maxRefDepth with another $ref to follow).
+	var params9 strings.Builder
+	params9.WriteString(`{"parameters":{"Leaf":{"name":"leaf","in":"query"},"P7":{"$ref":"#/parameters/P0"}`)
+	for i := maxRefDepth - 2; i >= 0; i-- {
+		next := "Leaf"
+		if i < maxRefDepth-2 {
+			next = fmt.Sprintf("P%d", i+1)
+		}
+		fmt.Fprintf(&params9, `,"P%d":{"$ref":"#/parameters/%s"}`, i, next)
+	}
+	params9.WriteString(`}}`)
+	own9, err := decodeSwagger([]byte(params9.String()))
+	if err != nil {
+		t.Fatalf("decode depth+1: %v", err)
+	}
+	r9 := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	if adderr := r9.add(testOpFile, own9); adderr != nil {
+		t.Fatalf("add depth+1: %v", adderr)
+	}
+	if _, _, _, perr := r9.param(
+		ctx,
+		testOpFile,
+		json.RawMessage(`{"$ref":"#/parameters/P7"}`),
+	); !errors.Is(
+		perr,
+		errRefLimit,
+	) {
+		t.Fatalf("param chain depth %d error = %v, want errRefLimit", maxRefDepth+1, perr)
+	}
+}
+
+// TestRefResolverSchemaDepth pins the maxRefDepth bound for schema resolution.
+func TestRefResolverSchemaDepth(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Build a chain: D0 -> D1 -> ... -> D6 -> Leaf (8 resolves: depth 0-7).
+	var defs strings.Builder
+	defs.WriteString(`{"definitions":{"Leaf":{"type":"string"}`)
+	for i := maxRefDepth - 2; i >= 0; i-- {
+		next := "Leaf"
+		if i < maxRefDepth-2 {
+			next = fmt.Sprintf("D%d", i+1)
+		}
+		fmt.Fprintf(&defs, `,"D%d":{"$ref":"#/definitions/%s"}`, i, next)
+	}
+	defs.WriteString(`}}`)
+	own, err := decodeSwagger([]byte(defs.String()))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	if adderr := r.add(testOpFile, own); adderr != nil {
+		t.Fatalf("add: %v", adderr)
+	}
+	// Chain of maxRefDepth resolves should succeed (depth 0..maxRefDepth-1, then return at depth maxRefDepth).
+	if s, _, serr := r.schema(ctx, testOpFile, json.RawMessage(`{"$ref":"#/definitions/D0"}`)); serr != nil ||
+		s.Type != "string" {
+		t.Fatalf("schema chain depth %d: %+v, %v", maxRefDepth, s, serr)
+	}
+	// Chain of maxRefDepth+1 resolves should fail (hits depth == maxRefDepth with another $ref to follow).
+	var defs9 strings.Builder
+	defs9.WriteString(`{"definitions":{"Leaf":{"type":"string"},"D7":{"$ref":"#/definitions/D0"}`)
+	for i := maxRefDepth - 2; i >= 0; i-- {
+		next := "Leaf"
+		if i < maxRefDepth-2 {
+			next = fmt.Sprintf("D%d", i+1)
+		}
+		fmt.Fprintf(&defs9, `,"D%d":{"$ref":"#/definitions/%s"}`, i, next)
+	}
+	defs9.WriteString(`}}`)
+	own9, err := decodeSwagger([]byte(defs9.String()))
+	if err != nil {
+		t.Fatalf("decode depth+1: %v", err)
+	}
+	r9 := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	if adderr := r9.add(testOpFile, own9); adderr != nil {
+		t.Fatalf("add depth+1: %v", adderr)
+	}
+	if _, _, serr := r9.schema(
+		ctx,
+		testOpFile,
+		json.RawMessage(`{"$ref":"#/definitions/D7"}`),
+	); !errors.Is(
+		serr,
+		errRefLimit,
+	) {
+		t.Fatalf("schema chain depth %d error = %v, want errRefLimit", maxRefDepth+1, serr)
 	}
 }
 

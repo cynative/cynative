@@ -19,6 +19,7 @@ func FuzzSummarize(f *testing.F) {
 		`{"paths":{"/a":{"parameters":[],"x-ext":{},"get":{}}}}`,
 		`{"paths":{"/a":{"get":{"operationId":7}}}}`,
 		`{"paths":{"/a":[]}}`,
+		`{"paths":{"/a":{"x-foo":{"operationId":"Y"}}}}`,
 	} {
 		f.Add([]byte(seed))
 	}
@@ -46,7 +47,7 @@ func FuzzSummarize(f *testing.F) {
 func FuzzRefPath(f *testing.F) {
 	for _, seed := range []string{
 		"", "things.json", "../../common/v1/common.json", "/abs.json", "https://e/x.json", `..\x.json`,
-		"%2e%2e/x.json", "a.json?q=1", "%zz",
+		"%2e%2e/x.json", "a.json?q=1", "a.json?", "//h/x.json", "%zz",
 	} {
 		f.Add(seed)
 	}

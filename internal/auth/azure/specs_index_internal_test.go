@@ -137,6 +137,28 @@ func TestParseOpPath(t *testing.T) {
 	}
 }
 
+// TestRefTarget pins the specification/ confinement: only paths under specification/ are ref targets.
+func TestRefTarget(t *testing.T) {
+	t.Parallel()
+	for _, p := range []string{
+		"specification/test/resource-manager/Microsoft.Test/stable/2024-01-01/things.json",
+		"specification/common-types/resource-management/v5/types.json",
+	} {
+		if !refTarget(p) {
+			t.Errorf("refTarget(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{
+		"other/svc/resource-manager/Microsoft.X/stable/2024-07-01/a.json",
+		"dev/common-types/resource-management/v1/types.json",
+		"README.md",
+	} {
+		if refTarget(p) {
+			t.Errorf("refTarget(%q) = true, want false (outside specification/)", p)
+		}
+	}
+}
+
 // TestRefTarget_AdmitsEveryOperationFile pins that the ref-segment grammar is no narrower than the operation
 // grammar: the longest file name parseOpPath admits is also a ref target, so BuildIndex never drops it.
 func TestRefTarget_AdmitsEveryOperationFile(t *testing.T) {

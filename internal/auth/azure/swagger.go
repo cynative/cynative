@@ -159,6 +159,9 @@ func appendOps(out []OpSummary, paths map[string]map[string]json.RawMessage, xms
 
 // operation returns the operation a summary names and its path item's own parameters.
 func (d *swaggerDoc) operation(s OpSummary) (swaggerOp, []json.RawMessage, error) {
+	if !swaggerMethods[strings.ToLower(s.Method)] || s.ID == "" {
+		return swaggerOp{}, nil, fmt.Errorf("%w: summary has invalid method %q or empty id", ErrSpecsRejected, s.Method)
+	}
 	paths := d.Paths
 	if s.XMs {
 		paths = d.XMsPaths
@@ -214,6 +217,8 @@ func (r *refResolver) add(p string, d *swaggerDoc) error {
 
 // param resolves one parameter object, following a $ref chain of at most maxRefDepth links. It returns the
 // parameter, the file it lives in and whether it came through a $ref (the shared-parameter shape).
+//
+//nolint:unparam // from varies in production (Tasks 7-8); tests use one file for simplicity.
 func (r *refResolver) param(ctx context.Context, from string, raw json.RawMessage) (swaggerParam, string, bool, error) {
 	shared := false
 	for depth := 0; ; depth++ {
@@ -363,6 +368,9 @@ func (r *refResolver) load(ctx context.Context, p string) (*swaggerDoc, error) {
 // scheme, host, query or backslash is accepted, and the result must be a ref target of the index.
 func refPath(from, file string, ix *Index) (string, error) {
 	if file == "" {
+		if _, ok := ix.Refs[from]; !ok {
+			return "", fmt.Errorf("%w: from %q", errRefConfined, from)
+		}
 		return from, nil
 	}
 	u, err := url.Parse(file)
