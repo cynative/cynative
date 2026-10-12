@@ -90,6 +90,8 @@ func buildHardenedAzureProvider(
 	// (role, identity) are constructed inside the closure because their
 	// constructors may return an error; the catalog above is infallible.
 	p := newAzureProvider(catalog, cc.Scope, nil)
+	p.docs = newAzureDocs(azureCfg.Config, cc.ARMEndpoint,
+		azurehardening.NewSpecsHTTPClient(e.HTTPClient(specsHTTPTimeout)), e.ScrubError, catalog.PeekSnapshot)
 	p.doLazyResolve = func(ctx context.Context) error {
 		roles, err := azurehardening.NewRoleClient(
 			azurehardening.RoleClientConfig{ //nolint:exhaustruct // test fields omitted.

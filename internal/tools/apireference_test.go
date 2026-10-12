@@ -153,7 +153,7 @@ func TestAPIReference_Info(t *testing.T) {
 			t.Errorf("schema missing %q: %s", want, raw)
 		}
 	}
-	if !strings.Contains(info.Desc, "github, gitlab and gcp, from public vendor metadata") ||
+	if !strings.Contains(info.Desc, "github, gitlab, gcp and azure, from public vendor metadata") ||
 		!strings.Contains(info.Desc, "generated from the path") ||
 		!strings.Contains(string(raw), "getApiV4ProjectsIdMergeRequests") {
 		t.Errorf("gitlab missing from the description or schema: %s %s", info.Desc, raw)
@@ -165,8 +165,13 @@ func TestAPIReference_Info(t *testing.T) {
 	if !strings.Contains(info.Desc, "pass kubernetes_auth {}") || !strings.Contains(string(raw), `"kubernetes_auth"`) ||
 		!strings.Contains(info.Desc, "and kubernetes, eks, gke and aks.") ||
 		!strings.Contains(info.Desc, "or the eks_auth, gke_auth or aks_auth block naming the cluster") ||
-		strings.Contains(info.Desc, "not available yet") || strings.Count(string(raw), "not available yet") != 1 {
+		strings.Contains(info.Desc, "not available yet") || strings.Contains(string(raw), "not available yet") {
 		t.Errorf("the Kubernetes connectors missing from the description or schema: %s %s", info.Desc, raw)
+	}
+	if !strings.Contains(info.Desc, "VirtualMachines_List") || !strings.Contains(string(raw), "'azure'") ||
+		!strings.Contains(string(raw), "Azure, required: the resource-provider namespace") ||
+		!strings.Contains(string(raw), "The azure lookup reads public metadata and ignores it.") {
+		t.Errorf("azure missing from the description or schema: %s %s", info.Desc, raw)
 	}
 	for _, want := range []string{
 		"'kubernetes', 'eks', 'gke' or 'aks'",
