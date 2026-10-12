@@ -140,7 +140,7 @@ func TestRenderOperation_APIVersion(t *testing.T) {
 			"",
 			false,
 		},
-		{"multi enum without it", "2024-01-01", multiMiss, "[]", "", "generic operation", true},
+		{"multi enum without it", "2024-01-01", multiMiss, "[]", "", "lists 2020-01-01, 2021-01-01", true},
 		{"inline without enum", "2024-01-01", inline, "[]", "", "generic operation", true},
 		{
 			"no parameter",
@@ -203,10 +203,10 @@ func TestRenderOperation_PathRules(t *testing.T) {
 	roleID := `{"name":"roleId","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true}`
 	ref := renderOne(t, "2024-01-01", `"x-ms-paths":`+op(roleKey, "get", "", roleID, pVersion), "GET", roleKey, true)
 	if ref.PathTemplate != "/{roleId+}" || fixed(ref) != "[{api-version 2024-01-01}]" ||
-		ref.AuthArgs["service"] != "<Namespace>" || !hasLimitation(ref, "after the last /providers/") ||
-		!hasLimitation(ref, "drop its leading '/'") {
-		t.Fatalf("role: path %q fixed %s auth %v limitations %q", ref.PathTemplate, fixed(ref), ref.AuthArgs,
-			ref.Limitations)
+		ref.AuthArgs["service"] != "<Namespace>" || ref.Service != "Microsoft.Test" ||
+		!hasLimitation(ref, "after the last /providers/") || !hasLimitation(ref, "drop its leading '/'") {
+		t.Fatalf("role: path %q fixed %s auth %v Service %q limitations %q", ref.PathTemplate, fixed(ref),
+			ref.AuthArgs, ref.Service, ref.Limitations)
 	}
 
 	kustoKey := "/subscriptions/{subscriptionId}/providers/Microsoft.Test/ops?operationResultResponseType=Location&$expand=x&bare"
@@ -235,9 +235,9 @@ func TestRenderOperation_PathRules(t *testing.T) {
 		"resourceProviderNamespace:a path segment name:a path segment]" {
 		t.Errorf("inputs = %v", names)
 	}
-	if ref.AuthArgs["service"] != "<Namespace>" || !hasLimitation(ref, "leave no empty segment (//) when "+
-		"parentResourcePath is empty") {
-		t.Errorf("generic auth %v limitations %q", ref.AuthArgs, ref.Limitations)
+	if ref.AuthArgs["service"] != "<Namespace>" || ref.Service != "Microsoft.Test" ||
+		!hasLimitation(ref, "leave no empty segment (//) when parentResourcePath is empty") {
+		t.Errorf("generic auth %v Service %q limitations %q", ref.AuthArgs, ref.Service, ref.Limitations)
 	}
 }
 
@@ -285,7 +285,6 @@ func TestQueryEscape(t *testing.T) {
 	}
 }
 
-//nolint:gocognit // tests many input combinations in one table.
 func TestRenderOperation_Inputs(t *testing.T) {
 	t.Parallel()
 	params := []string{
@@ -336,15 +335,6 @@ func TestRenderOperation_Inputs(t *testing.T) {
 	}
 	if !ref.Inputs[0].Required || ref.Inputs[len(ref.Inputs)-1].Required {
 		t.Errorf("required inputs do not come first: %+v", ref.Inputs)
-	}
-
-	many := []string{pSub, pVersion}
-	for i := range apiref.MaxOptionalInputs + 1 {
-		many = append(many, fmt.Sprintf(`{"name":"o%02d","in":"query","type":"string"}`, i))
-	}
-	ref = renderOne(t, "2024-01-01", `"paths":`+op(thingsKey, "get", "", many...), "GET", thingsKey, false)
-	if !ref.InputsTruncated || len(ref.Inputs) != apiref.MaxOptionalInputs+1 {
-		t.Errorf("truncated %v with %d inputs", ref.InputsTruncated, len(ref.Inputs))
 	}
 }
 
@@ -458,8 +448,10 @@ func TestRenderOperation_Errors(t *testing.T) {
 // TestRenderOperation_ParameterReplacement verifies that an operation parameter replaces a path item parameter.
 func TestRenderOperation_ParameterReplacement(t *testing.T) {
 	t.Parallel()
-	// Path item has subscriptionId, operation overrides it (though this is unusual, it's valid OpenAPI).
-	pathItem := `{"parameters":[` + pSub + `],"get":{"operationId":"Op_Id","parameters":[` + pSub + `,` + pVersion + `]}}`
+	// Path item has subscriptionId with no description, operation overrides it with a description.
+	pathSub := `{"$ref":"` + commonRef + `SubscriptionIdParameter"}`
+	opSub := `{"name":"subscriptionId","in":"path","required":true,"type":"string","description":"the subscription"}`
+	pathItem := `{"parameters":[` + pathSub + `],"get":{"operationId":"Op_Id","parameters":[` + opSub + `,` + pVersion + `]}}`
 	body := `{"info":{"version":"2024-01-01"},"paths":{` + fmt.Sprintf("%q", thingsKey) + `:` + pathItem + `}}`
 	doc, err := decodeSwagger([]byte(body))
 	if err != nil {
@@ -477,15 +469,17 @@ func TestRenderOperation_ParameterReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderOperation: %v", err)
 	}
-	// Should have exactly one subscriptionId input, not two.
+	// Should have exactly one subscriptionId input with the operation's description.
 	count := 0
+	var desc string
 	for _, in := range ref.Inputs {
 		if in.Name == "subscriptionId" {
 			count++
+			desc = in.Description
 		}
 	}
-	if count != 1 {
-		t.Errorf("subscriptionId appears %d times, want 1", count)
+	if count != 1 || desc != "the subscription" {
+		t.Errorf("subscriptionId: count=%d desc=%q, want count=1 desc=\"the subscription\"", count, desc)
 	}
 }
 
@@ -515,5 +509,166 @@ func TestRenderOperation_UnknownBodyProperty(t *testing.T) {
 	})
 	if !hasPresent || !hasMissing {
 		t.Errorf("body inputs: hasPresent=%v hasMissing=%v; inputs=%+v", hasPresent, hasMissing, ref.Inputs)
+	}
+}
+
+// TestRenderOperation_RequiredFirst verifies required inputs come before optional ones.
+func TestRenderOperation_RequiredFirst(t *testing.T) {
+	t.Parallel()
+	defs := `"definitions":{"Thing":{"required":["count"],"properties":{"count":{"type":"integer"}}}}`
+	key := thingsKey + "/{name}"
+	name := `{"name":"name","in":"path","required":true,"type":"string"}`
+	opt := `{"name":"opt","in":"query","type":"string"}`
+	body := `{"name":"p","in":"body","required":true,"schema":{"$ref":"#/definitions/Thing"}}`
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(key, "put", "", pSub, name, pVersion, opt, body)+","+defs,
+		"PUT", key, false)
+	// Required inputs must come first.
+	firstOptional := -1
+	for i, in := range ref.Inputs {
+		if !in.Required {
+			firstOptional = i
+			break
+		}
+	}
+	if firstOptional == -1 {
+		t.Fatalf("no optional input found")
+	}
+	for i := firstOptional + 1; i < len(ref.Inputs); i++ {
+		if ref.Inputs[i].Required {
+			t.Errorf("required input %s at position %d after optional input at %d", ref.Inputs[i].Name, i,
+				firstOptional)
+		}
+	}
+}
+
+// TestRenderOperation_OptionalSingleValueEnum verifies an optional single-value enum remains an input.
+func TestRenderOperation_OptionalSingleValueEnum(t *testing.T) {
+	t.Parallel()
+	opt := `{"name":"mode","in":"query","type":"string","enum":["fast"]}`
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(thingsKey, "get", "", pSub, pVersion, opt), "GET", thingsKey,
+		false)
+	// Should have mode as an input, not in FixedQuery.
+	hasInput := slices.ContainsFunc(ref.Inputs, func(in apiref.Input) bool { return in.Name == "mode" })
+	hasFixed := slices.ContainsFunc(ref.FixedQuery, func(p apiref.Param) bool { return p.Key == "mode" })
+	if !hasInput || hasFixed {
+		t.Errorf("mode: input=%v fixed=%v, want input=true fixed=false", hasInput, hasFixed)
+	}
+}
+
+// TestRenderOperation_ServicePlaceholder verifies ref.Service equals the lookup's service in placeholder cases.
+func TestRenderOperation_ServicePlaceholder(t *testing.T) {
+	t.Parallel()
+	roleKey := "/{roleId}?disambiguation_dummy"
+	roleID := `{"name":"roleId","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true}`
+	ref := renderOne(t, "2024-01-01", `"x-ms-paths":`+op(roleKey, "get", "", roleID, pVersion), "GET", roleKey, true)
+	if ref.Service != "Microsoft.Test" || ref.AuthArgs["service"] != "<Namespace>" {
+		t.Errorf("role: Service=%q AuthArgs[service]=%q, want Microsoft.Test and <Namespace>", ref.Service,
+			ref.AuthArgs["service"])
+	}
+
+	genericKey := "/subscriptions/{subscriptionId}/resourcegroups/{rg}/providers/{resourceProviderNamespace}/" +
+		"{parentResourcePath}/{resourceType}/{name}"
+	parent := `{"name":"parentResourcePath","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true}`
+	fixedType := `{"name":"resourceType","in":"path","required":true,"type":"string","enum":["vaults"]}`
+	ref = renderOne(t, "2024-01-01", `"paths":`+op(genericKey, "get", "", pSub, parent, fixedType, pVersion), "GET",
+		genericKey, false)
+	if ref.Service != "Microsoft.Test" || ref.AuthArgs["service"] != "<Namespace>" {
+		t.Errorf("generic: Service=%q AuthArgs[service]=%q, want Microsoft.Test and <Namespace>", ref.Service,
+			ref.AuthArgs["service"])
+	}
+}
+
+// TestRenderOperation_XMsPathsEscaping verifies fixed query values from x-ms-paths are escaped.
+func TestRenderOperation_XMsPathsEscaping(t *testing.T) {
+	t.Parallel()
+	key := "/subscriptions/{subscriptionId}/providers/Microsoft.Test/ops?mode=quick%20start&filter=type%20eq%20'x'"
+	ref := renderOne(t, "2024-01-01", `"x-ms-paths":`+op(key, "get", "", pSub, pVersion), "GET", key, true)
+	// The unescaped values "quick start" and "type eq 'x'" should be escaped in FixedQuery.
+	hasMode := slices.ContainsFunc(ref.FixedQuery, func(p apiref.Param) bool {
+		return p.Key == "mode" && p.Value == "quick%20start"
+	})
+	hasFilter := slices.ContainsFunc(ref.FixedQuery, func(p apiref.Param) bool {
+		return p.Key == "filter" && p.Value == "type%20eq%20%27x%27"
+	})
+	if !hasMode || !hasFilter {
+		t.Errorf("fixed query: mode=%v filter=%v; query=%v", hasMode, hasFilter, ref.FixedQuery)
+	}
+}
+
+// TestRenderOperation_CaseVariantNamespace verifies case-insensitive namespace comparison.
+func TestRenderOperation_CaseVariantNamespace(t *testing.T) {
+	t.Parallel()
+	key := "/subscriptions/{subscriptionId}/providers/Microsoft.Other/things"
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(key, "get", "", pSub, pVersion), "GET", key, false)
+	// Lookup service is "Microsoft.Test", derived is "Microsoft.Other": should have the "namespace is X, not Y" limitation.
+	if !hasLimitation(ref, "namespace is Microsoft.Other") {
+		t.Errorf("expected namespace mismatch limitation, got %q", ref.Limitations)
+	}
+
+	// Now with case-variant lookup service (lowercase), should NOT add the limitation.
+	files := newSpecFakeFiles(map[string]string{commonFile: renderCommon})
+	r := newRefResolver(files, refIndex(testOpFile, commonFile), NewBudget(1<<20))
+	body := `{"info":{"version":"2024-01-01"},"paths":` + op(key, "get", "", pSub, pVersion) + `}`
+	doc, _ := decodeSwagger([]byte(body))
+	ref2, err := renderOperation(context.Background(), renderInput{
+		Doc: doc, File: IndexFile{Path: testOpFile, Blob: fmt.Sprintf("%040x", 1)},
+		Dir: IndexDir{Kind: kindStable, Name: "2024-01-01"}, Group: "test/Test",
+		Op: OpSummary{ID: "Op_Id", Method: "GET", Path: key}, Commit: specTestSHA,
+		Endpoint: "https://management.azure.com", Service: "microsoft.other", SHA256: "feed",
+		Selector: "test/Test@stable/2024-01-01", Resolver: r,
+	})
+	if err != nil {
+		t.Fatalf("renderOperation: %v", err)
+	}
+	// Same namespace, different case: should NOT have the mismatch limitation.
+	if hasLimitation(ref2, "namespace is") {
+		t.Errorf("case-variant should not add mismatch limitation, got %q", ref2.Limitations)
+	}
+}
+
+// TestRenderOperation_TrailingGreedyLabel verifies no empty-segment limitation for trailing greedy.
+func TestRenderOperation_TrailingGreedyLabel(t *testing.T) {
+	t.Parallel()
+	key := "/subscriptions/{subscriptionId}/providers/Microsoft.Test/{rest+}"
+	rest := `{"name":"rest","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true}`
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(key, "get", "", pSub, pVersion, rest), "GET", key, false)
+	// Should NOT have the "leave no empty segment" limitation for a trailing greedy label.
+	for _, lim := range ref.Limitations {
+		if strings.Contains(lim, "leave no empty segment") && strings.Contains(lim, "rest") {
+			t.Errorf("trailing greedy should not have empty-segment limitation, got %q", lim)
+		}
+	}
+}
+
+// TestRenderOperation_InputsTruncated verifies optional inputs are truncated beyond the limit.
+func TestRenderOperation_InputsTruncated(t *testing.T) {
+	t.Parallel()
+	many := []string{pSub, pVersion}
+	for i := range apiref.MaxOptionalInputs + 1 {
+		many = append(many, fmt.Sprintf(`{"name":"o%02d","in":"query","type":"string"}`, i))
+	}
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(thingsKey, "get", "", many...), "GET", thingsKey, false)
+	if !ref.InputsTruncated || len(ref.Inputs) != apiref.MaxOptionalInputs+1 {
+		t.Errorf("truncated %v with %d inputs", ref.InputsTruncated, len(ref.Inputs))
+	}
+}
+
+// TestRenderOperation_MultiValueEnumLimitation verifies the limitation text for multi-value api-version.
+func TestRenderOperation_MultiValueEnumLimitation(t *testing.T) {
+	t.Parallel()
+	// Multi-value enum without the doc version.
+	multiMiss := `{"name":"api-version","in":"query","required":true,"type":"string","enum":["2020-01-01","2021-01-01","2022-01-01"]}`
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(thingsKey, "get", "", pSub, multiMiss), "GET", thingsKey, false)
+	// Should have the enum-listing limitation, not the generic one.
+	if !hasLimitation(ref, "lists 2020-01-01, 2021-01-01, 2022-01-01") {
+		t.Errorf("expected enum-listing limitation, got %q", ref.Limitations)
+	}
+
+	// Multi-value enum with more than 5 values (none matching doc version).
+	many := `{"name":"api-version","in":"query","required":true,"type":"string","enum":["2020-01-01","2021-01-01","2022-01-01","2023-01-01","2025-01-01","2026-01-01","2027-01-01"]}`
+	ref = renderOne(t, "2024-01-01", `"paths":`+op(thingsKey, "get", "", pSub, many), "GET", thingsKey, false)
+	// Should show first 5, then "and 2 more".
+	if !hasLimitation(ref, "lists 2020-01-01, 2021-01-01, 2022-01-01, 2023-01-01, 2025-01-01, and 2 more") {
+		t.Errorf("expected enum-listing with overflow, got %q", ref.Limitations)
 	}
 }

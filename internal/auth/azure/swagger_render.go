@@ -51,6 +51,7 @@ const (
 	refBadPageable    = "the operation's x-ms-pageable extension is malformed; pagination is not described"
 	refGenericVersion = "api-version is an input: this generic operation serves many resource types, so send a " +
 		"version the target resource type supports (ARM's error for a wrong one lists them)"
+	refEnumVersions   = "the api-version parameter lists %s; send one of them"
 	refNoAPIVersion   = "the operation declares no api-version parameter; the template sends the document's version"
 	refNamespaceInput = "azure_auth.service must equal the namespace after the last /providers/ of the final URL"
 	refOtherNamespace = "the path's namespace is %s, not the lookup's service %s; azure_auth.service must be %s"
@@ -249,6 +250,13 @@ func (r *renderer) pathQuery(query string, params []resolvedParam) {
 		if !hasValue || k == "" {
 			continue
 		}
+		// Decode the key and value from the x-ms-paths URL encoding, then re-encode for FixedQuery.
+		if kDec, err := url.QueryUnescape(k); err == nil {
+			k = kDec
+		}
+		if vDec, err := url.QueryUnescape(v); err == nil {
+			v = vDec
+		}
 		if _, modeled := findParam(params, inQuery, k); !modeled {
 			r.ref.FixedQuery = append(r.ref.FixedQuery, apiref.Param{Key: queryEscape(k), Value: queryEscape(v)})
 		}
@@ -270,6 +278,9 @@ func (r *renderer) renderVersion(params []resolvedParam) {
 		r.fixVersion(enumValue(p.Enum[0]))
 	case slices.Contains(enumValues(p.Enum), docVersion), len(p.Enum) == 0 && p.shared:
 		r.fixVersion(docVersion)
+	case len(p.Enum) > 1:
+		r.inputs = append(r.inputs, r.input(p, apiref.LocationQuery, true))
+		r.ref.Limitations = append(r.ref.Limitations, fmt.Sprintf(refEnumVersions, formatEnumList(p.Enum)))
 	default:
 		r.inputs = append(r.inputs, r.input(p, apiref.LocationQuery, true))
 		r.ref.Limitations = append(r.ref.Limitations, refGenericVersion)
@@ -523,6 +534,17 @@ func enumValues(raws []json.RawMessage) []string {
 	}
 
 	return out
+}
+
+// formatEnumList formats up to 5 enum values, then "and N more" if there are more.
+func formatEnumList(raws []json.RawMessage) string {
+	const maxShow = 5
+	vals := enumValues(raws)
+	if len(vals) <= maxShow {
+		return strings.Join(vals, ", ")
+	}
+
+	return strings.Join(vals[:maxShow], ", ") + fmt.Sprintf(", and %d more", len(vals)-maxShow)
 }
 
 func csvFormat(f string) bool { return f == "" || f == "csv" }
