@@ -246,8 +246,11 @@ func TestAdmitIndex_RefusesATamperedCache(t *testing.T) {
 			file0(m)["blob"] = ""
 			delete(refs(m), computeNew)
 		},
-		"empty blob": func(m map[string]any) { file0(m)["blob"] = "" },
-		"refs null":  func(m map[string]any) { m["refs"] = nil },
+		"empty blob": func(m map[string]any) {
+			file0(m)["blob"] = ""
+			refs(m)[computeNew] = ""
+		},
+		"refs null": func(m map[string]any) { m["refs"] = nil },
 		"duplicate dirs": func(m map[string]any) {
 			d := dirs(m)
 			d = append(d, d[0])
