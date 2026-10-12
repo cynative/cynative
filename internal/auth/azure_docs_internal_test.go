@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,5 +86,48 @@ func TestAzureDeadlineTextMatchesTheTargetedLookups(t *testing.T) {
 		if got, want := azurehardening.ContextReason(ctx), ContextReason(ctx); got != want {
 			t.Errorf("azure ContextReason = %q, want %q", got, want)
 		}
+	}
+}
+
+// TestNewAzureDocsScrubsIndexFetchErrors proves that newAzureDocs passes the scrub func to the store and that fetch
+// errors are scrubbed. The client fails every request with an error carrying a secret marker; the scrub func replaces
+// it with a placeholder; a lookup for a valid namespace attempts the index fetch, which fails and returns the scrubbed
+// error.
+func TestNewAzureDocsScrubsIndexFetchErrors(t *testing.T) {
+	t.Parallel()
+	var scrubCalled bool
+	scrub := func(err error) error {
+		scrubCalled = true
+		if err == nil {
+			return nil
+		}
+
+		return errors.New(strings.ReplaceAll(err.Error(), "hunter2", "[scrubbed]"))
+	}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("fetch failed: hunter2")
+	})}
+	docs := newAzureDocs(
+		cache.Config{Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now},
+		"https://management.azure.com", client, scrub,
+		func() azurehardening.Catalog { return nil },
+	)
+	p := newAzureProvider(fakeAzureCatalog{}, "scope", nil)
+	p.docs = docs
+	got := p.Reference(
+		context.Background(),
+		apiref.Query{Connector: "azure", Service: "Microsoft.Compute", Operation: "X_Y"},
+	)
+	if got.Outcome != apiref.OutcomeUnavailable {
+		t.Fatalf("Reference outcome = %s, want unavailable", got.Outcome)
+	}
+	if !strings.Contains(got.Reason, "[scrubbed]") {
+		t.Errorf("Reason = %q, want [scrubbed]", got.Reason)
+	}
+	if strings.Contains(got.Reason, "hunter2") {
+		t.Errorf("Reason = %q, contains hunter2 (not scrubbed)", got.Reason)
+	}
+	if !scrubCalled {
+		t.Error("scrub func was not called")
 	}
 }
