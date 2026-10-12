@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 	"unicode/utf8"
 
@@ -22,12 +23,30 @@ type fakeSpecs struct {
 	ix         *Index
 	indexErr   error
 	summaryErr map[string]error
-	onSummary  func() // when set, runs inside every Summary call
+	onSummary  func()                    // when set, runs inside every Summary call
+	onIndex    func(ctx context.Context) // when set, runs inside every Index call
 	mu         sync.Mutex
 	summaries  map[string]int
+	indexCalls int
 }
 
-func (f *fakeSpecs) Index(context.Context) (*Index, error) { return f.ix, f.indexErr }
+func (f *fakeSpecs) Index(ctx context.Context) (*Index, error) {
+	f.mu.Lock()
+	f.indexCalls++
+	f.mu.Unlock()
+	if f.onIndex != nil {
+		f.onIndex(ctx)
+	}
+
+	return f.ix, f.indexErr
+}
+
+func (f *fakeSpecs) indexCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.indexCalls
+}
 
 func (f *fakeSpecs) Summary(ctx context.Context, _ string, file IndexFile, b *Budget) (*FileSummary, error) {
 	f.mu.Lock()
@@ -152,8 +171,8 @@ func TestDocsReference_QueryGrammar(t *testing.T) {
 			t.Errorf("%+v: the guidance did not survive: %q", q, res.Reason)
 		}
 	}
-	if n := f.summaryCount(commonFile); n != 0 || len(f.calls) != 0 {
-		t.Errorf("a refused query read %d summaries and %d files", n, len(f.calls))
+	if n := f.summaryCount(commonFile); n != 0 || len(f.calls) != 0 || f.indexCount() != 0 {
+		t.Errorf("a refused query read %d summaries, %d files and %d indexes", n, len(f.calls), f.indexCount())
 	}
 }
 
@@ -252,6 +271,14 @@ func TestDocsReference_Collisions(t *testing.T) {
 	if res.Outcome != apiref.OutcomeFound || res.Reference.Model != "test/A@stable/2024-01-01" {
 		t.Fatalf("identical requests merge to the newest, then the first group: %+v", res)
 	}
+	f = specFixture(
+		fixtureFile{"A", kindStable, "2024-01-01", "a.json", same},
+		fixtureFile{"A", kindStable, "2024-01-01", "b.json", same},
+	)
+	res = lookup(t, f, "Operations_List", "")
+	if res.Outcome != apiref.OutcomeFound || res.Reference.Model != "test/A@stable/2024-01-01/a.json" {
+		t.Fatalf("identical requests in one dir merge to the first file: %+v", res)
+	}
 
 	other := strings.Replace(specOps("2024-01-01", "Things_Get"), "things/Things_Get", "other/Things_Get", 1)
 	f = specFixture(
@@ -311,6 +338,14 @@ func TestDocsReference_Models(t *testing.T) {
 	}
 	if res = lookup(t, f, "Things_Get", "test/Z@stable/2024-01-01"); res.Outcome != apiref.OutcomeNotFound {
 		t.Fatalf("missing selector = %+v", res)
+	}
+	g := specFixture(fixtureFile{
+		"A", kindStable, "2024-01-01", "a.json",
+		specOps("2024-01-01", "Things_Get", "things_get"),
+	})
+	if res = lookup(t, g, "Things_Get", "2024-01-01"); res.Outcome != apiref.OutcomeFound ||
+		res.Reference.Operation != "Things_Get" {
+		t.Fatalf("an exact id in a model dir must outrank its case variant = %+v", res)
 	}
 	if res = lookup(t, f, "Nope", "2024-01-01"); res.Outcome != apiref.OutcomeNotFound ||
 		strings.Contains(res.Reason, "pass model") {
@@ -527,7 +562,7 @@ func TestDocsReference_OperationEcho(t *testing.T) {
 		if !strings.HasPrefix(res.Reason, "no operation "+strconv.Quote(op)[:20]) {
 			t.Errorf("%.20q: the operation was not quoted: %q", op, res.Reason)
 		}
-		if !strings.Contains(res.Reason, " in Microsoft.Test (1 version dirs searched across 1 groups)") ||
+		if !strings.Contains(res.Reason, " in Microsoft.Test (1 version dirs searched in groups test/A)") ||
 			!strings.HasSuffix(res.Reason, olderGuidance) {
 			t.Errorf("%.20q: the text after the echo did not survive: %q", op, res.Reason)
 		}
@@ -573,7 +608,8 @@ func TestDocsReference_FileSelectorOutsideTheIndex(t *testing.T) {
 	t.Parallel()
 	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
 	res := lookup(t, f, "Things_Get", "test/A@stable/2024-01-01/missing.json")
-	if res.Outcome != apiref.OutcomeNotFound {
+	if res.Outcome != apiref.OutcomeNotFound ||
+		!strings.HasPrefix(res.Reason, `no "test/A@stable/2024-01-01/missing.json" in Microsoft.Test;`) {
 		t.Fatalf("a file outside the index = %+v", res)
 	}
 	f.mu.Lock()
@@ -617,5 +653,102 @@ func TestDocsReference_RenderStops(t *testing.T) {
 		apiref.Query{Service: "Microsoft.Test", Operation: "Things_Get"})
 	if res.Outcome != apiref.OutcomeUnavailable || !strings.HasPrefix(res.Reason, "a spec file could not be loaded: ") {
 		t.Fatalf("render decode error = %+v", res)
+	}
+}
+
+// TestDocsReference_Bounds pins the lookup's deadline and budget as NewDocs sets them.
+func TestDocsReference_Bounds(t *testing.T) {
+	t.Parallel()
+	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
+	var left time.Duration
+	f.onIndex = func(ctx context.Context) {
+		dl, _ := ctx.Deadline()
+		left = time.Until(dl)
+	}
+	d := NewDocs(f, "e", func() Catalog { return nil })
+	if d.budget != 160<<20 {
+		t.Errorf("budget = %d, want 160 MiB", d.budget)
+	}
+	d.Reference(context.Background(), apiref.Query{Service: "Microsoft.Test", Operation: "Things_Get"})
+	if left < 119*time.Second || left > 121*time.Second {
+		t.Errorf("the lookup's deadline was %v away, want 120s", left)
+	}
+}
+
+// blockingSpecs holds every Summary until release closes and records the peak number held at once.
+type blockingSpecs struct {
+	*fakeSpecs
+
+	release chan struct{}
+	active  int
+	peak    int
+}
+
+func (b *blockingSpecs) Summary(ctx context.Context, sha string, file IndexFile, budget *Budget) (*FileSummary, error) {
+	b.mu.Lock()
+	b.active++
+	b.peak = max(b.peak, b.active)
+	b.mu.Unlock()
+	<-b.release
+	b.mu.Lock()
+	b.active--
+	b.mu.Unlock()
+
+	return b.fakeSpecs.Summary(ctx, sha, file, budget)
+}
+
+// TestDocsReference_DownloadLimit pins that a dir's summaries are read at most maxLookupDownloads at a time. Inside
+// a synctest bubble, Wait returns only once every lookup goroutine is durably blocked, either in a held Summary or
+// in errgroup waiting for a slot, so the count it sees is the most the limit lets in.
+func TestDocsReference_DownloadLimit(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		var files []fixtureFile
+		for i := range 12 {
+			files = append(files, fixtureFile{
+				"A", kindStable, "2024-01-01", fmt.Sprintf("f%02d.json", i),
+				specOps("2024-01-01", fmt.Sprintf("Op%02d_Get", i)),
+			})
+		}
+		b := &blockingSpecs{fakeSpecs: specFixture(files...), release: make(chan struct{})}
+		done := make(chan apiref.Result)
+		go func() {
+			done <- NewDocs(b, "e", func() Catalog { return nil }).Reference(context.Background(),
+				apiref.Query{Service: "Microsoft.Test", Operation: "Op00_Get"})
+		}()
+		synctest.Wait()
+		b.mu.Lock()
+		held := b.active
+		b.mu.Unlock()
+		close(b.release)
+		res := <-done
+		if held != 8 || b.peak != 8 || res.Outcome != apiref.OutcomeFound {
+			t.Fatalf("held %d, peak %d, want 8 and 8; result %+v", held, b.peak, res)
+		}
+	})
+}
+
+// TestDocsReference_NearestAndGroups pins the not_found reason's lists: at most five nearest ids in edit-distance
+// order, and at most five searched groups in sorted order, then how many more.
+func TestDocsReference_NearestAndGroups(t *testing.T) {
+	t.Parallel()
+	f := specFixture(fixtureFile{
+		"A", kindStable, "2024-01-01", "a.json",
+		specOps("2024-01-01", "Abcdef", "Zabcde", "Zzabcd", "Zzzabc", "Zzzzab", "Zzzzza"),
+	})
+	res := lookup(t, f, "Zzzzzz", "")
+	want := `; nearest operation ids: "Zzzzza", "Zzzzab", "Zzzabc", "Zzabcd", "Zabcde";`
+	if res.Outcome != apiref.OutcomeNotFound || !strings.Contains(res.Reason, want) {
+		t.Fatalf("nearest = %+v, want %s", res, want)
+	}
+
+	var files []fixtureFile
+	for _, svc := range []string{"G", "F", "E", "D", "C", "B", "A"} {
+		files = append(files, fixtureFile{svc, kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "X_Get")})
+	}
+	res = lookup(t, specFixture(files...), "Nope", "")
+	want = "(7 version dirs searched in groups test/A, test/B, test/C, test/D, test/E and 2 more)"
+	if res.Outcome != apiref.OutcomeNotFound || !strings.Contains(res.Reason, want) {
+		t.Fatalf("groups = %+v, want %s", res, want)
 	}
 }

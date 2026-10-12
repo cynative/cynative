@@ -29,6 +29,10 @@ const (
 	// maxNearestEcho bounds each nearest operation id a reason lists. A longer id is left out, never cut, since a
 	// cut id is not an operation the caller can retry with.
 	maxNearestEcho = 100
+	// maxNearest bounds how many nearest operation ids a reason lists.
+	maxNearest = 5
+	// maxGroupEcho bounds how many searched group ids a not_found reason names before "and N more".
+	maxGroupEcho = 5
 	// selectorMinParts and selectorMaxParts bound "<kind>/<dir>" and "<kind>/<dir>/<file>" after the '@'.
 	selectorMinParts = 2
 	selectorMaxParts = 3
@@ -230,12 +234,13 @@ type search struct {
 	found    []match
 	searched []string
 	ids      map[string]bool
+	scanned  map[string]bool
 }
 
 func newSearch(d *Docs, ix *Index, ns *IndexNamespace, q apiref.Query) *search {
 	return &search{
 		d: d, ix: ix, ns: ns, q: q, budget: NewBudget(d.budget),
-		groups: slices.Sorted(maps.Keys(ns.Groups)), ids: map[string]bool{},
+		groups: slices.Sorted(maps.Keys(ns.Groups)), ids: map[string]bool{}, scanned: map[string]bool{},
 	}
 }
 
@@ -318,7 +323,10 @@ func (s *search) modelDirs(m lookupModel) []groupDir {
 	for _, g := range s.groups {
 		for _, dir := range s.ns.Groups[g].Dirs {
 			switch {
-			case m.sel != nil && g == m.sel.group && dir.Kind == m.sel.kind && dir.Name == m.sel.dir:
+			case m.sel != nil && g == m.sel.group && dir.Kind == m.sel.kind && dir.Name == m.sel.dir &&
+				(m.sel.file == "" || slices.ContainsFunc(dir.Files, func(f IndexFile) bool {
+					return path.Base(f.Path) == m.sel.file
+				})):
 				out = append(out, groupDir{group: g, dir: dir, file: m.sel.file})
 			case m.sel == nil && dir.Name == m.version:
 				out = append(out, groupDir{group: g, dir: dir})
@@ -346,6 +354,7 @@ func (s *search) scanDir(ctx context.Context, gd groupDir) (bool, error) {
 	}
 	if s.mode == matchExact {
 		s.searched = append(s.searched, selector{group: gd.group, kind: gd.dir.Kind, dir: gd.dir.Name}.String())
+		s.scanned[gd.group] = true
 	}
 	hit := false
 	for i, sum := range sums {
@@ -583,14 +592,24 @@ func distinctIDs(ms []match) []string {
 
 // notFound answers a search that found nothing, naming what it read and the nearest ids.
 func (s *search) notFound(fromPasses bool) apiref.Result {
-	head := fmt.Sprintf("no operation %s in %s (%d version dirs searched across %d groups)", echo(s.q.Operation),
-		s.ns.Name, len(s.searched), len(s.groups))
+	head := fmt.Sprintf("no operation %s in %s (%d version dirs searched in groups %s)", echo(s.q.Operation),
+		s.ns.Name, len(s.searched), s.scannedGroups())
 	suffix := s.nearest() + operationFormat
 	if fromPasses {
 		suffix += olderGuidance
 	}
 
 	return notFound(apiref.Bounded(head, suffix))
+}
+
+// scannedGroups names the groups the search read, up to maxGroupEcho in sorted order, then how many more.
+func (s *search) scannedGroups() string {
+	names := slices.Sorted(maps.Keys(s.scanned))
+	if len(names) <= maxGroupEcho {
+		return strings.Join(names, ", ")
+	}
+
+	return strings.Join(names[:maxGroupEcho], ", ") + fmt.Sprintf(" and %d more", len(names)-maxGroupEcho)
 }
 
 // noSuchModel answers a model that names no dir of the namespace.
@@ -633,9 +652,9 @@ func (s *search) failure(ctx context.Context, err error) apiref.Result {
 	return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: apiref.Bounded(head, suffix)}
 }
 
-// nearest lists up to apiref.MaxCandidates operation ids seen in the search, nearest first.
+// nearest lists up to maxNearest operation ids seen in the search, nearest first.
 func (s *search) nearest() string {
-	near := apiref.Nearest(slices.Sorted(maps.Keys(s.ids)), s.q.Operation, apiref.MaxCandidates)
+	near := apiref.Nearest(slices.Sorted(maps.Keys(s.ids)), s.q.Operation, maxNearest)
 	if len(near) == 0 {
 		return ""
 	}
