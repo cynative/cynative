@@ -217,8 +217,6 @@ func (r *refResolver) add(p string, d *swaggerDoc) error {
 
 // param resolves one parameter object, following a $ref chain of at most maxRefDepth links. It returns the
 // parameter, the file it lives in and whether it came through a $ref (the shared-parameter shape).
-//
-//nolint:unparam // from varies in production (Tasks 7-8); tests use one file for simplicity.
 func (r *refResolver) param(ctx context.Context, from string, raw json.RawMessage) (swaggerParam, string, bool, error) {
 	shared := false
 	for depth := 0; ; depth++ {
@@ -275,8 +273,6 @@ func (r *refResolver) schema(ctx context.Context, from string, raw json.RawMessa
 
 // body resolves a body schema and merges its allOf parents one level deep: required names in order, the schema's own
 // properties before its parents', each property resolved through its own $ref so its type and readOnly are known.
-//
-//nolint:unparam // from varies in production (Tasks 7-8); tests use one file for simplicity.
 func (r *refResolver) body(ctx context.Context, from string, raw json.RawMessage) (bodyShape, error) {
 	s, file, err := r.schema(ctx, from, raw)
 	if err != nil {
