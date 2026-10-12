@@ -49,10 +49,11 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 		return errors.New("azure_hardening: azure_auth.service is required")
 	}
 
-	// Layer 2: structural action derivation (service from URL path only).
+	// Layer 2: structural action derivation (service from URL path only). A path that names no resource the catalog
+	// knows gets a pointer to api_reference, which has the operation's real path.
 	action, err := DeriveAction(ctx, v, p.catalog)
 	if err != nil {
-		return err
+		return withReferencePointer(err)
 	}
 
 	// Verify the model's claimed service against the path-derived namespace.

@@ -159,7 +159,10 @@ func providerLessAction(method string, segs []string) (Action, error) {
 			return mk("Microsoft.Resources", r.resource, verbRead), nil
 		}
 	}
-	return Action{}, fmt.Errorf("%w: no provider-less route matches %v", ErrActionUnresolved, segs)
+	return Action{}, &structuralMissError{
+		namespace: "Microsoft.Resources",
+		err:       fmt.Errorf("%w: no provider-less route matches %v", ErrActionUnresolved, segs),
+	}
 }
 
 // matchTemplate reports whether segs matches a route template: equal length, each
@@ -249,12 +252,12 @@ func resolveResourceType(
 		}
 	}
 	if matched == "" {
-		return "", "", fmt.Errorf(
+		return "", "", &structuralMissError{namespace: namespace, err: fmt.Errorf(
 			"%w: %q not a resource type of %q",
 			ErrActionUnresolved,
 			strings.Join(rest, "/"),
 			namespace,
-		)
+		)}
 	}
 
 	// Reject unregistered type-position segments trailing the longest match.
@@ -263,8 +266,9 @@ func resolveResourceType(
 		maxTrailing = 1 // the action-verb token legitimately trails the type path.
 	}
 	if trailing := (lastEvenIdx - matchedIdx) / typeNameStride; trailing > maxTrailing {
-		return "", "", fmt.Errorf("%w: %q has unregistered segment(s) trailing %q",
-			ErrActionUnresolved, strings.Join(rest, "/"), matched)
+		return "", "", &structuralMissError{namespace: namespace, err: fmt.Errorf(
+			"%w: %q has unregistered segment(s) trailing %q",
+			ErrActionUnresolved, strings.Join(rest, "/"), matched)}
 	}
 
 	// token is the last even-position segment seen (drives POST verb derivation).
