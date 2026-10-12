@@ -28,10 +28,24 @@ func FuzzBuildIndex(f *testing.F) {
 		"/stable/2024-07-01/c.json")
 	// longest filename that passes the selector check
 	f.Add("specification/x/resource-manager/Microsoft.X/stable/2024-07-01/" + strings.Repeat("f", 175) + ".json")
+	// examples in first segment and middle segment
+	f.Add("specification/examples/resource-manager/Microsoft.X/stable/2024-07-01/c.json")
+	f.Add("specification/x/resource-manager/Microsoft.X/examples/stable/2024-07-01/c.json")
+	// namespace over 205 bytes
+	f.Add("specification/x/resource-manager/Microsoft." + strings.Repeat("N", 196) + "/stable/2024-07-01/c.json")
+	// non-specification root with 7+ segments
+	f.Add("other/x/resource-manager/Microsoft.X/stable/2024-07-01/c.json")
+	// 9 segments for default arm
+	f.Add("specification/x/resource-manager/Microsoft.X/S/stable/2024-07-01/deep/c.json")
 	f.Add("README.md")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, path string) {
-		ix, err := BuildIndex(listingOf(path, computeNew))
+		// Use webClassic as fixed entry to avoid duplication when path == computeNew.
+		listing := listingOf(webClassic)
+		if path != webClassic {
+			listing.Entries = append(listing.Entries, ListingEntry{Path: path, Blob: fakeBlob(path).String()})
+		}
+		ix, err := BuildIndex(listing)
 		if err != nil {
 			t.Fatalf("BuildIndex with %q: %v", path, err)
 		}

@@ -34,8 +34,10 @@ var (
 	versionPattern   = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}(-[a-z][a-z0-9.]*)?$`)
 	groupPartPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 	fileNamePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.json$`)
-	// refSegmentPattern admits any segment an operation file's path can hold, its longest being a 205-byte file
-	// name, so no file the operation grammar admits is ever dropped as a ref target.
+	// refSegmentPattern admits any segment an operation file's path can hold: the longest file name is 180 bytes
+	// (bound by the selector check) and the longest namespace is 205 bytes (the selector check does not touch the
+	// namespace segment, so fileNamePattern's 205-byte limit applies), so no file the operation grammar admits
+	// is ever dropped as a ref target.
 	refSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,204}$`)
 	shaPattern        = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
@@ -192,8 +194,14 @@ func admitNamespace(ix *Index, key string, ns *IndexNamespace) error {
 		return fmt.Errorf("%w: namespace %q", ErrSpecsRejected, key)
 	}
 	for gid, g := range ns.Groups {
-		if g == nil || len(g.Dirs) == 0 || !slices.IsSortedFunc(g.Dirs, compareDirs) {
-			return fmt.Errorf("%w: group %q of %s", ErrSpecsRejected, gid, ns.Name)
+		if g == nil || len(g.Dirs) == 0 {
+			return fmt.Errorf("%w: group %q of %s has no dirs", ErrSpecsRejected, gid, ns.Name)
+		}
+		// Dirs must be strictly ordered: no equal neighbors.
+		for i := 1; i < len(g.Dirs); i++ {
+			if compareDirs(g.Dirs[i-1], g.Dirs[i]) >= 0 {
+				return fmt.Errorf("%w: group %q dirs not strictly ordered", ErrSpecsRejected, gid)
+			}
 		}
 		for _, d := range g.Dirs {
 			if err := admitDir(ix, key, gid, d); err != nil {
@@ -209,10 +217,22 @@ func admitDir(ix *Index, key, gid string, d IndexDir) error {
 	if len(d.Files) == 0 {
 		return fmt.Errorf("%w: dir %s/%s of %s holds no file", ErrSpecsRejected, d.Kind, d.Name, gid)
 	}
+	// Files must be strictly ordered by path: no equal neighbors.
+	for i := 1; i < len(d.Files); i++ {
+		if strings.Compare(d.Files[i-1].Path, d.Files[i].Path) >= 0 {
+			return fmt.Errorf("%w: dir %s/%s files not strictly ordered", ErrSpecsRejected, d.Kind, d.Name)
+		}
+	}
 	for _, f := range d.Files {
-		of, ok := parseOpPath(f.Path)
-		if !ok || strings.ToLower(of.namespace) != key || of.group != gid || of.kind != d.Kind || of.dir != d.Name ||
-			ix.Refs[f.Path] != f.Blob {
+		if !validSHA(f.Blob) {
+			return fmt.Errorf("%w: file %q blob", ErrSpecsRejected, f.Path)
+		}
+		b, ok := ix.Refs[f.Path]
+		if !ok || b != f.Blob {
+			return fmt.Errorf("%w: file %q ref mismatch", ErrSpecsRejected, f.Path)
+		}
+		of, opOK := parseOpPath(f.Path)
+		if !opOK || strings.ToLower(of.namespace) != key || of.group != gid || of.kind != d.Kind || of.dir != d.Name {
 			return fmt.Errorf("%w: file %q is not where the index puts it", ErrSpecsRejected, f.Path)
 		}
 	}
@@ -236,9 +256,9 @@ func parseOpPath(p string) (opFile, bool) {
 		return opFile{}, false
 	}
 	ok := !slices.Contains(segs, examplesDir) && validNamespace(of.namespace) &&
-		!strings.HasSuffix(of.namespace, adminSuffix) && validGroupID(of.group) &&
-		(of.kind == kindStable || of.kind == kindPreview) && validVersion(of.dir) && validFileName(of.file) &&
-		len(of.selector()) <= apiref.MaxChoice
+		!strings.HasSuffix(of.namespace, adminSuffix) && refSegmentPattern.MatchString(of.namespace) &&
+		validGroupID(of.group) && (of.kind == kindStable || of.kind == kindPreview) && validVersion(of.dir) &&
+		validFileName(of.file) && len(of.selector()) <= apiref.MaxChoice
 
 	return of, ok
 }

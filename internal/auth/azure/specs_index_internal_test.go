@@ -83,6 +83,7 @@ func TestBuildIndex_GroupsOperationFilesAndKeepsRefTargets(t *testing.T) {
 // TestParseOpPath pins each layout rule.
 func TestParseOpPath(t *testing.T) {
 	t.Parallel()
+	longNS205 := "Microsoft." + strings.Repeat("N", 195)
 	ok := map[string]opFile{
 		computeNew: {
 			namespace: "Microsoft.Compute", group: "compute/Compute", kind: kindStable, dir: "2024-07-01",
@@ -95,13 +96,23 @@ func TestParseOpPath(t *testing.T) {
 			dir:       "2024-04-01",
 			file:      "WebApps.json",
 		},
+		"specification/x/resource-manager/" + longNS205 + "/stable/2024-07-01/c.json": {
+			namespace: longNS205,
+			group:     "x",
+			kind:      kindStable,
+			dir:       "2024-07-01",
+			file:      "c.json",
+		},
 	}
 	for p, want := range ok {
 		if got, good := parseOpPath(p); !good || got != want {
 			t.Errorf("parseOpPath(%q) = %+v, %v", p, got, good)
 		}
 	}
+	longNS206 := "Microsoft." + strings.Repeat("N", 196)
 	bad := []string{
+		"specification/examples/resource-manager/Microsoft.X/stable/2024-07-01/c.json",
+		"specification/x/resource-manager/Microsoft.X/examples/stable/2024-07-01/c.json",
 		"specification/compute/resource-manager/Microsoft.Compute/stable/2024-07-01/examples/x.json",
 		"specification/compute/resource-manager/Microsoft.Compute/Compute/beta/2024-07-01/c.json",
 		"specification/compute/resource-manager/Microsoft.Compute/Compute/stable/v1/c.json",
@@ -116,6 +127,8 @@ func TestParseOpPath(t *testing.T) {
 		// Every part fits its grammar, but the selector would pass apiref.MaxChoice.
 		"specification/" + strings.Repeat("s", 90) + "/resource-manager/Microsoft.X/" + strings.Repeat("v", 90) +
 			"/stable/2024-07-01/c.json",
+		// namespace over 205 bytes
+		"specification/x/resource-manager/" + longNS206 + "/stable/2024-07-01/c.json",
 	}
 	for _, p := range bad {
 		if got, good := parseOpPath(p); good {
@@ -135,23 +148,48 @@ func TestRefTarget_AdmitsEveryOperationFile(t *testing.T) {
 	if !refTarget(p) {
 		t.Fatalf("refTarget refused a file parseOpPath admits")
 	}
+	// selector at exactly 200 passes (x@stable/2024-07-01/ + 180-byte filename), 201 refuses
+	p200 := "specification/x/resource-manager/Microsoft.X/stable/2024-07-01/" + strings.Repeat("f", 175) + ".json"
+	p201 := "specification/x/resource-manager/Microsoft.X/stable/2024-07-01/" + strings.Repeat("f", 176) + ".json"
+	if _, ok := parseOpPath(p200); !ok {
+		t.Errorf("parseOpPath refused 200-byte selector")
+	}
+	if _, ok := parseOpPath(p201); ok {
+		t.Errorf("parseOpPath accepted 201-byte selector")
+	}
+	// refSegmentPattern at 205 passes, 206 refuses
+	seg205 := strings.Repeat("x", 205)
+	seg206 := strings.Repeat("x", 206)
+	if !refSegmentPattern.MatchString(seg205) {
+		t.Errorf("refSegmentPattern refused 205-byte segment")
+	}
+	if refSegmentPattern.MatchString(seg206) {
+		t.Errorf("refSegmentPattern accepted 206-byte segment")
+	}
 }
 
 // TestBuildIndex_Refusals pins the listing-level refusals.
 func TestBuildIndex_Refusals(t *testing.T) {
 	t.Parallel()
-	badBlob := listingOf(computeNew)
-	badBlob.Entries[0].Blob = "XYZ"
-	cases := map[string]*Listing{
-		"bad commit": {SHA: "nope", Entries: listingOf(computeNew).Entries},
-		"bad blob":   badBlob,
-		"no ops":     listingOf(commonTypesP),
+	badBlobNonRef := listingOf(computeNew, "README.md")
+	badBlobNonRef.Entries[1].Blob = "XYZ"
+	badBlobRefOnly := listingOf(computeNew, commonTypesP)
+	badBlobRefOnly.Entries[1].Blob = "XYZ"
+	cases := map[string]struct {
+		listing *Listing
+		errText string
+	}{
+		"bad commit":        {&Listing{SHA: "nope", Entries: listingOf(computeNew).Entries}, "commit id"},
+		"bad blob non-ref":  {badBlobNonRef, "blob id of"},
+		"bad blob ref-only": {badBlobRefOnly, "blob id of"},
+		"no ops":            {listingOf(commonTypesP), "no valid commit or no namespace"},
 	}
-	for name, l := range cases {
+	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := BuildIndex(l); !errors.Is(err, ErrSpecsRejected) {
-				t.Fatalf("err = %v, want ErrSpecsRejected", err)
+			_, err := BuildIndex(c.listing)
+			if !errors.Is(err, ErrSpecsRejected) || !strings.Contains(err.Error(), c.errText) {
+				t.Fatalf("err = %v, want ErrSpecsRejected with %q", err, c.errText)
 			}
 		})
 	}
@@ -204,6 +242,21 @@ func TestAdmitIndex_RefusesATamperedCache(t *testing.T) {
 			file0(m)["blob"] = fakeBlob("other").String()
 		},
 		"file not a ref": func(m map[string]any) { delete(refs(m), computeNew) },
+		"empty blob no ref": func(m map[string]any) {
+			file0(m)["blob"] = ""
+			delete(refs(m), computeNew)
+		},
+		"empty blob": func(m map[string]any) { file0(m)["blob"] = "" },
+		"refs null":  func(m map[string]any) { m["refs"] = nil },
+		"duplicate dirs": func(m map[string]any) {
+			d := dirs(m)
+			d = append(d, d[0])
+			groups(m)["compute/Compute"].(map[string]any)["dirs"] = d
+		},
+		"duplicate files": func(m map[string]any) {
+			files := dir0(m)["files"].([]any)
+			dir0(m)["files"] = append(files, files[0])
+		},
 	}
 	for name, f := range mutate {
 		t.Run(name, func(t *testing.T) {
@@ -274,8 +327,8 @@ func TestGrammars(t *testing.T) {
 		{
 			"file",
 			validFileName,
-			[]string{"compute.json", "a-b_c.d.json"},
-			[]string{".json", "a.yaml", "a b.json", "a/b.json"},
+			[]string{"compute.json", "a-b_c.d.json", strings.Repeat("f", 200) + ".json"},
+			[]string{".json", "a.yaml", "a b.json", "a/b.json", strings.Repeat("f", 201) + ".json"},
 		},
 		{"sha", validSHA, []string{testSHA}, []string{"", "0123", strings.ToUpper(testSHA), testSHA + "0"}},
 		{"group id", validGroupID, []string{"compute", "compute/Compute"}, []string{"", "a/b/c", "a/", "/a"}},
