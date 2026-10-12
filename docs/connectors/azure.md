@@ -141,7 +141,7 @@ The official [Azure MCP Server](https://github.com/Azure/azure-mcp/blob/main/doc
 
 ## API reference
 
-`api_reference` describes ARM operations from the public Azure REST API specs, with no credential and no prompt. Pass `connector: "azure"`, `service` as the namespace (`Microsoft.Compute`) and `operation` as the Swagger operationId (`VirtualMachines_List`). It returns an `http_request` template with the operation's api-version and the `azure_auth` block. See [API reference lookup](api-reference.md#azure).
+`api_reference` describes ARM operations from the public Azure REST API specs, with no credential and no prompt. Pass `connector: "azure"`, `service` as the namespace (`Microsoft.Compute`) and `operation` as the Swagger operationId (`VirtualMachines_List`). It returns an `http_request` template with the operation's api-version (an input for a generic operation such as `Resources_Get`) and the `azure_auth` block. See [API reference lookup](api-reference.md#azure).
 
 Three gate denials end with a pointer to it: a resource type the namespace does not register, a segment trailing a registered type, and a provider-less GET that no route matches.
 
