@@ -1,0 +1,82 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "host": "management.azure.com",
+  "info": {
+    "description": "The Azure management API provides a RESTful set of web services that interact with Azure Key Vault.",
+    "title": "KeyVaultManagementClient",
+    "version": "2026-05-15",
+    "x-typespec-generated": [
+      {
+        "emitter": "@azure-tools/typespec-autorest"
+      }
+    ]
+  },
+  "paths": {
+    "/subscriptions/{subscriptionId}/resources": {
+      "get": {
+        "description": "The List operation gets information about the vaults associated with the subscription.",
+        "operationId": "Vaults_List",
+        "parameters": [
+          {
+            "description": "The filter to apply on the operation.",
+            "enum": [
+              "resourceType eq 'Microsoft.KeyVault/vaults'"
+            ],
+            "in": "query",
+            "name": "$filter",
+            "required": true,
+            "type": "string",
+            "x-ms-enum": {
+              "modelAsString": false
+            }
+          },
+          {
+            "description": "Maximum number of results to return.",
+            "format": "int32",
+            "in": "query",
+            "name": "$top",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "description": "Azure Resource Manager Api Version.",
+            "enum": [
+              "2015-11-01"
+            ],
+            "in": "query",
+            "name": "api-version",
+            "required": true,
+            "type": "string",
+            "x-ms-api-version": false,
+            "x-ms-enum": {
+              "modelAsString": false
+            }
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v5/types.json#/parameters/SubscriptionIdParameter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Azure operation completed successfully."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "x-ms-pageable": {
+          "nextLinkName": "nextLink"
+        }
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0"
+}

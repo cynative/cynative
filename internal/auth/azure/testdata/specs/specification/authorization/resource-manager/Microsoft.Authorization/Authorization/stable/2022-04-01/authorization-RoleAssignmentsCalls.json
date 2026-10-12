@@ -1,0 +1,116 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "host": "management.azure.com",
+  "info": {
+    "description": "Role based access control provides you a way to apply granular level policy administration down to individual resources or resource groups. These operations enable you to manage role assignments. A role assignment grants access to Azure Active Directory users.",
+    "title": "AuthorizationManagementClient",
+    "version": "2022-04-01",
+    "x-typespec-generated": [
+      {
+        "emitter": "@azure-tools/typespec-autorest"
+      }
+    ]
+  },
+  "paths": {
+    "/{roleAssignmentId}": {
+      "get": {
+        "description": "Get a role assignment by ID.",
+        "operationId": "RoleAssignments_GetById",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v6/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "description": "The fully qualified ID of the role assignment including scope, resource name, and resource type. Format: /{scope}/providers/Microsoft.Authorization/roleAssignments/{roleAssignmentName}. Example: /subscriptions/<SUB_ID>/resourcegroups/<RESOURCE_GROUP>/providers/Microsoft.Authorization/roleAssignments/<ROLE_ASSIGNMENT_NAME>",
+            "in": "path",
+            "name": "roleAssignmentId",
+            "required": true,
+            "type": "string",
+            "x-ms-skip-url-encoding": true
+          },
+          {
+            "description": "Tenant ID for cross-tenant request",
+            "in": "query",
+            "name": "tenantId",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Azure operation completed successfully."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "RoleAssignments"
+        ]
+      }
+    },
+    "/{scope}/providers/Microsoft.Authorization/roleAssignments": {
+      "get": {
+        "description": "List all role assignments that apply to a scope.",
+        "operationId": "RoleAssignments_ListForScope",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v6/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "description": "The fully qualified Azure Resource manager identifier of the resource.",
+            "in": "path",
+            "name": "scope",
+            "required": true,
+            "type": "string",
+            "x-ms-skip-url-encoding": true
+          },
+          {
+            "description": "The filter to apply on the operation. Use $filter=atScope() to return all role assignments at or above the scope. Use $filter=principalId eq {id} to return all role assignments at, above or below the scope for the specified principal.",
+            "in": "query",
+            "name": "$filter",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "Tenant ID for cross-tenant request",
+            "in": "query",
+            "name": "tenantId",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "The skipToken to apply on the operation. Use $skipToken={skiptoken} to return paged role assignments following the skipToken passed. Only supported on provider level calls.",
+            "in": "query",
+            "name": "$skipToken",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request has succeeded."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "RoleAssignments"
+        ],
+        "x-ms-pageable": {
+          "nextLinkName": "nextLink"
+        }
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0"
+}

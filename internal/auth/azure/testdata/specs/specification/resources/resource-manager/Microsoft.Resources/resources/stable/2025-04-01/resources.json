@@ -1,0 +1,138 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "host": "management.azure.com",
+  "info": {
+    "description": "Provides operations for working with resources and resource groups.",
+    "title": "ResourceManagementClient",
+    "version": "2025-04-01",
+    "x-typespec-generated": [
+      {
+        "emitter": "@azure-tools/typespec-autorest"
+      }
+    ]
+  },
+  "paths": {
+    "/subscriptions/{subscriptionId}/resourcegroups": {
+      "get": {
+        "description": "Gets all the resource groups for a subscription.",
+        "operationId": "ResourceGroups_List",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/SubscriptionIdParameter"
+          },
+          {
+            "description": "The filter to apply on the operation.<br><br>You can filter by tag names and values. For example, to filter for a tag name and value, use $filter=tagName eq 'tag1' and tagValue eq 'Value1'",
+            "in": "query",
+            "name": "$filter",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "The number of results to return. If null is passed, returns all resource groups.",
+            "format": "int32",
+            "in": "query",
+            "name": "$top",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Azure operation completed successfully."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "ResourceGroups"
+        ],
+        "x-ms-pageable": {
+          "nextLinkName": "nextLink"
+        }
+      }
+    },
+    "/subscriptions/{subscriptionId}/resourcegroups/{resourceGroupName}/providers/{resourceProviderNamespace}/{parentResourcePath}/{resourceType}/{resourceName}": {
+      "get": {
+        "description": "Gets a resource.",
+        "operationId": "Resources_Get",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/SubscriptionIdParameter"
+          },
+          {
+            "description": "The name of the resource group containing the resource to get. The name is case insensitive.",
+            "in": "path",
+            "maxLength": 90,
+            "minLength": 1,
+            "name": "resourceGroupName",
+            "pattern": "^[-\\w\\._\\(\\)]+$",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "The resource provider of the resource to check.",
+            "in": "path",
+            "name": "resourceProviderNamespace",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "The parent resource identity.",
+            "in": "path",
+            "name": "parentResourcePath",
+            "required": true,
+            "type": "string",
+            "x-ms-skip-url-encoding": true
+          },
+          {
+            "description": "The resource type.",
+            "in": "path",
+            "name": "resourceType",
+            "required": true,
+            "type": "string",
+            "x-ms-skip-url-encoding": true
+          },
+          {
+            "description": "The name of the resource to check whether it exists.",
+            "in": "path",
+            "name": "resourceName",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "The API version to use for this operation.",
+            "in": "query",
+            "name": "api-version",
+            "required": true,
+            "type": "string",
+            "x-ms-client-name": "apiVersion"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Azure operation completed successfully."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "Resources"
+        ]
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0"
+}
