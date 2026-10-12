@@ -53,8 +53,8 @@ type CatalogConfig struct {
 // /metadata/endpoints (per cloud) + providerOperations (per namespace), runs the
 // startup shape-validation probe (rejecting the 2019 array shape), and caches the
 // parsed CatalogData under Dir/catalog/ with a .meta TTL sidecar. Excluded from
-// the coverage gate.
-func NewCatalog(cfg CatalogConfig) Catalog {
+// the coverage gate. PeekSnapshot reads what an earlier call loaded, never the disk or the network.
+func NewCatalog(cfg CatalogConfig) PeekableCatalog {
 	cfg, cacheName := applyCloudScope(cfg) // narrow MetadataURLs + cloud-scoped cache name.
 	cfg = applyDefaults(cfg)
 	tc := &cache.TTLCache[CatalogData]{
@@ -71,12 +71,15 @@ func NewCatalog(cfg CatalogConfig) Catalog {
 		},
 		Parse: scopedParse(cfg.Cloud),
 	}
-	return newCatalog(func(ctx context.Context) (CatalogData, error) {
+	c := newCatalog(func(ctx context.Context) (CatalogData, error) {
 		if d := tc.Get(ctx); d != nil {
 			return *d, nil
 		}
 		return CatalogData{}, ErrCatalogUnavailable
 	})
+	c.peek = tc.Peek
+
+	return c
 }
 
 func fetchCatalog(ctx context.Context, cfg CatalogConfig) (CatalogData, error) {

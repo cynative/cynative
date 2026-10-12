@@ -699,3 +699,46 @@ func TestParseCatalogData(t *testing.T) {
 		t.Error("parseCatalogData(bad) = nil error, want error")
 	}
 }
+
+func TestCatalogPeekSnapshot(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nothing loaded", func(t *testing.T) {
+		t.Parallel()
+		c := newCatalog(func(context.Context) (CatalogData, error) {
+			t.Error("fetch called")
+
+			return CatalogData{}, nil
+		})
+		if snap := c.PeekSnapshot(); snap != nil {
+			t.Fatalf("PeekSnapshot = %v, want nil", snap)
+		}
+	})
+
+	t.Run("loaded data is served without the fetch", func(t *testing.T) {
+		t.Parallel()
+		data := gateCheckData()
+		c := newCatalog(func(context.Context) (CatalogData, error) {
+			t.Error("fetch called")
+
+			return CatalogData{}, errors.New("unreachable")
+		})
+		c.peek = func() *CatalogData { return &data }
+		snap := c.PeekSnapshot()
+		if snap == nil {
+			t.Fatal("PeekSnapshot = nil, want a snapshot")
+		}
+		types, err := snap.ResourceTypes(t.Context(), "microsoft.compute")
+		if err != nil || len(types) != 2 {
+			t.Fatalf("ResourceTypes = %v, %v", types, err)
+		}
+		verbs, _, err := snap.LookupOperation(t.Context(), "Microsoft.Compute", "virtualMachines", "read")
+		if err != nil || len(verbs) != 1 || verbs[0] != "read" {
+			t.Fatalf("LookupOperation = %v, %v", verbs, err)
+		}
+		got, err := snap.ResolveCloud(t.Context(), ParsedHost{Host: "management.azure.com"})
+		if err != nil || got.Cloud != "AzureCloud" {
+			t.Fatalf("ResolveCloud = %+v, %v", got, err)
+		}
+	})
+}

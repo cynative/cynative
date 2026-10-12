@@ -115,10 +115,10 @@ func ContextReason(ctx context.Context) string {
 	return "the lookup was interrupted"
 }
 
-// finish is the one exit of every rendered reference: it adds what the lookup can tell about the gate's verdict
-// and returns the answer.
-func (d *Docs) finish(_ context.Context, ref *apiref.Reference) apiref.Result {
-	ref.Limitations = append(ref.Limitations, gateNotLoaded)
+// finish is the one exit of every rendered reference: it runs the gate check and answers it. OutcomeOf runs after
+// the check, so a gate gap makes the result incomplete.
+func (d *Docs) finish(ctx context.Context, ref *apiref.Reference) apiref.Result {
+	applyGateCheck(ctx, d.gate, ref)
 
 	return apiref.Result{Outcome: apiref.OutcomeOf(ref), Reference: ref}
 }

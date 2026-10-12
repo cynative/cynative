@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,6 +51,9 @@ func TestCatalogShellFetchAndProbe(t *testing.T) {
 		BaseURL:      srv.URL,
 	})
 
+	if snap := cat.PeekSnapshot(); snap != nil {
+		t.Fatalf("PeekSnapshot before any load = %v, want nil", snap)
+	}
 	got, err := cat.ResolveCloud(context.Background(), azurehardening.ParsedHost{Host: "management.azure.com"})
 	if err != nil || got.Cloud != "AzureCloud" {
 		t.Fatalf("ResolveCloud = %+v err=%v", got, err)
@@ -58,6 +62,13 @@ func TestCatalogShellFetchAndProbe(t *testing.T) {
 	_, err = cat.ResolveCloud(context.Background(), azurehardening.ParsedHost{Host: "management.azure.com"})
 	if err != nil {
 		t.Fatalf("second ResolveCloud: %v", err)
+	}
+	snap := cat.PeekSnapshot()
+	if snap == nil {
+		t.Fatal("PeekSnapshot after a load = nil")
+	}
+	if _, err = snap.ResourceTypes(context.Background(), "Microsoft.Compute"); err != nil {
+		t.Fatalf("snapshot ResourceTypes: %v", err)
 	}
 	if hits != 1 {
 		t.Errorf("/metadata/endpoints fetched %d times, want 1 (cache miss + reuse)", hits)
@@ -302,5 +313,66 @@ func TestCatalogShellRejectsCrossCloudCache(t *testing.T) {
 	}
 	if fetches == 0 {
 		t.Error("expected a fresh fetch after rejecting the cross-cloud cache (validate-in-Parse)")
+	}
+}
+
+// TestCatalogShellPeekDuringLoad pins that a peek started while the gate's own load is in flight starts no second
+// fetch and mints no token: it reads that load's result, and classifying against the snapshot fetches nothing.
+// Peek shares the cache's lock, so the peek either waits for the load or runs after it; both must leave one load.
+func TestCatalogShellPeekDuringLoad(t *testing.T) {
+	t.Parallel()
+	var endpointHits, opsHits, bearerCalls atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metadata/endpoints", func(w http.ResponseWriter, _ *http.Request) {
+		if endpointHits.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		_, _ = w.Write([]byte(armEndpointsBody("management.azure.com")))
+	})
+	mux.HandleFunc("/providers/Microsoft.Authorization/providerOperations",
+		func(w http.ResponseWriter, _ *http.Request) {
+			opsHits.Add(1)
+			_, _ = w.Write([]byte(`{"value":[{"name":"Microsoft.Compute","resourceTypes":[` +
+				`{"name":"virtualMachines","operations":[` +
+				`{"name":"Microsoft.Compute/virtualMachines/read","isDataAction":false}]}]}]}`))
+		})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
+		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
+		HTTPClient:   srv.Client(),
+		MetadataURLs: map[string]string{"AzureCloud": srv.URL + "/metadata/endpoints"},
+		BaseURL:      srv.URL,
+		BearerFunc: func(context.Context) (string, error) {
+			bearerCalls.Add(1)
+
+			return "token", nil
+		},
+	})
+	loaded := make(chan error, 1)
+	go func() {
+		_, err := cat.ResourceTypes(context.Background(), "Microsoft.Compute")
+		loaded <- err
+	}()
+	<-entered
+	peeked := make(chan azurehardening.Catalog, 1)
+	go func() { peeked <- cat.PeekSnapshot() }()
+	close(release)
+	if err := <-loaded; err != nil {
+		t.Fatalf("gate load: %v", err)
+	}
+	snap := <-peeked
+	if snap == nil {
+		t.Fatal("PeekSnapshot during a load = nil, want the load's result")
+	}
+	if _, err := snap.ResourceTypes(context.Background(), "Microsoft.Compute"); err != nil {
+		t.Fatalf("snapshot ResourceTypes: %v", err)
+	}
+	if e, o, b := endpointHits.Load(), opsHits.Load(), bearerCalls.Load(); e != 1 || o != 1 || b != 1 {
+		t.Fatalf("endpoints %d, providerOperations %d, bearer %d; want 1 each (the gate's one load)", e, o, b)
 	}
 }
