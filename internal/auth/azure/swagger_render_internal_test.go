@@ -672,3 +672,20 @@ func TestRenderOperation_MultiValueEnumLimitation(t *testing.T) {
 		t.Errorf("expected enum-listing with overflow, got %q", ref.Limitations)
 	}
 }
+
+// TestRenderOperation_EmptyGreedyOnlyForParentPaths pins that the empty-segment limitation goes to a mid-path
+// greedy label holding a parent path, never to another mid-path greedy label.
+func TestRenderOperation_EmptyGreedyOnlyForParentPaths(t *testing.T) {
+	t.Parallel()
+	for name, want := range map[string]bool{"parentResourcePath": true, "resourceType": false} {
+		key := "/subscriptions/{subscriptionId}/providers/Microsoft.Test/{" + name + "}/things"
+		p := `{"name":"` + name + `","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true}`
+		ref := renderOne(t, "2024-01-01", `"paths":`+op(key, "get", "", pSub, pVersion, p), "GET", key, false)
+		if !strings.Contains(ref.PathTemplate, "{"+name+"+}") {
+			t.Fatalf("%s: path = %q, want a greedy label", name, ref.PathTemplate)
+		}
+		if got := hasLimitation(ref, "leave no empty segment (//) when "+name+" is empty"); got != want {
+			t.Errorf("%s mid-path: empty-segment limitation = %v, want %v (%q)", name, got, want, ref.Limitations)
+		}
+	}
+}

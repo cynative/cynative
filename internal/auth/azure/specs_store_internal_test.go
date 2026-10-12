@@ -892,3 +892,50 @@ func TestSpecStore_ReadSummaryBounds(t *testing.T) {
 		t.Fatalf("a record copied from blob %s was served for blob %s", blob, other)
 	}
 }
+
+// TestSpecStore_ScansOnlyPastTheCap pins the running total: the first write scans the files dir to start it, a write
+// that keeps the total under the cap scans nothing, and the write that passes the cap scans and evicts the least
+// recently used file.
+func TestSpecStore_ScansOnlyPastTheCap(t *testing.T) {
+	t.Parallel()
+	srv := newRawServer()
+	s, _ := newTestStore(t, srv, nil)
+	var scans atomic.Int32
+	s.readDir = func(name string) ([]os.DirEntry, error) {
+		scans.Add(1)
+
+		return os.ReadDir(name)
+	}
+	s.maxCache = int64(len(computeNew) + len(computeOld) + len(diskNew) - 1)
+	read := func(p string) {
+		t.Helper()
+		if _, err := s.File(t.Context(), testSHA, fileOf(p)); err != nil {
+			t.Fatalf("File %s: %v", p, err)
+		}
+	}
+	read(computeNew)
+	if n := scans.Load(); n != 1 {
+		t.Fatalf("the first write scanned %d times, want 1", n)
+	}
+	read(computeOld)
+	if n := scans.Load(); n != 1 {
+		t.Fatalf("a write under the cap scanned: %d scans, want 1", n)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(s.filesDir, fakeBlob(computeOld).String()+blobSuffix), old, old); err != nil {
+		t.Fatal(err)
+	}
+	read(diskNew)
+	if n := scans.Load(); n != 2 {
+		t.Fatalf("the write past the cap scanned %d times in all, want 2", n)
+	}
+	for p, want := range map[string]bool{computeNew: true, computeOld: false, diskNew: true} {
+		_, err := os.Stat(filepath.Join(s.filesDir, fakeBlob(p).String()+blobSuffix))
+		if (err == nil) != want {
+			t.Errorf("%s kept = %v, want %v", p, err == nil, want)
+		}
+	}
+	if s.cacheSize != int64(len(computeNew)+len(diskNew)) {
+		t.Errorf("the total after eviction is %d, want %d", s.cacheSize, len(computeNew)+len(diskNew))
+	}
+}

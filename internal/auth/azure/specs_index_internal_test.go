@@ -143,6 +143,8 @@ func TestRefTarget(t *testing.T) {
 	for _, p := range []string{
 		"specification/test/resource-manager/Microsoft.Test/stable/2024-01-01/things.json",
 		"specification/common-types/resource-management/v5/types.json",
+		"specification/synapse/common/v1/types.json",
+		"specification/synapse/common/types.json",
 	} {
 		if !refTarget(p) {
 			t.Errorf("refTarget(%q) = false, want true", p)
@@ -152,9 +154,15 @@ func TestRefTarget(t *testing.T) {
 		"other/svc/resource-manager/Microsoft.X/stable/2024-07-01/a.json",
 		"dev/common-types/resource-management/v1/types.json",
 		"README.md",
+		"specification/synapse/common/v1/examples/x.json",
+		"specification/synapse/common/v1/types.yaml",
+		"specification/synapse/common/v 1/types.json",
+		"specification/synapse/data-plane/common/types.json",
+		"specification/synapse/commons/v1/types.json",
+		"specification/common/v1/types.json",
 	} {
 		if refTarget(p) {
-			t.Errorf("refTarget(%q) = true, want false (outside specification/)", p)
+			t.Errorf("refTarget(%q) = true, want false", p)
 		}
 	}
 }

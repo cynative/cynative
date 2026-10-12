@@ -18,6 +18,7 @@ const (
 	specsRoot         = "specification"
 	resourceManager   = "resource-manager"
 	commonTypesDir    = "common-types"
+	serviceCommonDir  = "common"
 	examplesDir       = "examples"
 	jsonSuffix        = ".json"
 	adminSuffix       = ".Admin"
@@ -274,14 +275,15 @@ func (of opFile) selector() string {
 }
 
 // refTarget reports whether a $ref may resolve to p: a JSON file outside examples, under a service's
-// resource-manager tree or under common-types, with every segment in the ref-segment grammar.
+// resource-manager tree, under a service's common tree (Synapse's resource-manager files ref
+// specification/synapse/common/v1/types.json) or under common-types, with every segment in the ref-segment grammar.
 func refTarget(p string) bool {
 	segs := strings.Split(p, "/")
 	if len(segs) < refMinSegs || segs[0] != specsRoot || !strings.HasSuffix(p, jsonSuffix) ||
 		slices.Contains(segs, examplesDir) {
 		return false
 	}
-	if segs[1] != commonTypesDir && segs[2] != resourceManager {
+	if segs[1] != commonTypesDir && segs[2] != resourceManager && segs[2] != serviceCommonDir {
 		return false
 	}
 	for _, s := range segs {

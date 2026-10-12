@@ -35,7 +35,9 @@ const (
 	inBody               = "body"
 	inFormData           = "formData"
 	typeArray            = "array"
-	typeString           = "string"
+	// parentPathSuffix ends the name of a greedy label that holds a parent path, which can be empty.
+	parentPathSuffix = "Path"
+	typeString       = "string"
 )
 
 // The reference text the reader adds.
@@ -502,7 +504,9 @@ func (r *renderer) renderService() {
 		switch {
 		case i == 0:
 			r.ref.Limitations = append(r.ref.Limitations, fmt.Sprintf(refLeadingGreedy, name))
-		case i < len(segs)-1:
+		// A parent path ({parentResourcePath}) is empty for a top-level resource; a mid-path greedy label of another
+		// name does not get the limitation.
+		case i < len(segs)-1 && strings.HasSuffix(name, parentPathSuffix):
 			r.ref.Limitations = append(r.ref.Limitations, fmt.Sprintf(refEmptyGreedy, name))
 		}
 	}

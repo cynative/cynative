@@ -10,10 +10,12 @@ import (
 //
 //nolint:gocognit // Fuzz targets check many properties.
 func FuzzBuildIndex(f *testing.F) {
-	f.Add(computeNew)   // new layout operation file
-	f.Add(webClassic)   // classic layout operation file
-	f.Add(commonTypesP) // common-types ref target only
-	f.Add(localCommon)  // service-local ref target only
+	f.Add(computeNew)                                   // new layout operation file
+	f.Add(webClassic)                                   // classic layout operation file
+	f.Add(commonTypesP)                                 // common-types ref target only
+	f.Add(localCommon)                                  // service-local ref target only
+	f.Add("specification/synapse/common/v1/types.json") // a service's common tree, outside resource-manager
+	f.Add("specification/synapse/common/v1/examples/x.json")
 	f.Add("specification/compute/resource-manager/Microsoft.Compute/Compute/stable/2024-07-01/examples/x.json")
 	f.Add("specification/compute/resource-manager/Microsoft.Compute.Admin/Compute/stable/2024-07-01/c.json")
 	f.Add("specification/compute/resource-manager/compute/Compute/stable/2024-07-01/c.json")
