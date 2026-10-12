@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -31,8 +32,11 @@ const (
 	maxTreeDepth = 32
 	// maxPathBytes bounds a listed path.
 	maxPathBytes = 1024
-	// deltaHeadBytes holds the two size varints at the start of a delta, at most ten bytes each.
-	deltaHeadBytes = 20
+	// maxListingBytes bounds the sum of path bytes plus 40 for every entry (recorded or skipped): a small pack can
+	// expand to about 1 GB via shared trees without it (the real listing is 61.5 MiB over 363,140 entries at main).
+	maxListingBytes = 256 << 20
+	// deltaHeadBytes holds the two size varints at the start of a delta, at most nine bytes each.
+	deltaHeadBytes = 18
 	// varintPayload, varintMore and varintStep decode git's delta size varints: 7 bits a byte, low bits first.
 	varintPayload = 0x7f
 	varintMore    = 0x80
@@ -66,7 +70,7 @@ type packLimits struct {
 
 // walkLimits bounds the tree walk.
 type walkLimits struct {
-	entries, depth, path int
+	entries, depth, path, listingBytes int
 }
 
 // FetchListing lists the specs tree at the commit repoURL's main points at, with one deadline over the fetch, the
@@ -227,14 +231,21 @@ func (w *headWriter) Write(p []byte) (int, error) {
 
 // walkPack parses a preflighted pack into memory and lists the tree of commit sha within the production bounds.
 func walkPack(ctx context.Context, pack []byte, sha string) (*Listing, error) {
-	return walkWith(ctx, pack, sha, walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes})
+	return walkWith(
+		ctx, pack, sha,
+		walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes},
+	)
 }
 
 // walkWith parses pack into memory storage and walks the commit's tree with lim.
 func walkWith(ctx context.Context, pack []byte, sha string, lim walkLimits) (*Listing, error) {
 	st := memory.NewStorage()
-	// NewParserWithStorage fails only for an unseekable source with no storage; a bytes.Reader seeks.
-	p, _ := packfile.NewParserWithStorage(packfile.NewScanner(bytes.NewReader(pack)), st, ctxObserver{ctx: ctx})
+	// NewParserWithStorage fails only for an unseekable source with no storage; the context-checking wrapper below
+	// makes reads return ctx.Err() once the context is done, and it still seeks. The observer checks the context
+	// during delta resolution; the wrapper checks it during the index phase before resolution.
+	p, _ := packfile.NewParserWithStorage(
+		packfile.NewScanner(&ctxReader{ctx: ctx, r: bytes.NewReader(pack)}), st, ctxObserver{ctx: ctx},
+	)
 	if _, err := p.Parse(); err != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			return nil, cerr
@@ -250,9 +261,25 @@ func walkWith(ctx context.Context, pack []byte, sha string, lim walkLimits) (*Li
 	return walkTrees(ctx, st, commit.TreeHash, sha, lim)
 }
 
-// ctxObserver stops a pack parse once ctx is done: go-git's parser calls it for every object it indexes and every
-// object it resolves (packfile/parser.go:144-162) and stops at the first error it returns.
-// It holds its context because the observer interface passes none.
+// ctxReader wraps an [io.ReadSeeker] and returns the context's error once it is done.
+type ctxReader struct {
+	ctx context.Context
+	r   io.ReadSeeker
+}
+
+func (c *ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	return c.r.Read(p)
+}
+
+func (c *ctxReader) Seek(offset int64, whence int) (int64, error) { return c.r.Seek(offset, whence) }
+
+// ctxObserver stops a pack parse once ctx is done: go-git's parser calls it during delta resolution
+// (packfile/parser.go:371, :375) and stops at the first error it returns. The ctxReader wrapper checks the context
+// during the index phase before resolution. It holds its context because the observer interface passes none.
 type ctxObserver struct{ ctx context.Context }
 
 func (o ctxObserver) OnHeader(uint32) error { return nil }
@@ -282,6 +309,7 @@ func walkTrees(
 	l := &Listing{SHA: sha}
 	stack := []walkFrame{{hash: root}}
 	seen := 0
+	listingBytes := 0
 	for len(stack) > 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -295,9 +323,14 @@ func walkTrees(
 		for _, e := range tree.Entries {
 			seen++
 			p := joinTreePath(f.prefix, e.Name)
-			if seen > lim.entries || len(p) > lim.path || (e.Mode == filemode.Dir && f.depth+1 > lim.depth) {
-				return nil, fmt.Errorf("%w: tree past %d entries, a path past %d bytes or depth past %d at %q",
-					ErrSpecsRejected, lim.entries, lim.path, lim.depth, p)
+			const blobIDBytes = 40
+			listingBytes += len(p) + blobIDBytes
+			if seen > lim.entries || len(p) > lim.path || (e.Mode == filemode.Dir && f.depth+1 > lim.depth) ||
+				listingBytes > lim.listingBytes {
+				return nil, fmt.Errorf(
+					"%w: tree past %d entries, %d listing bytes, a path past %d bytes or depth past %d at %q",
+					ErrSpecsRejected, lim.entries, lim.listingBytes, lim.path, lim.depth, p,
+				)
 			}
 			switch e.Mode { //nolint:exhaustive // The default counts symlinks, submodules and other modes as skipped.
 			case filemode.Dir:

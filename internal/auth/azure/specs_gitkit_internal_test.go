@@ -192,8 +192,9 @@ type gitServer struct {
 	location              string // when set, info/refs answers 302 to it
 	onUpload              func() // when set, runs as the upload-pack request arrives
 
-	mu      sync.Mutex
-	gotBody []byte
+	mu       sync.Mutex
+	gotBody  []byte
+	reqCount int
 }
 
 func newGitServer(adv, resp []byte) *gitServer {
@@ -201,6 +202,9 @@ func newGitServer(adv, resp []byte) *gitServer {
 }
 
 func (g *gitServer) RoundTrip(r *http.Request) (*http.Response, error) {
+	g.mu.Lock()
+	g.reqCount++
+	g.mu.Unlock()
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
@@ -243,6 +247,13 @@ func (g *gitServer) uploadBody() string {
 	defer g.mu.Unlock()
 
 	return string(g.gotBody)
+}
+
+func (g *gitServer) requests() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	return g.reqCount
 }
 
 func fakeResponse(r *http.Request, status int, body []byte) *http.Response {

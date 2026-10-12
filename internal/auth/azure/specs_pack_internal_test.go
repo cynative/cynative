@@ -133,34 +133,47 @@ func TestPreflightPack_Refusals(t *testing.T) {
 	trees := firstOffset(t, good, plumbing.TreeObject)
 	delta := firstOffset(t, good, plumbing.OFSDeltaObject)
 	cases := map[string]struct {
-		pack func(t *testing.T) []byte
-		lim  func(packLimits) packLimits
+		pack   func(t *testing.T) []byte
+		lim    func(packLimits) packLimits
+		substr string
 	}{
-		"empty": {func(*testing.T) []byte { return nil }, nil},
+		"empty": {func(*testing.T) []byte { return nil }, nil, "pack header"},
 		"too many": {
 			func(*testing.T) []byte { return good },
 			func(l packLimits) packLimits { l.objects = 2; return l },
+			"holds",
 		},
-		"header cut":     {func(*testing.T) []byte { return good[:trees+1] }, nil},
-		"delta data cut": {func(*testing.T) []byte { return good[:delta+6] }, nil},
+		"header cut":     {func(*testing.T) []byte { return good[:trees+1] }, nil, "object header"},
+		"delta data cut": {func(*testing.T) []byte { return good[:delta+6] }, nil, "pack delta"},
 		"object too big": {
 			func(*testing.T) []byte { return good },
 			func(l packLimits) packLimits { l.object = 64; return l },
+			"pack object of",
 		},
 		"total too big": {
 			func(*testing.T) []byte { return good },
 			func(l packLimits) packLimits { l.total = 4096; return l },
+			"inflate past",
 		},
-		"blob": {withBlob, nil},
+		"blob": {withBlob, nil, "not admitted"},
 		"ref delta": {
 			func(t *testing.T) []byte { t.Helper(); rr, _ := deltaRepo(t); return rr.pack(10, true) },
 			nil,
+			"not admitted",
 		},
-		"no commit":      {noCommit, nil},
-		"two commits":    {twoCommits, nil},
-		"no checksum":    {func(*testing.T) []byte { return good[:len(good)-20] }, nil},
-		"wrong checksum": {func(*testing.T) []byte { b := slices.Clone(good); b[len(b)-1] ^= 1; return b }, nil},
-		"trailing bytes": {func(*testing.T) []byte { return append(slices.Clone(good), 'x') }, nil},
+		"no commit":   {noCommit, nil, "holds 0 commits"},
+		"two commits": {twoCommits, nil, "holds 2 commits"},
+		"no checksum": {func(*testing.T) []byte { return good[:len(good)-20] }, nil, "checksum"},
+		"wrong checksum": {
+			func(*testing.T) []byte { b := slices.Clone(good); b[len(b)-1] ^= 1; return b },
+			nil,
+			"checksum",
+		},
+		"trailing bytes": {
+			func(*testing.T) []byte { return append(slices.Clone(good), 'x') },
+			nil,
+			"follow the pack checksum",
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -169,8 +182,9 @@ func TestPreflightPack_Refusals(t *testing.T) {
 			if tc.lim != nil {
 				lim = tc.lim(lim)
 			}
-			if err := preflightWith(t.Context(), tc.pack(t), lim); !errors.Is(err, ErrSpecsRejected) {
-				t.Fatalf("err = %v, want ErrSpecsRejected", err)
+			err := preflightWith(t.Context(), tc.pack(t), lim)
+			if !errors.Is(err, ErrSpecsRejected) || !strings.Contains(err.Error(), tc.substr) {
+				t.Fatalf("err = %v, want ErrSpecsRejected with %q", err, tc.substr)
 			}
 		})
 	}
@@ -380,6 +394,8 @@ func TestWalkPack_ListsRegularFilesWithTheirBlobIDs(t *testing.T) {
 }
 
 // TestWalkPack_Refusals pins every walk failure.
+//
+//nolint:gocognit // The 8 refusal cases share one runner.
 func TestWalkPack_Refusals(t *testing.T) {
 	t.Parallel()
 	deep := func(t *testing.T, depth int, name string) ([]byte, string) {
@@ -407,39 +423,41 @@ func TestWalkPack_Refusals(t *testing.T) {
 		return pack, c.String()
 	}
 	cases := map[string]struct {
-		build func(t *testing.T) ([]byte, string)
-		lim   func(walkLimits) walkLimits
-		ctx   func(t *testing.T) context.Context
+		build  func(t *testing.T) ([]byte, string)
+		lim    func(walkLimits) walkLimits
+		ctx    func(t *testing.T) context.Context
+		substr string
 	}{
 		"not a pack": {
 			func(*testing.T) ([]byte, string) { return []byte("PACKjunk"), strings.Repeat("a", 40) },
 			nil,
 			nil,
+			"parse pack",
 		},
 		"commit not in pack": {func(t *testing.T) ([]byte, string) {
 			t.Helper()
 			_, pack := smallRepo(t)
 
 			return pack, strings.Repeat("b", 40)
-		}, nil, nil},
+		}, nil, nil, "commit"},
 		"missing subtree": {func(t *testing.T) ([]byte, string) {
 			t.Helper()
 
 			return dangling(t, func(*testRepo) plumbing.Hash { return fakeBlob("absent") })
-		}, nil, nil},
+		}, nil, nil, "tree"},
 		"subtree is a commit": {func(t *testing.T) ([]byte, string) {
 			t.Helper()
 
 			return dangling(t, func(r *testRepo) plumbing.Hash { return r.commit(r.files("x.json")) })
-		}, nil, nil},
-		"too many entries": {small, func(l walkLimits) walkLimits { l.entries = 3; return l }, nil},
+		}, nil, nil, "tree"},
+		"too many entries": {small, func(l walkLimits) walkLimits { l.entries = 3; return l }, nil, "past"},
 		"too deep": {
 			func(t *testing.T) ([]byte, string) { t.Helper(); return deep(t, 5, "d") },
-			func(l walkLimits) walkLimits { l.depth = 4; return l }, nil,
+			func(l walkLimits) walkLimits { l.depth = 4; return l }, nil, "depth past",
 		},
 		"path too long": {
 			func(t *testing.T) ([]byte, string) { t.Helper(); return deep(t, 3, strings.Repeat("p", 20)) },
-			func(l walkLimits) walkLimits { l.path = 50; return l }, nil,
+			func(l walkLimits) walkLimits { l.path = 50; return l }, nil, "path past",
 		},
 		"cancelled": {small, nil, func(t *testing.T) context.Context {
 			t.Helper()
@@ -447,13 +465,18 @@ func TestWalkPack_Refusals(t *testing.T) {
 			cancel()
 
 			return ctx
-		}},
+		}, ""},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			pack, sha := tc.build(t)
-			lim := walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes}
+			lim := walkLimits{
+				entries:      maxTreeEntries,
+				depth:        maxTreeDepth,
+				path:         maxPathBytes,
+				listingBytes: maxListingBytes,
+			}
 			if tc.lim != nil {
 				lim = tc.lim(lim)
 			}
@@ -462,11 +485,14 @@ func TestWalkPack_Refusals(t *testing.T) {
 				ctx = tc.ctx(t)
 			}
 			_, err := walkWith(ctx, pack, sha, lim)
-			if !errors.Is(err, ErrSpecsRejected) && !errors.Is(err, context.Canceled) {
-				t.Fatalf("err = %v, want ErrSpecsRejected or context.Canceled", err)
-			}
-			if name == "cancelled" && !errors.Is(err, context.Canceled) {
-				t.Fatalf("err = %v, want context.Canceled", err)
+			if name == "cancelled" {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("err = %v, want context.Canceled", err)
+				}
+			} else {
+				if !errors.Is(err, ErrSpecsRejected) || !strings.Contains(err.Error(), tc.substr) {
+					t.Fatalf("err = %v, want ErrSpecsRejected with %q", err, tc.substr)
+				}
 			}
 		})
 	}
@@ -496,32 +522,36 @@ func TestFetchListing_Failures(t *testing.T) {
 
 		return c, r.pack(10, true)
 	}
-	cases := map[string]func(t *testing.T) *gitServer{
-		"fetch": func(t *testing.T) *gitServer {
+	cases := map[string]struct {
+		srv    func(t *testing.T) *gitServer
+		substr string
+	}{
+		"fetch": {func(t *testing.T) *gitServer {
 			t.Helper()
 			s := newGitServer(advertisement(t, commit, fullCaps()...), uploadResponse(t, commit, pack))
 			s.advErr = errTransport
 
 			return s
-		},
-		"preflight": func(t *testing.T) *gitServer {
+		}, "transport"},
+		"preflight": {func(t *testing.T) *gitServer {
 			t.Helper()
 			c, p := refDeltas(t)
 
 			return newGitServer(advertisement(t, c, fullCaps()...), uploadResponse(t, c, p))
-		},
-		"walk": func(t *testing.T) *gitServer {
+		}, "not admitted"},
+		"walk": {func(t *testing.T) *gitServer {
 			t.Helper()
 			other := plumbing.NewHash(strings.Repeat("c", 40))
 
 			return newGitServer(advertisement(t, other, fullCaps()...), uploadResponse(t, other, pack))
-		},
+		}, "commit"},
 	}
-	for name, srv := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := FetchListing(t.Context(), clientFor(srv(t)), testRepoURL); err == nil {
-				t.Fatal("FetchListing succeeded")
+			_, err := FetchListing(t.Context(), clientFor(tc.srv(t)), testRepoURL)
+			if err == nil || !strings.Contains(err.Error(), tc.substr) {
+				t.Fatalf("err = %v, want error containing %q", err, tc.substr)
 			}
 		})
 	}
@@ -532,7 +562,6 @@ func TestFetchListing_Failures(t *testing.T) {
 func TestFetchListing_RefusesNonHTTPSAndUserinfo(t *testing.T) {
 	t.Parallel()
 	commit, pack := smallRepo(t)
-	srv := newGitServer(advertisement(t, commit, fullCaps()...), uploadResponse(t, commit, pack))
 	cases := map[string]string{
 		"http":      "http://git.example/repo",
 		"userinfo":  "https://user:pass@git.example/repo",
@@ -541,13 +570,212 @@ func TestFetchListing_RefusesNonHTTPSAndUserinfo(t *testing.T) {
 	for name, url := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			srv := newGitServer(advertisement(t, commit, fullCaps()...), uploadResponse(t, commit, pack))
 			_, err := FetchListing(t.Context(), clientFor(srv), url)
 			if !errors.Is(err, ErrSpecsRejected) {
 				t.Fatalf("err = %v, want ErrSpecsRejected", err)
 			}
-			if srv.uploadBody() != "" {
-				t.Fatal("fetchPack was called despite URL refusal")
+			if srv.requests() != 0 {
+				t.Fatalf("sent %d requests despite URL refusal", srv.requests())
 			}
 		})
+	}
+}
+
+// TestBounds_EdgePairs pins that every bound accepts exactly at the limit and refuses at limit+1.
+//
+//nolint:gocognit // The 8 bounds share one test structure.
+func TestBounds_EdgePairs(t *testing.T) {
+	t.Parallel()
+	t.Run("object count", func(t *testing.T) {
+		t.Parallel()
+		r := newTestRepo(t)
+		// Build exactly 2 objects: 1 commit + 1 tree (blobs aren't stored in pack, just referenced).
+		root := r.tree(object.TreeEntry{Name: "a.json", Mode: filemode.Regular, Hash: fakeBlob("a.json")})
+		r.commit(root)
+		pack := r.pack(0, false)
+		lim := testPackLimits()
+		lim.objects = 2
+		if err := preflightWith(t.Context(), pack, lim); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		lim.objects = 1
+		if err := preflightWith(t.Context(), pack, lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("per-object size", func(t *testing.T) {
+		t.Parallel()
+		r := newTestRepo(t)
+		// Build a tree with many entries so it encodes to about 8 KB.
+		var es []object.TreeEntry
+		for i := range 200 {
+			es = append(
+				es,
+				object.TreeEntry{Name: fmt.Sprintf("f%03d.json", i), Mode: filemode.Regular, Hash: fakeBlob("x")},
+			)
+		}
+		r.commit(r.tree(es...))
+		pack := r.pack(0, false)
+		// Find the actual tree size from the pack.
+		sc := packfile.NewScanner(bytes.NewReader(pack))
+		_, n, _ := sc.Header()
+		var treeSize int64
+		for range n {
+			h, _ := sc.NextObjectHeader()
+			if h.Type == plumbing.TreeObject {
+				treeSize = h.Length
+				break
+			}
+		}
+		if treeSize == 0 {
+			t.Fatal("no tree in pack")
+		}
+		lim := testPackLimits()
+		lim.object = treeSize
+		if err := preflightWith(t.Context(), pack, lim); err != nil {
+			t.Fatalf("at limit (%d): %v", treeSize, err)
+		}
+		lim.object = treeSize - 1
+		if err := preflightWith(t.Context(), pack, lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("delta target", func(t *testing.T) {
+		t.Parallel()
+		limit := int64(1 << 20)
+		// Exactly at limit.
+		head := []byte{0x05, 0x80, 0x80, 0x40} // source 5, target 1048576
+		if _, err := admitDeltaTarget(head, limit); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		// One byte over.
+		head = []byte{0x05, 0x81, 0x80, 0x40} // target 1048577
+		if _, err := admitDeltaTarget(head, limit); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("total inflated", func(t *testing.T) {
+		t.Parallel()
+		// Build a pack with known sizes.
+		tree := rawObject(t, plumbing.TreeObject, 0, bytes.Repeat([]byte("x"), 10))
+		commit := rawObject(t, plumbing.CommitObject, 0, bytes.Repeat([]byte("y"), 10))
+		pack := rawPack(commit, tree)
+		const totalSize = 20
+		lim := testPackLimits()
+		lim.total = totalSize
+		if err := preflightWith(t.Context(), pack, lim); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		lim.total = totalSize - 1
+		if err := preflightWith(t.Context(), pack, lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("entries", func(t *testing.T) {
+		t.Parallel()
+		r := newTestRepo(t)
+		c := r.commit(r.files("a.json", "b.json"))
+		pack := r.pack(0, false)
+		const entryCount = 2
+		lim := walkLimits{entries: entryCount, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes}
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		lim.entries = entryCount - 1
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("depth", func(t *testing.T) {
+		t.Parallel()
+		r := newTestRepo(t)
+		h := r.tree(object.TreeEntry{Name: "f.json", Mode: filemode.Regular, Hash: fakeBlob("f")})
+		for range 3 {
+			h = r.tree(object.TreeEntry{Name: "d", Mode: filemode.Dir, Hash: h})
+		}
+		c := r.commit(h)
+		pack := r.pack(0, false)
+		const maxDepth = 3
+		lim := walkLimits{entries: maxTreeEntries, depth: maxDepth, path: maxPathBytes, listingBytes: maxListingBytes}
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		lim.depth = maxDepth - 1
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("path length", func(t *testing.T) {
+		t.Parallel()
+		r := newTestRepo(t)
+		// Use a simpler path to avoid hitting listingBytes first.
+		c := r.commit(r.files("a.json"))
+		pack := r.pack(0, false)
+		const pathLen = 6 // "a.json"
+		lim := walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: pathLen, listingBytes: maxListingBytes}
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		lim.path = pathLen - 1
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+	t.Run("listing bytes", func(t *testing.T) {
+		t.Parallel()
+		r := newTestRepo(t)
+		// Two entries: each adds len(path) + 40 bytes. "a.json" = 6, "b.json" = 6. Total = (6+40)*2 = 92.
+		c := r.commit(r.files("a.json", "b.json"))
+		pack := r.pack(0, false)
+		const listingBytes = 92
+		lim := walkLimits{entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: listingBytes}
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); err != nil {
+			t.Fatalf("at limit: %v", err)
+		}
+		lim.listingBytes = listingBytes - 1
+		if _, err := walkWith(t.Context(), pack, c.String(), lim); !errors.Is(err, ErrSpecsRejected) {
+			t.Fatalf("over limit: %v, want ErrSpecsRejected", err)
+		}
+	})
+}
+
+// TestWalkPack_SharedTreeExpansion pins that a small pack with one tree referenced from many parents trips the
+// listing bytes cap before the entry cap.
+func TestWalkPack_SharedTreeExpansion(t *testing.T) {
+	t.Parallel()
+	r := newTestRepo(t)
+	// One small subtree with one file.
+	sub := r.tree(object.TreeEntry{Name: "f.json", Mode: filemode.Regular, Hash: fakeBlob("f")})
+	// Reference it from many parents to expand the listing without hitting entry cap.
+	var parents []object.TreeEntry
+	for i := range 100 {
+		parents = append(parents, object.TreeEntry{Name: fmt.Sprintf("d%03d", i), Mode: filemode.Dir, Hash: sub})
+	}
+	c := r.commit(r.tree(parents...))
+	pack := r.pack(0, false)
+	// With 100 parents each with path "dNNN/f.json" (10 bytes), listing bytes = 100 * (10 + 40) = 5000.
+	// Set listing cap to 4999 (under the total) and entries cap to 200 (above the total of 101 entries).
+	lim := walkLimits{entries: 200, depth: maxTreeDepth, path: maxPathBytes, listingBytes: 4999}
+	_, err := walkWith(t.Context(), pack, c.String(), lim)
+	if !errors.Is(err, ErrSpecsRejected) || !strings.Contains(err.Error(), "listing bytes") {
+		t.Fatalf("err = %v, want ErrSpecsRejected with listing bytes", err)
+	}
+}
+
+// TestWalkWith_ContextCancelledDuringIndexing pins that cancelling the context during the pack index phase (before
+// delta resolution) stops the parse with [context.Canceled].
+func TestWalkWith_ContextCancelledDuringIndexing(t *testing.T) {
+	t.Parallel()
+	r, _ := deltaRepo(t)
+	commit := r.commit(r.files("a.json"))
+	pack := r.pack(0, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Cancel immediately; ctxReader will check during first Read.
+	_, err := walkWith(ctx, pack, commit.String(), walkLimits{
+		entries: maxTreeEntries, depth: maxTreeDepth, path: maxPathBytes, listingBytes: maxListingBytes,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }
