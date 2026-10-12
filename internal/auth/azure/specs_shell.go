@@ -7,8 +7,9 @@ import (
 	githttp "github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
-// openUploadSession opens a smart-HTTP upload-pack session on repoURL through client. go-git follows no redirect:
-// NoFollowRedirects refuses every hop, and client's own CheckRedirect still runs inside go-git's wrapper.
+// openUploadSession opens a smart-HTTP upload-pack session on repoURL through client. go-git follows no redirect.
+// Under NoFollowRedirects its wrapper refuses every hop itself (plumbing/transport/http/common.go:804-805) before
+// client's own CheckRedirect would run, so that hook guards only the raw-file fetches, which use client directly.
 func openUploadSession(client *http.Client, repoURL string) (transport.UploadPackSession, error) {
 	ep, err := transport.NewEndpoint(repoURL)
 	if err != nil {

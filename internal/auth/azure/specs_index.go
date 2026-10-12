@@ -37,10 +37,9 @@ var (
 	fileNamePattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}\.json$`)
 	// operationPattern admits every stable operationId of 2026-10-12 (117,672, the longest 96 bytes).
 	operationPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$`)
-	// refSegmentPattern admits any segment an operation file's path can hold: the longest file name is 180 bytes
-	// (bound by the selector check) and the longest namespace is 205 bytes (the selector check does not touch the
-	// namespace segment, so fileNamePattern's 205-byte limit applies), so no file the operation grammar admits
-	// is ever dropped as a ref target.
+	// refSegmentPattern admits every segment an operation file's path can hold, so BuildIndex never drops an
+	// operation file as a ref target. The longest file name is 180 bytes, bounded by the selector check. The
+	// namespace is not part of the selector; parseOpPath bounds it with this same pattern.
 	refSegmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,204}$`)
 	shaPattern        = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )

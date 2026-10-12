@@ -14,9 +14,9 @@ import (
 )
 
 // The bounds on $ref resolution in one lookup: distinct files loaded, the operation's own included, the length of
-// one chain of refs, and the bytes of parameter and schema objects decoded. The last bounds expansion: a file that
-// names one large definition many times stays inside the file bounds, and each ref target is decoded once, but the
-// inline objects a target holds are decoded again for every place that reaches them.
+// one chain of refs, and the bytes of parameter and schema objects decoded. The last one bounds expansion. A file
+// that names one large definition many times stays inside the file bounds, and each ref target is decoded only
+// once, but the inline objects inside a target are decoded again each time something reaches them.
 const (
 	maxRefFiles      = 16
 	maxRefDepth      = 8

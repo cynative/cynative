@@ -38,7 +38,8 @@ func requiredCapabilities() []capability.Capability {
 type bodyLimits struct{ ref, pack int64 }
 
 // fetchPack asks repoURL for the commit main points at, depth 1, with no blobs, and returns that commit's id and
-// the pack. It sends no credential and follows no redirect, and applies no deadline of its own.
+// the pack. It adds no credential of its own and follows no redirect. It sets no deadline either: the caller's
+// context bounds it.
 func fetchPack(ctx context.Context, client *http.Client, repoURL string) (string, []byte, error) {
 	return fetchPackWithin(ctx, client, repoURL, bodyLimits{ref: maxRefAdvertBytes, pack: maxPackBytes})
 }

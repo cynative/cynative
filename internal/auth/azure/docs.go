@@ -646,7 +646,7 @@ func (s *search) noSuchModel(m lookupModel) apiref.Result {
 }
 
 // failure answers a search a bound, the context or a load error stopped, naming the bound, the dirs read so far,
-// the nearest ids seen and that model can name one version.
+// the nearest ids seen while the context is live, and that model can name one version.
 func (s *search) failure(ctx context.Context, err error) apiref.Result {
 	var head string
 	switch {

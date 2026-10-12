@@ -417,9 +417,9 @@ func (s *summaryOnly) Summary(ctx context.Context, _ string, file IndexFile, b *
 	return Summarize(body)
 }
 
-// TestDocsReference_Finish pins the one exit with no catalog in memory, which says the gate check did not run.
-// It stays true after Task 9, whose check also answers gateNotLoaded for a nil snapshot. NewDocs keeping the
-// getter is pinned separately, without calling finish on a zero catalog the check could not read.
+// TestDocsReference_Finish pins the one exit with no catalog in memory, where the gate check answers gateNotLoaded
+// for a nil snapshot. NewDocs keeping the getter is pinned separately, without calling finish on a zero catalog the
+// check could not read.
 func TestDocsReference_Finish(t *testing.T) {
 	t.Parallel()
 	snap := &catalog{}
