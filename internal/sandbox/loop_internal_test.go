@@ -198,11 +198,15 @@ func TestLoop_TeardownUnderContention(t *testing.T) {
 	}
 }
 
-// TestLoop_InterruptDuringDrain covers loop's pb()-returns-error branch. The
-// awaited continuation spins, so the timeout interrupt fires while the loop is
-// inside resolve's microtask drain; resolve then returns an *InterruptedError
-// that propagates settle -> pb -> loop, which returns it. assemble still reports
-// the timeout (runCtx fired), but the loop's error return is what is exercised.
+// TestLoop_InterruptDuringDrain covers loop's pb()-returns-error branch: the
+// timeout interrupt lands while the loop is inside resolve's microtask drain,
+// resolve returns an *InterruptedError, and settle -> pb -> loop hands it back.
+// The deadline is held until the awaited continuation calls draining, a
+// synchronous host function, so it runs on the loop goroutine inside pb. The
+// loop is not at its select when the run context ends, so the runCtx.Done()
+// arm cannot win, and the spin that follows can end only by the interrupt
+// (#372). assemble still reports the timeout, because runCtx fired, so the
+// error the loop returns is asserted by TestLoop_PostbackErrorStopsLoop.
 func TestLoop_InterruptDuringDrain(t *testing.T) {
 	t.Parallel()
 
@@ -217,13 +221,77 @@ func TestLoop_InterruptDuringDrain(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	out, err := s.Run(context.Background(), `await trigger({}); while (true) {}`, 50*time.Millisecond)
+	// The run context ends when the script calls draining. The backstop keeps a
+	// script that never calls it from hanging the test; the check on drained
+	// below then fails it, since the backstop alone yields the same output.
+	var expire context.CancelFunc
+
+	s.withTimeout = func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		expire = cancel
+
+		return runCtx, cancel
+	}
+
+	drained := false
+
+	if serr := s.vm.Set("draining", func() {
+		drained = true
+
+		expire()
+	}); serr != nil {
+		t.Fatalf("register draining: %v", serr)
+	}
+
+	out, err := s.Run(context.Background(), `await trigger({}); draining(); while (true) {}`, 50*time.Millisecond)
 	if !errors.Is(err, ErrScript) {
 		t.Fatalf("Run: want ErrScript, got %v", err)
 	}
 
-	if !strings.Contains(out, "timed out") {
-		t.Errorf("out = %q, want timeout suffix", out)
+	if !drained {
+		t.Fatal("the run ended before the awaited continuation called draining")
+	}
+
+	if want := "\n[execution timed out after 50ms]"; out != want {
+		t.Errorf("out = %q, want %q", out, want)
+	}
+}
+
+// TestLoop_PostbackErrorStopsLoop pins what loop does when a postback fails:
+// it returns that error and applies no further postback, even with calls still
+// in flight. Run does not show it: the interrupt that makes a postback fail
+// comes from an ended run context, and assemble reports that ahead of the
+// loop's error. The run context here is never done, so the pending arm is the
+// only one that can be ready.
+func TestLoop_PostbackErrorStopsLoop(t *testing.T) {
+	t.Parallel()
+
+	s := &Sandbox{
+		runCtx:   context.Background(),
+		pending:  make(chan func() error, 2),
+		inFlight: 2,
+	}
+
+	later := false
+
+	s.pending <- func() error {
+		s.inFlight--
+
+		return errTest
+	}
+	s.pending <- func() error {
+		s.inFlight--
+		later = true
+
+		return nil
+	}
+
+	if err := s.loop(); !errors.Is(err, errTest) {
+		t.Fatalf("loop: want %v, got %v", errTest, err)
+	}
+
+	if later {
+		t.Error("loop applied a postback after one failed")
 	}
 }
 
