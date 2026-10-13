@@ -112,8 +112,8 @@ type Response struct {
 // Pagination describes how an operation pages its results.
 type Pagination struct {
 	Style       string `json:"style"`
-	InputToken  string `json:"input_token,omitempty"`
-	OutputToken string `json:"output_token,omitempty"`
+	InputToken  string `json:"token_param,omitempty"`
+	OutputToken string `json:"next_token_field,omitempty"`
 	Items       string `json:"items,omitempty"`
 	PageSize    string `json:"page_size,omitempty"`
 }
