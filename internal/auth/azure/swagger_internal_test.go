@@ -149,9 +149,19 @@ func TestRefPath(t *testing.T) {
 			t.Errorf("refPath(%q) = %q, %v, want %q", file, got, err, want)
 		}
 	}
-	// Empty file with from not in Index.Refs should fail.
+	// An empty file part names the referring file, which must be a ref target too.
 	if _, err := refPath("other/notarget.json", "", ix); !errors.Is(err, errRefConfined) {
-		t.Errorf("refPath from not in index error = %v, want errRefConfined", err)
+		t.Errorf("refPath from outside the trees error = %v, want errRefConfined", err)
+	}
+	if _, err := refPath(testOpFile, "", refIndex(commonFile)); !errors.Is(err, errUnindexed) ||
+		err.Error() != `the ref target is not in this commit's index: "`+testOpFile+`"` {
+		t.Errorf("refPath from an admitted file the index lacks error = %v, want errUnindexed", err)
+	}
+	// A path inside the admitted trees that the index lacks is missing from the commit, not outside the trees.
+	for _, file := range []string{"missing.json", "../../../../../../common-types/resource-management/v6/types.json"} {
+		if _, err := refPath(testOpFile, file, ix); !errors.Is(err, errUnindexed) || errors.Is(err, errRefConfined) {
+			t.Errorf("refPath(%q) error = %v, want errUnindexed", file, err)
+		}
 	}
 	for _, file := range []string{
 		"/specification/common-types/resource-management/v5/types.json",
@@ -163,10 +173,10 @@ func TestRefPath(t *testing.T) {
 		"../../../../../../../../../etc/passwd",
 		"../../../../../../other/svc/resource-manager/Microsoft.X/stable/2024-07-01/a.json",
 		"../../../../../../dev/common-types/resource-management/v1/types.json",
-		"missing.json",
 		"%zz",
 	} {
-		if _, err := refPath(testOpFile, file, ix); !errors.Is(err, errRefConfined) {
+		if _, err := refPath(testOpFile, file, ix); !errors.Is(err, errRefConfined) ||
+			!strings.HasPrefix(err.Error(), "the ref target is outside the spec trees the index admits: ") {
 			t.Errorf("refPath(%q) error = %v, want errRefConfined", file, err)
 		}
 	}
@@ -490,8 +500,8 @@ func TestRefResolverBody(t *testing.T) {
 	if err != nil || !shape.object {
 		t.Fatalf("body(VM) = %+v, %v", shape, err)
 	}
-	if got := fmt.Sprint(shape.required); got != "[properties location]" {
-		t.Errorf("required = %s, want [properties location]", got)
+	if got := fmt.Sprint(shape.required); got != "map[location:true properties:true]" {
+		t.Errorf("required = %s, want location and properties", got)
 	}
 	if shape.props["id"].Type != "string" || !shape.props["id"].ReadOnly {
 		t.Errorf("id = %+v, want the child's own read-only string", shape.props["id"])
@@ -526,7 +536,9 @@ func TestRefResolverBody(t *testing.T) {
 
 func TestRefGap(t *testing.T) {
 	t.Parallel()
-	for _, err := range []error{errRefConfined, errRefLimit, errRefKind, errRefMissing, errBadParam, errBadSchema} {
+	for _, err := range []error{
+		errRefConfined, errUnindexed, errRefLimit, errRefKind, errRefMissing, errBadParam, errBadSchema,
+	} {
 		if !refGap(fmt.Errorf("wrapped: %w", err)) {
 			t.Errorf("refGap(%v) = false", err)
 		}
@@ -547,11 +559,13 @@ func repeatedParents(n, size int) string {
 		`"type":"string","description":"` + strings.Repeat("d", size) + `"}}}}`
 }
 
-// TestRefResolverBody_RepeatedParentsAreBounded pins the decode bound: a body that names one definition a thousand
-// times, about 64 MiB of decoding from a file of 100 KB, stops at maxDecodedSchema with a gap error.
+// TestRefResolverBody_RepeatedParentsAreBounded pins the decode bound on the large-property fixture: one body merges
+// the repeated parent Big once, decoding its 64 KiB property once, and bodies that keep reaching Big through one
+// resolver, as the bodies of one lookup's candidates do, stop at maxDecodedSchema with a gap error.
 func TestRefResolverBody_RepeatedParentsAreBounded(t *testing.T) {
 	t.Parallel()
-	own, err := decodeSwagger([]byte(`{"definitions":` + repeatedParents(1000, 64<<10) + `}`))
+	defs := repeatedParents(1000, 64<<10)
+	own, err := decodeSwagger([]byte(`{"definitions":` + defs + `}`))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -562,12 +576,129 @@ func TestRefResolverBody_RepeatedParentsAreBounded(t *testing.T) {
 	if err = r.add(testOpFile, own); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	_, err = r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/VM"}`))
+	vm := json.RawMessage(`{"$ref":"#/definitions/VM"}`)
+	if _, err = r.body(t.Context(), testOpFile, vm); err != nil || r.decoded > 2*int64(len(defs)) {
+		t.Fatalf("one body of 1000 repeated parents: err = %v after %d bytes, want Big merged once", err, r.decoded)
+	}
+	for range 1000 {
+		if _, err = r.body(t.Context(), testOpFile, vm); err != nil {
+			break
+		}
+	}
 	if !errors.Is(err, errRefLimit) || !refGap(err) {
-		t.Fatalf("body of 1000 repeated parents: err = %v, want errRefLimit as a gap", err)
+		t.Fatalf("bodies reaching Big again: err = %v, want errRefLimit as a gap", err)
 	}
 	if r.decoded > r.maxDecoded+(64<<10)+64 {
 		t.Errorf("decoded %d bytes, want the stop within one object of %d", r.decoded, r.maxDecoded)
+	}
+}
+
+// requiredNames is a JSON array of n distinct required names, r0 to r<n-1>.
+func requiredNames(n int) string {
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fmt.Sprintf(`"r%d"`, i)
+	}
+
+	return "[" + strings.Join(names, ",") + "]"
+}
+
+// TestRefResolverBody_MergesEachNameOnce pins the merge's deduplication with 2,000 parts that each lead to a parent of
+// 2,000 required names: a repeated parent, distinct ref chains that end at one parent, distinct parents that share
+// their names, and a parent with properties too. Each body holds 2,000 names once and stays far inside the decode
+// bound, where merging every part's names would charge about a gigabyte.
+func TestRefResolverBody_MergesEachNameOnce(t *testing.T) {
+	t.Parallel()
+	const n = 2000
+	names := requiredNames(n)
+	repeat := func(part string) string { return strings.TrimSuffix(strings.Repeat(part+",", n), ",") }
+	chains, links := make([]string, n), make([]string, n)
+	for i := range n {
+		chains[i] = fmt.Sprintf(`{"$ref":"#/definitions/Q%d"}`, i)
+		links[i] = fmt.Sprintf(`"Q%d":{"$ref":"#/definitions/P"}`, i)
+	}
+	props := strings.NewReplacer("[", "{", "]", "}", `",`, `":{"type":"string"},`).Replace(names)
+	props = strings.TrimSuffix(props, `"}`) + `":{"type":"string"}}`
+	for name, tc := range map[string]struct {
+		defs  string
+		props int
+	}{
+		"repeated parent": {defs: `"VM":{"allOf":[` + repeat(`{"$ref":"#/definitions/P"}`) + `]},` +
+			`"P":{"required":` + names + `}`},
+		"ref chains to one parent": {defs: `"VM":{"allOf":[` + strings.Join(chains, ",") + `]},` +
+			strings.Join(links, ",") + `,"P":{"required":` + names + `}`},
+		"parents sharing names": {defs: `"VM":{"allOf":[` + repeat(`{"$ref":"#/definitions/P"},`+
+			`{"$ref":"#/definitions/P2"}`) + `]},"P":{"required":` + names + `},"P2":{"required":` + names + `}`},
+		"properties and required": {defs: `"VM":{"allOf":[` + repeat(`{"$ref":"#/definitions/P"}`) + `]},` +
+			`"P":{"required":` + names + `,"properties":` + props + `}`, props: n},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			doc := `{"definitions":{` + tc.defs + `}}`
+			own, err := decodeSwagger([]byte(doc))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+			if err = r.add(testOpFile, own); err != nil {
+				t.Fatalf("add: %v", err)
+			}
+			shape, err := r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/VM"}`))
+			if err != nil || len(shape.required) != n || len(shape.props) != tc.props {
+				t.Fatalf("body: %d required, %d properties, %v; want %d and %d", len(shape.required),
+					len(shape.props), err, n, tc.props)
+			}
+			// Two merges of the parent's names, one decode of the document's objects and one of each part.
+			if limit := int64(2*n*(len(`"r1999",`)+mergedNameCost) + 3*len(doc)); r.decoded > limit {
+				t.Errorf("charged %d bytes, want at most %d", r.decoded, limit)
+			}
+		})
+	}
+}
+
+// TestRefResolverBody_ChargesEveryMerge pins the merge charge: a memoized parent is decoded once, but each body that
+// merges it is charged its names, so bodies that keep reaching it through one resolver stop at the decode bound.
+func TestRefResolverBody_ChargesEveryMerge(t *testing.T) {
+	t.Parallel()
+	own, err := decodeSwagger([]byte(`{"definitions":{"P":{"type":"object","required":` + requiredNames(100) + `}}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	r.maxDecoded = 1 << 20
+	if err = r.add(testOpFile, own); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	merges := 0
+	for range 100 {
+		if _, err = r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/P"}`)); err != nil {
+			break
+		}
+		merges++
+	}
+	if !errors.Is(err, errRefLimit) || merges > int(r.maxDecoded)/(100*mergedNameCost) {
+		t.Fatalf("%d bodies merged before %v; want errRefLimit within %d", merges, err,
+			int(r.maxDecoded)/(100*mergedNameCost))
+	}
+}
+
+// TestRefResolverBody_ChecksTheContextBeforeAMerge pins the context check before a part's merge: a done context stops
+// a body whose only part has required names and no property, where no other check runs.
+func TestRefResolverBody_ChecksTheContextBeforeAMerge(t *testing.T) {
+	t.Parallel()
+	own, err := decodeSwagger([]byte(`{"definitions":{"P":{"type":"object","required":["a"]}}}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+	if err = r.add(testOpFile, own); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = r.body(ctx, testOpFile, json.RawMessage(`{"$ref":"#/definitions/P"}`))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("body with a done context: err = %v, want context.Canceled", err)
 	}
 }
 

@@ -30,6 +30,8 @@ const (
 	maxNearestEcho = 100
 	// maxNearest bounds how many nearest operation ids a reason lists.
 	maxNearest = 5
+	// nearestBatch is how many seen ids nearest goes through between two checks of the context.
+	nearestBatch = 256
 	// maxGroupEcho bounds how many searched group ids a not_found reason names before "and N more".
 	maxGroupEcho = 5
 	// selectorMinParts and selectorMaxParts bound "<kind>/<dir>" and "<kind>/<dir>/<file>" after the '@'.
@@ -51,8 +53,8 @@ const (
 	namespaceFormat  = "a namespace looks like Microsoft.Compute"
 	modelGuidance    = "; pass an api-version dir name such as 2024-07-01, or a choice from an ambiguous result"
 	operationFormat  = "; names are Swagger operationIds such as VirtualMachines_List"
-	operationGrammar = "; an operationId is letters, digits, '_', '.' and '-', at most 200, such as " +
-		"VirtualMachines_List"
+	operationGrammar = "; an operationId starts with a letter or digit, then has letters, digits, '_', '.' and " +
+		"'-', at most 200 in all, such as VirtualMachines_List"
 	olderGuidance = "; model can name an api-version dir outside the default search"
 	// gateNotLoaded says the lookup could not compare the template with the gate's catalog.
 	gateNotLoaded = "gate recognition not checked: the azure gate's catalog is not loaded yet"
@@ -72,12 +74,14 @@ type Docs struct {
 	endpoint string
 	gate     func() Catalog
 	budget   int64
+	// nearest scores seen ids against the operation; tests count its calls.
+	nearest func(ids []string, target string, n int) []string
 }
 
 // NewDocs builds the lookup. endpoint is the session cloud's ARM endpoint; gate returns the gate's loaded catalog
 // snapshot, or nil.
 func NewDocs(store specSource, endpoint string, gate func() Catalog) *Docs {
-	return &Docs{store: store, endpoint: endpoint, gate: gate, budget: lookupBudget}
+	return &Docs{store: store, endpoint: endpoint, gate: gate, budget: lookupBudget, nearest: apiref.Nearest}
 }
 
 // Reference answers one lookup.
@@ -89,12 +93,12 @@ func (d *Docs) Reference(ctx context.Context, q apiref.Query) apiref.Result {
 	ctx, cancel := context.WithTimeout(ctx, lookupDeadline)
 	defer cancel()
 	ix, err := d.store.Index(ctx)
+	// The store's error can carry another caller's cause, and a warm index never looks at the context, so only this
+	// lookup's own context says it stopped, whether or not Index failed.
+	if ctx.Err() != nil {
+		return unavailable(ContextReason(ctx))
+	}
 	if err != nil {
-		// The store's error can carry another caller's cause, so only this lookup's own context says it stopped.
-		if ctx.Err() != nil {
-			return unavailable(ContextReason(ctx))
-		}
-
 		return unavailable("the Azure REST API specs index could not be loaded: " + err.Error())
 	}
 	ns, ok := ix.Namespaces[strings.ToLower(q.Service)]
@@ -105,8 +109,9 @@ func (d *Docs) Reference(ctx context.Context, q apiref.Query) apiref.Result {
 
 	s := newSearch(d, ix, ns, q)
 	out := s.run(ctx, m)
-	// Every outcome passes here. A context that ends during the last read or the render meets no later check, so a
-	// lookup that ended answers as stopped, whatever the search had reached.
+	// Every outcome of the search passes here. The answers before it come from the query alone or after the context
+	// check above. A context that ends during the last read or the render meets no later check, so a lookup that ended
+	// answers as stopped, whatever the search had reached.
 	if ctx.Err() != nil {
 		return s.failure(ctx, ctx.Err())
 	}
@@ -302,7 +307,7 @@ func (s *search) passes(ctx context.Context) apiref.Result {
 		}
 	}
 
-	return s.notFound(true)
+	return s.notFound(ctx, true)
 }
 
 // walk reads, in each group, the dirs of kind whose position among that kind is between first and last, newest
@@ -422,7 +427,7 @@ func (s *search) summaries(ctx context.Context, files []IndexFile) ([]*FileSumma
 func (s *search) conclude(ctx context.Context, previewOnly, fromPasses bool) apiref.Result {
 	cands := s.found
 	if len(cands) == 0 {
-		return s.notFound(fromPasses)
+		return s.notFound(ctx, fromPasses)
 	}
 	// Only a case-insensitive search can find several distinct ids.
 	if ids := distinctIDs(cands); len(ids) > 1 {
@@ -604,11 +609,11 @@ func distinctIDs(ms []match) []string {
 	return ids
 }
 
-// notFound answers a search that found nothing, naming what it read and the nearest ids.
-func (s *search) notFound(fromPasses bool) apiref.Result {
+// notFound answers a search that found nothing, naming what it read and, while the context is live, the nearest ids.
+func (s *search) notFound(ctx context.Context, fromPasses bool) apiref.Result {
 	head := fmt.Sprintf("no operation %s in %s (%d version dirs searched in groups %s)", echo(s.q.Operation),
 		s.ns.Name, len(s.searched), s.scannedGroups())
-	suffix := s.nearest() + operationFormat
+	suffix := s.nearest(ctx) + operationFormat
 	if fromPasses {
 		suffix += olderGuidance
 	}
@@ -661,26 +666,35 @@ func (s *search) failure(ctx context.Context, err error) apiref.Result {
 	if n := len(s.searched); n > 0 {
 		suffix += ", the last " + s.searched[n-1]
 	}
-	// A done lookup does no more work, scoring included.
-	if ctx.Err() == nil {
-		suffix += s.nearest()
-	}
-	suffix += "; pass model with an api-version dir name to search one version"
+	suffix += s.nearest(ctx) + "; pass model with an api-version dir name to search one version"
 
 	return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: apiref.Bounded(head, suffix)}
 }
 
 // nearest lists up to maxNearest operation ids seen in the search, nearest first. Only ids in the operation grammar
-// whose quoted form fits maxNearestEcho are scored, so the edit distances cost at most 200 by 100 bytes each.
-func (s *search) nearest() string {
-	var ids []string
+// whose quoted form fits maxNearestEcho are scored, so the edit distances cost at most 200 by 100 bytes each. It
+// scores the ids nearestBatch at a time, keeping the nearest so far. It checks the context before each batch and
+// lists nothing once the context is done, so a done lookup scores nothing more.
+func (s *search) nearest(ctx context.Context) string {
+	var near, batch []string
+	score := func() bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		near, batch = s.d.nearest(append(near, batch...), s.q.Operation, maxNearest), batch[:0]
+
+		return true
+	}
+	seen := 0
 	for id := range s.ids {
 		if validOperation(id) && len(strconv.Quote(id)) <= maxNearestEcho {
-			ids = append(ids, id)
+			batch = append(batch, id)
+		}
+		if seen++; seen%nearestBatch == 0 && !score() {
+			return ""
 		}
 	}
-	near := apiref.Nearest(ids, s.q.Operation, maxNearest)
-	if len(near) == 0 {
+	if !score() || len(near) == 0 {
 		return ""
 	}
 	quoted := make([]string, 0, len(near))

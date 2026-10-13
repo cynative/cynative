@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/url"
 	"regexp"
 	"slices"
@@ -405,9 +406,7 @@ func (r *renderer) jsonBody(ctx context.Context, p resolvedParam) error {
 	}
 	r.ref.BodyEncoding = apiref.BodyJSON
 	r.ref.FixedHeaders = append(r.ref.FixedHeaders, apiref.Param{Key: "Content-Type", Value: refJSONMedia})
-	required := slices.Clone(shape.required)
-	slices.Sort(required)
-	for _, name := range slices.Compact(required) {
+	for _, name := range slices.Sorted(maps.Keys(shape.required)) {
 		prop, known := shape.props[name]
 		if prop.ReadOnly {
 			continue

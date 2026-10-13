@@ -43,11 +43,12 @@ func FuzzSummarize(f *testing.F) {
 	})
 }
 
-// FuzzRefPath guards ref confinement: an accepted ref names a clean ref target of the index.
+// FuzzRefPath guards ref confinement: an accepted ref names a clean ref target of the index, and a refused one is
+// outside the admitted trees or missing from the index.
 func FuzzRefPath(f *testing.F) {
 	for _, seed := range []string{
 		"", "things.json", "../../common/v1/common.json", "/abs.json", "https://e/x.json", `..\x.json`,
-		"%2e%2e/x.json", "a.json?q=1", "a.json?", "//h/x.json", "%zz",
+		"%2e%2e/x.json", "a.json?q=1", "a.json?", "//h/x.json", "%zz", "missing.json",
 	} {
 		f.Add(seed)
 	}
@@ -55,8 +56,8 @@ func FuzzRefPath(f *testing.F) {
 	f.Fuzz(func(t *testing.T, file string) {
 		got, err := refPath(testOpFile, file, ix)
 		if err != nil {
-			if !errors.Is(err, errRefConfined) {
-				t.Fatalf("error %v is not errRefConfined", err)
+			if !errors.Is(err, errRefConfined) && !errors.Is(err, errUnindexed) {
+				t.Fatalf("error %v is neither errRefConfined nor errUnindexed", err)
 			}
 			return
 		}

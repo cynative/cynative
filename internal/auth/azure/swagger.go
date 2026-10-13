@@ -14,13 +14,17 @@ import (
 )
 
 // The bounds on $ref resolution in one lookup: distinct files loaded, the operation's own included, the length of
-// one chain of refs, and the bytes of parameter and schema objects decoded. The last one bounds expansion. A file
-// that names one large definition many times stays inside the file bounds, and each ref target is decoded only
-// once, but the inline objects inside a target are decoded again each time something reaches them.
+// one chain of refs, and maxDecodedSchema, the bytes charged for every parameter and schema object decoded and every
+// name merged into a body (see merge). Each ref target is decoded once per lookup and merged at most once per body,
+// but an inline object is decoded, and charged, again each time something reaches it.
 const (
 	maxRefFiles      = 16
 	maxRefDepth      = 8
 	maxDecodedSchema = 16 << 20
+	// mergedNameCost is what merging one required or property name charges beyond the name's own bytes: about the
+	// memory of the input and the gap the render can build from a required name, or of the schema stored for a
+	// property (on a 64-bit platform an apiref.Input is 96 bytes and a swaggerSchema 112).
+	mergedNameCost = 256
 )
 
 // The ref tables the reader follows; responses, examples and every other pointer are not followed.
@@ -32,6 +36,7 @@ const (
 // The errors that turn a parameter or a body into a gap rather than failing the lookup.
 var (
 	errRefConfined = errors.New("the ref target is outside the spec trees the index admits")
+	errUnindexed   = errors.New("the ref target is not in this commit's index")
 	errRefLimit    = errors.New("the ref limit was reached")
 	errRefKind     = errors.New("only parameters and definitions refs are followed")
 	errRefMissing  = errors.New("the ref target does not exist")
@@ -94,11 +99,13 @@ type swaggerSchema struct {
 	ReadOnly    bool                       `json:"readOnly"`
 }
 
-// bodyShape is a body schema with its allOf parents merged one level deep.
+// bodyShape is a body schema with its allOf parents merged one level deep: the required names as a set, the
+// properties by name, and the ref targets already merged.
 type bodyShape struct {
 	object   bool
-	required []string
+	required map[string]bool
 	props    map[string]swaggerSchema
+	merged   map[refKey]bool
 }
 
 // fileSource reads one verified spec file at a commit.
@@ -107,7 +114,8 @@ type fileSource interface {
 }
 
 // refResolver follows $refs for one lookup, loading each file at most once and charging what it parses to the
-// lookup's budget. It decodes each ref target at most once and counts every object it decodes against maxDecoded.
+// lookup's budget. It decodes each ref target at most once, and charges every object it decodes and every body
+// schema part it merges against maxDecoded.
 type refResolver struct {
 	src        fileSource
 	ix         *Index
@@ -207,7 +215,9 @@ func (d *swaggerDoc) operation(s OpSummary) (swaggerOp, []json.RawMessage, error
 
 // refGap reports whether err makes an input or a body a gap. Budget, context and load errors end the lookup instead.
 func refGap(err error) bool {
-	for _, gap := range []error{errRefConfined, errRefLimit, errRefKind, errRefMissing, errBadParam, errBadSchema} {
+	for _, gap := range []error{
+		errRefConfined, errUnindexed, errRefLimit, errRefKind, errRefMissing, errBadParam, errBadSchema,
+	} {
 		if errors.Is(err, gap) {
 			return true
 		}
@@ -260,61 +270,57 @@ func (r *refResolver) param(ctx context.Context, from string, raw json.RawMessag
 }
 
 // schema decodes a schema object, following a top-level $ref chain of at most maxRefDepth links, and returns the
-// schema and the file it lives in. Two keys written beside a $ref are kept, as AutoRest keeps them: readOnly (any
-// link marking it read-only makes the property read-only, so a required one is dropped from the body, never sent)
-// and description (the outermost one wins).
-func (r *refResolver) schema(ctx context.Context, from string, raw json.RawMessage) (swaggerSchema, string, error) {
+// schema and where it lives: the last ref target of the chain, or only the file for an inline schema. Two keys
+// written beside a $ref are kept, as AutoRest keeps them: readOnly (any link marking it read-only makes the property
+// read-only, so a required one is dropped from the body, never sent) and description (the outermost one wins).
+func (r *refResolver) schema(ctx context.Context, from string, raw json.RawMessage) (swaggerSchema, refKey, error) {
 	var s swaggerSchema
 	err := r.decode(raw, &s, errBadSchema)
 	readOnly, desc := false, ""
+	key := refKey{file: from}
 	for depth := 0; ; depth++ {
 		if err != nil {
-			return swaggerSchema{}, "", err
+			return swaggerSchema{}, refKey{}, err
 		}
 		readOnly = readOnly || s.ReadOnly
 		desc = cmp.Or(desc, s.Description)
 		if s.Ref == "" {
 			s.ReadOnly, s.Description = readOnly, desc
 
-			return s, from, nil
+			return s, key, nil
 		}
 		if depth == maxRefDepth {
-			return swaggerSchema{}, "", fmt.Errorf("%w: a chain longer than %d", errRefLimit, maxRefDepth)
+			return swaggerSchema{}, refKey{}, fmt.Errorf("%w: a chain longer than %d", errRefLimit, maxRefDepth)
 		}
-		var key refKey
-		key, err = r.target(ctx, from, s.Ref)
+		key, err = r.target(ctx, key.file, s.Ref)
 		if err == nil {
 			s, err = targetOf(r, r.schemas, key, errBadSchema)
 		}
-		from = key.file
 	}
 }
 
-// body resolves a body schema and merges its allOf parents one level deep, one part at a time: required names in
-// order, the schema's own properties before its parents', each property resolved through its own $ref so its type
-// and readOnly are known. It checks the context before each part and each property, since a cached ref target costs
-// no read that would.
+// body resolves a body schema and merges its allOf parents one level deep, one part at a time: the schema's own
+// properties before its parents', each property resolved through its own $ref so its type and readOnly are known.
 func (r *refResolver) body(ctx context.Context, from string, raw json.RawMessage) (bodyShape, error) {
-	s, file, err := r.schema(ctx, from, raw)
+	s, key, err := r.schema(ctx, from, raw)
 	if err != nil {
 		return bodyShape{}, err
 	}
 	if s.Type != "object" && (s.Type != "" || (len(s.Properties) == 0 && len(s.AllOf) == 0)) {
 		return bodyShape{}, nil
 	}
-	shape := bodyShape{object: true, props: map[string]swaggerSchema{}}
-	if err = r.merge(ctx, &shape, s, file); err != nil {
+	shape := bodyShape{
+		object: true, required: map[string]bool{}, props: map[string]swaggerSchema{}, merged: map[refKey]bool{},
+	}
+	if err = r.merge(ctx, &shape, s, key); err != nil {
 		return bodyShape{}, err
 	}
 	for _, a := range s.AllOf {
-		if err = ctx.Err(); err != nil {
-			return bodyShape{}, err
-		}
-		ps, pf, perr := r.schema(ctx, file, a)
+		ps, pk, perr := r.schema(ctx, key.file, a)
 		if perr != nil {
 			return bodyShape{}, perr
 		}
-		if err = r.merge(ctx, &shape, ps, pf); err != nil {
+		if err = r.merge(ctx, &shape, ps, pk); err != nil {
 			return bodyShape{}, err
 		}
 	}
@@ -322,14 +328,47 @@ func (r *refResolver) body(ctx context.Context, from string, raw json.RawMessage
 	return shape, nil
 }
 
-// merge adds one part's required names and the properties shape does not have yet, each resolved from file.
-func (r *refResolver) merge(ctx context.Context, shape *bodyShape, part swaggerSchema, file string) error {
-	shape.required = append(shape.required, part.Required...)
+// merge adds one part's required names and the properties shape does not have yet, each property resolved from the
+// part's file. Its invariant:
+//
+//   - Charged: before it stores anything, merge charges maxDecoded the length plus mergedNameCost of each of the
+//     part's required and property names, and it charges each property schema as it decodes it. A memoized ref
+//     target is decoded once but charged on every merge, so one lookup merges at most maxDecodedSchema /
+//     mergedNameCost (65,536) names across all its bodies and candidates.
+//   - Deduplicated: a ref target already merged into shape is skipped before it is charged, and a required name or a
+//     property is stored once, so one body holds at most the distinct names its documents contain.
+//
+// The second rule keeps one body's merged state within O(N) for documents of N bytes, however often a part repeats.
+// The first keeps the whole lookup's merged state within the decode bound, even where the memo saves the decoding.
+// merge checks the context first and before each property, since a cached ref target costs no read that would.
+func (r *refResolver) merge(ctx context.Context, shape *bodyShape, part swaggerSchema, key refKey) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if key.name != "" {
+		if shape.merged[key] {
+			return nil
+		}
+		shape.merged[key] = true
+	}
+	var cost int64
+	for _, name := range part.Required {
+		cost += int64(len(name) + mergedNameCost)
+	}
+	for name := range part.Properties {
+		cost += int64(len(name) + mergedNameCost)
+	}
+	if err := r.charge(cost); err != nil {
+		return err
+	}
+	for _, name := range part.Required {
+		shape.required[name] = true
+	}
 	for _, name := range slices.Sorted(maps.Keys(part.Properties)) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		prop, _, err := r.schema(ctx, file, part.Properties[name])
+		prop, _, err := r.schema(ctx, key.file, part.Properties[name])
 		if err != nil {
 			return err
 		}
@@ -341,14 +380,24 @@ func (r *refResolver) merge(ctx context.Context, shape *bodyShape, part swaggerS
 	return nil
 }
 
-// decode decodes raw into v after counting its bytes against maxDecoded; malformed wraps a decode error.
+// decode decodes raw into v after charging its bytes against maxDecoded; malformed wraps a decode error.
 func (r *refResolver) decode(raw json.RawMessage, v any, malformed error) error {
-	r.decoded += int64(len(raw))
-	if r.decoded > r.maxDecoded {
-		return fmt.Errorf("%w: more than %d bytes of parameters and schemas decoded", errRefLimit, r.maxDecoded)
+	if err := r.charge(int64(len(raw))); err != nil {
+		return err
 	}
 	if err := json.Unmarshal(raw, v); err != nil {
 		return fmt.Errorf("%w: %w", malformed, err)
+	}
+
+	return nil
+}
+
+// charge counts n bytes against maxDecoded and fails once the count passes it.
+func (r *refResolver) charge(n int64) error {
+	r.decoded += n
+	if r.decoded > r.maxDecoded {
+		return fmt.Errorf("%w: more than %d bytes of parameters and schemas decoded or merged", errRefLimit,
+			r.maxDecoded)
 	}
 
 	return nil
@@ -436,9 +485,10 @@ func (r *refResolver) load(ctx context.Context, p string) (*swaggerDoc, error) {
 // scheme, host, query or backslash is accepted, and the result must be a ref target of the index.
 func refPath(from, file string, ix *Index) (string, error) {
 	if file == "" {
-		if _, ok := ix.Refs[from]; !ok {
-			return "", fmt.Errorf("%w: from %q", errRefConfined, from)
+		if err := indexed(ix, from, from); err != nil {
+			return "", err
 		}
+
 		return from, nil
 	}
 	u, err := url.Parse(file)
@@ -447,11 +497,24 @@ func refPath(from, file string, ix *Index) (string, error) {
 		return "", fmt.Errorf("%w: %q", errRefConfined, file)
 	}
 	target := path.Clean(path.Join(path.Dir(from), u.Path))
-	if _, ok := ix.Refs[target]; !ok {
-		return "", fmt.Errorf("%w: %q", errRefConfined, file)
+	if err = indexed(ix, target, file); err != nil {
+		return "", err
 	}
 
 	return target, nil
+}
+
+// indexed reports whether p, which the ref written as ref names, is a ref target of the index: a path the trees
+// admit that the index lacks is not in this commit, any other path is outside the admitted trees.
+func indexed(ix *Index, p, ref string) error {
+	if _, ok := ix.Refs[p]; ok {
+		return nil
+	}
+	if refTarget(p) {
+		return fmt.Errorf("%w: %q", errUnindexed, ref)
+	}
+
+	return fmt.Errorf("%w: %q", errRefConfined, ref)
 }
 
 // refPointer splits a JSON pointer of the form /parameters/<name> or /definitions/<name> and unescapes the name as

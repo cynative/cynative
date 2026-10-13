@@ -30,11 +30,14 @@ const (
 	maxFileBytes = 16 << 20
 	// maxFileCacheBytes bounds the on-disk file and summary cache; the least recently used go first.
 	maxFileCacheBytes = 512 << 20
-	indexCacheName    = "index"
-	filesDirName      = "files"
-	blobSuffix        = ".json"
-	summarySuffix     = ".ops.json"
-	tempPrefix        = "."
+	// rescanEvery is how many cache writes a store makes between two scans of the files dir. A scan is what sees
+	// the writes of other processes sharing the dir.
+	rescanEvery    = 256
+	indexCacheName = "index"
+	filesDirName   = "files"
+	blobSuffix     = ".json"
+	summarySuffix  = ".ops.json"
+	tempPrefix     = "."
 )
 
 // FileSummary is what a lookup needs from one spec file to search it: its declared version and its operations.
@@ -84,6 +87,8 @@ type SpecStore struct {
 	writeFile func(name string, data []byte, perm os.FileMode) error
 	// readDir lists the files dir for eviction; tests count its calls.
 	readDir func(name string) ([]os.DirEntry, error)
+	// remove deletes an evicted file; tests make it fail.
+	remove func(name string) error
 	// joined runs when a caller joins a download already in flight, and leading when a caller starts one; tests
 	// use them to order goroutines and to fill the cache in between.
 	joined, leading func()
@@ -93,9 +98,11 @@ type SpecStore struct {
 	flights map[string]*flight
 
 	// sizeMu guards cacheSize, the bytes the files dir held at the last scan plus every write since, or -1 before
-	// the first scan.
+	// the first scan; writes, the store's cache writes so far; and rescan, how many writes apart scans are.
 	sizeMu    sync.Mutex
 	cacheSize int64
+	writes    int
+	rescan    int
 }
 
 // flight is one blob download that later callers for the same blob wait on.
@@ -147,7 +154,9 @@ func NewSpecStore(cfg SpecStoreConfig) *SpecStore {
 		maxCache:  maxFileCacheBytes,
 		writeFile: os.WriteFile,
 		readDir:   os.ReadDir,
+		remove:    os.Remove,
 		cacheSize: -1,
+		rescan:    rescanEvery,
 		joined:    func() {},
 		leading:   func() {},
 		flights:   map[string]*flight{},
@@ -392,13 +401,15 @@ func (s *SpecStore) writeAtomic(name string, data []byte) error {
 	return nil
 }
 
-// noteWrite adds a write of n bytes to the running total and scans the files dir only when the total passes
-// maxCache, or on the store's first write, which starts the total. The total overcounts a rewritten or deleted file
-// and misses another process's writes until the next scan; an overcount only brings that scan forward.
+// noteWrite adds a write of n bytes to the running total and scans the files dir on the store's first write, on
+// every rescan-th write and whenever the total passes maxCache. Between scans the total misses other processes'
+// writes and overcounts a rewritten or deleted file, so the dir can exceed maxCache by what other processes wrote
+// since this store's last scan, until a store sharing the dir scans and evicts.
 func (s *SpecStore) noteWrite(n int64) {
 	s.sizeMu.Lock()
 	defer s.sizeMu.Unlock()
-	if s.cacheSize >= 0 {
+	s.writes++
+	if s.cacheSize >= 0 && s.writes%s.rescan != 0 {
 		s.cacheSize += n
 		if s.cacheSize <= s.maxCache {
 			return
@@ -408,7 +419,7 @@ func (s *SpecStore) noteWrite(n int64) {
 }
 
 // evict removes the least recently used cache files until the cache is within maxCache, and returns the bytes it
-// counts as left.
+// counts as left: a file it fails to remove still counts.
 // Temp files are skipped: they belong to writes in flight, possibly in another process.
 func (s *SpecStore) evict() int64 {
 	type cached struct {
@@ -437,8 +448,9 @@ func (s *SpecStore) evict() int64 {
 		if total <= s.maxCache {
 			break
 		}
-		_ = os.Remove(f.path)
-		total -= f.size
+		if s.remove(f.path) == nil {
+			total -= f.size
+		}
 	}
 
 	return total

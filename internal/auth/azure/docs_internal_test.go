@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -665,6 +666,9 @@ func TestDocsReference_OperationGrammar(t *testing.T) {
 		f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
 		res := lookup(t, f, op, "")
 		refused := strings.HasSuffix(res.Reason, operationGrammar)
+		if op == "_Things" && !strings.Contains(res.Reason, "starts with a letter or digit") {
+			t.Errorf("_Things: the guidance %q does not state the first-character rule it fails", res.Reason)
+		}
 		if res.Outcome != apiref.OutcomeNotFound || refused == searched || (f.indexCount() > 0) != searched {
 			t.Errorf("%.20q: %s %q after %d index loads; want searched %v", op, res.Outcome, res.Reason,
 				f.indexCount(), searched)
@@ -897,15 +901,19 @@ func TestDocsReference_NoNearestAfterTheLookupEnds(t *testing.T) {
 	}
 }
 
-// TestDocsReference_RepeatedParentsAnswerAGap pins what a lookup makes of the decode bound: the body of an operation
-// that names one large definition a thousand times is a gap, and the rest of the reference is rendered.
+// TestDocsReference_RepeatedParentsAnswerAGap pins what a lookup makes of the decode bound: an operation with 200 body
+// parameters whose schema names one large definition a thousand times reaches the bound, since every body merges
+// that definition again, and the bodies past it are gaps while the rest of the reference is rendered.
 func TestDocsReference_RepeatedParentsAnswerAGap(t *testing.T) {
 	t.Parallel()
-	body := `{"name":"body","in":"body","required":true,"schema":{"$ref":"#/definitions/VM"}}`
+	params := []string{pSub, pVersion}
+	for i := range 200 {
+		params = append(params, fmt.Sprintf(
+			`{"name":"body%d","in":"body","required":true,"schema":{"$ref":"#/definitions/VM"}}`, i))
+	}
 	spec := `{"info":{"version":"2024-01-01"},"paths":{` +
 		`"/subscriptions/{subscriptionId}/providers/Microsoft.Test/things/x":{"put":{"operationId":"Things_Put",` +
-		`"parameters":[` + pSub + `,` + pVersion + `,` + body + `]}}},"definitions":` +
-		repeatedParents(1000, 64<<10) + `}`
+		`"parameters":[` + strings.Join(params, ",") + `]}}},"definitions":` + repeatedParents(1000, 64<<10) + `}`
 	res := lookup(t, specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", spec}), "Things_Put", "")
 	if res.Outcome != apiref.OutcomeIncomplete || !slices.Contains(res.Reference.Gaps, refBodyGap) ||
 		res.Reference.Operation != "Things_Put" {
@@ -954,5 +962,104 @@ func TestDocsReference_PassOneReadsOnlyTheNewestDir(t *testing.T) {
 	older := fixtureFile{"B", kindStable, "2023-01-01", "b.json", ""}.path()
 	if n := f.summaryCount(older); n != 0 {
 		t.Errorf("pass 1 read group B's older dir %d times", n)
+	}
+}
+
+// countingNearest is a Docs.nearest that counts its calls and the ids it scored, running after when set.
+type countingNearest struct {
+	calls, scored atomic.Int32
+	after         func()
+}
+
+func (c *countingNearest) nearest(ids []string, target string, n int) []string {
+	c.calls.Add(1)
+	c.scored.Add(int32(len(ids)))
+	if c.after != nil {
+		c.after()
+	}
+
+	return apiref.Nearest(ids, target, n)
+}
+
+// TestDocsReference_NoScoringAfterTheFinalSummary pins that the not_found reason scores nothing once the context is
+// done: the context ends during the folded pass's final summary read, which leaves the search to conclude not_found,
+// and no id is scored on the way to the unavailable answer.
+func TestDocsReference_NoScoringAfterTheFinalSummary(t *testing.T) {
+	t.Parallel()
+	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Other_Get")})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	f.onSummary = func() {
+		if calls.Add(1) == 2 {
+			cancel()
+		}
+	}
+	d := NewDocs(f, "e", func() Catalog { return nil })
+	scorer := &countingNearest{}
+	d.nearest = scorer.nearest
+	res := d.Reference(ctx, apiref.Query{Service: "Microsoft.Test", Operation: "Othr_Get"})
+	if res.Outcome != apiref.OutcomeUnavailable || calls.Load() != 2 || scorer.calls.Load() != 0 {
+		t.Fatalf("cancelled at the final summary = %+v after %d summaries and %d scorings; want unavailable and "+
+			"no scoring", res, calls.Load(), scorer.calls.Load())
+	}
+	scorer = &countingNearest{}
+	d.nearest = scorer.nearest
+	f.onSummary = nil
+	if res = d.Reference(context.Background(), apiref.Query{Service: "Microsoft.Test", Operation: "Othr_Get"}); res.
+		Outcome != apiref.OutcomeNotFound || scorer.scored.Load() != 1 {
+		t.Fatalf("uncancelled = %+v after %d ids scored, want not_found scoring the one id", res, scorer.scored.Load())
+	}
+}
+
+// nearestSearch is a search over no index that has seen n ids, Op_0 to Op_<n-1>, looking for "Op_x".
+func nearestSearch(d *Docs, n int) *search {
+	s := newSearch(d, &Index{}, &IndexNamespace{}, apiref.Query{Operation: "Op_x"})
+	for i := range n {
+		s.ids[fmt.Sprintf("Op_%d", i)] = true
+	}
+
+	return s
+}
+
+// TestSearchNearest_Batches pins the batched scoring: 1,000 seen ids are scored nearestBatch at a time with the same
+// list as one scoring of all of them, and a context that ends after the first batch stops the rest and lists nothing.
+func TestSearchNearest_Batches(t *testing.T) {
+	t.Parallel()
+	d := NewDocs(specFixture(), "e", func() Catalog { return nil })
+	scorer := &countingNearest{}
+	d.nearest = scorer.nearest
+	s := nearestSearch(d, 1000)
+	var quoted []string
+	for _, id := range apiref.Nearest(slices.Collect(maps.Keys(s.ids)), "Op_x", maxNearest) {
+		quoted = append(quoted, strconv.Quote(id))
+	}
+	want := "; nearest operation ids: " + strings.Join(quoted, ", ")
+	if got := s.nearest(context.Background()); got != want || scorer.calls.Load() != 4 {
+		t.Fatalf("nearest = %q after %d scorings, want %q after 4", got, scorer.calls.Load(), want)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scorer = &countingNearest{after: cancel}
+	d.nearest = scorer.nearest
+	if got := nearestSearch(d, 1000).nearest(ctx); got != "" || scorer.calls.Load() != 1 ||
+		scorer.scored.Load() != nearestBatch {
+		t.Fatalf("cancelled in the first batch: %q after %d scorings of %d ids; want nothing after one of %d", got,
+			scorer.calls.Load(), scorer.scored.Load(), nearestBatch)
+	}
+}
+
+// TestDocsReference_DoneContextBeforeTheNamespace pins the check after a warm index: a done lookup whose namespace
+// the index lacks answers unavailable, not not_found, though the index came back without looking at the context.
+func TestDocsReference_DoneContextBeforeTheNamespace(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Things_Get")})
+	res := NewDocs(f, "e", func() Catalog { return nil }).Reference(ctx,
+		apiref.Query{Service: "Microsoft.Missing", Operation: "Things_Get"})
+	if res.Outcome != apiref.OutcomeUnavailable || res.Reason != "the lookup was interrupted" || f.indexCount() != 1 {
+		t.Fatalf("done lookup, missing namespace = %+v after %d index loads; want unavailable", res, f.indexCount())
 	}
 }

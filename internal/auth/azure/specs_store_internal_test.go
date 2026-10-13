@@ -939,3 +939,99 @@ func TestSpecStore_ScansOnlyPastTheCap(t *testing.T) {
 		t.Errorf("the total after eviction is %d, want %d", s.cacheSize, len(computeNew)+len(diskNew))
 	}
 }
+
+// dirTotal is the bytes of the files dir that evict counts: regular files, temp files left out.
+func dirTotal(t *testing.T, dir string) int64 {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read the files dir: %v", err)
+	}
+	var total int64
+	for _, e := range entries {
+		info, ierr := e.Info()
+		if ierr != nil {
+			t.Fatalf("stat %s: %v", e.Name(), ierr)
+		}
+		if info.Mode().IsRegular() && !strings.HasPrefix(e.Name(), tempPrefix) {
+			total += info.Size()
+		}
+	}
+
+	return total
+}
+
+// TestSpecStore_RescansASharedDir pins the periodic scan: two stores sharing one files dir, as two processes do, each
+// count only their own writes between scans, so together they pass the cap with neither total past it, and the next
+// store write that is a rescan-th one scans the dir and evicts it back within the cap.
+func TestSpecStore_RescansASharedDir(t *testing.T) {
+	t.Parallel()
+	a, _ := newTestStore(t, newRawServer(), nil)
+	b := NewSpecStore(SpecStoreConfig{
+		Cache:  cache.Config{Dir: filepath.Dir(a.filesDir), TTL: time.Hour, Clock: time.Now},
+		Client: &http.Client{Transport: newRawServer()}, RawBase: testRawBase, Summarize: (&summaries{}).summarize,
+	})
+	if a.rescan != rescanEvery || rescanEvery != 256 {
+		t.Fatalf("rescan = %d, rescanEvery = %d; want 256", a.rescan, rescanEvery)
+	}
+	const size = 100
+	for _, s := range []*SpecStore{a, b} {
+		s.maxCache, s.rescan = 950, 6
+	}
+	write := func(s *SpecStore, i int) {
+		t.Helper()
+		name := fmt.Sprintf("f%02d%s", i, blobSuffix)
+		if err := s.writeAtomic(name, bytes.Repeat([]byte("x"), size)); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		s.noteWrite(size)
+	}
+	for i := range 10 {
+		write([]*SpecStore{a, b}[i%2], i)
+	}
+	if got := dirTotal(t, a.filesDir); got != 10*size || a.cacheSize > a.maxCache || b.cacheSize > b.maxCache {
+		t.Fatalf("before the rescan: dir %d bytes, totals %d and %d; want 1000 with both under 950", got,
+			a.cacheSize, b.cacheSize)
+	}
+	write(a, 10)
+	if got := dirTotal(t, a.filesDir); got > a.maxCache || got != a.cacheSize {
+		t.Errorf("after the rescan: dir %d bytes, total %d; want them equal and at most 950", got, a.cacheSize)
+	}
+}
+
+// TestSpecStore_EvictCountsAFailedRemoval pins that a file evict cannot remove still counts: evict goes on to the
+// next file, and the total it returns is what the dir holds.
+func TestSpecStore_EvictCountsAFailedRemoval(t *testing.T) {
+	t.Parallel()
+	s, _ := newTestStore(t, newRawServer(), nil)
+	if err := os.MkdirAll(s.filesDir, cache.DirPerm); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	var paths []string
+	for i := range 3 {
+		p := filepath.Join(s.filesDir, fmt.Sprintf("f%d%s", i, blobSuffix))
+		at := old.Add(time.Duration(i) * time.Minute)
+		if err := os.WriteFile(p, bytes.Repeat([]byte("x"), 100), cache.FilePerm); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, at, at); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	s.remove = func(name string) error {
+		if name == paths[0] {
+			return errors.New("busy")
+		}
+
+		return os.Remove(name)
+	}
+	s.maxCache = 150
+	if got, held := s.evict(), dirTotal(t, s.filesDir); got != held || held > s.maxCache {
+		t.Errorf("evict counts %d bytes left, the dir holds %d; want them equal and at most 150", got, held)
+	}
+	if _, err := os.Stat(paths[0]); err != nil {
+		t.Errorf("the file that failed to go: %v", err)
+	}
+}
