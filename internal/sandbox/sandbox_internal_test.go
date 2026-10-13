@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -63,10 +64,14 @@ func TestRefresh_RebuildFailureIsRetried(t *testing.T) {
 func TestRun_ConsoleOutputBeforeTimeout(t *testing.T) {
 	t.Parallel()
 
-	var expire context.CancelFunc
+	var (
+		expire context.CancelFunc
+		logged atomic.Bool
+	)
 
 	funcs := map[string]ToolFunc{
 		"logged": func(context.Context, string) (string, error) {
+			logged.Store(true)
 			expire()
 
 			return "", nil
@@ -78,8 +83,9 @@ func TestRun_ConsoleOutputBeforeTimeout(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	// The run context ends only when the script calls logged, or at a backstop
-	// that turns a script that never calls it into a failed assertion, not a hang.
+	// The run context ends when the script calls logged. The backstop keeps a
+	// script that never calls it from hanging the test; the check on logged
+	// below then fails it, since the backstop alone yields the same output.
 	s.withTimeout = func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
 		runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		expire = cancel
@@ -90,6 +96,10 @@ func TestRun_ConsoleOutputBeforeTimeout(t *testing.T) {
 	out, err := s.Run(context.Background(), `console.log("partial"); logged({}); while (true) {}`, 30*time.Millisecond)
 	if !errors.Is(err, ErrScript) {
 		t.Fatalf("Run: want ErrScript, got %v", err)
+	}
+
+	if !logged.Load() {
+		t.Fatal("the run ended without the script calling logged")
 	}
 
 	if want := "partial\n\n[execution timed out after 30ms]"; out != want {
