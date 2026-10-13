@@ -88,6 +88,11 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			want: "- name: \"API_KEY\"\n  value: " + field + "\r\n",
 		},
 		{
+			name: "yaml name value pair capitalized",
+			in:   "- Name: DB_PASSWORD\n  Value: hunter2\n",
+			want: "- Name: DB_PASSWORD\n  Value: " + field + "\n",
+		},
+		{
 			name: "yaml name value pair crlf",
 			in:   "- name: DB_PASSWORD\r\n  value: hunter2\r\n",
 			want: "- name: DB_PASSWORD\r\n  value: " + field + "\r\n",
@@ -126,6 +131,11 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			name: "json passwd and passphrase keys",
 			in:   `{"DB_PASSWD":"a","sshPassphrase":"b"}`,
 			want: `{"DB_PASSWD":"` + field + `","sshPassphrase":"` + field + `"}`,
+		},
+		{
+			name: "passwd and passphrase in env yaml and xml",
+			in:   "DB_PASSWD=a\nssh_passphrase: b\n<Passphrase>c</Passphrase><passwd>d</passwd>",
+			want: "DB_PASSWD=" + field + "\nssh_passphrase: " + field + "\n<Passphrase>" + field + "</Passphrase><passwd>" + field + "</passwd>",
 		},
 		{
 			name: "boolean flag before a credential flag",

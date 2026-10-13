@@ -105,17 +105,17 @@ func credentialRules() []rule {
 	// returns to owners/admins — including MULTI-component names (runners_token,
 	// registration_token, incoming_email_token, …) that a single-component pattern
 	// would miss — which the bare `token` alternative alone would not match.
-	const credName = `access_?token|refresh_?token|id_?token|client_?secret|secret|password|secret_?access_?key|session_?token|api_?key|apikey|private_?key|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
+	const credName = `access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
 	// keyEnd is a JSON key or variable name that ENDS in a credential word, so
 	// DB_PASSWORD, webhookSecret and stripeApiKey match the way the YAML and env
 	// rules already allow. Bare "token" takes no prefix: nextPageToken, pageToken
 	// and NextToken are pagination cursors the model has to send back.
-	const keyEnd = `[\w.-]*(?:access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key)|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
+	const keyEnd = `[\w.-]*(?:access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key)|(?:[a-z0-9]+_)+token|token`
 	// flagArg is a command-line flag whose name ends in a credential word
 	// (--token, --db-password, --api-key, ...), with any hyphenated prefix. Unlike
 	// keyEnd it lets "token" take a prefix: a --page-token in a workload's args is
 	// configuration, not a cursor the model sends back, so redacting it costs little.
-	const flagArg = `--[\w-]*(?i:token|password|passwd|passphrase|secret|api[-_]?key|secret[-_]?access[-_]?key|private[-_]?key|bearer)` //nolint:lll // single indivisible alternation
+	const flagArg = `--[\w-]*(?i:token|password|passwd|passphrase|secret|api[-_]?key|secret[-_]?access[-_]?key|private[-_]?key|bearer)`
 	// jsonValue is the body of a JSON string, consuming any escape (a backslash
 	// before a newline too) so the value isn't cut short; jsonEnd closes it or, for
 	// a value truncated at the content cap, takes the end of content after an
@@ -127,10 +127,13 @@ func credentialRules() []rule {
 		jsonValue  = `(?:(?s:\\.)|[^"\\])*`
 		jsonEnd    = `(?:(")|\\?\z)`
 		jsonFields = `(?:\s*,\s*"` + jsonValue + `"\s*:\s*(?:"` + jsonValue + `"|[\w.+-]+))*?`
-		// jsonElement opens an array element: the '[' or ',' before it rules out an
-		// object key or member value. Only the leading delimiter is consumed, so the
-		// next element's ',' is still there for the next match.
-		jsonElement = `([\[,]\s*"`
+		// jsonElement opens an array element: the '[' or ',' before it rules out a
+		// member value, which follows ':'. A ',' also opens an object key, so a key
+		// spelled like a joined flag ({"x":1,"--token=a":"b"}) loses its tail; telling
+		// the two apart would mean consuming the delimiter after the element, which
+		// hides the next flag from the next match. Only the leading delimiter is
+		// consumed, so the next element's ',' is still there for the next match.
+		jsonElement = `[\[,]\s*"`
 	)
 
 	return []rule{
@@ -161,12 +164,12 @@ func credentialRules() []rule {
 			// lines' indentation, so a "value:" line that belongs to another mapping is
 			// redacted too.
 			re: regexp.MustCompile(
-				`(?m)^([ \t]*-[ \t]+name:[ \t]*["']?(?i:` + keyEnd + `)["']?[ \t]*\r?\n[ \t]*value:[ \t]*)([^\s\[][^\r\n]*)`,
+				`(?m)^([ \t]*-[ \t]+(?i:name):[ \t]*["']?(?i:` + keyEnd + `)["']?[ \t]*\r?\n[ \t]*(?i:value):[ \t]*)([^\s\[][^\r\n]*)`,
 			),
 			repl: `${1}` + placeholder("credential-field"),
 		},
 		{ // Command-line flag with its value in the same array element: "--password=...".
-			re:   regexp.MustCompile(jsonElement + flagArg + `=)` + jsonValue + jsonEnd),
+			re:   regexp.MustCompile(`(` + jsonElement + flagArg + `=)` + jsonValue + jsonEnd),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
 		},
 		{ // Command-line flag with its value in the next array element:
@@ -176,7 +179,7 @@ func credentialRules() []rule {
 			// at the cost of leaving a value that itself starts with "--". Not covered: a
 			// flag inside one shell string ("sh","-c","app --token x").
 			re: regexp.MustCompile(
-				jsonElement + flagArg + `"\s*,\s*")(?:[^-"\\]|(?s:\\.)|-(?:[^-"\\]|(?s:\\.)))` + jsonValue + jsonEnd,
+				`(` + jsonElement + flagArg + `"\s*,\s*")(?:[^-"\\]|(?s:\\.)|-(?:[^-"\\]|(?s:\\.)))` + jsonValue + jsonEnd,
 			),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
 		},
