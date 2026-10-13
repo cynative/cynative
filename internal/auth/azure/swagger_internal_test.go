@@ -656,29 +656,42 @@ func TestRefResolverBody_MergesEachNameOnce(t *testing.T) {
 	}
 }
 
-// TestRefResolverBody_ChargesEveryMerge pins the merge charge: a memoized parent is decoded once, but each body that
-// merges it is charged its names, so bodies that keep reaching it through one resolver stop at the decode bound.
+// TestRefResolverBody_ChargesEveryMerge pins the merge charge: a memoized parent is decoded once, but every body that
+// merges it is charged for its required and property names, so bodies that keep reaching it through one resolver stop
+// at the decode bound.
 func TestRefResolverBody_ChargesEveryMerge(t *testing.T) {
 	t.Parallel()
-	own, err := decodeSwagger([]byte(`{"definitions":{"P":{"type":"object","required":` + requiredNames(100) + `}}}`))
-	if err != nil {
-		t.Fatalf("decode: %v", err)
+	props := make([]string, 100)
+	for i := range props {
+		props[i] = fmt.Sprintf(`"r%d":{"type":"string"}`, i)
 	}
-	r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
-	r.maxDecoded = 1 << 20
-	if err = r.add(testOpFile, own); err != nil {
-		t.Fatalf("add: %v", err)
-	}
-	merges := 0
-	for range 100 {
-		if _, err = r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/P"}`)); err != nil {
-			break
-		}
-		merges++
-	}
-	if !errors.Is(err, errRefLimit) || merges > int(r.maxDecoded)/(100*mergedNameCost) {
-		t.Fatalf("%d bodies merged before %v; want errRefLimit within %d", merges, err,
-			int(r.maxDecoded)/(100*mergedNameCost))
+	for name, parent := range map[string]string{
+		"required names": `{"type":"object","required":` + requiredNames(100) + `}`,
+		"property names": `{"type":"object","properties":{` + strings.Join(props, ",") + `}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			own, err := decodeSwagger([]byte(`{"definitions":{"P":` + parent + `}}`))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			r := newRefResolver(newSpecFakeFiles(nil), refIndex(testOpFile), NewBudget(1<<20))
+			r.maxDecoded = 1 << 20
+			if err = r.add(testOpFile, own); err != nil {
+				t.Fatalf("add: %v", err)
+			}
+			merges := 0
+			for range 100 {
+				if _, err = r.body(t.Context(), testOpFile, json.RawMessage(`{"$ref":"#/definitions/P"}`)); err != nil {
+					break
+				}
+				merges++
+			}
+			if !errors.Is(err, errRefLimit) || merges > int(r.maxDecoded)/(100*mergedNameCost) {
+				t.Fatalf("%d bodies merged before %v; want errRefLimit within %d", merges, err,
+					int(r.maxDecoded)/(100*mergedNameCost))
+			}
+		})
 	}
 }
 
