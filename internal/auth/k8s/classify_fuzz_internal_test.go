@@ -15,6 +15,8 @@ func FuzzClassify(f *testing.F) {
 	f.Add("GET", "/api/v1/pods")
 	f.Add("DELETE", "/api/v1/namespaces/default/pods")
 	f.Add("POST", "/apis/apps/v1/namespaces/ns/deployments")
+	f.Add("GET", "/api/v1/namespaces/default/status")
+	f.Add("PUT", "/api/v1/namespaces/default/finalize")
 	f.Add("", "")
 	f.Add("GET", "not-a-path")
 

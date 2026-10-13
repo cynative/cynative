@@ -59,3 +59,27 @@ func TestGoldenViewRolesEnforceReadOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestGoldenViewRolesNamespaceSubresources classifies the namespace
+// subresource paths and checks them against the built-in view roles, which
+// grant namespaces/status and nothing that allows a finalize write (#381).
+func TestGoldenViewRolesNamespaceSubresources(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		method, path string
+		want         bool
+	}{
+		{method: "GET", path: "/api/v1/namespaces/default/status", want: true},
+		{method: "PUT", path: "/api/v1/namespaces/default/finalize", want: false},
+	}
+
+	for _, name := range []string{"eks-view.json", "gke-view.json", "aks-view.json"} {
+		vp := loadGoldenPolicy(t, name)
+		for _, tc := range cases {
+			if got := vp.Allows(Classify(tc.method, tc.path, nil)); got != tc.want {
+				t.Errorf("%s: %s %s allowed = %v, want %v", name, tc.method, tc.path, got, tc.want)
+			}
+		}
+	}
+}
