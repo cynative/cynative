@@ -94,8 +94,9 @@ func contentRules() []rule {
 }
 
 // credentialRules returns value-substitution rules: a credential-named JSON/XML
-// field or a signing query param keeps its key/param and gets its value
-// replaced, so the surrounding document stays well-formed.
+// field, a name/value pair whose name is a credential, a credential flag in a
+// command array, or a signing query param keeps its key/param and gets its
+// value replaced, so the surrounding document stays well-formed.
 func credentialRules() []rule {
 	// Every multi-word name is underscore-optional so snake_case (secret_access_key),
 	// Pascal/camelCase (SecretAccessKey, accessToken), and the no-separator apikey all
@@ -105,10 +106,78 @@ func credentialRules() []rule {
 	// registration_token, incoming_email_token, …) that a single-component pattern
 	// would miss — which the bare `token` alternative alone would not match.
 	const credName = `access_?token|refresh_?token|id_?token|client_?secret|secret|password|secret_?access_?key|session_?token|api_?key|apikey|private_?key|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
+	// keyEnd is a JSON key or variable name that ENDS in a credential word, so
+	// DB_PASSWORD, webhookSecret and stripeApiKey match the way the YAML and env
+	// rules already allow. Bare "token" takes no prefix: nextPageToken, pageToken
+	// and NextToken are pagination cursors the model has to send back.
+	const keyEnd = `[\w.-]*(?:access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key)|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
+	// flagArg is a command-line flag whose name ends in a credential word
+	// (--token, --db-password, --api-key, ...), with any hyphenated prefix. Unlike
+	// keyEnd it lets "token" take a prefix: a --page-token in a workload's args is
+	// configuration, not a cursor the model sends back, so redacting it costs little.
+	const flagArg = `--[\w-]*(?i:token|password|passwd|passphrase|secret|api[-_]?key|secret[-_]?access[-_]?key|private[-_]?key|bearer)` //nolint:lll // single indivisible alternation
+	// jsonValue is the body of a JSON string, consuming any escape (a backslash
+	// before a newline too) so the value isn't cut short; jsonEnd closes it or, for
+	// a value truncated at the content cap, takes the end of content after an
+	// optional lone backslash. jsonFields is a lazy run of scalar members
+	// ("type":"PLAINTEXT") between a name and its value: lazy so the first "value"
+	// member is the one redacted, and made of strings and bare scalars only, so in
+	// valid JSON it never leaves the object.
+	const (
+		jsonValue  = `(?:(?s:\\.)|[^"\\])*`
+		jsonEnd    = `(?:(")|\\?\z)`
+		jsonFields = `(?:\s*,\s*"` + jsonValue + `"\s*:\s*(?:"` + jsonValue + `"|[\w.+-]+))*?`
+		// jsonElement opens an array element: the '[' or ',' before it rules out an
+		// object key or member value. Only the leading delimiter is consumed, so the
+		// next element's ',' is still there for the next match.
+		jsonElement = `([\[,]\s*"`
+	)
 
 	return []rule{
-		{ // JSON: "key":"value" (consume escaped \" so the value isn't cut short).
-			re:   regexp.MustCompile(`("(?i:` + credName + `)"\s*:\s*")(?:\\.|[^"\\])*(")`),
+		{ // JSON: "key":"value", closed or truncated to end-of-content. One rule for
+			// both, since the prefixed key makes each pass over a large body costly.
+			re:   regexp.MustCompile(`("(?i:` + keyEnd + `)"\s*:\s*")` + jsonValue + jsonEnd),
+			repl: `${1}` + placeholder("credential-field") + `${2}`,
+		},
+		{ // JSON name/value pair: {"name":"DB_PASSWORD","value":"..."}, the shape of
+			// ECS, Batch and CodeBuild container environments and Kubernetes pod env.
+			re: regexp.MustCompile(
+				`((?i:"name")\s*:\s*"(?i:` + keyEnd + `)"` + jsonFields + `\s*,\s*(?i:"value")\s*:\s*")` +
+					jsonValue + jsonEnd,
+			),
+			repl: `${1}` + placeholder("credential-field") + `${2}`,
+		},
+		{ // JSON value/name pair: the same pair with "value" first.
+			re: regexp.MustCompile(
+				`((?i:"value")\s*:\s*")` + jsonValue +
+					`("` + jsonFields + `\s*,\s*(?i:"name")\s*:\s*"(?i:` + keyEnd + `)")`,
+			),
+			repl: `${1}` + placeholder("credential-field") + `${2}`,
+		},
+		{ // YAML name/value pair: "- name: DB_PASSWORD" with "value: ..." on the next
+			// line, as kubectl prints pod env. Same '[' exclusion as the YAML rule below,
+			// and the same residual: a value continued on later lines (a multi-line
+			// quoted or block scalar) keeps its continuation. RE2 cannot compare the two
+			// lines' indentation, so a "value:" line that belongs to another mapping is
+			// redacted too.
+			re: regexp.MustCompile(
+				`(?m)^([ \t]*-[ \t]+name:[ \t]*["']?(?i:` + keyEnd + `)["']?[ \t]*\r?\n[ \t]*value:[ \t]*)([^\s\[][^\r\n]*)`,
+			),
+			repl: `${1}` + placeholder("credential-field"),
+		},
+		{ // Command-line flag with its value in the same array element: "--password=...".
+			re:   regexp.MustCompile(jsonElement + flagArg + `=)` + jsonValue + jsonEnd),
+			repl: `${1}` + placeholder("credential-field") + `${2}`,
+		},
+		{ // Command-line flag with its value in the next array element:
+			// ["--token","..."]. A next element that starts with "--" is read as another
+			// flag, not a value: taking it would hide a credential flag behind a boolean
+			// one (["--generate-secret","--password","x"]) and leave its value in place,
+			// at the cost of leaving a value that itself starts with "--". Not covered: a
+			// flag inside one shell string ("sh","-c","app --token x").
+			re: regexp.MustCompile(
+				jsonElement + flagArg + `"\s*,\s*")(?:[^-"\\]|(?s:\\.)|-(?:[^-"\\]|(?s:\\.)))` + jsonValue + jsonEnd,
+			),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
 		},
 		{ // XML: <key>value</key>.
@@ -144,12 +213,6 @@ func credentialRules() []rule {
 		{ // AWS presigned-URL session token (temp-credential calls embed it as a query param).
 			re:   regexp.MustCompile(`((?i:X-Amz-Security-Token)=)[^&"'\s]+`),
 			repl: `${1}` + placeholder("aws-session-token"),
-		},
-		{ // JSON credential value truncated to end-of-content (no closing quote);
-			// allow an optional trailing lone backslash so a value cut right after
-			// an escape (e.g. "secret\) still redacts.
-			re:   regexp.MustCompile(`("(?i:` + credName + `)"\s*:\s*")(?:\\.|[^"\\])*\\?\z`),
-			repl: `${1}` + placeholder("credential-field"),
 		},
 		{ // XML credential value truncated to end-of-content (no closing tag);
 			// allow an optional trailing < so a value cut at the start of a closing
