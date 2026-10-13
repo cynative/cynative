@@ -15,9 +15,10 @@ import (
 
 // The bounds on $ref resolution in one lookup: distinct files loaded, the operation's own included, the length of
 // one chain of refs, and maxDecodedSchema, the bytes charged for every parameter and schema object decoded and every
-// name and ref target merged into a body (see merge). A ref target that decodes is memoized, so it is decoded once per
-// lookup. A malformed target is decoded, and charged, again each time something reaches it, as an inline object is. A
-// ref target is merged at most once per body.
+// name and ref target merged into a body (see merge). A successful decode is memoized once per cache, the parameter
+// cache and the schema cache, so one target can decode once through each. A malformed target is not memoized: it is
+// decoded, and charged, again each time something reaches it, as an inline object is. A ref target is merged at most
+// once per body.
 const (
 	maxRefFiles      = 16
 	maxRefDepth      = 8
