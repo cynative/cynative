@@ -17,10 +17,12 @@ type openAPIHandoff struct {
 	mu    sync.Mutex
 	raw   []byte
 	at    time.Time
+	// dropped is set once the docs cache will never take a download, so none is kept.
+	dropped bool
 }
 
 func newOpenAPIHandoff(clock func() time.Time, ttl time.Duration) *openAPIHandoff {
-	return &openAPIHandoff{clock: clock, ttl: ttl, mu: sync.Mutex{}, raw: nil, at: time.Time{}}
+	return &openAPIHandoff{clock: clock, ttl: ttl, mu: sync.Mutex{}, raw: nil, at: time.Time{}, dropped: false}
 }
 
 // record wraps fetch so a successful download is kept for the next take.
@@ -31,7 +33,9 @@ func (h *openAPIHandoff) record(fetch func(context.Context) ([]byte, error)) fun
 			return nil, err
 		}
 		h.mu.Lock()
-		h.raw, h.at = raw, h.clock()
+		if !h.dropped {
+			h.raw, h.at = raw, h.clock()
+		}
 		h.mu.Unlock()
 
 		return raw, nil
@@ -51,4 +55,15 @@ func (h *openAPIHandoff) take(fetch func(context.Context) ([]byte, error)) func(
 
 		return fetch(ctx)
 	}
+}
+
+// drop frees any recorded download and keeps no later one, for a docs cache that will never take it. A nil
+// handoff, as on a bare provider in tests, has nothing to drop.
+func (h *openAPIHandoff) drop() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.raw, h.dropped = nil, true
+	h.mu.Unlock()
 }

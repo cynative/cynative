@@ -38,6 +38,10 @@ const (
 // phase timeouts surface a precise error before this coarse backstop fires.
 const k8sBootstrapFetchTimeout = 35 * time.Second
 
+// BootstrapDrainTimeout is how long the run's audit closer waits for a targeted lookup's control-plane calls that
+// outlived their lookup to write their result records: the fetch bound, plus a margin for the write itself.
+const BootstrapDrainTimeout = k8sBootstrapFetchTimeout + 5*time.Second
+
 // defaultK8sFetchTimeouts are the production phase timeouts for the bootstrap
 // ClusterRole fetch.
 func defaultK8sFetchTimeouts() k8sFetchTimeouts {

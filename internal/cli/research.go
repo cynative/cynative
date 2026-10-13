@@ -641,7 +641,8 @@ const extraTools = 2
 // buildToolSet builds the tool set from the given providers, egress policy, config,
 // flags, verbose writer, and audit sink: approval-wrapped http_request and
 // code_execution, plus the unwrapped api_reference lookup.
-// egress goes to http_request, which is where a model request picks its route.
+// egress goes to http_request, which is where a model request picks its route, and
+// to api_reference's targeted reads.
 func (d *deps) buildToolSet(
 	providers []auth.Provider,
 	egress *auth.Egress,
@@ -670,12 +671,14 @@ func (d *deps) buildToolSet(
 		toolSet = append(toolSet, tools.NewApprovalTool(p, prompter, cfg.RenderStyle))
 	}
 
-	// api_reference reads public vendor metadata and sends no credentials, so it
-	// runs without an approval prompt, like the orchestration tools, and is not
-	// exposed inside code_execution.
+	// api_reference runs without an approval prompt, like the orchestration
+	// tools, and is not exposed inside code_execution. It reads public vendor
+	// metadata, or, for a targeted lookup, the target's own metadata at
+	// host-built paths through the same egress and gates as http_request, each
+	// read audited to sink.
 	return append(toolSet,
 		tools.NewApprovalTool(codeTool, prompter, cfg.RenderStyle),
-		tools.NewAPIReferenceTool(providers),
+		tools.NewAPIReferenceTool(providers, egress, sink),
 	), nil
 }
 

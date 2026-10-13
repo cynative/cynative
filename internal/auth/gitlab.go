@@ -102,6 +102,33 @@ func parseGitLabUser(raw []byte) (string, error) {
 	return resp.Username, nil
 }
 
+// metadataOutcome records the result of the metadata probe: either success with
+// version info, or failure with a reason.
+type metadataOutcome struct {
+	ok      bool
+	version string
+	reason  string // only set when !ok.
+}
+
+// errGitLabMetadata wraps a failed metadata probe.
+var errGitLabMetadata = errors.New("gitlab metadata probe failed")
+
+// parseGitLabMetadata returns the version from a GET /api/v4/metadata response. It fails closed unless "version"
+// is a present non-empty string.
+func parseGitLabMetadata(raw []byte) (string, error) {
+	var resp struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return "", fmt.Errorf("%w: invalid metadata JSON: %w", errGitLabMetadata, err)
+	}
+	if resp.Version == "" {
+		return "", fmt.Errorf("%w: metadata response has no version", errGitLabMetadata)
+	}
+
+	return resp.Version, nil
+}
+
 // gitlabIdentity renders the startup-inventory identity: the validated @username,
 // and — for a self-managed instance (served host other than gitlab.com) — the
 // served host too, so the operator sees which instance was reached. Falls back to
@@ -139,6 +166,18 @@ type gitlabProvider struct {
 	resolver addrResolver
 	// egress routes the registration probe; set by buildGitLabProvider.
 	egress *Egress
+	// handoff passes the table's download to the master docs; nil for bare providers in tests.
+	handoff *openAPIHandoff
+	// docsFailure keeps the last reason the master docs failed to load; nil when not recorded.
+	docsFailure *loadFailure
+	// docsChoice is the document api_reference reads, set by useDocs at registration.
+	docsChoice gitlabDocsChoice
+	// release holds the chosen release's docs and releaseFailure their load failure; nil for master.
+	release        *openAPIDocs
+	releaseFailure *loadFailure
+	// docsCfg and releaseFetch build a release's docs cache; set by buildGitLabProvider.
+	docsCfg      cache.Config
+	releaseFetch func(ref string) func(context.Context) ([]byte, error)
 }
 
 var (
@@ -555,11 +594,11 @@ func (p *gitlabProvider) AuthorizesAddr(ctx context.Context, ip netip.Addr, _ au
 }
 
 // newGitLabCaches builds the gate's table cache and the api_reference docs cache over one fetch of the OpenAPI
-// document. One download feeds both on a cold start: the table's fetch hands its bytes to the docs cache once, and
-// the table is never served from the docs.
+// document, and returns the handoff between them. One download feeds both on a cold start: the table's fetch hands
+// its bytes to the docs cache once, and the table is never served from the docs.
 func newGitLabCaches(
 	cfg GitLabHardeningConfig, fetch func(context.Context) ([]byte, error),
-) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs]) {
+) (*cache.TTLCache[gitlabclass.Table], *cache.TTLCache[openapidoc.OperationDocs], *openAPIHandoff) {
 	handoff := newOpenAPIHandoff(cfg.Config.Clock, cfg.Config.TTL)
 	tables := cache.NewTableCache(cfg.Config, handoff.record(fetch),
 		gitlabclass.DistillOpenAPI, (*gitlabclass.Table).Serialize,
@@ -568,30 +607,60 @@ func newGitLabCaches(
 		gitlabclass.DistillDocs, (*openapidoc.OperationDocs).Serialize,
 		openapidoc.Unmarshal, openapidoc.Admit)
 
-	return tables, docs
+	return tables, docs, handoff
 }
 
 // Reference answers an api_reference lookup from the cached OpenAPI
-// documentation. It reads only the docs cache and the served host, so it never
-// resolves the token, probes the instance or loads the gate's table.
+// documentation registration selected for the instance's version. It reads that
+// docs cache, the served host and the gate's table as already loaded (Peek), so
+// it never resolves the token, probes the instance or loads the table. Peek
+// takes the table cache's lock, so a lookup can wait for a table load another
+// goroutine has in progress.
 func (p *gitlabProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
-	d := p.docs.forReference(ctx)
+	docs, failure, why := p.selectedDocs()
+	if why != "" {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: why}
+	}
+	d := docs.forReference(ctx)
 	if d == nil {
-		return apiref.Result{
-			Outcome: apiref.OutcomeUnavailable,
-			Reason:  "GitLab OpenAPI documentation could not be loaded",
-		}
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: p.unloadedReason(failure)}
 	}
 
-	return gitlabclass.Reference(d, q, "https://"+p.servedHost(), gitlabRefusedInput)
+	lookup := gitlabclass.Reference
+	if p.docsChoice.ref != "" {
+		lookup = gitlabclass.ReleaseReference
+	}
+	res := gitlabclass.CheckGate(lookup(d, q, "https://"+p.servedHost(), gitlabRefusedInput), p.liveTable())
+	if res.Reference != nil {
+		res.Reference.Limitations = append(res.Reference.Limitations, p.docsChoice.statement())
+	}
+
+	return res
 }
 
-// Hint suggests operations for a request the gate's table matched to none.
+// liveTable returns the gate's table if a request already loaded it, else nil. It never loads it.
+func (p *gitlabProvider) liveTable() *gitlabclass.Table {
+	if p.tables == nil {
+		return nil
+	}
+
+	return p.tables.Peek()
+}
+
+// Hint suggests operations for a request the gate's table matched to none,
+// from the selected docs and only among the routes that table classifies. The
+// gate loaded the table before it denied the request, so a missing one means
+// there is nothing to check against and nothing is suggested.
 func (p *gitlabProvider) Hint(ctx context.Context, v authreq.View, _ *authreq.UnmatchedRequestError) apiref.Hint {
-	d := p.docs.forHint(ctx)
-	if d == nil {
+	docs, _, why := p.selectedDocs()
+	if why != "" {
+		return apiref.Hint{}
+	}
+	d := docs.forHint(ctx)
+	table := p.liveTable()
+	if d == nil || table == nil {
 		return apiref.Hint{}
 	}
 
-	return gitlabclass.Hint(d, v)
+	return gitlabclass.RecognizedHint(d, v, table)
 }

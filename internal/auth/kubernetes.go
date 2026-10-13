@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
@@ -429,6 +430,10 @@ func newKubernetesProvider(cluster resolvedCluster) *kubernetesProvider {
 	p.clusterRole = defaultClusterRole
 	p.egress = NoProxy()
 	p.expectedPort = defaultedPort(cluster.port)
+	p.connector = kubernetesProviderName
+	p.target = func(*KubernetesAuthArgs) string { return kubernetesProviderName + "/" + cluster.authority }
+	p.refs = &kubeRefCache{}
+	p.now = time.Now
 
 	return p
 }
@@ -446,7 +451,9 @@ func (p *kubernetesProvider) Description() string {
 			"(KUBECONFIG / ~/.kube/config, current-context). Targets the single configured cluster at "+
 			"https://%s, which is the only authority accepted: send every request to that host AND port. "+
 			"Pass auth_provider=\"kubernetes\". The CA and credentials are resolved from the kubeconfig; "+
-			"do NOT provide them.", p.cluster.authority,
+			"do NOT provide them. For an operation's request template as this cluster serves it, call "+
+			"api_reference with connector \"kubernetes\", kubernetes_auth {}, model set to the apiVersion and "+
+			"the operationId.", p.cluster.authority,
 	)
 }
 

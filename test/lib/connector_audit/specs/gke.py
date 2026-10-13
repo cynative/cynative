@@ -311,6 +311,28 @@ def plan_reads(calls, target):
     return planned
 
 
+def lookup_targets(calls, target):
+    """Rule (a)'s bindings: one per planned hop-1 call whose RESULT established an endpoint
+    (bound_endpoint), for gke reads at exactly that endpoint whose gke_auth names the target
+    cluster, positioned at the hop-1 result in the full record list. That is the same evidence
+    plan_reads requires of hop 2, so a lookup read is bound exactly when a hop 2 at that
+    endpoint would be: a lookup before hop 1, or while hop 1 is in flight, binds nothing.
+    Accepts either target arity, as plan_reads does, and uses only the cluster's three parts."""
+    project, location, cluster = _split_target(target, (_READ_PARTS, _CANARY_PARTS))[:3]
+    bindings = []
+    for _key, slot in calls:
+        rec = slot.get("attempt") or slot.get("result")
+        result, at = slot.get("result"), slot.get("result_at")
+        if result is None or at is None or not is_hop1(rec, project, location, cluster):
+            continue
+        endpoint = bound_endpoint(result)
+        if endpoint is not None:
+            bindings.append(engine.LookupTarget(
+                auth_provider="gke", authority=endpoint, position=at,
+                auth_matches=lambda a: _gke_auth_matches(a, project, location, cluster)))
+    return bindings
+
+
 def never_sanctioned(_rec, _target):
     """The required per-record hook, a constant deny. See the module docstring: GKE's
     sanctioning is contextual, so if plan_reads were ever dropped this spec must sanction
@@ -547,6 +569,57 @@ def _pair(cid, args, result, outcome="ok"):
             _jline(cid, "result", args, result=result, outcome=outcome, decision="approved")]
 
 
+# Targeted lookup fixtures (rule (a)): a parent api_reference call and its lookup_read
+# children, in the exact shapes the Go tool writes. The child's gke_auth is the canonical
+# block, in GKEAuthArgs field order.
+LOOKUP_HASH = "AB" * 64
+_LOOKUP_OK = json.dumps({"status": 200, "bytes": 10, "sha256": "00" * 32, "truncated": False})
+# A pre-dispatch denial as the transport returns it to the reader: bare, no tool wrapper.
+_LOOKUP_DENIED = "auth: authorize action for provider gke: k8s_hardening: could not classify Kubernetes API request"
+_LOOKUP_BOUNDS = {"/openapi/v3": (20, 2 << 20), "/version": (10, 64 << 10)}
+
+
+def _lline(cid, phase, tool, args, **extra):
+    r = {"session_id": "s", "run_id": "r", "call_id": cid, "depth": 0, "phase": phase,
+         "tool": tool, "arguments": args}
+    r.update(extra)
+    return json.dumps(r)
+
+
+def _lookup_args(path, endpoint=ENDPOINT, block=None, **over):
+    timeout, cap = _LOOKUP_BOUNDS.get(path, (60, 10 << 20))
+    a = {"method": "GET", "url": "https://" + endpoint + path,
+         "headers": [{"key": "Accept", "value": "application/json"}],
+         "timeout_seconds": timeout, "max_response_body_size": cap, "auth_provider": "gke",
+         "gke_auth": block or {"cluster_name": CLUSTER, "location": LOCATION, "project": PROJECT}}
+    a.update(over)
+    return a
+
+
+def _lread(cid, path="/openapi/v3", args=None, result=_LOOKUP_OK, outcome="ok", parent="L1",
+           depth=0, decision="unprompted"):
+    a = args or _lookup_args(path)
+    return [_lline(cid, "attempt", "lookup_read", a, via="api_reference", parent_call_id=parent, depth=depth),
+            _lline(cid, "result", "lookup_read", a, via="api_reference", parent_call_id=parent, depth=depth,
+                   decision=decision, outcome=outcome, result=result)]
+
+
+def _lookup(children, args=None, outcome="ok", cid="L1", result=True):
+    a = args or {"connector": "gke", "model": "apps/v1", "operation": "listAppsV1NamespacedDeployment",
+                 "gke_auth": {"project": PROJECT, "location": LOCATION, "cluster_name": CLUSTER}}
+    out = [_lline(cid, "attempt", "api_reference", a)] + children
+    if result:
+        out.append(_lline(cid, "result", "api_reference", a, decision="unprompted", outcome=outcome,
+                          result='{"outcome":"found"}'))
+    return out
+
+
+def _lbootstrap(cid, call, target):
+    a = {"connector": "gke", "call": call, "target": target}
+    return [_lline(cid, "attempt", "lookup_bootstrap", a, via="api_reference", parent_call_id="L1"),
+            _lline(cid, "result", "lookup_bootstrap", a, via="api_reference", parent_call_id="L1",
+                   decision="unprompted", outcome="ok", result="ok")]
+
 def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hides the table.
     hop1_args = {"method": "GET", "url": hop1_url(PROJECT, LOCATION, CLUSTER),
                  "auth_provider": "gcp", "gcp_auth": {"service": GCP_SERVICE}}
@@ -593,6 +666,12 @@ def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hide
 
     def hop2_to(url, result=None, outcome="ok", cid="h2"):
         return _pair(cid, {**hop2_args, "url": url}, result or _sres(200, cm_body), outcome)
+
+    doc = "/openapi/v3/apis/apps/v1"
+    doc_hashed = doc + "?hash=" + LOOKUP_HASH
+    parent_args = {"connector": "gke", "model": "apps/v1", "operation": "listAppsV1NamespacedDeployment",
+                   "gke_auth": {"project": PROJECT, "location": LOCATION, "cluster_name": CLUSTER}}
+    other_block = {"cluster_name": "other", "location": LOCATION, "project": PROJECT}
 
     return [
         # ---- the happy path and its ordering ----
@@ -879,6 +958,79 @@ def _build_cases():  # noqa: PLR0915 - one flat frozen corpus; splitting it hide
             "c1", {**ss_args, "body": "{}"}, ssdenial, outcome="error")),
         ("secretscan_wrongverb", 1, "secretscan", _pair("c1", ss_args, wdenial, outcome="error")),
         ("secretscan_none", 1, "secretscan", hop1),
+        # ---- targeted lookup reads (rule (a)) ----
+        # A lookup after hop 1 reads at the endpoint hop 1 established: admitted, and the
+        # witness is still hop 2.
+        ("read_lookup_bound", 0, "read", hop1 + _lookup(
+            _lread("r1") + _lread("r2", doc_hashed) + _lread("r3", "/version")) + hop2, NONCE),
+        # Before hop 1 the endpoint is not in the audit yet: a successful read is unbound (4),
+        # a denied one a retryable miss (1).
+        ("read_lookup_before_hop1", 4, "read", _lookup(_lread("r1")) + hop1 + hop2, NONCE),
+        ("read_lookup_before_hop1_denied", 1, "read", _lookup(_lread(
+            "r1", result=_LOOKUP_DENIED, outcome="error")) + hop1 + hop2, NONCE),
+        # The binding is hop 1's RESULT position: a read made while hop 1 was in flight is
+        # unbound, whatever hop 1 later answered.
+        ("read_lookup_during_hop1", 4, "read", hop1[:1] + _lookup(_lread("r1")) + hop1[1:] + hop2, NONCE),
+        ("read_lookup_wrong_path", 4, "read", hop1 + _lookup(_lread(
+            "r1", "/api/v1/namespaces/default/secrets")) + hop2, NONCE),
+        ("read_lookup_other_query", 4, "read", hop1 + _lookup(_lread("r1", doc + "?watch=1")) + hop2, NONCE),
+        ("read_lookup_lowercase_hash", 4, "read", hop1 + _lookup(_lread(
+            "r1", doc + "?hash=" + LOOKUP_HASH.lower())) + hop2, NONCE),
+        ("read_lookup_extra_header", 4, "read", hop1 + _lookup(_lread("r1", args=_lookup_args(
+            "/openapi/v3", headers=[{"key": "Accept", "value": "application/json"},
+                                    {"key": "X-HTTP-Method-Override", "value": "DELETE"}]))) + hop2, NONCE),
+        ("read_lookup_missing_header", 4, "read", hop1 + _lookup(_lread("r1", args=_lookup_args(
+            "/openapi/v3", headers=[]))) + hop2, NONCE),
+        # Another cluster's gke_auth, on parent and child alike: the binding's predicate
+        # rejects it, so a successful read is unbound.
+        ("read_lookup_other_cluster", 4, "read", hop1 + _lookup(
+            _lread("r1", args=_lookup_args("/openapi/v3", block=other_block)),
+            args=dict(parent_args, gke_auth=other_block)) + hop2, NONCE),
+        ("read_lookup_no_parent", 4, "read", hop1 + _lread("r1") + hop2, NONCE),
+        ("read_lookup_parent_denied", 4, "read", hop1 + _lookup(_lread("r1"), outcome="denied") + hop2, NONCE),
+        ("read_lookup_parent_no_result", 4, "read", hop1 + _lookup(_lread("r1"), result=False) + hop2, NONCE),
+        ("read_lookup_after_parent_result", 4, "read", hop1 + _lookup([]) + _lread("r1") + hop2, NONCE),
+        ("read_lookup_depth_differs", 4, "read", hop1 + _lookup(_lread("r1", depth=1)) + hop2, NONCE),
+        ("read_lookup_decision_differs", 4, "read", hop1 + _lookup(_lread(
+            "r1", decision="approved")) + hop2, NONCE),
+        ("read_lookup_provider_differs", 4, "read", hop1 + _lookup(_lread("r1", args=_lookup_args(
+            "/openapi/v3", auth_provider="eks"))) + hop2, NONCE),
+        ("read_lookup_block_differs", 4, "read", hop1 + _lookup(_lread(
+            "r1", args=_lookup_args("/openapi/v3", block=other_block))) + hop2, NONCE),
+        ("read_lookup_wrong_document_key", 4, "read", hop1 + _lookup(_lread(
+            "r1", "/openapi/v3/apis/batch/v1")) + hop2, NONCE),
+        ("read_lookup_missing_child_result", 4, "read", hop1 + _lookup(_lread("r1")[:1]) + hop2, NONCE),
+        ("read_lookup_three_roots", 4, "read", hop1 + _lookup(
+            _lread("r1") + _lread("r2") + _lread("r3")) + hop2, NONCE),
+        ("read_lookup_four_documents", 4, "read", hop1 + _lookup(
+            _lread("r1", doc_hashed) + _lread("r2", doc_hashed) + _lread("r3", doc) + _lread("r4", doc))
+            + hop2, NONCE),
+        ("read_lookup_two_versions", 4, "read", hop1 + _lookup(
+            _lread("r1", "/version") + _lread("r2", "/version")) + hop2, NONCE),
+        ("read_lookup_seven_reads", 4, "read", hop1 + _lookup(
+            _lread("r1") + _lread("r2") + _lread("r3", doc_hashed) + _lread("r4", doc_hashed)
+            + _lread("r5", doc) + _lread("r6", "/version") + _lread("r7", "/version")) + hop2, NONCE),
+        # A denied read on an unbound authority still counts toward the budget.
+        ("read_lookup_unbound_denied_over_budget", 4, "read", hop1 + _lookup(
+            _lread("r1") + _lread("r2") + _lread("r3", args=_lookup_args("/openapi/v3", endpoint=ROGUE),
+                                                result=_LOOKUP_DENIED, outcome="error")) + hop2, NONCE),
+        # Two spellings of one key: encoding/json used the last, but which one is ambiguous to
+        # the parser, so it fails closed even though cynative answered normally.
+        ("read_lookup_parent_two_spellings", 4, "read", hop1 + _lookup(
+            _lread("r1"), args=dict(parent_args, GKE_AUTH=parent_args["gke_auth"])) + hop2, NONCE),
+        ("read_lookup_bootstrap_pair", 0, "read", hop1 + _lookup(
+            _lbootstrap("b1", "clusterrole", "gke/%s/%s/%s clusterroles/view" % (PROJECT, LOCATION, CLUSTER))
+            + _lread("r1")) + hop2, NONCE),
+        # An admitted lookup read is never the witness.
+        ("read_lookup_no_witness", 1, "read", hop1 + _lookup(_lread("r1")), NONCE),
+        # Canary modes judge lookup reads by the same rule: bound after a discovery hop 1 the
+        # canary verdict is unchanged, and with no hop 1 a successful read is unbound.
+        ("canary_with_lookup_read", 0, "canary", hop1 + _lookup(_lread("r1")) + _pair(
+            "c1", write_args, wdenial, outcome="error")),
+        ("secretscan_with_lookup_read", 0, "secretscan", hop1 + _lookup(_lread("r1")) + _pair(
+            "c1", ss_args, ssdenial, outcome="error")),
+        ("canary_lookup_unbound", 4, "canary", _lookup(_lread("r1")) + _pair(
+            "c1", write_args, wdenial, outcome="error")),
     ]
 
 
@@ -913,6 +1065,7 @@ SPEC = engine.ProviderSpec(
                   "returning an untruncated 200 ConfigMap with the nonce) - retry"),
     canaries=(CANARY_WRITE, CANARY_SECRETSCAN),
     plan_reads=plan_reads,
+    lookup_targets=lookup_targets,
     selftest_target=READ_TARGET,
     selftest_targets=SELFTEST_TARGETS,
     selftest_cases=SELFTEST_CASES,

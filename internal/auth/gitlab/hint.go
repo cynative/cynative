@@ -22,12 +22,23 @@ const maxNamespaceSegments = 22
 // Hint suggests operations for a request the gate's table matched to none. It tries the shared candidate rules
 // over every documented route and, when they find nothing, the namespace rule. An over-long path gets nothing.
 func Hint(d *openapidoc.OperationDocs, v authreq.View) apiref.Hint {
+	return hint(d.Routes(), v)
+}
+
+// RecognizedHint is Hint over the routes t, the gate's live table, classifies, so it never suggests a route the
+// gate would deny as unmatched.
+func RecognizedHint(d *openapidoc.OperationDocs, v authreq.View, t *Table) apiref.Hint {
+	routes := slices.DeleteFunc(d.Routes(), func(r apiref.Route) bool { return !Recognizes(t, r.Method, r.Template) })
+	return hint(routes, v)
+}
+
+// hint runs the shared candidate rules over routes and, when they find nothing, the namespace rule.
+func hint(routes []apiref.Route, v authreq.View) apiref.Hint {
 	if apiref.HintPathTooLong(v.EscapedPath) {
 		return apiref.Hint{}
 	}
 	// The gate looks HEAD and OPTIONS up as GET, so the hint does too.
 	method := openapidoc.LookupMethod(v.Method)
-	routes := d.Routes()
 	if cands := apiref.Candidates(routes, method, v.EscapedPath); len(cands) > 0 {
 		h := apiref.Hint{Candidates: cands}
 		if ops := apiref.CandidateOperations(routes, method, v.EscapedPath); len(ops) == 1 {

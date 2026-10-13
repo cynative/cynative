@@ -40,8 +40,11 @@ type Record struct {
 	SessionID string    `json:"session_id"`
 	RunID     string    `json:"run_id"`
 	CallID    string    `json:"call_id"`
-	Depth     int       `json:"depth"`
-	Actor     string    `json:"actor"`
+	// ParentCallID is the call ID of the tool call a child record belongs to: a lookup_read is one credentialed
+	// read an api_reference call made. Empty on every other record.
+	ParentCallID string `json:"parent_call_id,omitempty"`
+	Depth        int    `json:"depth"`
+	Actor        string `json:"actor"`
 	// Agent is the agent file that framed this run, when one was selected. Set
 	// by the Logger, never by the caller.
 	Agent     *AgentProvenance `json:"agent,omitempty"`
@@ -74,12 +77,23 @@ const (
 	DecisionDenied          = "denied"
 	DecisionUngated         = "ungated"
 	DecisionApprovedSession = "approved_session"
+	// DecisionUnprompted labels a call that ran without a prompt by design and could use a connector's credentials
+	// for metadata reads at host-built paths: a targeted api_reference lookup and each read it made.
+	DecisionUnprompted = "unprompted"
 
 	OutcomeOK     = "ok"
 	OutcomeDenied = "denied"
 	OutcomeError  = "error"
 
 	ViaCodeExecution = "code_execution"
+	ViaAPIReference  = "api_reference"
+
+	// ToolLookupRead is the tool name of a child record for one credentialed read a targeted api_reference
+	// lookup made.
+	ToolLookupRead = "lookup_read"
+	// ToolLookupBootstrap is the tool name of a child record for one control-plane call a targeted api_reference
+	// lookup triggered while it resolved its target: a cluster resolution or the ClusterRole fetch.
+	ToolLookupBootstrap = "lookup_bootstrap"
 )
 
 // ErrLog wraps any audit write/marshal failure. [errors.Is](err, ErrLog) marks a
@@ -100,6 +114,11 @@ type redactor interface {
 // Logger serializes Records as one JSON object per line to w. It is safe for
 // concurrent use: every Log call is serialized under mu, so concurrent inner
 // sandbox workers and the verifier panel can share one Logger.
+//
+// The first write or marshal failure latches: every later Log returns that same
+// error, writes nothing and spends no sequence number. A record written from a
+// goroutine that outlives its tool call can fail after the loop's last write, so
+// the latch keeps that failure for the closer to report.
 type Logger struct {
 	mu       sync.Mutex
 	w        io.Writer
@@ -108,10 +127,48 @@ type Logger struct {
 	actor    string
 	agent    *AgentProvenance
 	seq      uint64
+	err      error
+
+	// drain bounds how long the closer waits for held records; holds counts them, and drained is closed when the
+	// count returns to zero. They have their own lock, so a record written by a holder never waits on a closer.
+	drain   time.Duration
+	notice  func(time.Duration)
+	holdMu  sync.Mutex
+	holds   int
+	drained chan struct{}
+	closing bool
 }
 
 // Option configures a Logger at construction.
 type Option func(*Logger)
+
+// WithDrain sets how long the closer waits for records still held (Hold) before it closes the writer.
+func WithDrain(d time.Duration) Option {
+	return func(l *Logger) { l.drain = d }
+}
+
+// WithDrainNotice sets a function the closer calls once, with the bound, when it is about to wait for a held
+// record, so a run that pauses at exit can say why.
+func WithDrainNotice(notice func(time.Duration)) Option {
+	return func(l *Logger) { l.notice = notice }
+}
+
+// PendingRecordsError reports records held (Hold) that were not written before the log closed. It matches ErrLog,
+// since the log is missing records.
+type PendingRecordsError struct {
+	Records int
+}
+
+func (e *PendingRecordsError) Error() string {
+	if e.Records == 1 {
+		return ErrLog.Error() + ": 1 record was not written before the log closed"
+	}
+
+	return fmt.Sprintf("%s: %d records were not written before the log closed", ErrLog, e.Records)
+}
+
+// Is reports that a PendingRecordsError is an ErrLog.
+func (e *PendingRecordsError) Is(target error) bool { return target == ErrLog }
 
 // WithActor sets the actor identity stamped on every record (e.g. provider/model).
 func WithActor(a string) Option {
@@ -149,6 +206,10 @@ func (l *Logger) Log(rec Record) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if l.err != nil {
+		return l.err
+	}
+
 	l.seq++
 	rec.Seq = l.seq
 	rec.Time = l.clock()
@@ -168,14 +229,122 @@ func (l *Logger) Log(rec Record) error {
 
 	line, err := json.Marshal(rec)
 	if err != nil {
-		return fmt.Errorf("%w: marshal: %w", ErrLog, err)
+		l.err = fmt.Errorf("%w: marshal: %w", ErrLog, err)
+
+		return l.err
 	}
 	line = append(line, '\n')
 	if _, werr := l.w.Write(line); werr != nil {
-		return fmt.Errorf("%w: write: %w", ErrLog, werr)
+		l.err = fmt.Errorf("%w: write: %w", ErrLog, werr)
+
+		return l.err
 	}
 
 	return nil
+}
+
+// Err returns the latched write or marshal failure, or nil while every write has
+// succeeded.
+func (l *Logger) Err() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.err
+}
+
+// Holder is a Sink that can be asked, at close, to wait for a record still to be written. *Logger implements it.
+type Holder interface {
+	Hold() (release func(), err error)
+}
+
+// errClosing refuses a hold once the closer has stopped waiting: a record it covers could land after the log
+// closed.
+var errClosing = fmt.Errorf("%w: the audit log is closing", ErrLog)
+
+var _ Holder = (*Logger)(nil)
+
+// Hold reports a record that will be written later, by a call that can outlive the tool call that started it: a
+// targeted lookup's control-plane call runs on after the lookup returns when it times out. The closer waits for
+// every hold to be released before it closes. Once the closer has stopped waiting, Hold refuses with an ErrLog
+// error, so the call it would cover is never started. The release it returns counts once, however often it is
+// called.
+func (l *Logger) Hold() (func(), error) {
+	l.holdMu.Lock()
+	if l.closing {
+		l.holdMu.Unlock()
+
+		return nil, errClosing
+	}
+	if l.holds == 0 {
+		l.drained = make(chan struct{})
+	}
+	l.holds++
+	l.holdMu.Unlock()
+	var once sync.Once
+
+	return func() {
+		once.Do(func() {
+			l.holdMu.Lock()
+			defer l.holdMu.Unlock()
+			if l.holds--; l.holds == 0 {
+				close(l.drained)
+			}
+		})
+	}, nil
+}
+
+// pendingAfter waits up to bound for every hold to be released and returns how many are still held. It re-reads
+// the holds after every wake, so a hold taken while it waits is waited for too, and it marks the log closing in the
+// same critical section as its last read, so no hold can be taken after it stops waiting.
+func (l *Logger) pendingAfter(bound time.Duration) int {
+	deadline := time.Now().Add(bound)
+	noticed := false
+	for {
+		l.holdMu.Lock()
+		n, drained := l.holds, l.drained
+		wait := time.Until(deadline)
+		if n == 0 || wait <= 0 {
+			l.closing = true
+			l.holdMu.Unlock()
+
+			return n
+		}
+		l.holdMu.Unlock()
+		if !noticed && l.notice != nil {
+			l.notice(l.drain)
+		}
+		noticed = true
+		timer := time.NewTimer(wait)
+		select {
+		case <-drained:
+		case <-timer.C:
+		}
+		timer.Stop()
+	}
+}
+
+// Closer wraps the audit writer's close for the composition root. It first waits, up to the drain bound, for the
+// records still held, then always closes. It returns the latched failure when there is one, then a held record
+// that never arrived, then the close error, so a failed or missing write that no later record reported still ends
+// the run with an error.
+func (l *Logger) Closer(closeWriter func() error) func() error {
+	return func() error {
+		// A latched failure is what the closer returns whatever a held record does, so it does not wait for one.
+		bound := l.drain
+		if l.Err() != nil {
+			bound = 0
+		}
+		pending := l.pendingAfter(bound)
+		cerr := closeWriter()
+		if err := l.Err(); err != nil {
+			return err
+		}
+		if pending > 0 {
+			return &PendingRecordsError{Records: pending}
+		}
+
+		return cerr
+	}
 }
 
 // RawArgs returns s as a [json.RawMessage] when it is valid JSON, otherwise a

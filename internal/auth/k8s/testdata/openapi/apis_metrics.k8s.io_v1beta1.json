@@ -1,0 +1,56 @@
+{
+ "components":{
+  "schemas":{
+   "io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetrics":{
+    "type":"object"
+   },
+   "io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetricsList":{
+    "type":"object"
+   }
+  }
+ },
+ "info":{
+  "title":"Kubernetes metrics-server",
+  "version":"v0.8.0"
+ },
+ "openapi":"3.0.0",
+ "paths":{
+  "/apis/metrics.k8s.io/v1beta1/nodes":{
+   "get":{
+    "description":"list objects of kind NodeMetrics",
+    "operationId":"listMetricsV1beta1NodeMetrics",
+    "responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetricsList"}},"application/json;stream=watch":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetricsList"}},"application/vnd.kubernetes.protobuf":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetricsList"}},"application/vnd.kubernetes.protobuf;stream=watch":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetricsList"}},"application/yaml":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetricsList"}}},"description":"OK"}},
+    "tags":["metrics_v1beta1"],
+    "x-kubernetes-action":"list",
+    "x-kubernetes-group-version-kind":{"group":"metrics.k8s.io","kind":"NodeMetrics","version":"v1beta1"}
+   },
+   "parameters":[
+    {"in":"query","name":"allowWatchBookmarks","schema":{"type":"boolean","uniqueItems":true}},
+    {"in":"query","name":"continue","schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"fieldSelector","schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"labelSelector","schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"limit","schema":{"type":"integer","uniqueItems":true}},
+    {"in":"query","name":"pretty","schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"resourceVersion","schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"resourceVersionMatch","schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"sendInitialEvents","schema":{"type":"boolean","uniqueItems":true}},
+    {"in":"query","name":"timeoutSeconds","schema":{"type":"integer","uniqueItems":true}},
+    {"in":"query","name":"watch","schema":{"type":"boolean","uniqueItems":true}}
+   ]
+  },
+  "/apis/metrics.k8s.io/v1beta1/nodes/{name}":{
+   "get":{
+    "description":"read the specified NodeMetrics",
+    "operationId":"readMetricsV1beta1NodeMetrics",
+    "responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetrics"}},"application/vnd.kubernetes.protobuf":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetrics"}},"application/yaml":{"schema":{"$ref":"#/components/schemas/io.k8s.metrics.pkg.apis.metrics.v1beta1.NodeMetrics"}}},"description":"OK"}},
+    "tags":["metrics_v1beta1"],
+    "x-kubernetes-action":"get",
+    "x-kubernetes-group-version-kind":{"group":"metrics.k8s.io","kind":"NodeMetrics","version":"v1beta1"}
+   },
+   "parameters":[
+    {"in":"path","name":"name","required":true,"schema":{"type":"string","uniqueItems":true}},
+    {"in":"query","name":"pretty","schema":{"type":"string","uniqueItems":true}}
+   ]
+  }
+ }
+}

@@ -107,7 +107,7 @@ type refOut struct {
 func runRef(t *testing.T, providers []auth.Provider, args string) (string, refOut, *audit.Failure) {
 	t.Helper()
 	ctx, fail := audit.WithFailure(t.Context())
-	got, err := tools.NewAPIReferenceTool(providers).Run(ctx, args)
+	got, err := tools.NewAPIReferenceTool(providers, nil, nil).Run(ctx, args)
 	if err != nil {
 		t.Fatalf("Run returned a Go error: %v", err)
 	}
@@ -143,7 +143,7 @@ func hasHeader(args transport.RequestArgs, k, v string) bool {
 func TestAPIReference_Info(t *testing.T) {
 	t.Parallel()
 
-	info := tools.NewAPIReferenceTool(nil).Info()
+	info := tools.NewAPIReferenceTool(nil, nil, nil).Info()
 	if info.Name != "api_reference" {
 		t.Errorf("name = %q", info.Name)
 	}
@@ -153,7 +153,7 @@ func TestAPIReference_Info(t *testing.T) {
 			t.Errorf("schema missing %q: %s", want, raw)
 		}
 	}
-	if !strings.Contains(info.Desc, "github, gitlab and gcp.") ||
+	if !strings.Contains(info.Desc, "github, gitlab and gcp, from public vendor metadata") ||
 		!strings.Contains(info.Desc, "generated from the path") ||
 		!strings.Contains(string(raw), "getApiV4ProjectsIdMergeRequests") {
 		t.Errorf("gitlab missing from the description or schema: %s %s", info.Desc, raw)
@@ -162,7 +162,28 @@ func TestAPIReference_Info(t *testing.T) {
 		!strings.Contains(string(raw), "GCP: the Discovery version label") {
 		t.Errorf("gcp missing from the description or schema: %s %s", info.Desc, raw)
 	}
-	if _, ok := tools.NewAPIReferenceTool(nil).(schema.StructuredRunner); ok {
+	if !strings.Contains(info.Desc, "pass kubernetes_auth {}") || !strings.Contains(string(raw), `"kubernetes_auth"`) ||
+		!strings.Contains(info.Desc, "and kubernetes, eks, gke and aks.") ||
+		!strings.Contains(info.Desc, "or the eks_auth, gke_auth or aks_auth block naming the cluster") ||
+		strings.Contains(info.Desc, "not available yet") || strings.Count(string(raw), "not available yet") != 1 {
+		t.Errorf("the Kubernetes connectors missing from the description or schema: %s %s", info.Desc, raw)
+	}
+	for _, want := range []string{
+		"'kubernetes', 'eks', 'gke' or 'aks'",
+		"Required for an eks lookup: the same block as http_request's, naming the cluster.",
+		"Required for a gke lookup: the same block as http_request's, naming the cluster.",
+		"Required for an aks lookup: the same block as http_request's, naming the cluster.",
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("schema lacks %q: %s", want, raw)
+		}
+	}
+	for _, block := range []string{"aws_auth", "gcp_auth", "eks_auth", "gke_auth", "aks_auth", "azure_auth"} {
+		if !strings.Contains(string(raw), `"`+block+`"`) {
+			t.Errorf("schema missing %s", block)
+		}
+	}
+	if _, ok := tools.NewAPIReferenceTool(nil, nil, nil).(schema.StructuredRunner); ok {
 		t.Error("api_reference must not implement StructuredRunner")
 	}
 }
@@ -655,7 +676,7 @@ func TestAPIReference_GitHubMultiSegmentLabelsStayUnmarked(t *testing.T) {
 func TestAPIReference_NeverReturnsGoError(t *testing.T) {
 	t.Parallel()
 
-	tl := tools.NewAPIReferenceTool(nil)
+	tl := tools.NewAPIReferenceTool(nil, nil, nil)
 	for _, args := range []string{``, `null`, `[]`, `{"operation":1}`, `{"operation":"x"}`} {
 		if _, err := tl.Run(t.Context(), args); err != nil {
 			t.Errorf("%q: %v", args, err)
@@ -666,7 +687,7 @@ func TestAPIReference_NeverReturnsGoError(t *testing.T) {
 func TestAPIReferenceTool_IsUngatedIO(t *testing.T) {
 	t.Parallel()
 
-	marker, ok := tools.NewAPIReferenceTool(nil).(interface{ UngatedIO() })
+	marker, ok := tools.NewAPIReferenceTool(nil, nil, nil).(interface{ UngatedIO() })
 	if !ok {
 		t.Fatal("api_reference must implement UngatedIO so the agent audits it as ungated")
 	}

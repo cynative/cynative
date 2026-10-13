@@ -259,3 +259,280 @@ func TestLog_OverwritesCallerSuppliedAgent(t *testing.T) {
 		t.Fatalf("Agent = %+v, want the logger's configured provenance", rec.Agent)
 	}
 }
+
+func TestLog_ParentCallIDFollowsCallIDAndIsOmittedWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	l := audit.New(&buf, audit.WithClock(fixedClock()), audit.WithActor("a"))
+	for _, rec := range []audit.Record{
+		{CallID: "C", Phase: audit.PhaseAttempt, Tool: "api_reference", Arguments: json.RawMessage(`{}`)},
+		{
+			CallID: "K", ParentCallID: "C", Phase: audit.PhaseAttempt, Via: audit.ViaAPIReference,
+			Tool: audit.ToolLookupRead, Arguments: json.RawMessage(`{}`),
+		},
+	} {
+		if err := l.Log(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if strings.Contains(lines[0], "parent_call_id") {
+		t.Errorf("parent record carries parent_call_id: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"call_id":"K","parent_call_id":"C","depth":0`) ||
+		!strings.Contains(lines[1], `"via":"api_reference","tool":"lookup_read"`) {
+		t.Errorf("child record: %s", lines[1])
+	}
+}
+
+// flakyWriter fails exactly its failOn-th write (1-based) and accepts every other one.
+type flakyWriter struct {
+	buf    bytes.Buffer
+	n      int
+	failOn int
+}
+
+func (w *flakyWriter) Write(p []byte) (int, error) {
+	w.n++
+	if w.n == w.failOn {
+		return 0, errors.New("disk full")
+	}
+
+	return w.buf.Write(p)
+}
+
+// TestLogger_Log_LatchesTheFirstFailure pins the sticky latch: once a write fails, every later Log returns that
+// same error and writes nothing, even when the writer would accept the line, and Err reports it.
+func TestLogger_Log_LatchesTheFirstFailure(t *testing.T) {
+	t.Parallel()
+
+	w := &flakyWriter{failOn: 2}
+	l := audit.New(w)
+	rec := audit.Record{Tool: "x", Phase: audit.PhaseAttempt} //nolint:exhaustruct // Logger stamps the rest.
+	if err := l.Log(rec); err != nil || l.Err() != nil {
+		t.Fatalf("first Log = %v, Err = %v, want both nil", err, l.Err())
+	}
+	first := l.Log(rec)
+	if !errors.Is(first, audit.ErrLog) {
+		t.Fatalf("second Log = %v, want ErrLog", first)
+	}
+	later := l.Log(rec)
+	if !errors.Is(later, first) || !errors.Is(l.Err(), first) {
+		t.Errorf("later Log = %v and Err = %v, want the latched %v", later, l.Err(), first)
+	}
+	if w.n != 2 || strings.Count(w.buf.String(), "\n") != 1 {
+		t.Errorf("writer saw %d writes and kept %q, want two writes and one line", w.n, w.buf.String())
+	}
+}
+
+// TestLogger_Log_LatchesAMarshalFailure pins that a marshal failure latches as a write failure does.
+func TestLogger_Log_LatchesAMarshalFailure(t *testing.T) {
+	t.Parallel()
+
+	w := &flakyWriter{}
+	l := audit.New(w)
+	bad := audit.Record{Tool: "x", Arguments: json.RawMessage(`{`)} //nolint:exhaustruct // Logger stamps the rest.
+	first := l.Log(bad)
+	if !errors.Is(first, audit.ErrLog) {
+		t.Fatalf("Log = %v, want ErrLog", first)
+	}
+	good := audit.Record{Tool: "x", Phase: audit.PhaseAttempt} //nolint:exhaustruct // Logger stamps the rest.
+	if err := l.Log(good); !errors.Is(err, first) || !errors.Is(l.Err(), first) || w.n != 0 {
+		t.Errorf("Log after a marshal failure = %v, Err = %v, %d writes; want the latched %v and none",
+			err, l.Err(), w.n, first)
+	}
+}
+
+// TestLogger_Closer pins the closer the composition root returns: it always closes, reports the latched audit
+// failure ahead of any close error, and the close error otherwise.
+func TestLogger_Closer(t *testing.T) {
+	t.Parallel()
+
+	closeErr := errors.New("flush failed")
+	for _, tc := range []struct {
+		name    string
+		latched bool
+		close   error
+		want    string
+	}{
+		{"clean", false, nil, ""},
+		{"close error only", false, closeErr, "flush failed"},
+		{"latched", true, nil, "audit: log write failed: write: disk full"},
+		{"latched beats the close error", true, closeErr, "audit: log write failed: write: disk full"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := &flakyWriter{}
+			if tc.latched {
+				w.failOn = 1
+			}
+			l := audit.New(w)
+			_ = l.Log(audit.Record{Tool: "x"}) //nolint:exhaustruct // Logger stamps the rest.
+			closed := false
+			err := l.Closer(func() error { closed = true; return tc.close })()
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if !closed || got != tc.want {
+				t.Errorf("closer = %q (closed %v), want %q", got, closed, tc.want)
+			}
+		})
+	}
+}
+
+// TestLogger_CloserWaitsForAHeldRecord pins that the closer waits for a record still to be written before it
+// closes, so a late write lands in the log and a late write that fails is reported.
+func TestLogger_CloserWaitsForAHeldRecord(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		failOn int
+		want   string
+	}{
+		{"the late write succeeds", 0, ""},
+		{"the late write fails", 1, "audit: log write failed: write: disk full"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w := &flakyWriter{failOn: tc.failOn}
+			// The bound is far longer than the late write takes, so the closer can only return through the release.
+			l := audit.New(w, audit.WithDrain(time.Minute))
+			release := mustHold(t, l)
+			var closedAfter int
+			go func() {
+				time.Sleep(20 * time.Millisecond)
+				_ = l.Log(audit.Record{Tool: "late"}) //nolint:exhaustruct // Logger stamps the rest.
+				release()
+			}()
+			err := l.Closer(func() error { closedAfter = w.n; return nil })()
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != tc.want || closedAfter != w.n {
+				t.Errorf("closer = %q, closed after %d of %d writes; want %q after the late one", got, closedAfter,
+					w.n, tc.want)
+			}
+		})
+	}
+}
+
+// TestLogger_CloserReportsARecordStillHeldAtTheBound pins the fail-closed end of the wait: a record still held when
+// the bound passes is reported as missing, after the writer is closed, and a release called twice counts once.
+func TestLogger_CloserReportsARecordStillHeldAtTheBound(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(10*time.Millisecond))
+	released := mustHold(t, l)
+	released()
+	released()
+	mustHold(t, l)
+	closed := false
+	err := l.Closer(func() error { closed = true; return nil })()
+	if !errors.Is(err, audit.ErrLog) || !closed ||
+		err.Error() != "audit: log write failed: 1 record was not written before the log closed" {
+		t.Errorf("closer = %v (closed %v), want 1 pending record reported", err, closed)
+	}
+}
+
+// TestLogger_CloserWithNothingHeldDoesNotWait pins that a run with no record in flight closes at once, whatever
+// the bound.
+func TestLogger_CloserWithNothingHeldDoesNotWait(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Hour))
+	mustHold(t, l)()
+	start := time.Now()
+	if err := l.Closer(func() error { return nil })(); err != nil || time.Since(start) > time.Minute {
+		t.Errorf("closer = %v after %s", err, time.Since(start))
+	}
+}
+
+// TestLogger_HoldIsRefusedOnceTheCloserStoppedWaiting pins the shutdown edge: once the closer has finished waiting,
+// a new hold is refused with an ErrLog error, so a call that would write its record later is never started. The
+// refusal holds from inside the writer's close onwards and after the closer returns.
+func TestLogger_HoldIsRefusedOnceTheCloserStoppedWaiting(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Minute))
+	var during error
+	if err := l.Closer(func() error { _, during = l.Hold(); return nil })(); err != nil {
+		t.Fatalf("closer = %v", err)
+	}
+	_, after := l.Hold()
+	for name, err := range map[string]error{"during the close": during, "after it": after} {
+		if !errors.Is(err, audit.ErrLog) || err.Error() != "audit: log write failed: the audit log is closing" {
+			t.Errorf("Hold %s = %v, want the closing refusal", name, err)
+		}
+	}
+}
+
+// TestLogger_CloserNamesHowManyRecordsAreMissing pins the pending error's wording for more than one record and that
+// it still matches ErrLog, so the run treats it as an audit failure.
+func TestLogger_CloserNamesHowManyRecordsAreMissing(t *testing.T) {
+	t.Parallel()
+
+	l := audit.New(&flakyWriter{}, audit.WithDrain(time.Millisecond))
+	mustHold(t, l)
+	mustHold(t, l)
+	err := l.Closer(func() error { return nil })()
+	var pending *audit.PendingRecordsError
+	if !errors.Is(err, audit.ErrLog) || !errors.As(err, &pending) || pending.Records != 2 ||
+		err.Error() != "audit: log write failed: 2 records were not written before the log closed" {
+		t.Errorf("closer = %v", err)
+	}
+}
+
+// TestLogger_CloserTellsWhenItWaits pins the notice: it is given once, before the first wait, and only when a
+// record is actually held.
+func TestLogger_CloserTellsWhenItWaits(t *testing.T) {
+	t.Parallel()
+
+	var notices []time.Duration
+	logger := func() *audit.Logger {
+		return audit.New(&flakyWriter{}, audit.WithDrain(time.Millisecond),
+			audit.WithDrainNotice(func(d time.Duration) { notices = append(notices, d) }))
+	}
+	_ = logger().Closer(func() error { return nil })()
+	if len(notices) != 0 {
+		t.Fatalf("notices with nothing held: %v", notices)
+	}
+	l := logger()
+	mustHold(t, l)
+	_ = l.Closer(func() error { return nil })()
+	if len(notices) != 1 || notices[0] != time.Millisecond {
+		t.Errorf("notices = %v, want one, naming the bound", notices)
+	}
+}
+
+// TestLogger_CloserDoesNotWaitOnceTheLogFailed pins that a latched failure ends the wait before it starts: the
+// closer returns that failure whatever a held record would do, so waiting would only delay the exit.
+func TestLogger_CloserDoesNotWaitOnceTheLogFailed(t *testing.T) {
+	t.Parallel()
+
+	noticed := false
+	l := audit.New(&flakyWriter{failOn: 1}, audit.WithDrain(2*time.Second),
+		audit.WithDrainNotice(func(time.Duration) { noticed = true }))
+	_ = l.Log(audit.Record{Tool: "x"}) //nolint:exhaustruct // Logger stamps the rest.
+	mustHold(t, l)
+	start := time.Now()
+	err := l.Closer(func() error { return nil })()
+	if !errors.Is(err, audit.ErrLog) || noticed || time.Since(start) > time.Second {
+		t.Errorf("closer = %v after %s (noticed %v), want the latched failure at once", err, time.Since(start),
+			noticed)
+	}
+}
+
+// mustHold takes a hold that must be admitted.
+func mustHold(t *testing.T, l *audit.Logger) func() {
+	t.Helper()
+	release, err := l.Hold()
+	if err != nil {
+		t.Fatalf("Hold = %v", err)
+	}
+
+	return release
+}

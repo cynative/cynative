@@ -96,3 +96,57 @@ func TestInteractiveLoop_TerminatesOnErrLog(t *testing.T) {
 		t.Error("non-audit error should not terminate the loop")
 	}
 }
+
+// lateWriteModel stands for a bootstrap call that outlives its lookup: while the run is still going, a record is
+// written from outside the loop and its write fails. The model then answers, so no later record of the loop's own
+// can notice the failure.
+type lateWriteModel struct {
+	w *switchWriter
+	l *audit.Logger
+}
+
+func (m *lateWriteModel) Generate(context.Context, []*schema.Message, []*schema.ToolInfo) (schema.Generation, error) {
+	m.w.fail = true
+	_ = m.l.Log(audit.Record{Tool: audit.ToolLookupRead}) //nolint:exhaustruct // Logger stamps the rest.
+
+	return schema.Generation{Message: assistantMsg("done")}, nil
+}
+
+func (m *lateWriteModel) Shutdown() {}
+
+type switchWriter struct{ fail bool }
+
+func (w *switchWriter) Write(p []byte) (int, error) {
+	if w.fail {
+		return 0, errors.New("disk full")
+	}
+
+	return len(p), nil
+}
+
+// TestRunResearch_ALateFailedAuditWriteFailsTheRun pins that a failed audit write no later record reports still
+// ends the run with an error, through the Logger's closer, so it exits nonzero.
+func TestRunResearch_ALateFailedAuditWriteFailsTheRun(t *testing.T) {
+	t.Parallel()
+
+	w := &switchWriter{}
+	l := audit.New(w)
+	d := testDeps()
+	d.newChatModel = func(context.Context, config.Config, func(schema.Usage)) (chatModel, error) {
+		return &lateWriteModel{w: w, l: l}, nil
+	}
+	d.newAuditSink = func(config.Config, *audit.AgentProvenance) (audit.Sink, func() error, error) {
+		return l, l.Closer(func() error { return nil }), nil
+	}
+	d.out = io.Discard
+
+	err := d.runResearch(
+		context.Background(),
+		taskReq("task"),
+		validCfg(),
+		researchFlags{}, //nolint:exhaustruct // defaults
+	)
+	if !errors.Is(err, audit.ErrLog) || ExitCodeFor(err) != 1 {
+		t.Fatalf("runResearch = %v (exit %d), want the latched audit error and exit 1", err, ExitCodeFor(err))
+	}
+}

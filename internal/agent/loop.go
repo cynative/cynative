@@ -549,7 +549,7 @@ func (a *Agent) dispatch(ctx context.Context, rs *runState, tc schema.ToolCallBl
 		return "", 0, err
 	}
 
-	ret, oc, fatal := a.invoke(ctx, rs, tc)
+	ret, oc, fatal := a.invoke(ctx, rs, tc, callID)
 	if fatal != nil {
 		return "", 0, fatal
 	}
@@ -621,7 +621,9 @@ func (a *Agent) audited(rec audit.Record) error {
 // invoke runs one tool call and classifies it. The returned error is non-nil
 // only for a fatal audit-write failure surfaced by a tool (errors.Is ErrLog);
 // every other tool failure is folded into the result string.
-func (a *Agent) invoke(ctx context.Context, rs *runState, tc schema.ToolCallBlock) (string, callOutcome, error) {
+func (a *Agent) invoke(
+	ctx context.Context, rs *runState, tc schema.ToolCallBlock, callID string,
+) (string, callOutcome, error) {
 	t, ok := a.tools.tools[tc.Name]
 	if !ok {
 		msg := fmt.Sprintf("Error: unknown tool %q.", tc.Name)
@@ -633,7 +635,7 @@ func (a *Agent) invoke(ctx context.Context, rs *runState, tc schema.ToolCallBloc
 		return a.invokeScoped(ctx, rs, rst, tc)
 	}
 
-	return a.invokeIO(ctx, rs, t, tc)
+	return a.invokeIO(ctx, rs, t, tc, callID)
 }
 
 // invokeScoped runs an in-package orchestration tool (write_todos, task,
@@ -661,10 +663,10 @@ func (a *Agent) invokeScoped(
 // decision comes from that recorder, while the existing deniedResult sentinel
 // still drives the model-facing untrusted-framing (out of scope to change).
 func (a *Agent) invokeIO(
-	ctx context.Context, rs *runState, t schema.InvokableTool, tc schema.ToolCallBlock,
+	ctx context.Context, rs *runState, t schema.InvokableTool, tc schema.ToolCallBlock, callID string,
 ) (string, callOutcome, error) {
 	ctx, dec := audit.WithDecision(ctx)
-	ctx = audit.WithScope(ctx, audit.Scope{SessionID: a.sessionID, RunID: rs.runID, Depth: rs.depth})
+	ctx = audit.WithScope(ctx, audit.Scope{SessionID: a.sessionID, RunID: rs.runID, Depth: rs.depth, CallID: callID})
 	ctx, fail := audit.WithFailure(ctx)
 	ctx, rt := audit.WithRoute(ctx)
 
@@ -688,7 +690,8 @@ func (a *Agent) invokeIO(
 
 	label := func() string { return decisionLabel(dec) }
 	if _, ungated := t.(ungatedIOTool); ungated {
-		label = func() string { return audit.DecisionUngated }
+		// An ungated tool that may have used a connector's credentials says so per call.
+		label = func() string { return ungatedLabel(dec) }
 	}
 
 	out, err := t.Run(ctx, tc.Arguments)
@@ -726,6 +729,16 @@ func (a *Agent) invokeIO(
 		decision: decision, outcome: outcome, result: out,
 		failures: fail.Count(), progress: fail.Progress(), route: rt.Value(),
 	}, nil
+}
+
+// ungatedLabel is the decision of an ungated I/O tool call: unprompted when the
+// tool recorded that it could use a connector's credentials, ungated otherwise.
+func ungatedLabel(d *audit.Decision) string {
+	if d.Unprompted {
+		return audit.DecisionUnprompted
+	}
+
+	return audit.DecisionUngated
 }
 
 // decisionLabel maps the approval recorder to an audit decision; an undecided

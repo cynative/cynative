@@ -1416,7 +1416,7 @@ func TestInvokeIO_CancelsRunningToolOnInterrupt(t *testing.T) {
 		runID: "r",
 	}
 
-	out, _, err := a.invokeIO(context.Background(), rs, tool, dispatchTC("waiter", "{}"))
+	out, _, err := a.invokeIO(context.Background(), rs, tool, dispatchTC("waiter", "{}"), "C")
 	if err != nil {
 		t.Fatalf("invokeIO error: %v", err)
 	}

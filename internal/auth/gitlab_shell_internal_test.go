@@ -104,7 +104,9 @@ func TestNewGitLabCaches_OneDownloadFeedsBothCaches(t *testing.T) {
 
 			return []byte(gitlabDocsFixture), nil
 		}
-		return newGitLabCaches(cfg, fetch)
+		tables, docs, _ := newGitLabCaches(cfg, fetch)
+
+		return tables, docs
 	}
 	t.Run("table first", func(t *testing.T) {
 		t.Parallel()

@@ -24,7 +24,8 @@ func TestToolSchemas_ContainNoSecretShapedContent(t *testing.T) {
 	}
 
 	r := redact.New()
-	for _, tool := range []schema.InvokableTool{httpTool, codeTool} {
+	refTool := tools.NewAPIReferenceTool(nil, nil, nil)
+	for _, tool := range []schema.InvokableTool{httpTool, codeTool, refTool} {
 		info := tool.Info()
 
 		rendered := info.Desc

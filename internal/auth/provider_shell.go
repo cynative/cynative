@@ -167,7 +167,8 @@ func buildRegistrationDeps(cfg HardeningConfig) *registrationDeps {
 		buildGitLab: func(c GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error) {
 			return buildGitLabProvider(c, host, cred, egress)
 		},
-		validateGitLab: validateGitLabToken,
+		validateGitLab:      validateGitLabToken,
+		fetchGitLabMetadata: fetchGitLabMetadata,
 
 		loadAWS: func(ctx context.Context) (aws.Config, error) { return loadAWSDefaultConfig(ctx, egress) },
 		retrieveAWS: func(ctx context.Context, c aws.Config) error {

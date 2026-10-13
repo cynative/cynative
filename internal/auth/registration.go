@@ -38,9 +38,10 @@ type registrationDeps struct {
 	tokenForHost   func(ctx context.Context) (token string, present bool, err error)
 	validateGithub func(ctx context.Context, token string) (login string, err error)
 
-	discoverGitLab func(loginHost, apiHost string) (cred glabCredential, err error)
-	buildGitLab    func(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error)
-	validateGitLab func(ctx context.Context, p *gitlabProvider) (username string, err error)
+	discoverGitLab      func(loginHost, apiHost string) (cred glabCredential, err error)
+	buildGitLab         func(cfg GitLabHardeningConfig, host string, cred glabCredential) (*gitlabProvider, error)
+	validateGitLab      func(ctx context.Context, p *gitlabProvider) (username string, err error)
+	fetchGitLabMetadata func(ctx context.Context, p *gitlabProvider) metadataOutcome
 
 	loadAWS           func(context.Context) (aws.Config, error)
 	retrieveAWS       func(context.Context, aws.Config) error
@@ -485,6 +486,27 @@ func (d *registrationDeps) gitlabOutcome(
 			fmt.Sprintf("gitlab_hardening: skipped (token validation failed): %v", perr))
 	}
 
+	// Fetch metadata after /user succeeds, outside its retry loop, bounded by its own deadline.
+	// A metadata failure never disables a connector whose /user validation passed.
+	mctx, mcancel := context.WithTimeout(ctx, credentialProbeTimeout)
+	defer mcancel()
+
+	md := awaitMetadata(mctx, func() metadataOutcome { return d.fetchGitLabMetadata(mctx, gl) })
+
+	// BELOW_FLOOR is the only metadata outcome that affects registration. Every
+	// other outcome only selects the document api_reference reads.
+	class, choice := chooseGitLabDocs(md, served, gl.egress.Scrub)
+	if class == gitlabclass.VersionBelowFloor {
+		return skipOutcome(
+			gitlabProviderName,
+			true,
+			verbose,
+			emitAlways,
+			fmt.Sprintf("gitlab_hardening: skipped: %s", choice.unavailable),
+		)
+	}
+	gl.useDocs(choice)
+
 	exposure := gitlabclass.BuildExposure(glCfg.Permissions)
 	posture, warn := gitlabPosture(exposure, glCfg.Permissions)
 
@@ -492,5 +514,20 @@ func (d *registrationDeps) gitlabOutcome(
 		providers: []Provider{gl},
 		statuses:  []ConnectorStatus{availStatus(gitlabProviderName, posture, gitlabIdentity(username, served), warn)},
 		visible:   []bool{true},
+	}
+}
+
+// awaitMetadata runs fetch and returns its outcome, or a failure once ctx is done. The fetch resolves the token
+// before any request, and a glab refresh does not see ctx, so only waiting on ctx here bounds the whole step. A
+// fetch still running when ctx ends finishes in the background (glab's own timeout bounds it) and its outcome is
+// dropped.
+func awaitMetadata(ctx context.Context, fetch func() metadataOutcome) metadataOutcome {
+	done := make(chan metadataOutcome, 1)
+	go func() { done <- fetch() }()
+	select {
+	case md := <-done:
+		return md
+	case <-ctx.Done():
+		return metadataOutcome{ok: false, reason: "metadata read did not finish: " + ctx.Err().Error()}
 	}
 }

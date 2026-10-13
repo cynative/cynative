@@ -164,3 +164,25 @@ func TestFailureFrom(t *testing.T) {
 		t.Errorf("FailureFrom must return the installed recorder, got ok=%v", ok)
 	}
 }
+
+func TestRecordUnprompted_RecordAndNoRecorder(t *testing.T) {
+	t.Parallel()
+
+	ctx, dec := audit.WithDecision(context.Background())
+	audit.RecordUnprompted(ctx)
+	if !dec.Unprompted || dec.Decided {
+		t.Fatalf("unprompted not recorded alone: %+v", dec)
+	}
+
+	// No recorder installed: RecordUnprompted is a safe no-op.
+	audit.RecordUnprompted(context.Background())
+}
+
+func TestScope_CarriesTheCallID(t *testing.T) {
+	t.Parallel()
+
+	got, _ := audit.ScopeFrom(audit.WithScope(context.Background(), audit.Scope{CallID: "C"}))
+	if got.CallID != "C" {
+		t.Fatalf("ScopeFrom: %+v", got)
+	}
+}

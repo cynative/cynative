@@ -57,7 +57,12 @@ func buildGitLabProvider(
 		egress:   e,
 		exposure: gitlabclass.BuildExposure(cfg.Permissions),
 	}
-	p.tables, p.docs.cache = newGitLabCaches(cfg, newGitLabOpenAPIFetcher(e))
+	p.tables, p.docs.cache, p.handoff = newGitLabCaches(cfg, newGitLabOpenAPIFetcher(e))
+	p.docsFailure = recordLoadFailure(p.docs.cache)
+	p.docsCfg = cfg.Config
+	p.releaseFetch = func(ref string) func(context.Context) ([]byte, error) {
+		return newGitLabOpenAPIRefFetcher(e, ref)
+	}
 
 	p.tokenSource = newTokenSource(p, cred)
 
@@ -139,4 +144,32 @@ func gitlabProbeBody(
 	}
 
 	return body, nil
+}
+
+// fetchGitLabMetadata reads GET /api/v4/metadata once, through a new probe client built the same way as the one
+// for /user validation (buildProbeClient), and returns the outcome; a failure is a reason for api_reference, never a
+// registration error. gitlabOutcome calls it after /user succeeds, outside that retry loop, and bounds the whole
+// call, token resolution included, by the step's deadline. Shell I/O.
+func fetchGitLabMetadata(ctx context.Context, p *gitlabProvider) metadataOutcome {
+	accessToken, err := p.currentToken()
+	if err != nil {
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("token resolution failed: %v", err)}
+	}
+
+	hc, err := buildProbeClient(p)
+	if err != nil {
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("build client failed: %v", err)}
+	}
+
+	body, err := gitlabProbeBody(ctx, hc, p, "/api/v4/metadata", accessToken)
+	if err != nil {
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("probe failed: %v", err)}
+	}
+
+	version, err := parseGitLabMetadata(body)
+	if err != nil {
+		return metadataOutcome{ok: false, reason: fmt.Sprintf("parse failed: %v", err)}
+	}
+
+	return metadataOutcome{ok: true, version: version}
 }
