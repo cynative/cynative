@@ -77,7 +77,7 @@ func NewCatalog(cfg CatalogConfig) PeekableCatalog {
 		}
 		return CatalogData{}, ErrCatalogUnavailable
 	})
-	c.peek = tc.Peek
+	c.peek = tc.TryPeek
 
 	return c
 }

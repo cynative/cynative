@@ -421,6 +421,42 @@ func TestTTLCache_PeekWaitsForALoadAndNeverRefreshes(t *testing.T) {
 	}
 }
 
+// TestTTLCache_TryPeek pins TryPeek: nil before any load, the loaded value after one, and nil, without waiting, while
+// a Get holds the lock through a Fetch that is blocked on a channel the test controls.
+func TestTTLCache_TryPeek(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var fetches atomic.Int32
+	c := newCache(t.TempDir(), time.Now, func(context.Context) ([]byte, error) {
+		if fetches.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return []byte(goodRaw), nil
+	})
+	if d := c.TryPeek(); d != nil {
+		t.Fatalf("TryPeek before any load = %v, want nil", d)
+	}
+	got := make(chan *strDoc, 1)
+	go func() { got <- c.Get(context.Background()) }()
+	<-entered
+	// The Get holds the lock until release is closed, so TryPeek cannot take it: it returns nil and does not wait.
+	if d := c.TryPeek(); d != nil {
+		t.Fatalf("TryPeek during a load = %v, want nil", d)
+	}
+	close(release)
+	if d := <-got; d == nil || d.V != "ok" {
+		t.Fatalf("Get = %v", d)
+	}
+	if d := c.TryPeek(); d == nil || d.V != "ok" || fetches.Load() != 1 {
+		t.Fatalf(
+			"TryPeek after the load = %v after %d fetches, want the loaded value and no refresh",
+			d,
+			fetches.Load(),
+		)
+	}
+}
+
 // TestTTLCache_MaxDiskBytesRefusesALargerPayload pins that a persisted payload over MaxDiskBytes is never read:
 // the fetch runs, and when it fails the oversize file is not served as a stale fallback either.
 func TestTTLCache_MaxDiskBytesRefusesALargerPayload(t *testing.T) {

@@ -86,6 +86,17 @@ func (c *TTLCache[T]) Peek() *T {
 	return c.data
 }
 
+// TryPeek is Peek without the wait: it returns nil when the lock is held, which means a Get is loading in another
+// goroutine, and otherwise the payload a Get already loaded, or nil. It never blocks, reads the disk or fetches, so a
+// caller that must honor its own deadline can use it while another run loads the cache.
+func (c *TTLCache[T]) TryPeek() *T {
+	if !c.mu.TryLock() {
+		return nil
+	}
+	defer c.mu.Unlock()
+	return c.data
+}
+
 // load resolves the payload: fresh disk → Fetch (with stale-disk fallback on
 // error). Returns nil on any unrecoverable failure; never memoizes a failure.
 func (c *TTLCache[T]) load(ctx context.Context) *T {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -316,14 +317,20 @@ func TestCatalogShellRejectsCrossCloudCache(t *testing.T) {
 	}
 }
 
-// TestCatalogShellPeekDuringLoad pins that a peek started while the gate's own load is in flight starts no second
-// fetch and mints no token: it reads that load's result, and classifying against the snapshot fetches nothing.
-// Peek shares the cache's lock, so the peek either waits for the load or runs after it; both must leave one load.
+// peekBound is how long a PeekSnapshot may take while a load is held. It is far above the microseconds a non-blocking
+// peek needs; a peek that waits behind the load can only finish after the test releases it, so it always exceeds this.
+const peekBound = 10 * time.Second
+
+// TestCatalogShellPeekDuringLoad pins that a peek started while the gate's own load is in flight does not wait for it:
+// it returns nil at once, starts no second fetch and mints no token, and a peek after the load reads that load's
+// result, which classifies without fetching.
 func TestCatalogShellPeekDuringLoad(t *testing.T) {
 	t.Parallel()
 	var endpointHits, opsHits, bearerCalls atomic.Int32
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metadata/endpoints", func(w http.ResponseWriter, _ *http.Request) {
 		if endpointHits.Add(1) == 1 {
@@ -340,7 +347,9 @@ func TestCatalogShellPeekDuringLoad(t *testing.T) {
 				`{"name":"Microsoft.Compute/virtualMachines/read","isDataAction":false}]}]}]}`))
 		})
 	srv := httptest.NewServer(mux)
-	defer srv.Close()
+	// Cleanups run last in, first out: release the held handler before the server waits for it to finish.
+	t.Cleanup(srv.Close)
+	t.Cleanup(unblock)
 
 	cat := azurehardening.NewCatalog(azurehardening.CatalogConfig{ //nolint:exhaustruct // optional fields omitted.
 		Dir: t.TempDir(), TTL: time.Hour, Clock: time.Now,
@@ -361,13 +370,21 @@ func TestCatalogShellPeekDuringLoad(t *testing.T) {
 	<-entered
 	peeked := make(chan azurehardening.Catalog, 1)
 	go func() { peeked <- cat.PeekSnapshot() }()
-	close(release)
+	select {
+	case during := <-peeked:
+		if during != nil {
+			t.Fatal("PeekSnapshot during a load != nil, want nil (not loaded yet)")
+		}
+	case <-time.After(peekBound):
+		t.Fatal("PeekSnapshot waited for the in-flight load")
+	}
+	unblock()
 	if err := <-loaded; err != nil {
 		t.Fatalf("gate load: %v", err)
 	}
-	snap := <-peeked
+	snap := cat.PeekSnapshot()
 	if snap == nil {
-		t.Fatal("PeekSnapshot during a load = nil, want the load's result")
+		t.Fatal("PeekSnapshot after the load = nil, want the load's result")
 	}
 	if _, err := snap.ResourceTypes(context.Background(), "Microsoft.Compute"); err != nil {
 		t.Fatalf("snapshot ResourceTypes: %v", err)

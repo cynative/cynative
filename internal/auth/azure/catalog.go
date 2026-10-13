@@ -60,8 +60,8 @@ type catalogFetcher func(ctx context.Context) (CatalogData, error)
 // PeekableCatalog is the gate's Catalog plus a read of the data it already holds, for api_reference's gate check.
 type PeekableCatalog interface {
 	Catalog
-	// PeekSnapshot returns a Catalog over the data already in memory, or nil when none is loaded. The returned
-	// Catalog never fetches and never mints a token.
+	// PeekSnapshot returns a Catalog over the data already in memory, or nil when none is loaded or a load is in
+	// flight. It never waits for a load. The returned Catalog never fetches and never mints a token.
 	PeekSnapshot() Catalog
 }
 
@@ -182,12 +182,10 @@ func (c *catalog) ResolveCloud(ctx context.Context, p ParsedHost) (ParsedHost, e
 	return ParsedHost{}, fmt.Errorf("%w: %q is not a known cloud resourceManager host", ErrHostPattern, p.Host)
 }
 
-// PeekSnapshot returns a Catalog over the data a fetch already loaded, or nil when nothing is loaded. The snapshot's
-// fetch returns that data and nothing else, so classifying against it does no I/O; the maps are shared, read only.
-// The shell's peek is TTLCache.Peek, which shares the cache's lock: while a load is in flight in another goroutine it
-// waits behind that load and starts none, and the wait is not bounded by the lookup's context. No lookup reaches that
-// wait today: the loop dispatches tool calls one at a time, code_execution waits for its inner calls before it
-// returns, and api_reference is never exposed inside code_execution.
+// PeekSnapshot returns a Catalog over the data a fetch already loaded, or nil when nothing is loaded or a load is in
+// flight. The snapshot's fetch returns that data and nothing else, so classifying against it does no I/O; the maps are
+// shared, read only. The shell's peek is TTLCache.TryPeek, which never waits: while another run's request is loading
+// the catalog it returns nil, so a lookup reads that as not loaded yet and still honors its own deadline and interrupt.
 func (c *catalog) PeekSnapshot() Catalog {
 	d := c.peek()
 	if d == nil {

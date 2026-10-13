@@ -62,6 +62,10 @@ const (
 		"form of the operation where one exists"
 	refLeadingGreedy = "%s is a full resource ID: drop its leading '/' when you substitute it, since the path " +
 		"already starts with one"
+	refAsReturnedDesc = "already URL-encoded: send the value as returned (for example a resource ID), without " +
+		"percent-encoding it again; "
+	refAsReturned = "%s takes a value as returned (already URL-encoded): do not percent-encode it again, which " +
+		"overrides the per-segment encoding the note gives for a <Name+> value"
 	refOptionalFormat = "optional input %s (collectionFormat %s) is not listed"
 	refUnresolved     = "a parameter could not be resolved: "
 	refPathSegment    = "a path segment"
@@ -104,6 +108,8 @@ type renderer struct {
 	in     renderInput
 	ref    *apiref.Reference
 	inputs []apiref.Input
+	// asReturned names the greedy path inputs that carry x-ms-skip-url-encoding, whose values are sent as returned.
+	asReturned []string
 }
 
 // renderOperation describes one operation. A budget stop, a context error or a file that cannot be loaded is
@@ -130,6 +136,7 @@ func renderOperation(ctx context.Context, in renderInput) (*apiref.Reference, er
 	r.finishInputs()
 	r.renderResponse(op)
 	r.renderService()
+	r.renderAsReturned()
 
 	return r.ref, nil
 }
@@ -309,7 +316,7 @@ func (r *renderer) renderParams(params []resolvedParam) {
 		case inBody, inFormData:
 		case inPath:
 			if len(p.Enum) != 1 {
-				r.inputs = append(r.inputs, r.input(p, apiref.LocationPath, true))
+				r.inputs = append(r.inputs, r.pathInput(p))
 			}
 		case inQuery, inHeader:
 			if p.Name != apiVersionParam || p.In != inQuery {
@@ -349,6 +356,29 @@ func (r *renderer) queryOrHeader(p resolvedParam) {
 		r.ref.Limitations = append(r.ref.Limitations, fmt.Sprintf(refOptionalFormat, p.Name, p.CollectionFormat))
 	default:
 		r.inputs = append(r.inputs, r.input(p, apiref.Location(p.In), p.Required))
+	}
+}
+
+// pathInput renders a path parameter. One that carries x-ms-skip-url-encoding and is greedy in the template holds a
+// value that is already URL-encoded, so its description says to send it as returned, ahead of the declared text.
+func (r *renderer) pathInput(p resolvedParam) apiref.Input {
+	in := r.input(p, apiref.LocationPath, true)
+	if p.SkipURLEncoding && strings.Contains(r.ref.PathTemplate, "{"+p.Name+"+}") {
+		in.Description = apiref.Truncate(
+			strings.TrimSuffix(refAsReturnedDesc+in.Description, "; "),
+			apiref.MaxInputDescription,
+		)
+		r.asReturned = append(r.asReturned, p.Name)
+	}
+
+	return in
+}
+
+// renderAsReturned adds the one limitation naming the inputs that take a value as returned.
+func (r *renderer) renderAsReturned() {
+	if len(r.asReturned) > 0 {
+		r.ref.Limitations = append(r.ref.Limitations,
+			fmt.Sprintf(refAsReturned, strings.Join(r.asReturned, ", ")))
 	}
 }
 

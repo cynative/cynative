@@ -231,13 +231,77 @@ func TestRenderOperation_PathRules(t *testing.T) {
 	for _, in := range ref.Inputs {
 		names = append(names, in.Name+":"+in.Description)
 	}
-	if fmt.Sprint(names) != "[subscriptionId: parentResourcePath: rg:a path segment "+
+	if fmt.Sprint(names) != "[subscriptionId: parentResourcePath:"+asReturnedDesc+" rg:a path segment "+
 		"resourceProviderNamespace:a path segment name:a path segment]" {
 		t.Errorf("inputs = %v", names)
 	}
 	if ref.AuthArgs["service"] != "<Namespace>" || ref.Service != "Microsoft.Test" ||
 		!hasLimitation(ref, "leave no empty segment (//) when parentResourcePath is empty") {
 		t.Errorf("generic auth %v Service %q limitations %q", ref.AuthArgs, ref.Service, ref.Limitations)
+	}
+}
+
+// asReturnedDesc is the description of a greedy x-ms-skip-url-encoding input that declares none.
+const asReturnedDesc = "already URL-encoded: send the value as returned (for example a resource ID), without " +
+	"percent-encoding it again"
+
+// TestRenderOperation_SkipEncodingSentAsReturned pins that a greedy x-ms-skip-url-encoding input is described as
+// already URL-encoded, ahead of its own text and within the description bound, with one limitation naming every such
+// input, and that an ordinary path label and a skip-encoding parameter the path does not use get neither.
+func TestRenderOperation_SkipEncodingSentAsReturned(t *testing.T) {
+	t.Parallel()
+	key := "/{scope}/providers/Microsoft.Test/things/{name}/{unused}"
+	scope := `{"name":"scope","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true,` +
+		`"description":"The scope."}`
+	long := `{"name":"name","in":"path","required":true,"type":"string","x-ms-skip-url-encoding":true,` +
+		`"description":"` + strings.Repeat("d", 400) + `"}`
+	ref := renderOne(t, "2024-01-01", `"paths":`+op(key, "get", "", scope, long, pVersion), "GET", key, false)
+	desc := map[string]string{}
+	for _, in := range ref.Inputs {
+		desc[in.Name] = in.Description
+	}
+	if want := strings.TrimSuffix(refAsReturnedDesc, "; ") + "; The scope."; desc["scope"] != want {
+		t.Errorf("scope description = %q, want %q", desc["scope"], want)
+	}
+	if got := desc["name"]; !strings.HasPrefix(got, refAsReturnedDesc) ||
+		len([]rune(got)) > apiref.MaxInputDescription {
+		t.Errorf("name description = %q (%d runes), want the prefix within %d", got, len([]rune(got)),
+			apiref.MaxInputDescription)
+	}
+	if desc["unused"] != refPathSegment {
+		t.Errorf("undeclared label description = %q", desc["unused"])
+	}
+	n := 0
+	for _, lim := range ref.Limitations {
+		if strings.Contains(lim, "takes a value as returned") {
+			n++
+			if !strings.HasPrefix(lim, "scope, name takes") {
+				t.Errorf("limitation = %q, want it to name scope and name", lim)
+			}
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d as-returned limitations, want 1: %q", n, ref.Limitations)
+	}
+
+	plain := "/subscriptions/{subscriptionId}/providers/Microsoft.Test/things/{name}"
+	named := `{"name":"name","in":"path","required":true,"type":"string","description":"The name."}`
+	notInPath := `{"name":"other","in":"query","type":"string","x-ms-skip-url-encoding":true}`
+	ref = renderOne(
+		t,
+		"2024-01-01",
+		`"paths":`+op(plain, "get", "", pSub, named, notInPath, pVersion),
+		"GET",
+		plain,
+		false,
+	)
+	for _, in := range ref.Inputs {
+		if strings.Contains(in.Description, "already URL-encoded") {
+			t.Errorf("input %s description = %q, want no as-returned prefix", in.Name, in.Description)
+		}
+	}
+	if hasLimitation(ref, "takes a value as returned") {
+		t.Errorf("ordinary path got the as-returned limitation: %q", ref.Limitations)
 	}
 }
 
