@@ -41,10 +41,13 @@ var (
 	errRefConfined = errors.New("the ref target is outside the spec trees the index admits")
 	errUnindexed   = errors.New("the ref target is not in this commit's index")
 	errRefLimit    = errors.New("the ref limit was reached")
-	errRefKind     = errors.New("only parameters and definitions refs are followed")
-	errRefMissing  = errors.New("the ref target does not exist")
-	errBadParam    = errors.New("the parameter is malformed")
-	errBadSchema   = errors.New("the schema is malformed")
+	// errOperationFiles marks a refResolver.add refusal: the operation files a lookup renders, not one operation's
+	// own refs, filled the per-lookup file bound. It always wraps errRefLimit as well.
+	errOperationFiles = errors.New("the operation files exceed the per-lookup file bound")
+	errRefKind        = errors.New("only parameters and definitions refs are followed")
+	errRefMissing     = errors.New("the ref target does not exist")
+	errBadParam       = errors.New("the parameter is malformed")
+	errBadSchema      = errors.New("the schema is malformed")
 )
 
 // swaggerMethods are the operation keys of a Swagger 2.0 path item.
@@ -237,7 +240,7 @@ func (r *refResolver) add(p string, d *swaggerDoc) error {
 		return nil
 	}
 	if len(r.docs) >= maxRefFiles {
-		return fmt.Errorf("%w: more than %d files", errRefLimit, maxRefFiles)
+		return fmt.Errorf("%w: %w: more than %d files", errOperationFiles, errRefLimit, maxRefFiles)
 	}
 	r.docs[p], r.paths[p] = d, p
 

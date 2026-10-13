@@ -620,6 +620,29 @@ func TestDocsReference_ChoicesCap(t *testing.T) {
 	}
 }
 
+// TestDocsReference_ManyCandidateFilesAnswerChoices pins that an id defined in more groups than one lookup has file
+// slots for answers ambiguous with selectors, not unavailable with a load failure: the candidate files count toward
+// the per-lookup file bound, and running out of it is the lookup's limit, not a broken spec file.
+func TestDocsReference_ManyCandidateFilesAnswerChoices(t *testing.T) {
+	t.Parallel()
+	var files []fixtureFile
+	for i := range maxRefFiles + 1 {
+		files = append(files, fixtureFile{
+			fmt.Sprintf("G%02d", i), kindStable, "2024-01-01", "a.json", specOps("2024-01-01", "Operations_List"),
+		})
+	}
+	res := lookup(t, specFixture(files...), "Operations_List", "")
+	if res.Outcome != apiref.OutcomeAmbiguous || len(res.Choices) != apiref.MaxChoices ||
+		!strings.Contains(res.Reason, `several operations named "Operations_List" span more spec files`) ||
+		!strings.Contains(res.Reason, "pass model with one of the choices") {
+		t.Fatalf("%d groups = %+v, want ambiguous with %d choices", len(files), res, apiref.MaxChoices)
+	}
+	if got := fmt.Sprint(res.Choices); got != "[test/G00@stable/2024-01-01 test/G01@stable/2024-01-01 "+
+		"test/G02@stable/2024-01-01 test/G03@stable/2024-01-01 test/G04@stable/2024-01-01]" {
+		t.Errorf("choices = %s", got)
+	}
+}
+
 // TestDocsReference_OperationEcho pins that the echoed operation is quoted and bounded before the text after it,
 // so a long, escape-heavy operation cannot push the namespace or the guidance out of the reason: outside the
 // operation grammar it is refused with the grammar, and at the grammar's longest it is searched for.
@@ -880,6 +903,20 @@ func TestDocsReference_NearestScoresOnlyListableIDs(t *testing.T) {
 	res := lookup(t, f, long+"_X", "")
 	if res.Outcome != apiref.OutcomeNotFound || !strings.Contains(res.Reason, `; nearest operation ids: "Short_Get";`) {
 		t.Fatalf("nearest = %+v, want only the short id listed", res)
+	}
+}
+
+// TestDocsReference_NearestEchoBoundary pins the listing's edge: an id whose quoted form is exactly maxNearestEcho
+// bytes is listed, one byte longer is not.
+func TestDocsReference_NearestEchoBoundary(t *testing.T) {
+	t.Parallel()
+	fits := strings.Repeat("a", maxNearestEcho-2)
+	over := strings.Repeat("b", maxNearestEcho-1)
+	f := specFixture(fixtureFile{"A", kindStable, "2024-01-01", "a.json", specOps("2024-01-01", fits, over)})
+	res := lookup(t, f, "Nope", "")
+	if res.Outcome != apiref.OutcomeNotFound || !strings.Contains(res.Reason, `; nearest operation ids: "`+fits+`";`) ||
+		strings.Contains(res.Reason, over) {
+		t.Fatalf("nearest = %+v, want only the id of %d bytes quoted", res, maxNearestEcho-2)
 	}
 }
 

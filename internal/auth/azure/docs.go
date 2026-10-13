@@ -442,6 +442,10 @@ func (s *search) conclude(ctx context.Context, previewOnly, fromPasses bool) api
 			"; pass model with a preview choice to read it"))
 	}
 	rs, err := s.renderAll(ctx, cands)
+	if errors.Is(err, errOperationFiles) {
+		return s.choose(cands, apiref.Bounded("several operations named "+echo(s.q.Operation)+
+			" span more spec files than one lookup renders", "; pass model with one of the choices"))
+	}
 	if err != nil {
 		return s.failure(ctx, err)
 	}
@@ -689,7 +693,9 @@ func (s *search) nearest(ctx context.Context) string {
 	}
 	seen := 0
 	for id := range s.ids {
-		if validOperation(id) && len(strconv.Quote(id)) <= maxNearestEcho {
+		// validOperation admits only [A-Za-z0-9_.-], which strconv.Quote leaves as is, so the quoted length is
+		// len(id)+2 exactly.
+		if validOperation(id) && len(id)+2 <= maxNearestEcho {
 			batch = append(batch, id)
 		}
 		if seen++; seen%nearestBatch == 0 && !score() {

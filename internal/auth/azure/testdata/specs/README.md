@@ -3,7 +3,9 @@
 Trimmed copies of files from `Azure/azure-rest-api-specs` (MIT) at commit
 `67d29f055c6c0ca0ff8262181837b1e9fc049c4a`, under their repository paths, and `catalog.json`, a subset of the
 providerOperations catalog the azure gate caches (`Microsoft.Compute`, `Microsoft.Resources`, `Microsoft.Storage`,
-`Microsoft.Authorization`).
+`Microsoft.Authorization`). The `Microsoft.KeyVault` `Vaults_List` case in the test table passes without a
+`Microsoft.KeyVault` entry only because its path has no provider segment, so the gate classifies it under
+`Microsoft.Resources`. A case with a real `Microsoft.KeyVault` path needs that provider added to `catalog.json`.
 
 Each spec file keeps only the operations `compat_internal_test.go` names, their `parameters`, and every parameter and
 definition those reach through `$ref`, across files. Response schemas and `x-ms-examples` are dropped.

@@ -142,7 +142,7 @@ func (ix *Index) sort() {
 		for _, g := range ns.Groups {
 			slices.SortFunc(g.Dirs, compareDirs)
 			for i := range g.Dirs {
-				slices.SortFunc(g.Dirs[i].Files, func(a, b IndexFile) int { return strings.Compare(a.Path, b.Path) })
+				slices.SortFunc(g.Dirs[i].Files, func(a, b IndexFile) int { return cmp.Compare(a.Path, b.Path) })
 			}
 		}
 	}
@@ -150,7 +150,7 @@ func (ix *Index) sort() {
 
 // compareDirs orders dirs newest first by name, then stable before preview.
 func compareDirs(a, b IndexDir) int {
-	return cmp.Or(strings.Compare(b.Name, a.Name), cmp.Compare(kindRank(a.Kind), kindRank(b.Kind)))
+	return cmp.Or(cmp.Compare(b.Name, a.Name), cmp.Compare(kindRank(a.Kind), kindRank(b.Kind)))
 }
 
 func kindRank(kind string) int {
@@ -221,7 +221,7 @@ func admitDir(ix *Index, key, gid string, d IndexDir) error {
 	}
 	// Files must be strictly ordered by path: no equal neighbors.
 	for i := 1; i < len(d.Files); i++ {
-		if strings.Compare(d.Files[i-1].Path, d.Files[i].Path) >= 0 {
+		if cmp.Compare(d.Files[i-1].Path, d.Files[i].Path) >= 0 {
 			return fmt.Errorf("%w: dir %s/%s files not strictly ordered", ErrSpecsRejected, d.Kind, d.Name)
 		}
 	}

@@ -170,7 +170,7 @@ A Kubernetes lookup always needs the cluster. All five public sources are cached
 
 ## Unmatched-request message
 
-When the AWS, GitHub, GitLab or GCP action gate finds that a request matches no operation in its metadata, `http_request` returns an explanatory error in place of the bare gate text. For example, a Route53 request to `/2013-04-01/hostedzones` produces:
+When the AWS, GitHub, GitLab or GCP action gate finds that a request matches no operation in its metadata, `http_request` returns an explanatory error in place of the bare gate text. The azure gate has no unmatched-request message; its structural misses carry a pointer instead, described in the last paragraph of this section. For example, a Route53 request to `/2013-04-01/hostedzones` produces:
 
 ```
 auth: authorize action for provider aws: aws_hardening: could not resolve IAM action for operation: no candidate serves the request for "route53". GET "/2013-04-01/hostedzones" on aws/route53 matched no operation in the cached API metadata. The gate stopped before attaching credentials or sending anything; this says nothing about the principal's permissions. Check the request shape against the operation reference. Candidates: ListHostedZones (GET /2013-04-01/hostedzone). For an operation's request template call api_reference with {"connector":"aws","operation":"ListHostedZones","service":"route53"}.

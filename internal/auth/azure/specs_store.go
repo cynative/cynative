@@ -445,7 +445,7 @@ func (s *SpecStore) evict() int64 {
 	}
 	slices.SortFunc(
 		files,
-		func(a, b cached) int { return cmp.Or(a.mod.Compare(b.mod), strings.Compare(a.path, b.path)) },
+		func(a, b cached) int { return cmp.Or(a.mod.Compare(b.mod), cmp.Compare(a.path, b.path)) },
 	)
 	for _, f := range files {
 		if total <= s.maxCache {
