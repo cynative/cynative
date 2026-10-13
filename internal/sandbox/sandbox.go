@@ -67,6 +67,11 @@ type Sandbox struct {
 	build func(s *Sandbox, funcs map[string]ToolFunc) error
 	dirty bool
 
+	// withTimeout derives each Run's context from the caller's and the timeout.
+	// It is context.WithTimeout outside tests; a test swaps it to hold the
+	// deadline until the script has reached a known point.
+	withTimeout func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+
 	// Per-run state, owned by the loop goroutine (set under mu at the start of
 	// each Run). runCtx is the in-flight Run's timeout context; pending carries
 	// worker postbacks to the loop; done is closed when the Run finishes, always
@@ -101,13 +106,14 @@ func New(
 	}
 
 	s := &Sandbox{ //nolint:exhaustruct // per-run fields are set in Run.
-		out:       &bytes.Buffer{},
-		maxOutput: maxOutput,
-		verbose:   verbose,
-		redact:    redact,
-		sem:       make(chan struct{}, maxConcurrency),
-		funcs:     funcs,
-		build:     buildRuntime,
+		out:         &bytes.Buffer{},
+		maxOutput:   maxOutput,
+		verbose:     verbose,
+		redact:      redact,
+		sem:         make(chan struct{}, maxConcurrency),
+		funcs:       funcs,
+		build:       buildRuntime,
+		withTimeout: context.WithTimeout,
 	}
 
 	return s, s.build(s, funcs)
@@ -128,7 +134,7 @@ func (s *Sandbox) Run(ctx context.Context, code string, timeout time.Duration) (
 
 	s.out.Reset()
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := s.withTimeout(ctx, timeout)
 	defer cancel()
 
 	s.runCtx = runCtx

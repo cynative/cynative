@@ -514,27 +514,6 @@ func TestRun_ConsoleOutputBeforeError(t *testing.T) {
 	}
 }
 
-func TestRun_ConsoleOutputBeforeTimeout(t *testing.T) {
-	t.Parallel()
-
-	out, err := newSandbox(
-		t,
-		nil,
-		nil,
-	).Run(context.Background(), `console.log("partial"); while (true) {}`, 30*time.Millisecond)
-	if !errors.Is(err, sandbox.ErrScript) {
-		t.Fatalf("Run: want sandbox.ErrScript, got %v", err)
-	}
-
-	if !strings.Contains(out, "partial") {
-		t.Errorf("expected pre-timeout console output, got %q", out)
-	}
-
-	if !strings.Contains(out, "timed out") {
-		t.Errorf("expected timeout suffix, got %q", out)
-	}
-}
-
 func TestRun_AwaitAndParallel(t *testing.T) {
 	t.Parallel()
 
