@@ -673,8 +673,10 @@ func (s *search) failure(ctx context.Context, err error) apiref.Result {
 
 // nearest lists up to maxNearest operation ids seen in the search, nearest first. Only ids in the operation grammar
 // whose quoted form fits maxNearestEcho are scored, so the edit distances cost at most 200 by 100 bytes each. It
-// scores the ids nearestBatch at a time, keeping the nearest so far. It checks the context before each batch and
-// lists nothing once the context is done, so a done lookup scores nothing more.
+// scores the ids nearestBatch at a time, keeping the nearest so far. It checks the context before each batch, not
+// during one: once the context is done it starts no further batch and lists nothing, but a batch already being scored
+// runs to its end, so a context that ends during the last batch can still get ids back. Reference checks the context
+// after the search and answers a done lookup as stopped.
 func (s *search) nearest(ctx context.Context) string {
 	var near, batch []string
 	score := func() bool {

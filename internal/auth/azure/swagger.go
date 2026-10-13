@@ -15,15 +15,17 @@ import (
 
 // The bounds on $ref resolution in one lookup: distinct files loaded, the operation's own included, the length of
 // one chain of refs, and maxDecodedSchema, the bytes charged for every parameter and schema object decoded and every
-// name merged into a body (see merge). Each ref target is decoded once per lookup and merged at most once per body,
-// but an inline object is decoded, and charged, again each time something reaches it.
+// name and ref target merged into a body (see merge). A ref target that decodes is memoized, so it is decoded once per
+// lookup. A malformed target is decoded, and charged, again each time something reaches it, as an inline object is. A
+// ref target is merged at most once per body.
 const (
 	maxRefFiles      = 16
 	maxRefDepth      = 8
 	maxDecodedSchema = 16 << 20
-	// mergedNameCost is what merging one required or property name charges beyond the name's own bytes: about the
-	// memory of the input and the gap the render can build from a required name, or of the schema stored for a
-	// property (on a 64-bit platform an apiref.Input is 96 bytes and a swaggerSchema 112).
+	// mergedNameCost is what merging one required or property name, or one ref target's key, charges beyond its own
+	// bytes: about the memory of the input and the gap the render can build from a required name, of the schema
+	// stored for a property, or of a key's map entry (on a 64-bit platform an apiref.Input is 96 bytes, a
+	// swaggerSchema 112 and a refKey 48).
 	mergedNameCost = 256
 )
 
@@ -121,6 +123,7 @@ type refResolver struct {
 	ix         *Index
 	budget     *Budget
 	docs       map[string]*swaggerDoc
+	paths      map[string]string
 	params     map[refKey]swaggerParam
 	schemas    map[refKey]swaggerSchema
 	decoded    int64
@@ -135,8 +138,8 @@ type refKey struct {
 // newRefResolver builds the resolver for one lookup.
 func newRefResolver(src fileSource, ix *Index, b *Budget) *refResolver {
 	return &refResolver{
-		src: src, ix: ix, budget: b, docs: map[string]*swaggerDoc{}, params: map[refKey]swaggerParam{},
-		schemas: map[refKey]swaggerSchema{}, maxDecoded: maxDecodedSchema,
+		src: src, ix: ix, budget: b, docs: map[string]*swaggerDoc{}, paths: map[string]string{},
+		params: map[refKey]swaggerParam{}, schemas: map[refKey]swaggerSchema{}, maxDecoded: maxDecodedSchema,
 	}
 }
 
@@ -235,7 +238,7 @@ func (r *refResolver) add(p string, d *swaggerDoc) error {
 	if len(r.docs) >= maxRefFiles {
 		return fmt.Errorf("%w: more than %d files", errRefLimit, maxRefFiles)
 	}
-	r.docs[p] = d
+	r.docs[p], r.paths[p] = d, p
 
 	return nil
 }
@@ -331,27 +334,32 @@ func (r *refResolver) body(ctx context.Context, from string, raw json.RawMessage
 // merge adds one part's required names and the properties shape does not have yet, each property resolved from the
 // part's file. Its invariant:
 //
-//   - Charged: before it stores anything, merge charges maxDecoded the length plus mergedNameCost of each of the
-//     part's required and property names, and it charges each property schema as it decodes it. A memoized ref
-//     target is decoded once but charged on every merge, so one lookup merges at most maxDecodedSchema /
-//     mergedNameCost (65,536) names across all its bodies and candidates.
-//   - Deduplicated: a ref target already merged into shape is skipped before it is charged, and a required name or a
-//     property is stored once, so one body holds at most the distinct names its documents contain.
+//   - Deduplicated: a ref target already in shape.merged is skipped before anything is charged or stored, and a
+//     required name or a property is stored once, so one body holds at most the distinct targets and names its
+//     documents contain.
+//   - Charged before stored: merge adds up the part's key (the lengths of its file and name, for a ref target) and
+//     each of its required and property names, each plus mergedNameCost, charges the sum against maxDecoded, and
+//     only then stores the key and the names. It charges each property schema as it decodes it. A memoized ref target
+//     is decoded once but charged on every merge, so one lookup merges at most maxDecodedSchema / mergedNameCost
+//     (65,536) ref targets and names across all its bodies and candidates.
+//   - Keys hold their own strings: a stored key's file is the resolver's one copy of that path (see target), its
+//     table a constant and its name a copy (see refPointer), so a key keeps no document string alive and its charge
+//     covers its own bytes. Keys share the file string, so charging its length for each key overcounts it.
 //
-// The second rule keeps one body's merged state within O(N) for documents of N bytes, however often a part repeats.
-// The first keeps the whole lookup's merged state within the decode bound, even where the memo saves the decoding.
-// merge checks the context first and before each property, since a cached ref target costs no read that would.
+// Together these keep the merged state of one lookup within a constant factor of the bytes charged, which the decode
+// bound caps, however the documents repeat or spread their parts. merge checks the context first and before each
+// property, since a cached ref target costs no read that would.
 func (r *refResolver) merge(ctx context.Context, shape *bodyShape, part swaggerSchema, key refKey) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	var cost int64
 	if key.name != "" {
 		if shape.merged[key] {
 			return nil
 		}
-		shape.merged[key] = true
+		cost = int64(len(key.file) + len(key.name) + mergedNameCost)
 	}
-	var cost int64
 	for _, name := range part.Required {
 		cost += int64(len(name) + mergedNameCost)
 	}
@@ -360,6 +368,9 @@ func (r *refResolver) merge(ctx context.Context, shape *bodyShape, part swaggerS
 	}
 	if err := r.charge(cost); err != nil {
 		return err
+	}
+	if key.name != "" {
+		shape.merged[key] = true
 	}
 	for _, name := range part.Required {
 		shape.required[name] = true
@@ -428,7 +439,8 @@ func (r *refResolver) raw(key refKey) json.RawMessage {
 }
 
 // target follows one $ref written in file from, loading the file it names, and returns the target's key once the
-// target is known to exist.
+// target is known to exist. The key's file is the copy of the path the resolver kept when it loaded the file, not the
+// one refPath built, so every key naming a file shares one string.
 func (r *refResolver) target(ctx context.Context, from, ref string) (refKey, error) {
 	file, pointer, found := strings.Cut(ref, "#")
 	if !found {
@@ -454,7 +466,7 @@ func (r *refResolver) target(ctx context.Context, from, ref string) (refKey, err
 		return refKey{}, fmt.Errorf("%w: %q", errRefMissing, ref)
 	}
 
-	return refKey{file: target, table: table, name: name}, nil
+	return refKey{file: r.paths[target], table: table, name: name}, nil
 }
 
 // load returns the decoded file at p, reading and charging it once per lookup.
@@ -476,7 +488,7 @@ func (r *refResolver) load(ctx context.Context, p string) (*swaggerDoc, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.docs[p] = d
+	r.docs[p], r.paths[p] = d, p
 
 	return d, nil
 }
@@ -505,7 +517,7 @@ func refPath(from, file string, ix *Index) (string, error) {
 }
 
 // indexed reports whether p, which the ref written as ref names, is a ref target of the index: a path the trees
-// admit that the index lacks is not in this commit, any other path is outside the admitted trees.
+// admit that the index lacks is missing from this commit's index, and any other path is outside the admitted trees.
 func indexed(ix *Index, p, ref string) error {
 	if _, ok := ix.Refs[p]; ok {
 		return nil
@@ -518,13 +530,18 @@ func indexed(ix *Index, p, ref string) error {
 }
 
 // refPointer splits a JSON pointer of the form /parameters/<name> or /definitions/<name> and unescapes the name as
-// RFC 6901 defines (~1 is '/', ~0 is '~').
+// RFC 6901 defines (~1 is '/', ~0 is '~'). It returns the table as a constant and the name as a copy, so a key built
+// from them keeps none of the $ref string alive.
 func refPointer(pointer string) (string, string, error) {
 	parts := strings.Split(pointer, "/")
 	if len(parts) != 3 || parts[0] != "" || parts[2] == "" ||
 		(parts[1] != refTableParameters && parts[1] != refTableDefinitions) {
 		return "", "", fmt.Errorf("%w: pointer %q", errRefKind, pointer)
 	}
+	table := refTableParameters
+	if parts[1] == refTableDefinitions {
+		table = refTableDefinitions
+	}
 
-	return parts[1], strings.NewReplacer("~1", "/", "~0", "~").Replace(parts[2]), nil
+	return table, strings.NewReplacer("~1", "/", "~0", "~").Replace(strings.Clone(parts[2])), nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unsafe"
 )
 
 // specTestSHA is the commit every fixture index names.
@@ -182,6 +183,13 @@ func TestRefPath(t *testing.T) {
 	}
 }
 
+// within reports whether the bytes of s lie inside the bytes of of.
+func within(s, of string) bool {
+	p, lo := uintptr(unsafe.Pointer(unsafe.StringData(s))), uintptr(unsafe.Pointer(unsafe.StringData(of)))
+
+	return p >= lo && p < lo+uintptr(len(of))
+}
+
 func TestRefPointer(t *testing.T) {
 	t.Parallel()
 	for ptr, want := range map[string][2]string{
@@ -192,6 +200,9 @@ func TestRefPointer(t *testing.T) {
 		kind, name, err := refPointer(ptr)
 		if err != nil || kind != want[0] || name != want[1] {
 			t.Errorf("refPointer(%q) = %q, %q, %v, want %v", ptr, kind, name, err, want)
+		}
+		if within(kind, ptr) || within(name, ptr) {
+			t.Errorf("refPointer(%q) returned a string inside the pointer, which would keep the $ref alive", ptr)
 		}
 	}
 	for _, ptr := range []string{"parameters/X", "/parameters", "/parameters/", "/responses/X", "/definitions/X/properties/y"} {
@@ -577,7 +588,9 @@ func TestRefResolverBody_RepeatedParentsAreBounded(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 	vm := json.RawMessage(`{"$ref":"#/definitions/VM"}`)
-	if _, err = r.body(t.Context(), testOpFile, vm); err != nil || r.decoded > 2*int64(len(defs)) {
+	// At most twice the document's bytes, plus the charges for the keys of VM and Big.
+	keys := 2 * int64(len(testOpFile)+len("Big")+mergedNameCost)
+	if _, err = r.body(t.Context(), testOpFile, vm); err != nil || r.decoded > 2*int64(len(defs))+keys {
 		t.Fatalf("one body of 1000 repeated parents: err = %v after %d bytes, want Big merged once", err, r.decoded)
 	}
 	for range 1000 {
@@ -603,10 +616,11 @@ func requiredNames(n int) string {
 	return "[" + strings.Join(names, ",") + "]"
 }
 
-// TestRefResolverBody_MergesEachNameOnce pins the merge's deduplication with 2,000 parts that each lead to a parent of
-// 2,000 required names: a repeated parent, distinct ref chains that end at one parent, distinct parents that share
-// their names, and a parent with properties too. Each body holds 2,000 names once and stays far inside the decode
-// bound, where merging every part's names would charge about a gigabyte.
+// TestRefResolverBody_MergesEachNameOnce pins the merge's deduplication with parts that each lead to a parent of 2,000
+// required names: 2,000 parts naming a repeated parent, 2,000 distinct ref chains that end at one parent, 4,000 parts
+// alternating between two distinct parents that share their names, and 2,000 parts naming a parent with properties
+// too. Each body holds 2,000 names once and stays far inside the decode bound, where merging every part's names would
+// charge about a gigabyte.
 func TestRefResolverBody_MergesEachNameOnce(t *testing.T) {
 	t.Parallel()
 	const n = 2000
@@ -692,6 +706,68 @@ func TestRefResolverBody_ChargesEveryMerge(t *testing.T) {
 					int(r.maxDecoded)/(100*mergedNameCost))
 			}
 		})
+	}
+}
+
+// distinctEmptyParents is a definitions document whose body schema VM lists n distinct empty definitions as allOf
+// parents, each through a ref that names the document's own file by its base name, so refPath builds the file's whole
+// path afresh for every parent.
+func distinctEmptyParents(n int) string {
+	parts, defs := make([]string, n), make([]string, n)
+	for i := range n {
+		parts[i] = fmt.Sprintf(`{"$ref":"types.json#/definitions/P%d"}`, i)
+		defs[i] = fmt.Sprintf(`"P%d":{}`, i)
+	}
+
+	return `{"definitions":{"VM":{"allOf":[` + strings.Join(parts, ",") + `]},` + strings.Join(defs, ",") + `}}`
+}
+
+// TestRefResolverBody_ChargesEachMergedTarget pins the charge for each merged ref target's key and the one copy of a
+// path every key shares: distinct empty parents in a file whose path is about 1,000 bytes charge the path and the name
+// of each, every key the resolver keeps holds the path it was given, and enough of them stop at the decode bound.
+func TestRefResolverBody_ChargesEachMergedTarget(t *testing.T) {
+	t.Parallel()
+	long := "specification/common-types/resource-management/" + strings.Repeat("d", 940) + "/v5/types.json"
+	body := func(n int) (*refResolver, bodyShape, error) {
+		own, err := decodeSwagger([]byte(distinctEmptyParents(n)))
+		if err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		r := newRefResolver(newSpecFakeFiles(nil), refIndex(long), NewBudget(1<<20))
+		if err = r.add(long, own); err != nil {
+			t.Fatalf("add: %v", err)
+		}
+		shape, err := r.body(t.Context(), long, json.RawMessage(`{"$ref":"#/definitions/VM"}`))
+
+		return r, shape, err
+	}
+	small, shape, err := body(1000)
+	if err != nil || len(shape.merged) != 1001 {
+		t.Fatalf("1,000 parents: %d keys merged, %v; want VM and every parent", len(shape.merged), err)
+	}
+	for k := range shape.merged {
+		if unsafe.StringData(k.file) != unsafe.StringData(long) {
+			t.Fatalf("merged key %s/%s holds its own copy of the path", k.table, k.name)
+		}
+	}
+	for k := range small.schemas {
+		if unsafe.StringData(k.file) != unsafe.StringData(long) {
+			t.Fatalf("memoized key %s/%s holds its own copy of the path", k.table, k.name)
+		}
+	}
+	large, _, err := body(2000)
+	if err != nil {
+		t.Fatalf("2,000 parents: %v", err)
+	}
+	if grew, least := large.decoded-small.decoded, int64(1000*(len(long)+mergedNameCost)); grew < least {
+		t.Errorf("1,000 more parents charged %d bytes, want at least %d", grew, least)
+	}
+	over, _, err := body(20000)
+	if !errors.Is(err, errRefLimit) || !refGap(err) {
+		t.Fatalf("20,000 parents: err = %v, want errRefLimit as a gap", err)
+	}
+	if over.decoded > over.maxDecoded+int64(len(long)+len("P19999")+mergedNameCost) {
+		t.Errorf("charged %d bytes, want the stop within one key of %d", over.decoded, over.maxDecoded)
 	}
 }
 

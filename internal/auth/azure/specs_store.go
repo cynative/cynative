@@ -28,7 +28,8 @@ const (
 	maxIndexBytes = 64 << 20
 	// maxFileBytes bounds one spec file after decompression (largest measured 2.04 MB on 2026-10-12).
 	maxFileBytes = 16 << 20
-	// maxFileCacheBytes bounds the on-disk file and summary cache; the least recently used go first.
+	// maxFileCacheBytes is the size the store evicts the on-disk file and summary cache down to, least recently used
+	// first. It is a target the store works toward on its own writes, not a hard limit (see noteWrite and evict).
 	maxFileCacheBytes = 512 << 20
 	// rescanEvery is how many cache writes a store makes between two scans of the files dir. A scan is what sees
 	// the writes of other processes sharing the dir.
@@ -404,7 +405,8 @@ func (s *SpecStore) writeAtomic(name string, data []byte) error {
 // noteWrite adds a write of n bytes to the running total and scans the files dir on the store's first write, on
 // every rescan-th write and whenever the total passes maxCache. Between scans the total misses other processes'
 // writes and overcounts a rewritten or deleted file, so the dir can exceed maxCache by what other processes wrote
-// since this store's last scan, until a store sharing the dir scans and evicts.
+// since this store's last scan. Only a write can scan, so the dir can stay over maxCache until a store sharing it
+// makes a write that scans.
 func (s *SpecStore) noteWrite(n int64) {
 	s.sizeMu.Lock()
 	defer s.sizeMu.Unlock()
@@ -418,9 +420,10 @@ func (s *SpecStore) noteWrite(n int64) {
 	s.cacheSize = s.evict()
 }
 
-// evict removes the least recently used cache files until the cache is within maxCache, and returns the bytes it
-// counts as left: a file it fails to remove still counts.
-// Temp files are skipped: they belong to writes in flight, possibly in another process.
+// evict removes the least recently used cache files it lists, oldest first, until the ones left fit within maxCache,
+// and returns the bytes it counts as left. A file it fails to remove still counts, so the result can stay over
+// maxCache. It counts only the regular files it can list and stat; temp files are skipped, since they belong to
+// writes in flight, possibly in another process, so the dir can hold more than it counts.
 func (s *SpecStore) evict() int64 {
 	type cached struct {
 		path string
