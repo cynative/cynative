@@ -1,9 +1,6 @@
 package auth
 
 import (
-	"context"
-	"sync"
-
 	"github.com/cynative/cynative/internal/apiref"
 	gitlabclass "github.com/cynative/cynative/internal/auth/gitlab"
 	"github.com/cynative/cynative/internal/auth/openapidoc"
@@ -60,11 +57,11 @@ func (p *gitlabProvider) useDocs(c gitlabDocsChoice) {
 	docs := cache.NewNamedCache(p.docsCfg, "docs-"+c.ref, p.releaseFetch(c.ref), gitlabclass.DistillReleaseDocs,
 		(*openapidoc.OperationDocs).Serialize, openapidoc.Unmarshal, openapidoc.Admit)
 	p.release = &openAPIDocs{cache: docs} //nolint:exhaustruct // hint latch zero-valued by design.
-	p.releaseFailure = recordLoadFailure(docs)
+	p.releaseFailure = cache.RecordLoadFailure(docs)
 }
 
 // selectedDocs returns the docs the choice names and their failure recorder, or the reason no docs apply.
-func (p *gitlabProvider) selectedDocs() (*openAPIDocs, *loadFailure, string) {
+func (p *gitlabProvider) selectedDocs() (*openAPIDocs, *cache.LoadFailure, string) {
 	switch {
 	case p.docsChoice.unavailable != "":
 		return nil, nil, apiref.Truncate(p.egress.Scrub("no GitLab OpenAPI document matches this instance: "+
@@ -92,48 +89,23 @@ func (c gitlabDocsChoice) statement() string {
 
 // unloadedReason is the reason api_reference gives when the selected docs did not load. A proxy credential in the
 // recorded cause is scrubbed, as the transport scrubs its own errors.
-func (p *gitlabProvider) unloadedReason(failure *loadFailure) string {
+func (p *gitlabProvider) unloadedReason(failure *cache.LoadFailure) string {
 	if p.docsChoice.ref == "" {
-		return failure.reason(gitlabDocsUnloaded, p.egress.Scrub)
+		return failureReason(failure, gitlabDocsUnloaded, p.egress.Scrub)
 	}
 
-	return failure.reason("GitLab OpenAPI documentation for "+p.docsChoice.ref+" could not be loaded", p.egress.Scrub)
+	return failureReason(
+		failure,
+		"GitLab OpenAPI documentation for "+p.docsChoice.ref+" could not be loaded",
+		p.egress.Scrub,
+	)
 }
 
-// loadFailure keeps the last error a docs cache's fetch returned, because [cache.TTLCache.Get] reports a failed
-// load only as nil. The wired fetch runs the distiller too, so a parse error, or a
-// document with no operations, is kept as well.
-type loadFailure struct {
-	mu  sync.Mutex
-	err error
-}
-
-// recordLoadFailure wraps c's fetch so its outcome is kept. Call it before c is shared.
-func recordLoadFailure[T any](c *cache.TTLCache[T]) *loadFailure {
-	f := &loadFailure{} //nolint:exhaustruct // zero mutex and no error yet.
-	fetch := c.Fetch
-	c.Fetch = func(ctx context.Context) ([]byte, error) {
-		raw, err := fetch(ctx)
-		f.mu.Lock()
-		f.err = err
-		f.mu.Unlock()
-
-		return raw, err
-	}
-
-	return f
-}
-
-// reason returns base with the recorded cause appended, passed through scrub and then bounded to
+// failureReason returns base with the cause f recorded appended, passed through scrub and then bounded to
 // [apiref.MaxReason], so a cut never leaves part of a scrubbed credential behind; base alone when nothing was
 // recorded or f is nil.
-func (f *loadFailure) reason(base string, scrub func(string) string) string {
-	if f == nil {
-		return base
-	}
-	f.mu.Lock()
-	err := f.err
-	f.mu.Unlock()
+func failureReason(f *cache.LoadFailure, base string, scrub func(string) string) string {
+	err := f.Err()
 	if err == nil {
 		return base
 	}

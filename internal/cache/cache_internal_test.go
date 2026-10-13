@@ -420,3 +420,96 @@ func TestTTLCache_PeekWaitsForALoadAndNeverRefreshes(t *testing.T) {
 		t.Errorf("stale Peek = %v after %d fetches, want the loaded value and no refresh", d, fetches.Load())
 	}
 }
+
+// TestTTLCache_TryPeek pins TryPeek: nil before any load, the loaded value after one, and nil, without waiting, while
+// a Get holds the lock through a Fetch that is blocked on a channel the test controls.
+func TestTTLCache_TryPeek(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var fetches atomic.Int32
+	c := newCache(t.TempDir(), time.Now, func(context.Context) ([]byte, error) {
+		if fetches.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		return []byte(goodRaw), nil
+	})
+	if d := c.TryPeek(); d != nil {
+		t.Fatalf("TryPeek before any load = %v, want nil", d)
+	}
+	got := make(chan *strDoc, 1)
+	go func() { got <- c.Get(context.Background()) }()
+	<-entered
+	// The Get holds the lock until release is closed, so TryPeek cannot take it: it returns nil and does not wait.
+	if d := c.TryPeek(); d != nil {
+		t.Fatalf("TryPeek during a load = %v, want nil", d)
+	}
+	close(release)
+	if d := <-got; d == nil || d.V != "ok" {
+		t.Fatalf("Get = %v", d)
+	}
+	if d := c.TryPeek(); d == nil || d.V != "ok" || fetches.Load() != 1 {
+		t.Fatalf(
+			"TryPeek after the load = %v after %d fetches, want the loaded value and no refresh",
+			d,
+			fetches.Load(),
+		)
+	}
+}
+
+// TestTTLCache_MaxDiskBytesRefusesALargerPayload pins that a persisted payload over MaxDiskBytes is never read:
+// the fetch runs, and when it fails the oversize file is not served as a stale fallback either.
+func TestTTLCache_MaxDiskBytesRefusesALargerPayload(t *testing.T) {
+	t.Parallel()
+	dir := seedDisk(t)
+	c := newCache(dir, time.Now, func(context.Context) ([]byte, error) { return nil, errors.New("offline") })
+	c.MaxDiskBytes = int64(len(goodRaw)) - 1
+	if got := c.Get(t.Context()); got != nil {
+		t.Fatalf("Get = %v, want nil: the cached payload is over the bound", got)
+	}
+}
+
+// TestTTLCache_MaxDiskBytesAdmitsAPayloadWithinTheBound pins that a bound at or above the payload size changes
+// nothing: the fresh disk copy is served without a fetch.
+func TestTTLCache_MaxDiskBytesAdmitsAPayloadWithinTheBound(t *testing.T) {
+	t.Parallel()
+	dir := seedDisk(t)
+	c := newCache(dir, time.Now, func(context.Context) ([]byte, error) {
+		t.Error("fetch ran although the disk copy is fresh and within the bound")
+
+		return nil, errors.New("unexpected fetch")
+	})
+	c.MaxDiskBytes = int64(len(goodRaw))
+	if got := c.Get(t.Context()); got == nil || got.V != "ok" {
+		t.Fatalf("Get = %v, want ok", got)
+	}
+}
+
+// TestTTLCache_ReadDataBounded pins each path of the capped read: a missing file, a path that opens but cannot be
+// read (a directory), a payload one byte over the bound, and one exactly at it.
+func TestTTLCache_ReadDataBounded(t *testing.T) {
+	t.Parallel()
+	dir := seedDisk(t)
+	c := newCache(dir, time.Now, nil)
+	c.MaxDiskBytes = int64(len(goodRaw))
+	if raw, err := c.readData(); err != nil || string(raw) != goodRaw {
+		t.Fatalf("at the bound = %q, %v", raw, err)
+	}
+	c.MaxDiskBytes--
+	if _, err := c.readData(); !errors.Is(err, errPayloadTooLarge) {
+		t.Fatalf("over the bound: err = %v, want errPayloadTooLarge", err)
+	}
+	missing := newCache(t.TempDir(), time.Now, nil)
+	missing.MaxDiskBytes = 1
+	if _, err := missing.readData(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing: err = %v, want os.ErrNotExist", err)
+	}
+	unreadable := newCache(t.TempDir(), time.Now, nil)
+	if err := os.MkdirAll(unreadable.DataPath, DirPerm); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	unreadable.MaxDiskBytes = 1
+	if _, err := unreadable.readData(); err == nil || errors.Is(err, errPayloadTooLarge) {
+		t.Fatalf("a directory: err = %v, want the read error", err)
+	}
+}

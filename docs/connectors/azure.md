@@ -139,6 +139,12 @@ The official [Azure MCP Server](https://github.com/Azure/azure-mcp/blob/main/doc
 
 > Third-party behavior was checked against official docs in June 2026; these tools change quickly, so re-verify before relying on this.
 
+## API reference
+
+`api_reference` describes ARM operations from the public Azure REST API specs, with no credential and no prompt. Pass `connector: "azure"`, `service` as the namespace (`Microsoft.Compute`) and `operation` as the Swagger operationId (`VirtualMachines_List`). It returns an `http_request` template with the operation's api-version (an input for a generic operation such as `Resources_Get`) and the `azure_auth` block. See [API reference lookup](api-reference.md#azure).
+
+Three gate denials end with a pointer to it: a resource type the namespace does not register, a segment trailing a registered type, and a provider-less GET that no route matches.
+
 ## Cynative configuration
 
 ### Target & connection settings
@@ -171,7 +177,7 @@ export CYNATIVE_CONNECTORS_AZURE_ROLE_DEFINITION=Reader
 
 ### Cache settings
 
-The Azure service catalog is cached under `<cache.dir>/azure` (the role definition is fetched live per run, not cached). The cache is shared across connectors — see [Shared configuration](README.md#shared-configuration).
+The Azure service catalog is cached under `<cache.dir>/azure` (the role definition is fetched live per run, not cached), and the `api_reference` spec index and files under `<cache.dir>/azure/specs`. The cache is shared across connectors; see [Shared configuration](README.md#shared-configuration).
 
 ```yaml
 cache:

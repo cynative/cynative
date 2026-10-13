@@ -1,0 +1,50 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "host": "management.azure.com",
+  "info": {
+    "description": "Role based access control provides you a way to apply granular level policy administration down to individual resources or resource groups. These operations allow you to manage role definitions. A role definition describes the set of actions that can be performed on resources.",
+    "title": "AuthorizationManagementClient",
+    "version": "2022-04-01"
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0",
+  "x-ms-paths": {
+    "/{roleId}?disambiguation_dummy": {
+      "get": {
+        "description": "Gets a role definition by ID.",
+        "operationId": "RoleDefinitions_GetById",
+        "parameters": [
+          {
+            "description": "The fully qualified role definition ID. Use the format, /subscriptions/{guid}/providers/Microsoft.Authorization/roleDefinitions/{roleDefinitionId} for subscription level role definitions, or /providers/Microsoft.Authorization/roleDefinitions/{roleDefinitionId} for tenant level role definitions.",
+            "in": "path",
+            "name": "roleId",
+            "required": true,
+            "type": "string",
+            "x-ms-skip-url-encoding": true
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v2/types.json#/parameters/ApiVersionParameter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK - Returns information about the role definition."
+          },
+          "default": {
+            "description": "Error response describing why the operation failed."
+          }
+        },
+        "tags": [
+          "RoleDefinitions"
+        ]
+      }
+    }
+  }
+}

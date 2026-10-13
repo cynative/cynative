@@ -21,16 +21,18 @@ var _ schema.InvokableTool = (*apiReferenceTool)(nil)
 
 const apiReferenceDescription = "Look up one connector API operation by exact name and get its protocol, inputs, " +
 	"an http_request template with <placeholders>, response parsing and pagination. Read-only. Supported: aws " +
-	"(restXml, restJson1, awsQuery, awsJson), github, gitlab and gcp, from public vendor metadata, sending " +
+	"(restXml, restJson1, awsQuery, awsJson), github, gitlab, gcp and azure, from public vendor metadata, sending " +
 	"nothing to the connector; and kubernetes, eks, gke and aks. GitLab operation IDs are generated from the path, " +
 	"so an ID changes when its path does. GCP operations are Discovery method ids such as compute.instances.list, " +
-	"and model picks the Discovery version. The Kubernetes connectors read the target cluster's own /openapi/v3 " +
-	"document with the connector's credentials, so CRDs and aggregated APIs are covered: pass kubernetes_auth {} " +
-	"for kubernetes, or the eks_auth, gke_auth or aks_auth block naming the cluster, as in http_request; model as " +
-	"the apiVersion (apps/v1, or v1 for the core group) and operation as the operationId. Not covered: discovery " +
-	"documents (/version, /api, /apis), operations without an operationId or outside the form this tool renders, " +
-	"documents published outside /openapi/v3/<group-version>, over 10 MiB or over 100000 elements, aggregated " +
-	"APIs whose server is not answering, and lookup by resource or verb."
+	"and model picks the Discovery version. Azure operations are Swagger operationIds such as " +
+	"VirtualMachines_List, service is the resource-provider namespace (the azure_auth.service value, e.g. " +
+	"Microsoft.Compute) and model picks an api-version. The Kubernetes connectors read the target cluster's own " +
+	"/openapi/v3 document with the connector's credentials, so CRDs and aggregated APIs are covered: pass " +
+	"kubernetes_auth {} for kubernetes, or the eks_auth, gke_auth or aks_auth block naming the cluster, as in " +
+	"http_request; model as the apiVersion (apps/v1, or v1 for the core group) and operation as the operationId. " +
+	"Not covered: discovery documents (/version, /api, /apis), operations without an operationId or outside the " +
+	"form this tool renders, documents published outside /openapi/v3/<group-version>, over 10 MiB or over 100000 " +
+	"elements, aggregated APIs whose server is not answering, and lookup by resource or verb."
 
 const (
 	apiReferenceNote = "Replace every <placeholder>; percent-encode query and form values and every path value " +
@@ -49,10 +51,10 @@ const (
 // apiReferenceArgs is the tool's schema. The auth blocks reuse http_request's structs and JSON names; Run never
 // decodes them into these types (see lookupArgs and lookupBlocks).
 type apiReferenceArgs struct {
-	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github', 'gitlab', 'gcp', 'kubernetes', 'eks', 'gke' or 'aks'."`                                                                                                                                                                                                                             //nolint:lll // struct tags are indivisible
-	Service   string `json:"service,omitempty" jsonschema_description:"AWS: the endpoint prefix from the request host, e.g. 'route53' or 'iam'. GCP, optional: the Discovery API name when the method id does not start with it, e.g. 'sqladmin' for 'sql.instances.list'. Kubernetes: leave empty."`                                                                                       //nolint:lll // struct tags are indivisible
-	Model     string `json:"model,omitempty"   jsonschema_description:"AWS: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices). GCP: the Discovery version label, e.g. 'v1' or 'beta'; without it the lookup searches the API's vN versions. Kubernetes, required: the apiVersion, e.g. 'apps/v1', or 'v1' for the core group."` //nolint:lll // struct tags are indivisible
-	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get'), GitLab (e.g. 'getApiV4ProjectsIdMergeRequests') and Kubernetes (e.g. 'listAppsV1NamespacedDeployment'), the Discovery method id for GCP (e.g. 'compute.instances.list')."`            //nolint:lll // struct tags are indivisible
+	Connector string `json:"connector"         jsonschema_description:"Connector name: 'aws', 'github', 'gitlab', 'gcp', 'azure', 'kubernetes', 'eks', 'gke' or 'aks'."`                                                                                                                                                                                                                                                                                                                //nolint:lll // struct tags are indivisible
+	Service   string `json:"service,omitempty" jsonschema_description:"AWS: the endpoint prefix from the request host, e.g. 'route53' or 'iam'. GCP, optional: the Discovery API name when the method id does not start with it, e.g. 'sqladmin' for 'sql.instances.list'. Azure, required: the resource-provider namespace, the azure_auth.service value, e.g. 'Microsoft.Compute'. Kubernetes: leave empty."`                                                                         //nolint:lll // struct tags are indivisible
+	Model     string `json:"model,omitempty"   jsonschema_description:"AWS: the model directory, to choose between models sharing an endpoint prefix (from an ambiguous result's choices). GCP: the Discovery version label, e.g. 'v1' or 'beta'; without it the lookup searches the API's vN versions. Azure: an api-version, e.g. '2024-07-01', or a selector from an ambiguous result's choices. Kubernetes, required: the apiVersion, e.g. 'apps/v1', or 'v1' for the core group."` //nolint:lll // struct tags are indivisible
+	Operation string `json:"operation"         jsonschema_description:"Exact operation name: the Smithy name for AWS (e.g. 'ListHostedZones'), the OpenAPI operationId for GitHub (e.g. 'repos/get'), GitLab (e.g. 'getApiV4ProjectsIdMergeRequests') and Kubernetes (e.g. 'listAppsV1NamespacedDeployment'), the Discovery method id for GCP (e.g. 'compute.instances.list'), the Swagger operationId for Azure (e.g. 'VirtualMachines_List')."`                                       //nolint:lll // struct tags are indivisible
 
 	AWSAuth        *auth.AWSAuthArgs        `json:"aws_auth,omitempty"        jsonschema_description:"Same shape as http_request's. The aws lookup reads public metadata and ignores it."`                                                                                            //nolint:lll // struct tags are indivisible
 	GCPAuth        *auth.GCPAuthArgs        `json:"gcp_auth,omitempty"        jsonschema_description:"Same shape as http_request's. The gcp lookup reads public metadata and ignores it."`                                                                                            //nolint:lll // struct tags are indivisible
@@ -60,7 +62,7 @@ type apiReferenceArgs struct {
 	GKEAuth        *auth.GKEAuthArgs        `json:"gke_auth,omitempty"        jsonschema_description:"Required for a gke lookup: the same block as http_request's, naming the cluster. The lookup resolves the cluster and reads its /openapi/v3 with the connector's credentials."`  //nolint:lll // struct tags are indivisible
 	AKSAuth        *auth.AKSAuthArgs        `json:"aks_auth,omitempty"        jsonschema_description:"Required for an aks lookup: the same block as http_request's, naming the cluster. The lookup resolves the cluster and reads its /openapi/v3 with the connector's credentials."` //nolint:lll // struct tags are indivisible
 	KubernetesAuth *auth.KubernetesAuthArgs `json:"kubernetes_auth,omitempty" jsonschema_description:"Required for a kubernetes lookup: pass {}. The lookup reads the configured cluster's /openapi/v3 with the connector's credentials."`                                            //nolint:lll // struct tags are indivisible
-	AzureAuth      *auth.AzureAuthArgs      `json:"azure_auth,omitempty"      jsonschema_description:"Same shape as http_request's. azure lookups are not available yet."`                                                                                                            //nolint:lll // struct tags are indivisible
+	AzureAuth      *auth.AzureAuthArgs      `json:"azure_auth,omitempty"      jsonschema_description:"Same shape as http_request's. The azure lookup reads public metadata and ignores it."`                                                                                          //nolint:lll // struct tags are indivisible
 }
 
 // lookupArgs is what Run decodes before routing: the four strings every connector shares.
@@ -278,72 +280,18 @@ func capped(out referenceOutput) string {
 	})
 }
 
-// placeholder names an input, marking one the reference could not render.
-func placeholder(in apiref.Input) string {
-	if !in.Renderable {
-		return "<" + in.Name + ":unrendered>"
-	}
-
-	return "<" + in.Name + ">"
-}
-
-// pathPlaceholder names a path label, keeping the '+' of a greedy label so the note can say its value spans
-// segments, and marking it when the first path input of that name could not be rendered.
-func pathPlaceholder(ref *apiref.Reference, name string, greedy bool) string {
-	label := name
-	if greedy {
-		label += "+"
-	}
-	for _, in := range ref.Inputs {
-		if in.Location == apiref.LocationPath && in.Name == name {
-			if !in.Renderable {
-				return "<" + label + ":unrendered>"
-			}
-
-			break
-		}
-	}
-
-	return "<" + label + ">"
-}
-
-// requiredAt lists the required inputs at a location.
-func requiredAt(ref *apiref.Reference, loc apiref.Location) []apiref.Input {
-	var out []apiref.Input
-	for _, in := range ref.Inputs {
-		if in.Required && in.Location == loc {
-			out = append(out, in)
-		}
-	}
-
-	return out
-}
-
-func paramPairs(ps []apiref.Param) []string {
-	out := make([]string, 0, len(ps))
-	for _, p := range ps {
-		if p.Value == "" {
-			out = append(out, p.Key)
-		} else {
-			out = append(out, p.Key+"="+p.Value)
-		}
-	}
-
-	return out
-}
-
 func buildTemplate(ref *apiref.Reference) map[string]any {
 	tpl := map[string]any{
 		"method":        ref.Method,
-		"url":           buildURL(ref),
+		"url":           apiref.TemplateURL(ref),
 		"auth_provider": ref.Connector,
 	}
 	var headers []map[string]string
 	for _, h := range ref.FixedHeaders {
 		headers = append(headers, map[string]string{"key": h.Key, "value": h.Value})
 	}
-	for _, in := range requiredAt(ref, apiref.LocationHeader) {
-		headers = append(headers, map[string]string{"key": in.WireName, "value": placeholder(in)})
+	for _, in := range apiref.RequiredAt(ref, apiref.LocationHeader) {
+		headers = append(headers, map[string]string{"key": in.WireName, "value": apiref.Placeholder(in)})
 	}
 	if len(headers) > 0 {
 		tpl["headers"] = headers
@@ -356,46 +304,6 @@ func buildTemplate(ref *apiref.Reference) map[string]any {
 	}
 
 	return tpl
-}
-
-func buildURL(ref *apiref.Reference) string {
-	segs := strings.Split(ref.PathTemplate, "/")
-	for i, s := range segs {
-		segs[i] = segmentPlaceholders(ref, s)
-	}
-	query := paramPairs(ref.FixedQuery)
-	for _, in := range requiredAt(ref, apiref.LocationQuery) {
-		query = append(query, in.WireName+"="+placeholder(in))
-	}
-	u := ref.Endpoint + strings.Join(segs, "/")
-	if len(query) > 0 {
-		u += "?" + strings.Join(query, "&")
-	}
-
-	return u
-}
-
-// segmentPlaceholders replaces every {label} in one path segment with its placeholder: a whole-segment label as in
-// /things/{Id}, or one inside literal text as in GitLab's {file_name}.tgz.
-func segmentPlaceholders(ref *apiref.Reference, seg string) string {
-	var b strings.Builder
-	for {
-		open := strings.IndexByte(seg, '{')
-		if open < 0 {
-			break
-		}
-		end := strings.IndexByte(seg[open:], '}')
-		if end < 0 {
-			break
-		}
-		name, greedy := strings.CutSuffix(seg[open+1:open+end], "+")
-		b.WriteString(seg[:open])
-		b.WriteString(pathPlaceholder(ref, name, greedy))
-		seg = seg[open+end+1:]
-	}
-	b.WriteString(seg)
-
-	return b.String()
 }
 
 // bareTypes are the input types whose JSON placeholder is unquoted, so the substituted value stays a number or
@@ -414,7 +322,7 @@ func jsonBody(req []apiref.Input) string {
 	slices.SortStableFunc(sorted, func(a, b apiref.Input) int { return strings.Compare(a.WireName, b.WireName) })
 	members := make([]string, 0, len(sorted))
 	for _, in := range sorted {
-		holder := placeholder(in)
+		holder := apiref.Placeholder(in)
 		if !bareTypes[in.Type] || !in.Renderable {
 			holder = encode(holder)
 		}
@@ -425,12 +333,12 @@ func jsonBody(req []apiref.Input) string {
 }
 
 func buildBody(ref *apiref.Reference) string {
-	req := requiredAt(ref, apiref.LocationBody)
+	req := apiref.RequiredAt(ref, apiref.LocationBody)
 	switch ref.BodyEncoding {
 	case apiref.BodyForm:
-		pairs := paramPairs(ref.FixedForm)
+		pairs := apiref.ParamPairs(ref.FixedForm)
 		for _, in := range req {
-			pairs = append(pairs, in.WireName+"="+placeholder(in))
+			pairs = append(pairs, in.WireName+"="+apiref.Placeholder(in))
 		}
 
 		return strings.Join(pairs, "&")
@@ -441,7 +349,7 @@ func buildBody(ref *apiref.Reference) string {
 	// No encoding: required body members have no wire form, so list their placeholders.
 	holders := make([]string, 0, len(req))
 	for _, in := range req {
-		holders = append(holders, placeholder(in))
+		holders = append(holders, apiref.Placeholder(in))
 	}
 
 	return strings.Join(holders, " ")

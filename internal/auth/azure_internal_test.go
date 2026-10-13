@@ -37,6 +37,10 @@ func (fakeAzureCatalog) LookupOperation(
 	return nil, nil, errors.New("fake: LookupOperation not used here")
 }
 
+func (f fakeAzureCatalog) PeekSnapshot() azurehardening.Catalog {
+	return f
+}
+
 // fakeAzureCred returns a fixed token; tokenErr forces a failure.
 type fakeAzureCred struct {
 	token    string

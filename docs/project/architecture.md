@@ -8,9 +8,9 @@ Single static Go binary, no server, no external state.
 - **Agent loop** - drives the model, bounded by iteration and token limits.
 - **Tools** - `http_request`, `code_execution`, `verify_findings`,
   `api_reference`. The last reads public vendor metadata for aws, github,
-  gitlab and gcp, and the target cluster's own OpenAPI documents, with the
-  connector's credentials, for the Kubernetes connectors; no approval prompt,
-  and not reachable from `code_execution`.
+  gitlab, gcp and azure, and the target cluster's own OpenAPI documents,
+  with the connector's credentials, for the Kubernetes connectors; no
+  approval prompt, and not reachable from `code_execution`.
 - **Action gate** - resolves each call to its required IAM actions and
   authorizes against the configured policy before credentials are attached.
   Fails closed.

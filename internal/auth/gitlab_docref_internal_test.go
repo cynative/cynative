@@ -303,7 +303,7 @@ func TestGitLabReference_UnavailableReasonIsBounded(t *testing.T) {
 	failing := newDocsOnlyGitLab(t, "gitlab.example", "", func(context.Context) ([]byte, error) {
 		return nil, errors.New(long)
 	})
-	failing.docsFailure = recordLoadFailure(failing.docs.cache)
+	failing.docsFailure = cache.RecordLoadFailure(failing.docs.cache)
 	if res := failing.Reference(t.Context(), apiref.Query{Operation: "a"}); utf8.RuneCountInString(res.Reason) >
 		apiref.MaxReason || !strings.HasPrefix(res.Reason, "GitLab OpenAPI documentation could not be loaded: x") {
 		t.Errorf("reason has %d runes: %.80q", utf8.RuneCountInString(res.Reason), res.Reason)
@@ -333,7 +333,7 @@ func TestGitLabReference_SurfacesTheLoadFailure(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			p := newDocsOnlyGitLab(t, "gitlab.example", "", tc.fetch)
-			p.docsFailure = recordLoadFailure(p.docs.cache)
+			p.docsFailure = cache.RecordLoadFailure(p.docs.cache)
 			res := p.Reference(t.Context(), apiref.Query{Operation: "getApiV4ProjectsId"})
 			if res.Outcome != apiref.OutcomeUnavailable || !strings.HasPrefix(res.Reason, tc.want) {
 				t.Errorf("reason %q, want prefix %q", res.Reason, tc.want)
@@ -342,8 +342,8 @@ func TestGitLabReference_SurfacesTheLoadFailure(t *testing.T) {
 	}
 }
 
-// TestRecordLoadFailure_ClearsOnSuccess pins that a later successful fetch clears the recorded cause.
-func TestRecordLoadFailure_ClearsOnSuccess(t *testing.T) {
+// TestFailureReason_ClearsOnSuccess pins that a later successful fetch clears the recorded cause.
+func TestFailureReason_ClearsOnSuccess(t *testing.T) {
 	t.Parallel()
 	var calls atomic.Int32
 	c := newGitLabDocsCache(t.TempDir(), func(context.Context) ([]byte, error) {
@@ -353,17 +353,17 @@ func TestRecordLoadFailure_ClearsOnSuccess(t *testing.T) {
 
 		return []byte(gitlabDocsFixture), nil
 	})
-	f := recordLoadFailure(c)
+	f := cache.RecordLoadFailure(c)
 	same := func(s string) string { return s }
-	if c.Get(t.Context()) != nil || f.reason("base", same) != "base: first" {
-		t.Fatalf("after a failure: %q", f.reason("base", same))
+	if c.Get(t.Context()) != nil || failureReason(f, "base", same) != "base: first" {
+		t.Fatalf("after a failure: %q", failureReason(f, "base", same))
 	}
-	if c.Get(t.Context()) == nil || f.reason("base", nil) != "base" {
-		t.Errorf("after a success: %q", f.reason("base", nil))
+	if c.Get(t.Context()) == nil || failureReason(f, "base", nil) != "base" {
+		t.Errorf("after a success: %q", failureReason(f, "base", nil))
 	}
-	var none *loadFailure
-	if none.reason("base", nil) != "base" {
-		t.Errorf("nil recorder: %q", none.reason("base", nil))
+	var none *cache.LoadFailure
+	if failureReason(none, "base", nil) != "base" {
+		t.Errorf("nil recorder: %q", failureReason(none, "base", nil))
 	}
 }
 
@@ -488,7 +488,7 @@ func TestGitLabReference_ScrubsProxyCredentials(t *testing.T) {
 		t.Parallel()
 		p := newDocsOnlyGitLab(t, "gitlab.example", "", failing)
 		p.egress = egress
-		p.docsFailure = recordLoadFailure(p.docs.cache)
+		p.docsFailure = cache.RecordLoadFailure(p.docs.cache)
 		want := "GitLab OpenAPI documentation could not be loaded: " + scrubbed
 		if res := p.Reference(t.Context(), q); res.Reason != want {
 			t.Errorf("reason = %q, want %q", res.Reason, want)
@@ -550,7 +550,7 @@ func TestGitLabReference_NamesAnEmptyDocument(t *testing.T) {
 	p := newDocsOnlyGitLab(t, "gitlab.example", "", func(context.Context) ([]byte, error) {
 		return []byte("openapi: 3.0.0\npaths: {}\n"), nil
 	})
-	p.docsFailure = recordLoadFailure(p.docs.cache)
+	p.docsFailure = cache.RecordLoadFailure(p.docs.cache)
 	res := p.Reference(t.Context(), apiref.Query{Operation: "getApiV4ProjectsId"})
 	want := gitlabDocsUnloaded + ": openapidoc: operation docs rejected: no operations"
 	if res.Outcome != apiref.OutcomeUnavailable || res.Reason != want {

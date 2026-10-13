@@ -57,11 +57,23 @@ type Catalog interface {
 // One-call seam; real impl in catalog_shell.go.
 type catalogFetcher func(ctx context.Context) (CatalogData, error)
 
-type catalog struct {
-	fetch catalogFetcher
+// PeekableCatalog is the gate's Catalog plus a read of the data it already holds, for api_reference's gate check.
+type PeekableCatalog interface {
+	Catalog
+	// PeekSnapshot returns a Catalog over the data already in memory, or nil when none is loaded or a load is in
+	// flight. It never waits for a load. The returned Catalog never fetches and never mints a token.
+	PeekSnapshot() Catalog
 }
 
-func newCatalog(fetch catalogFetcher) *catalog { return &catalog{fetch: fetch} }
+type catalog struct {
+	fetch catalogFetcher
+	// peek returns the data a fetch already loaded into memory, or nil; it never fetches.
+	peek func() *CatalogData
+}
+
+func newCatalog(fetch catalogFetcher) *catalog {
+	return &catalog{fetch: fetch, peek: func() *CatalogData { return nil }}
+}
 
 // applyDefaults fills the zero-valued CatalogConfig fields with their production
 // defaults. Pure; the gated counterpart of NewCatalog's inline defaulting so the
@@ -168,6 +180,20 @@ func (c *catalog) ResolveCloud(ctx context.Context, p ParsedHost) (ParsedHost, e
 		}
 	}
 	return ParsedHost{}, fmt.Errorf("%w: %q is not a known cloud resourceManager host", ErrHostPattern, p.Host)
+}
+
+// PeekSnapshot returns a Catalog over the data a fetch already loaded, or nil when nothing is loaded or a load is in
+// flight. The snapshot's fetch returns that data and nothing else, so classifying against it does no I/O; the maps are
+// shared, read only. The shell's peek is TTLCache.TryPeek, which never waits: while another run's request is loading
+// the catalog it returns nil, so a lookup reads that as not loaded yet and still honors its own deadline and interrupt.
+func (c *catalog) PeekSnapshot() Catalog {
+	d := c.peek()
+	if d == nil {
+		return nil
+	}
+	snap := *d
+
+	return newCatalog(func(context.Context) (CatalogData, error) { return snap, nil })
 }
 
 // providerOps looks up an RP namespace case-insensitively.

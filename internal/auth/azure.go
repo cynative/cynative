@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
+	"github.com/cynative/cynative/internal/apiref"
 	"github.com/cynative/cynative/internal/auth/authreq"
 	azurehardening "github.com/cynative/cynative/internal/auth/azure"
+	"github.com/cynative/cynative/internal/cache"
 )
 
 const azureProviderName = "azure"
@@ -33,11 +37,13 @@ type azureProvider struct {
 	scope            string                 // resolved cloud's ARM audience the bearer is minted for.
 	scopedCredential azcore.TokenCredential // home-tenant-authority token source; set by lazy init.
 	hardeningAction  ActionAuthorizer       // Layer 2 + Layer 1; set by lazy init.
+	docs             *azurehardening.Docs   // api_reference store; never touches the credential or the bootstrap.
 }
 
 var (
-	_ Provider         = (*azureProvider)(nil)
-	_ ActionAuthorizer = (*azureProvider)(nil)
+	_ Provider            = (*azureProvider)(nil)
+	_ ActionAuthorizer    = (*azureProvider)(nil)
+	_ OperationDocumenter = (*azureProvider)(nil)
 )
 
 // newAzureProvider constructs an Azure provider with the catalog available
@@ -66,7 +72,45 @@ func (p *azureProvider) Description() string {
 		"the Azure credential chain (CLI/environment/workload identity preferred over " +
 		"managed identity), pins the host to the cloud's resource manager, gates every " +
 		"request against an allow-list RBAC role and injects the " +
-		"operator's raw home-tenant ARM bearer. Requires azure_auth field with service."
+		"operator's raw home-tenant ARM bearer. Requires azure_auth field with service." +
+		" For an operation's request template and response format, call the api_reference tool."
+}
+
+// specsHTTPTimeout bounds one request of the api_reference spec fetch: the listing pack or one spec file.
+const specsHTTPTimeout = 60 * time.Second
+
+// newAzureDocs builds the api_reference store under <cache>/azure/specs. client is the anonymous, redirect-refusing
+// specs client and gate peeks the gate's loaded catalog; nothing here reaches the credential or the bootstrap.
+func newAzureDocs(
+	cfg cache.Config, endpoint string, client *http.Client, scrub func(error) error, gate func() azurehardening.Catalog,
+) *azurehardening.Docs {
+	store := azurehardening.NewSpecStore(azurehardening.SpecStoreConfig{ //nolint:exhaustruct // Listing defaults.
+		Cache:     cache.Config{Dir: filepath.Join(cfg.Dir, "specs"), TTL: cfg.TTL, Clock: cfg.Clock},
+		Client:    client,
+		RepoURL:   azurehardening.SpecsRepoURL,
+		RawBase:   azurehardening.SpecsRawBase,
+		Scrub:     scrub,
+		Summarize: azurehardening.Summarize,
+	})
+
+	return azurehardening.NewDocs(store, endpoint, gate)
+}
+
+// Reference answers an api_reference lookup from the Azure REST API specs. It never runs the lazy credential
+// bootstrap and never loads the gate's catalog.
+func (p *azureProvider) Reference(ctx context.Context, q apiref.Query) apiref.Result {
+	if p.docs == nil {
+		return apiref.Result{Outcome: apiref.OutcomeUnavailable, Reason: "Azure API metadata is not configured"}
+	}
+
+	return p.docs.Reference(ctx, q)
+}
+
+// Hint is the empty hint: no azure denial carries UnmatchedRequestError, because the gate classifies paths by
+// structure against providerOperations rather than matching them to operations. The structural misses point at
+// api_reference in their own text instead.
+func (p *azureProvider) Hint(context.Context, authreq.View, *authreq.UnmatchedRequestError) apiref.Hint {
+	return apiref.Hint{}
 }
 
 // parseAzureArgs decodes azure_auth; fails closed when absent or Service empty.

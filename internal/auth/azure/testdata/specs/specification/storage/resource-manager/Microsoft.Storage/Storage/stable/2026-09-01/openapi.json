@@ -1,0 +1,76 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "host": "management.azure.com",
+  "info": {
+    "description": "The Azure Storage Management API.",
+    "title": "StorageManagementClient",
+    "version": "2026-09-01",
+    "x-typespec-generated": [
+      {
+        "emitter": "@azure-tools/typespec-autorest"
+      }
+    ]
+  },
+  "paths": {
+    "/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Storage/storageAccounts/{accountName}/listKeys": {
+      "post": {
+        "description": "Lists the access keys or Kerberos keys (if active directory enabled) for the specified storage account.",
+        "operationId": "StorageAccounts_ListKeys",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v5/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v5/types.json#/parameters/SubscriptionIdParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v5/types.json#/parameters/ResourceGroupNameParameter"
+          },
+          {
+            "description": "The name of the storage account within the specified resource group. Storage account names must be between 3 and 24 characters in length and use numbers and lower-case letters only.",
+            "in": "path",
+            "maxLength": 24,
+            "minLength": 3,
+            "name": "accountName",
+            "pattern": "^[a-z0-9]+$",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "description": "Specifies type of the key to be listed. Possible value is kerb.",
+            "enum": [
+              "kerb"
+            ],
+            "in": "query",
+            "name": "$expand",
+            "required": false,
+            "type": "string",
+            "x-ms-enum": {
+              "modelAsString": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Azure operation completed successfully."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "StorageAccounts"
+        ]
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0"
+}

@@ -1,0 +1,176 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "host": "management.azure.com",
+  "info": {
+    "description": "Compute Client",
+    "title": "Azure Compute resource management API.",
+    "version": "2026-04-01",
+    "x-typespec-generated": [
+      {
+        "emitter": "@azure-tools/typespec-autorest"
+      }
+    ]
+  },
+  "paths": {
+    "/subscriptions/{subscriptionId}/providers/Microsoft.Compute/locations/{location}/virtualMachines": {
+      "get": {
+        "description": "Gets all the virtual machines under the specified subscription for the specified location.",
+        "operationId": "VirtualMachines_ListByLocation",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/SubscriptionIdParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/LocationParameter"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request has succeeded."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "VirtualMachines"
+        ],
+        "x-ms-pageable": {
+          "nextLinkName": "nextLink"
+        }
+      }
+    },
+    "/subscriptions/{subscriptionId}/providers/Microsoft.Compute/virtualMachines": {
+      "get": {
+        "description": "Lists all of the virtual machines in the specified subscription. Use the nextLink property in the response to get the next page of virtual machines.",
+        "operationId": "VirtualMachines_ListAll",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/SubscriptionIdParameter"
+          },
+          {
+            "description": "statusOnly=true enables fetching run time status of all Virtual Machines in the subscription.",
+            "in": "query",
+            "name": "statusOnly",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "The system query option to filter VMs returned in the response. Allowed value is 'virtualMachineScaleSet/id' eq /subscriptions/{subId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Compute/virtualMachineScaleSets/{vmssName}'",
+            "in": "query",
+            "name": "$filter",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "The expand expression to apply on operation. 'instanceView' enables fetching run time status of all Virtual Machines, this can only be specified if a valid $filter option is specified",
+            "enum": [
+              "instanceView"
+            ],
+            "in": "query",
+            "name": "$expand",
+            "required": false,
+            "type": "string",
+            "x-ms-enum": {
+              "modelAsString": true,
+              "name": "ExpandTypesForListVMs",
+              "values": [
+                {
+                  "name": "instanceView",
+                  "value": "instanceView"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request has succeeded."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "VirtualMachines"
+        ],
+        "x-ms-pageable": {
+          "nextLinkName": "nextLink"
+        }
+      }
+    },
+    "/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Compute/virtualMachines": {
+      "get": {
+        "description": "Lists all of the virtual machines in the specified resource group. Use the nextLink property in the response to get the next page of virtual machines.",
+        "operationId": "VirtualMachines_List",
+        "parameters": [
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/ApiVersionParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/SubscriptionIdParameter"
+          },
+          {
+            "$ref": "../../../../../../common-types/resource-management/v3/types.json#/parameters/ResourceGroupNameParameter"
+          },
+          {
+            "description": "The system query option to filter VMs returned in the response. Allowed value is 'virtualMachineScaleSet/id' eq /subscriptions/{subId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Compute/virtualMachineScaleSets/{vmssName}'",
+            "in": "query",
+            "name": "$filter",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "description": "The expand expression to apply on operation. 'instanceView' enables fetching run time status of all Virtual Machines, this can only be specified if a valid $filter option is specified",
+            "enum": [
+              "instanceView"
+            ],
+            "in": "query",
+            "name": "$expand",
+            "required": false,
+            "type": "string",
+            "x-ms-enum": {
+              "modelAsString": true,
+              "name": "ExpandTypeForListVMs",
+              "values": [
+                {
+                  "name": "instanceView",
+                  "value": "instanceView"
+                }
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request has succeeded."
+          },
+          "default": {
+            "description": "An unexpected error response."
+          }
+        },
+        "tags": [
+          "VirtualMachines"
+        ],
+        "x-ms-pageable": {
+          "nextLinkName": "nextLink"
+        }
+      }
+    }
+  },
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "swagger": "2.0"
+}

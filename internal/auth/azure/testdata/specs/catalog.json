@@ -1,0 +1,3201 @@
+{
+ "clouds": {
+  "AzureCloud": {
+   "resourceManager": "management.azure.com"
+  }
+ },
+ "providers": {
+  "Microsoft.Authorization": {
+   "operations": [
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignments/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/permissions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/locks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/locks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/locks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleDefinitions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleDefinitions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/providerOperations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policySetDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policySetDefinitions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policySetDefinitions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyDefinitions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyDefinitions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/exempt/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/denyAssignments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/denyAssignments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/denyAssignments/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policies/audit/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policies/auditIfNotExists/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policies/deny/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policies/deployIfNotExists/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnectionProxies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnectionProxies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnectionProxies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnectionProxies/validate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnections/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnections/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/resourceManagementPrivateLinks/privateEndpointConnections/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/privateLinkAssociations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/privateLinkAssociations/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyAssignments/privateLinkAssociations/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyExemptions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyExemptions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyExemptions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignmentScheduleRequests/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignmentScheduleRequests/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignmentScheduleRequests/cancel/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleEligibilityScheduleRequests/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleEligibilityScheduleRequests/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleEligibilityScheduleRequests/cancel/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignmentSchedules/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleEligibilitySchedules/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleAssignmentScheduleInstances/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleEligibilityScheduleInstances/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleManagementPolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleManagementPolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleManagementPolicies/approvalRule/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleManagementPolicyAssignments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/diagnosticSettings/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/diagnosticSettingsCategories/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policySetDefinitions/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policySetDefinitions/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policySetDefinitions/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyDefinitions/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyDefinitions/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyDefinitions/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyEnrollments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyEnrollments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/policyEnrollments/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/acquirePolicyToken/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/roleEligibilityScheduleRequests/whenApprovalRequired/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Authorization/elevateAccess/action"
+    }
+   ],
+   "resourceTypes": [
+    "roleAssignments",
+    "permissions",
+    "locks",
+    "roleDefinitions",
+    "providerOperations",
+    "policySetDefinitions",
+    "policyDefinitions",
+    "policyAssignments",
+    "operations",
+    "denyAssignments",
+    "policies",
+    "policyAssignments/resourceManagementPrivateLinks",
+    "policyAssignments/resourceManagementPrivateLinks/privateEndpointConnectionProxies",
+    "policyAssignments/resourceManagementPrivateLinks/privateEndpointConnections",
+    "policyAssignments/privateLinkAssociations",
+    "policyExemptions",
+    "roleAssignmentScheduleRequests",
+    "roleEligibilityScheduleRequests",
+    "roleAssignmentSchedules",
+    "roleEligibilitySchedules",
+    "roleAssignmentScheduleInstances",
+    "roleEligibilityScheduleInstances",
+    "roleManagementPolicies",
+    "roleManagementPolicyAssignments",
+    "diagnosticSettings",
+    "diagnosticSettingsCategories",
+    "policySetDefinitions/versions",
+    "policyDefinitions/versions",
+    "policyEnrollments",
+    "acquirePolicyToken",
+    "roleEligibilityScheduleRequests/whenApprovalRequired"
+   ]
+  },
+  "Microsoft.Compute": {
+   "operations": [
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/availabilitySets/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/availabilitySets/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/availabilitySets/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/availabilitySets/vmSizes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/start/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/powerOff/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/reapply/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/redeploy/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/restart/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/retrieveBootDiagnosticsData/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/deallocate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/generalize/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/capture/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/restore/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/runCommand/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/diagnosticRunCommand/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/convertToManagedDisks/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/performMaintenance/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/reimage/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/virtualMachines/login/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/virtualMachines/loginAsAdmin/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/installPatches/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/assessPatches/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/cancelPatchInstallation/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/simulateEviction/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/virtualMachines/WACloginAsAdmin/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/osUpgradeInternal/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/rollbackOSDisk/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/deletePreservedOSDisk/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/upgradeVMAgent/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/attachDetachDataDisks/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/setVMHealth/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmSizes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/images/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/images/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/images/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/retrieveSasUris/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/extensions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/extensions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/extensions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/extensions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/extensions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/extensions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/delete/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/start/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/powerOff/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/reapply/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/restart/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/deallocate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/manualUpgrade/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/reimage/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/reimageAll/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/approveRollingUpgrade/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/redeploy/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/performMaintenance/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/scale/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/forceRecoveryServiceFabricPlatformUpdateDomainWalk/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/forceRestart/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/osRollingUpgrade/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/setOrchestrationServiceState/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/setVMHealth/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/rollingUpgrades/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/skus/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/rollingUpgrades/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/osUpgradeHistory/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/start/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/powerOff/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/restart/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/deallocate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/reimage/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/reimageAll/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/approveRollingUpgrade/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/redeploy/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/retrieveBootDiagnosticsData/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/performMaintenance/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommand/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/diagnosticRunCommand/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/simulateEviction/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/attachDetachDataDisks/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/vmSizes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/usages/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/runCommands/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/skus/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/disks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/disks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/disks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/disks/beginGetAccess/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/disks/endGetAccess/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/disks/download/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/disks/upload/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/beginGetAccess/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/endGetAccess/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/snapshots/download/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Compute/snapshots/upload/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/updateImmutabilityPolicy/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/snapshots/updateImmutabilityPolicyLock/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/diskOperations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMImages/versions/replicate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/capsOperations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/publishers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/publishers/artifacttypes/offers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/publishers/artifacttypes/offers/skus/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/publishers/artifacttypes/offers/skus/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/publishers/artifacttypes/types/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/publishers/artifacttypes/types/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/networkInterfaces/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/publicIPAddresses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/networkInterfaces/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/networkInterfaces/getEffectiveRouteTable/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/networkInterfaces/getEffectiveSecurityGroups/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/networkInterfaces/ipConfigurations/publicIPAddresses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/networkInterfaces/ipConfigurations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/share/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/images/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/images/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/images/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/images/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/images/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/images/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/providers/Microsoft.Insights/logDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/logAnalytics/getRequestRateByInterval/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/logAnalytics/getThrottledRequests/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/providers/Microsoft.Insights/logDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/proximityPlacementGroups/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/proximityPlacementGroups/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/proximityPlacementGroups/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/vmSizes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/hosts/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/hosts/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/hosts/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskEncryptionSets/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskEncryptionSets/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskEncryptionSets/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/vsmOperations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/applications/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/applications/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/applications/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/applications/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/applications/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/applications/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/extensions/roles/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/extensions/roles/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sshPublicKeys/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sshPublicKeys/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sshPublicKeys/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sshPublicKeys/generateKeyPair/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/privateEndpointConnectionProxyAzureAsyncOperation/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/privateEndpointConnectionProxyOperationResults/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMExtensions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMExtensions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMExtensions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMExtensions/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMExtensions/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/sharedVMExtensions/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnectionsApproval/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnections/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnections/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnections/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnectionProxies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnectionProxies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnectionProxies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/diskAccesses/privateEndpointConnectionProxies/validate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/extensions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/extensions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/extensions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/poweroff/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/start/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/restart/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/reimage/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/rebuild/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/delete/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roleInstances/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roleInstances/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roleInstances/restart/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roleInstances/reimage/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roleInstances/rebuild/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/updateDomains/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roleInstances/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roles/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roles/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roles/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roles/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/cloudServices/roles/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/runCommands/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/runCommands/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/runCommands/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommands/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommands/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/runCommands/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/patchInstallationResults/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/patchInstallationResults/softwarePatches/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/patchAssessmentResults/latest/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/patchAssessmentResults/latest/softwarePatches/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/capacityReservations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/capacityReservations/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/capacityReservations/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/deploy/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/capacityReservationGroups/share/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/diskRestorePoints/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/diskRestorePoints/beginGetAccess/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/restorePointCollections/restorePoints/diskRestorePoints/endGetAccess/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/cloudServiceOsVersions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/cloudServiceOsFamilies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/diagnostics/run/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/diagnostics/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/diagnostics/generate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/diagnostics/diskInspection/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/diagnosticOperations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/edgeZones/publishers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/edgeZones/publishers/artifacttypes/offers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/edgeZones/publishers/artifacttypes/offers/skus/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/edgeZones/publishers/artifacttypes/offers/skus/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/serviceArtifacts/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/serviceArtifacts/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/serviceArtifacts/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/sharedGalleries/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/sharedGalleries/images/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/sharedGalleries/images/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/communityGalleries/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/communityGalleries/images/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/communityGalleries/images/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/hostGroups/hosts/hostSizes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/disks/beginGetAccess/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/remoteContainerImages/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/remoteContainerImages/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/remoteContainerImages/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/remoteContainerImages/beginGetAccess/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/edgeZones/vmimages/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/placementScores/generate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/vmSizeRecommendations/generate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/eventGridFilters/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/eventGridFilters/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/eventGridFilters/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/serviceArtifacts/vmArtifactsProfiles/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/inVMAccessControlProfiles/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/inVMAccessControlProfiles/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/inVMAccessControlProfiles/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/inVMAccessControlProfiles/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/inVMAccessControlProfiles/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/inVMAccessControlProfiles/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/diagnosticRunCommands/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/diagnosticRunCommands/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/diagnosticRunCommands/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/diagnosticRunCommands/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/diagnosticRunCommands/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/diagnosticRunCommands/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/interconnectBlocks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/interconnectBlocks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/interconnectBlocks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/interconnectBlocks/deploy/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/sharedGallerySubscriptions/sharedGalleries/accept/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/sharedGallerySubscriptions/sharedGalleries/reject/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/tenantLevelSharedGallerySubscriptions/sharedGalleries/accept/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/tenantLevelSharedGallerySubscriptions/sharedGalleries/reject/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmProtection/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmProtection/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmProtection/configureProtection/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmApplications/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmApplications/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmApplications/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachines/vmApplications/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/applications/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/applications/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/applications/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/applications/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/virtualMachineScaleSets/virtualMachines/applications/instanceView/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/instanceProfiles/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/instanceProfiles/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/instanceProfiles/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/instanceProfiles/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/instanceProfiles/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/galleries/instanceProfiles/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/locations/skuMixPlacementScores/generate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/register/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Compute/unregister/action"
+    }
+   ],
+   "resourceTypes": [
+    "availabilitySets",
+    "availabilitySets/vmSizes",
+    "virtualMachines",
+    "virtualMachines/instanceView",
+    "virtualMachines/vmSizes",
+    "images",
+    "restorePointCollections",
+    "restorePointCollections/restorePoints",
+    "virtualMachines/providers/Microsoft.Insights/metricDefinitions",
+    "virtualMachines/extensions",
+    "virtualMachineScaleSets/extensions",
+    "virtualMachineScaleSets",
+    "virtualMachineScaleSets/instanceView",
+    "virtualMachineScaleSets/skus",
+    "virtualMachineScaleSets/providers/Microsoft.Insights/metricDefinitions",
+    "virtualMachineScaleSets/osUpgradeHistory",
+    "virtualMachineScaleSets/virtualMachines",
+    "virtualMachineScaleSets/virtualMachines/instanceView",
+    "virtualMachineScaleSets/virtualMachines/providers/Microsoft.Insights/metricDefinitions",
+    "locations/vmSizes",
+    "locations/operations",
+    "locations/usages",
+    "locations/runCommands",
+    "operations",
+    "skus",
+    "disks",
+    "snapshots",
+    "locations/diskOperations",
+    "sharedVMImages",
+    "sharedVMImages/versions",
+    "locations/capsOperations",
+    "locations/publishers",
+    "locations/publishers/artifacttypes/offers",
+    "locations/publishers/artifacttypes/offers/skus",
+    "locations/publishers/artifacttypes/offers/skus/versions",
+    "locations/publishers/artifacttypes/types",
+    "locations/publishers/artifacttypes/types/versions",
+    "virtualMachineScaleSets/networkInterfaces",
+    "virtualMachineScaleSets/publicIPAddresses",
+    "virtualMachineScaleSets/virtualMachines/networkInterfaces",
+    "virtualMachineScaleSets/virtualMachines/networkInterfaces/ipConfigurations/publicIPAddresses",
+    "virtualMachineScaleSets/virtualMachines/networkInterfaces/ipConfigurations",
+    "galleries",
+    "galleries/images",
+    "galleries/images/versions",
+    "virtualMachineScaleSets/providers/Microsoft.Insights/logDefinitions",
+    "virtualMachineScaleSets/providers/Microsoft.Insights/diagnosticSettings",
+    "locations/logAnalytics",
+    "virtualMachines/providers/Microsoft.Insights/logDefinitions",
+    "virtualMachines/providers/Microsoft.Insights/diagnosticSettings",
+    "hostGroups",
+    "proximityPlacementGroups",
+    "virtualMachineScaleSets/vmSizes",
+    "hostGroups/hosts",
+    "diskEncryptionSets",
+    "locations/vsmOperations",
+    "galleries/applications",
+    "galleries/applications/versions",
+    "virtualMachineScaleSets/extensions/roles",
+    "sshPublicKeys",
+    "locations/privateEndpointConnectionProxyAzureAsyncOperation",
+    "locations/privateEndpointConnectionProxyOperationResults",
+    "sharedVMExtensions",
+    "sharedVMExtensions/versions",
+    "diskAccesses",
+    "diskAccesses/privateEndpointConnections",
+    "diskAccesses/privateEndpointConnectionProxies",
+    "virtualMachineScaleSets/virtualMachines/extensions",
+    "cloudServices",
+    "cloudServices/instanceView",
+    "cloudServices/roleInstances",
+    "cloudServices/updateDomains",
+    "cloudServices/roleInstances/instanceView",
+    "cloudServices/providers/Microsoft.Insights/metricDefinitions",
+    "cloudServices/roles",
+    "cloudServices/roles/providers/Microsoft.Insights/metricDefinitions",
+    "cloudServices/providers/Microsoft.Insights/diagnosticSettings",
+    "cloudServices/roles/providers/Microsoft.Insights/diagnosticSettings",
+    "virtualMachines/runCommands",
+    "virtualMachineScaleSets/virtualMachines/runCommands",
+    "virtualMachines/patchInstallationResults",
+    "virtualMachines/patchInstallationResults/softwarePatches",
+    "virtualMachines/patchAssessmentResults/latest",
+    "virtualMachines/patchAssessmentResults/latest/softwarePatches",
+    "capacityReservationGroups/capacityReservations",
+    "capacityReservationGroups",
+    "restorePointCollections/restorePoints/diskRestorePoints",
+    "locations/cloudServiceOsVersions",
+    "locations/cloudServiceOsFamilies",
+    "locations/diagnostics",
+    "locations/diagnostics/diskInspection",
+    "locations/diagnosticOperations",
+    "locations/edgeZones/publishers",
+    "locations/edgeZones/publishers/artifacttypes/offers",
+    "locations/edgeZones/publishers/artifacttypes/offers/skus",
+    "locations/edgeZones/publishers/artifacttypes/offers/skus/versions",
+    "galleries/serviceArtifacts",
+    "locations/sharedGalleries",
+    "locations/sharedGalleries/images",
+    "locations/sharedGalleries/images/versions",
+    "locations/communityGalleries",
+    "locations/communityGalleries/images",
+    "locations/communityGalleries/images/versions",
+    "hostGroups/hosts/hostSizes",
+    "virtualMachineScaleSets/disks",
+    "galleries/remoteContainerImages",
+    "locations/edgeZones/vmimages",
+    "locations/placementScores",
+    "locations/vmSizeRecommendations",
+    "virtualMachineScaleSets/eventGridFilters",
+    "galleries/serviceArtifacts/vmArtifactsProfiles",
+    "galleries/inVMAccessControlProfiles",
+    "galleries/inVMAccessControlProfiles/versions",
+    "virtualMachines/diagnosticRunCommands",
+    "virtualMachineScaleSets/virtualMachines/diagnosticRunCommands",
+    "interconnectBlocks",
+    "locations/sharedGallerySubscriptions/sharedGalleries",
+    "locations/tenantLevelSharedGallerySubscriptions/sharedGalleries",
+    "virtualMachines/vmProtection",
+    "virtualMachines/vmApplications",
+    "virtualMachines/vmApplications/instanceView",
+    "virtualMachineScaleSets/applications",
+    "virtualMachineScaleSets/virtualMachines/applications",
+    "virtualMachineScaleSets/virtualMachines/applications/instanceView",
+    "galleries/instanceProfiles",
+    "galleries/instanceProfiles/versions",
+    "locations/skuMixPlacementScores"
+   ]
+  },
+  "Microsoft.Resources": {
+   "operations": [
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/tenants/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/providers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/resources/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resources/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/locations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/providers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/operationresults/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourceGroups/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourceGroups/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourceGroups/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourceGroups/moveResources/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourceGroups/validateMoveResources/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourcegroups/resources/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/tagNames/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/tagNames/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/tagNames/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/tagNames/tagValues/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/tagNames/tagValues/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/tagNames/tagValues/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/cancel/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/validate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/whatIf/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/exportTemplate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourcegroups/deployments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourcegroups/deployments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourcegroups/deployments/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptions/resourcegroups/deployments/operationstatuses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/links/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/links/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/links/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/marketplace/purchase/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/tags/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/tags/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/tags/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deployments/operationstatuses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentScripts/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentScripts/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentScripts/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentScripts/logs/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/checkPolicyCompliance/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/templateSpecs/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/templateSpecs/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/templateSpecs/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/templateSpecs/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/templateSpecs/versions/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/templateSpecs/versions/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/changes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/subscriptionRegistrations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacks/validate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacks/exportTemplate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacks/manageDenySetting/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/dataBoundaries/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/moboBrokers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/moboBrokers/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/moboBrokers/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/locations/moboOperationStatuses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacksWhatIfResults/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacksWhatIfResults/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacksWhatIfResults/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/deploymentStacksWhatIfResults/whatIf/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/checkResourceName/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/calculateTemplateHash/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/relayRegionalMoveRequest/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/populateRegionalMoveTargetResource/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Resources/checkZonePeers/action"
+    }
+   ],
+   "resourceTypes": [
+    "tenants",
+    "providers",
+    "resources",
+    "subscriptions",
+    "subscriptions/resources",
+    "subscriptions/locations",
+    "subscriptions/providers",
+    "subscriptions/operationresults",
+    "subscriptions/resourceGroups",
+    "subscriptions/resourcegroups/resources",
+    "subscriptions/tagNames",
+    "subscriptions/tagNames/tagValues",
+    "deployments",
+    "subscriptions/resourcegroups/deployments",
+    "subscriptions/resourcegroups/deployments/operations",
+    "subscriptions/resourcegroups/deployments/operationstatuses",
+    "deployments/operations",
+    "links",
+    "marketplace",
+    "tags",
+    "deployments/operationstatuses",
+    "deploymentScripts",
+    "deploymentScripts/logs",
+    "checkPolicyCompliance",
+    "templateSpecs",
+    "templateSpecs/versions",
+    "changes",
+    "subscriptionRegistrations",
+    "deploymentStacks",
+    "dataBoundaries",
+    "moboBrokers",
+    "locations/moboOperationStatuses",
+    "deploymentStacksWhatIfResults"
+   ]
+  },
+  "Microsoft.Storage": {
+   "operations": [
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/deleteVirtualNetworkOrSubnets/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/notifyNetworkSecurityPerimeterUpdatesAvailable/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/previewActions/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/generateUserDelegationKey/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/getInfo/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/write"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/delete"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/deleteBlobVersion/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/permanentDelete/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/add/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/filter/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/move/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/manageOwnership/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/modifyPermissions/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/runAsSuperUser/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/migrate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/setAcl/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/getAcl/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/lease/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/clearLegalHold/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/setLegalHold/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/extend/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/lock/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/generateUserDelegationKey/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/setAcl/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/getAcl/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/messages/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/messages/write"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/messages/delete"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/messages/add/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/queues/messages/process/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/updateAutoRotateUserKeys/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/updateAccountContainerHoldingPeriod/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/updateInternalProperties/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/consumerDataShare/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/abortHnsOnMigration/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/hnsonmigration/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/networkSecurityPerimeterConfigurations/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/restoreBlobRanges/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/PrivateEndpointConnectionsApproval/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/failover/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/listkeys/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/regeneratekey/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/rotateKey/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/revokeUserDelegationKeys/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/joinPerimeter/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/listAccountSas/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/listServiceSas/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/services/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/providers/Microsoft.Insights/metricDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/providers/Microsoft.Insights/diagnosticSettings/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/providers/Microsoft.Insights/diagnosticSettings/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/providers/Microsoft.Insights/logDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/providers/Microsoft.Insights/logDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/providers/Microsoft.Insights/logDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/queueServices/providers/Microsoft.Insights/logDefinitions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/skus/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/operations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/checknameavailability/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/usages/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/usages/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/tags/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/managementPolicies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/managementPolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/managementPolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/generateUserDelegationKey/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/readFileBackupSemantics/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/writeFileBackupSemantics/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/takeOwnership/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/runAsBuiltInFileAdministrator/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/generateUserDelegationKey/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/fileshares/files/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/fileshares/files/write"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/fileshares/files/delete"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/fileshares/files/modifypermissions/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/fileshares/files/actassuperuser/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/fileShares/files/bypasspermissions/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnectionProxies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnectionProxies/updatePrivateEndpointProperties/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnectionProxies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnectionProxies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnectionProxies/validate/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnections/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnections/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnections/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpointConnections/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateLinkResources/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/checknameavailability/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/lease/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/restore/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/shares/revert/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/encryptionScopes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/encryptionScopes/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/objectReplicationPolicies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/objectReplicationPolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/objectReplicationPolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/objectReplicationPolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/dataSharePolicies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/dataSharePolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/dataSharePolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localUsers/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localusers/regeneratePassword/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localusers/listKeys/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localusers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localusers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localusers/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/localUsers/regenerateSharedKey/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/deletedAccounts/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/setAcl/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/getAcl/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/inventoryPolicies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/inventoryPolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/inventoryPolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/accountLocks/deleteLock/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/accountLocks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/accountLocks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/accountLocks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/consumerDataSharePolicies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/consumerDataSharePolicies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/resilienciesProgressions/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/entities/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/entities/write"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/entities/delete"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/entities/add/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/tableServices/tables/entities/update/action"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/immutableStorage/runAsSuperUser/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/objectReplicationPolicies/restorePointMarkers/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/restorePoints/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/restorePoints/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/restorePoints/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/accountMigrations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/accountMigrations/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/networkSecurityPerimeterAssociationProxies/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/networkSecurityPerimeterAssociationProxies/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/networkSecurityPerimeterAssociationProxies/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/promote/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/networkSecurityPerimeterConfigurations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/privateEndpoints/move/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/hoboConfigurations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/hoboConfigurations/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/encryptionScopes/hoboConfigurations/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/encryptionScopes/hoboConfigurations/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/storageTaskAssignments/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/storageTaskAssignments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/storageTaskAssignments/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/reports/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/storageTaskAssignments/reports/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/reports/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/storageTaskAssignments/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageTasks/versions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/fileServices/usages/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/ActionsRPOperationStatuses/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/ActionsRPOperationStatuses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/connectors/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/connectors/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/connectors/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/connectors/testExistingConnection/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/dataShares/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/dataShares/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/dataShares/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/DataManagementRPOperationStatuses/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/DataManagementRPOperationStatuses/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/advancedPlatformMetrics/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/advancedPlatformMetrics/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/advancedPlatformMetrics/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/encryptionScopes/sharedIdentities/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/encryptionScopes/sharedIdentities/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/sharedIdentities/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/storageAccounts/sharedIdentities/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/providerPermissions/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/resourceTypes/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCaches/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCaches/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCaches/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCaches/contextCacheContainers/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCaches/contextCacheContainers/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCaches/contextCacheContainers/delete"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/ContextCacheRPOperationStatuses/write"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/locations/ContextCacheRPOperationStatuses/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/metadata/snapshot/read"
+    },
+    {
+     "isDataAction": true,
+     "name": "Microsoft.Storage/storageAccounts/blobServices/metadata/journal/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/contextCacheCheckNameAvailability/read"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/register/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/unregister/action"
+    },
+    {
+     "isDataAction": false,
+     "name": "Microsoft.Storage/register/action"
+    }
+   ],
+   "resourceTypes": [
+    "locations",
+    "storageAccounts/blobServices",
+    "storageAccounts/blobServices/containers/blobs",
+    "storageAccounts/blobServices/containers",
+    "storageAccounts/blobServices/containers/immutabilityPolicies",
+    "storageAccounts/queueServices",
+    "storageAccounts/queueServices/queues",
+    "storageAccounts/queueServices/queues/messages",
+    "storageAccounts",
+    "storageAccounts/services/diagnosticSettings",
+    "storageAccounts/providers/Microsoft.Insights/metricDefinitions",
+    "storageAccounts/providers/Microsoft.Insights/diagnosticSettings",
+    "storageAccounts/blobServices/providers/Microsoft.Insights/metricDefinitions",
+    "storageAccounts/blobServices/providers/Microsoft.Insights/diagnosticSettings",
+    "storageAccounts/tableServices/providers/Microsoft.Insights/metricDefinitions",
+    "storageAccounts/tableServices/providers/Microsoft.Insights/diagnosticSettings",
+    "storageAccounts/fileServices/providers/Microsoft.Insights/metricDefinitions",
+    "storageAccounts/fileServices/providers/Microsoft.Insights/diagnosticSettings",
+    "storageAccounts/queueServices/providers/Microsoft.Insights/metricDefinitions",
+    "storageAccounts/queueServices/providers/Microsoft.Insights/diagnosticSettings",
+    "storageAccounts/tableServices/providers/Microsoft.Insights/logDefinitions",
+    "storageAccounts/blobServices/providers/Microsoft.Insights/logDefinitions",
+    "storageAccounts/fileServices/providers/Microsoft.Insights/logDefinitions",
+    "storageAccounts/queueServices/providers/Microsoft.Insights/logDefinitions",
+    "skus",
+    "operations",
+    "checknameavailability",
+    "locations/usages",
+    "usages",
+    "storageAccounts/blobServices/containers/blobs/tags",
+    "storageAccounts/managementPolicies",
+    "storageAccounts/fileServices",
+    "storageAccounts/tableServices",
+    "storageAccounts/fileServices/fileshares/files",
+    "storageAccounts/privateEndpointConnectionProxies",
+    "storageAccounts/privateEndpointConnections",
+    "storageAccounts/privateLinkResources",
+    "locations/checknameavailability",
+    "storageAccounts/fileServices/shares",
+    "storageAccounts/encryptionScopes",
+    "storageAccounts/objectReplicationPolicies",
+    "storageAccounts/dataSharePolicies",
+    "storageAccounts/localUsers",
+    "deletedAccounts",
+    "storageAccounts/tableServices/tables",
+    "storageAccounts/inventoryPolicies",
+    "storageAccounts/accountLocks",
+    "storageAccounts/consumerDataSharePolicies",
+    "resilienciesProgressions",
+    "storageAccounts/tableServices/tables/entities",
+    "storageAccounts/blobServices/containers/blobs/immutableStorage",
+    "storageAccounts/objectReplicationPolicies/restorePointMarkers",
+    "storageAccounts/restorePoints",
+    "storageAccounts/accountMigrations",
+    "storageAccounts/networkSecurityPerimeterAssociationProxies",
+    "storageTasks",
+    "storageAccounts/privateEndpoints",
+    "storageAccounts/hoboConfigurations",
+    "storageAccounts/encryptionScopes/hoboConfigurations",
+    "storageAccounts/storageTaskAssignments",
+    "storageAccounts/reports",
+    "storageAccounts/storageTaskAssignments/reports",
+    "storageTasks/reports",
+    "storageTasks/storageTaskAssignments",
+    "storageTasks/versions",
+    "storageAccounts/fileServices/usages",
+    "locations/ActionsRPOperationStatuses",
+    "storageAccounts/connectors",
+    "storageAccounts/dataShares",
+    "locations/DataManagementRPOperationStatuses",
+    "storageAccounts/advancedPlatformMetrics",
+    "storageAccounts/encryptionScopes/sharedIdentities",
+    "storageAccounts/sharedIdentities",
+    "providerPermissions",
+    "resourceTypes",
+    "contextCaches",
+    "contextCaches/contextCacheContainers",
+    "locations/ContextCacheRPOperationStatuses",
+    "storageAccounts/blobServices/metadata/snapshot",
+    "storageAccounts/blobServices/metadata/journal",
+    "contextCacheCheckNameAvailability"
+   ]
+  }
+ }
+}

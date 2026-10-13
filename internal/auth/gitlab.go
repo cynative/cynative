@@ -169,12 +169,12 @@ type gitlabProvider struct {
 	// handoff passes the table's download to the master docs; nil for bare providers in tests.
 	handoff *openAPIHandoff
 	// docsFailure keeps the last reason the master docs failed to load; nil when not recorded.
-	docsFailure *loadFailure
+	docsFailure *cache.LoadFailure
 	// docsChoice is the document api_reference reads, set by useDocs at registration.
 	docsChoice gitlabDocsChoice
 	// release holds the chosen release's docs and releaseFailure their load failure; nil for master.
 	release        *openAPIDocs
-	releaseFailure *loadFailure
+	releaseFailure *cache.LoadFailure
 	// docsCfg and releaseFetch build a release's docs cache; set by buildGitLabProvider.
 	docsCfg      cache.Config
 	releaseFetch func(ref string) func(context.Context) ([]byte, error)

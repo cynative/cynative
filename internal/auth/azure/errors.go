@@ -22,4 +22,11 @@ var (
 	ErrTenantUnresolved        = errors.New("azure_hardening: target tenant could not be resolved")
 	ErrRoleFetchFailed         = errors.New("azure_hardening: role definition fetch failed")
 	ErrModelSuppliedCredential = errors.New("azure_hardening: model-supplied credential (SAS) rejected")
+	// ErrSpecsRejected marks Azure specs metadata the api_reference index refused: a bound passed, a capability
+	// missing, a malformed pack or tree, a file that does not match its blob id, or an index that fails admission.
+	ErrSpecsRejected = errors.New("azure specs: rejected")
+	// ErrSpecsUnavailable marks a lookup that found no usable specs index: none cached and the listing failed.
+	ErrSpecsUnavailable = errors.New("azure specs: index unavailable")
+	// ErrBudgetExceeded marks a lookup that parsed more file bytes than its budget allows.
+	ErrBudgetExceeded = errors.New("azure specs: per-lookup byte budget exceeded")
 )
