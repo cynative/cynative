@@ -230,6 +230,62 @@ func TestClassify(t *testing.T) {
 			},
 		},
 		{
+			// kube-apiserver's namespaceSubresources: status under namespaces/<name>
+			// is a subresource of the namespace, not a namespaced resource (#381).
+			name:   "get namespace status subresource",
+			method: "GET",
+			path:   "/api/v1/namespaces/default/status",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "get", APIVersion: "v1",
+				Resource: "namespaces", Name: "default", Subresource: "status",
+				Path: "/api/v1/namespaces/default/status",
+			},
+		},
+		{
+			name:   "update namespace finalize subresource",
+			method: "PUT",
+			path:   "/api/v1/namespaces/default/finalize",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "update", APIVersion: "v1",
+				Resource: "namespaces", Name: "default", Subresource: "finalize",
+				Path: "/api/v1/namespaces/default/finalize",
+			},
+		},
+		{
+			// Segments past the subresource are not interpreted, as upstream.
+			name:   "namespace status with trailing segments",
+			method: "GET",
+			path:   "/api/v1/namespaces/default/status/extra",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "get", APIVersion: "v1",
+				Resource: "namespaces", Name: "default", Subresource: "status",
+				Path: "/api/v1/namespaces/default/status/extra",
+			},
+		},
+		{
+			// Upstream applies the rule in every API group, not only the core one.
+			name:   "namespace status under a named group",
+			method: "GET",
+			path:   "/apis/example.io/v1/namespaces/default/status",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "get", APIGroup: "example.io", APIVersion: "v1",
+				Resource: "namespaces", Name: "default", Subresource: "status",
+				Path: "/apis/example.io/v1/namespaces/default/status",
+			},
+		},
+		{
+			// Only status and finalize are namespace subresources; a namespace
+			// named status still scopes the resource that follows it.
+			name:   "namespace named status scopes its resources",
+			method: "GET",
+			path:   "/api/v1/namespaces/status/pods",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "list", APIVersion: "v1",
+				Namespace: "status", Resource: "pods",
+				Path: "/api/v1/namespaces/status/pods",
+			},
+		},
+		{
 			name:   "watch=1 is truthy",
 			method: "GET",
 			path:   "/api/v1/pods",
@@ -292,8 +348,8 @@ func TestIsWatchNilQuery(t *testing.T) {
 // TestClassifyProxyVerbInPath exercises the early-set proxy/watch path verb
 // that fires when the verb appears as the first resource segment after the
 // version (e.g. /api/v1/proxy/...) rather than as a subresource. This reaches
-// the applyVerb early-return (ri.Verb != "") and the consumeResource ri.Resource
-// early-return branches.
+// the applyVerb early-return (ri.Verb != "") and, with nothing after the verb,
+// the consumeResource empty-parts early return.
 func TestClassifyProxyVerbInPath(t *testing.T) {
 	t.Parallel()
 
@@ -324,6 +380,15 @@ func TestClassifyProxyVerbInPath(t *testing.T) {
 			},
 		},
 		{
+			name:   "watch with no resource after it",
+			method: "GET",
+			path:   "/api/v1/watch",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "watch", APIVersion: "v1",
+				Path: "/api/v1/watch",
+			},
+		},
+		{
 			// 3+ post-proxy segments: proxy verb is already set before consumeResource,
 			// so the ri.Verb != verbProxy guard suppresses the subresource field even
 			// though the tail has enough segments to fill it.
@@ -334,6 +399,18 @@ func TestClassifyProxyVerbInPath(t *testing.T) {
 				IsResourceRequest: true, Verb: "proxy", APIVersion: "v1",
 				Resource: "nodes", Name: "n1",
 				Path: "/api/v1/proxy/nodes/n1/logs",
+			},
+		},
+		{
+			// The namespace-subresource rule still names the namespace under the
+			// proxy verb, which then drops the subresource as it does elsewhere.
+			name:   "proxy-prefix verb on namespace status",
+			method: "GET",
+			path:   "/api/v1/proxy/namespaces/default/status",
+			want: RequestInfo{
+				IsResourceRequest: true, Verb: "proxy", APIVersion: "v1",
+				Resource: "namespaces", Name: "default",
+				Path: "/api/v1/proxy/namespaces/default/status",
 			},
 		},
 	}

@@ -97,25 +97,18 @@ func splitPath(p string) []string {
 	return strings.Split(p, "/")
 }
 
-// consumeNamespace strips a leading namespaces/<ns> scope, handling the
-// /namespaces and /namespaces/<ns> resource-request forms. It returns the
-// remaining path segments.
+// consumeNamespace strips a leading namespaces/<ns> scope and returns the
+// remaining path segments. The /namespaces, /namespaces/<ns> and
+// /namespaces/<ns>/{status,finalize} forms name the namespace itself, so they
+// are returned whole for consumeResource to read as resource, name and
+// subresource, as kube-apiserver's namespaceSubresources rule does.
 func consumeNamespace(ri *RequestInfo, parts []string) []string {
 	if len(parts) == 0 || parts[0] != resourceNamespaces {
 		return parts
 	}
 
-	if len(parts) == 1 {
-		ri.Resource = resourceNamespaces
-
-		return nil
-	}
-
-	if len(parts) < minSegmentsForSubresource {
-		ri.Resource = resourceNamespaces
-		ri.Name = parts[indexName]
-
-		return nil
+	if len(parts) < minSegmentsForSubresource || isNamespaceSubresource(parts[indexSubresource]) {
+		return parts
 	}
 
 	ri.Namespace = parts[indexName]
@@ -123,10 +116,16 @@ func consumeNamespace(ri *RequestInfo, parts []string) []string {
 	return parts[minSegmentsForName:]
 }
 
+// isNamespaceSubresource reports whether a segment after namespaces/<ns> is a
+// subresource of the namespace rather than a namespaced resource.
+func isNamespaceSubresource(segment string) bool {
+	return segment == "status" || segment == "finalize"
+}
+
 // consumeResource fills resource/name/subresource from the remaining segments,
 // skipping the subresource under the proxy verb (its tail is opaque).
 func consumeResource(ri *RequestInfo, parts []string) {
-	if ri.Resource != "" || len(parts) == 0 {
+	if len(parts) == 0 {
 		return
 	}
 
