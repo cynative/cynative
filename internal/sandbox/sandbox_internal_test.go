@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -53,6 +54,56 @@ func TestRefresh_RebuildFailureIsRetried(t *testing.T) {
 	out, rerr := s.Run(context.Background(), `console.log("x")`, time.Second)
 	if rerr != nil || out != "x\n" {
 		t.Errorf("after a successful rebuild: out=%q err=%v", out, rerr)
+	}
+}
+
+// TestRun_ConsoleOutputBeforeTimeout pins that console output written before a
+// timeout survives it. The deadline is held until the script reports that it
+// has logged, so a slow VM start cannot let the timeout fire before the first
+// statement and leave only the timeout suffix (#376).
+func TestRun_ConsoleOutputBeforeTimeout(t *testing.T) {
+	t.Parallel()
+
+	var (
+		expire context.CancelFunc
+		logged atomic.Bool
+	)
+
+	funcs := map[string]ToolFunc{
+		"logged": func(context.Context, string) (string, error) {
+			logged.Store(true)
+			expire()
+
+			return "", nil
+		},
+	}
+
+	s, err := New(funcs, nil, 32*1024, DefaultMaxConcurrency, identityRedact)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// The run context ends when the script calls logged. The backstop keeps a
+	// script that never calls it from hanging the test; the check on logged
+	// below then fails it, since the backstop alone yields the same output.
+	s.withTimeout = func(ctx context.Context, _ time.Duration) (context.Context, context.CancelFunc) {
+		runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		expire = cancel
+
+		return runCtx, cancel
+	}
+
+	out, err := s.Run(context.Background(), `console.log("partial"); logged({}); while (true) {}`, 30*time.Millisecond)
+	if !errors.Is(err, ErrScript) {
+		t.Fatalf("Run: want ErrScript, got %v", err)
+	}
+
+	if !logged.Load() {
+		t.Fatal("the run ended without the script calling logged")
+	}
+
+	if want := "partial\n\n[execution timed out after 30ms]"; out != want {
+		t.Errorf("Run output = %q, want %q", out, want)
 	}
 }
 
