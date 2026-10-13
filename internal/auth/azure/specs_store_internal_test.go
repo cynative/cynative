@@ -133,6 +133,118 @@ func TestSpecStore_IndexLoadsOnceAndMemoizes(t *testing.T) {
 	}
 }
 
+// indexWaitBound fails a test whose Index call waits on a load another caller holds. A correct store returns at once,
+// so the bound only ends a test that would otherwise hang.
+const indexWaitBound = 10 * time.Second
+
+// heldListing is a listing that blocks until release is closed. It signals started once it runs, and records whether
+// its context had ended once released.
+type heldListing struct {
+	started, release chan struct{}
+	calls            atomic.Int32
+	ctxErr           atomic.Value
+}
+
+func newHeldListing() *heldListing {
+	return &heldListing{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (h *heldListing) list(ctx context.Context, _ *http.Client, _ string) (*Listing, error) {
+	if h.calls.Add(1) == 1 {
+		close(h.started)
+	}
+	<-h.release
+	h.ctxErr.Store(fmt.Sprint(ctx.Err()))
+
+	return listingOf(computeNew), nil
+}
+
+// indexResult is one Index call's outcome.
+type indexResult struct {
+	ix  *Index
+	err error
+}
+
+func goIndex(ctx context.Context, s *SpecStore) chan indexResult {
+	out := make(chan indexResult, 1)
+	go func() {
+		ix, err := s.Index(ctx)
+		out <- indexResult{ix, err}
+	}()
+
+	return out
+}
+
+// awaitIndex returns an Index call's outcome, failing the test when the call is still waiting after indexWaitBound.
+func awaitIndex(t *testing.T, out chan indexResult) indexResult {
+	t.Helper()
+	select {
+	case r := <-out:
+		return r
+	case <-time.After(indexWaitBound):
+		t.Fatal("Index waited for a load another caller holds")
+
+		return indexResult{}
+	}
+}
+
+// TestSpecStore_IndexWaitHonorsTheCallersContext pins the shared index load: while one caller's load is held in the
+// listing, a caller whose context ended returns its own context error at once, ending a context stops neither the
+// load nor the other callers, and the loaded index is then served from memory with no second listing.
+func TestSpecStore_IndexWaitHonorsTheCallersContext(t *testing.T) {
+	t.Parallel()
+	// Each case starts the load and returns the live caller whose Index the test then releases.
+	cases := map[string]func(t *testing.T, s *SpecStore, h *heldListing) chan indexResult{
+		"a joiner is cancelled": func(t *testing.T, s *SpecStore, h *heldListing) chan indexResult {
+			t.Helper()
+			starter := goIndex(t.Context(), s)
+			<-h.started
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			wantCancelled(t, awaitIndex(t, goIndex(ctx, s)))
+
+			return starter
+		},
+		"the starter is cancelled": func(t *testing.T, s *SpecStore, h *heldListing) chan indexResult {
+			t.Helper()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			starter := goIndex(ctx, s)
+			<-h.started
+			cancel()
+			wantCancelled(t, awaitIndex(t, starter))
+
+			return goIndex(t.Context(), s)
+		},
+	}
+	for name, start := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHeldListing()
+			s, _ := newTestStore(t, newRawServer(), h.list)
+			live := start(t, s, h)
+			close(h.release)
+			if r := awaitIndex(t, live); r.err != nil || r.ix.SHA != testSHA {
+				t.Fatalf("live caller: Index = %+v, %v", r.ix, r.err)
+			}
+			if got := h.ctxErr.Load(); got != "<nil>" {
+				t.Errorf("listing context error = %v, want <nil>", got)
+			}
+			if ix, err := s.Index(t.Context()); err != nil || ix.SHA != testSHA || h.calls.Load() != 1 {
+				t.Fatalf("Index = %+v, %v after %d listings, want the cached index after one", ix, err, h.calls.Load())
+			}
+		})
+	}
+}
+
+// wantCancelled fails the test unless r is a cancelled caller's own context error.
+func wantCancelled(t *testing.T, r indexResult) {
+	t.Helper()
+	if !errors.Is(r.err, context.Canceled) || !errors.Is(r.err, ErrSpecsUnavailable) || r.ix != nil {
+		t.Fatalf("cancelled caller: Index = %+v, %v, want its own context error", r.ix, r.err)
+	}
+}
+
 // TestSpecStore_IndexFailureIsRecordedAndScrubbed pins the unavailable error: it wraps ErrSpecsUnavailable and the
 // cause, and passes through the scrubber.
 func TestSpecStore_IndexFailureIsRecordedAndScrubbed(t *testing.T) {

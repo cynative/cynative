@@ -98,6 +98,10 @@ type SpecStore struct {
 	mu      sync.Mutex
 	flights map[string]*flight
 
+	// loadMu guards loading, the index load in flight, or nil when none is.
+	loadMu  sync.Mutex
+	loading *indexLoad
+
 	// sizeMu guards cacheSize, the bytes the files dir held at the last scan plus every write since, or -1 before
 	// the first scan; writes, the store's cache writes so far; and rescan, how many writes apart scans are.
 	sizeMu    sync.Mutex
@@ -114,6 +118,13 @@ type flight struct {
 	// abandoned is set when the download failed after the leader's own context ended, the one outcome a joiner
 	// still live does not share.
 	abandoned bool
+}
+
+// indexLoad is one index load that every concurrent Index caller waits on. The loader writes ix before it closes
+// done, and callers read ix only after done is closed.
+type indexLoad struct {
+	done chan struct{}
+	ix   *Index
 }
 
 // NewSpecStore builds the store. Nothing is read until the first Index, File or Summary call.
@@ -164,14 +175,51 @@ func NewSpecStore(cfg SpecStoreConfig) *SpecStore {
 	}
 }
 
-// Index returns the specs index, from memory, the disk cache or a fresh listing. The error, when there is no
-// index, wraps ErrSpecsUnavailable and the last listing failure, scrubbed.
+// Index returns the specs index, from memory, the disk cache or a fresh listing. When there is no index, the error
+// wraps ErrSpecsUnavailable and either this caller's context error, when its context ended first, or the last listing
+// failure, scrubbed.
+//
+// A loaded index is returned without waiting. Otherwise the caller starts the store's one load, or joins the one in
+// flight, and waits for it or for its own context. The load runs in its own goroutine under the context of the caller
+// that started it with the cancellation removed, so no caller's interrupt or deadline stops a load the others share;
+// the listing's own deadline (listingTimeout) bounds it.
 func (s *SpecStore) Index(ctx context.Context) (*Index, error) {
-	if ix := s.index.Get(ctx); ix != nil {
+	if ix := s.index.TryPeek(); ix != nil {
 		return ix, nil
+	}
+	l := s.joinIndexLoad(ctx)
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: %w", ErrSpecsUnavailable, ctx.Err())
+	case <-l.done:
+	}
+	if l.ix != nil {
+		return l.ix, nil
 	}
 
 	return nil, s.scrub(fmt.Errorf("%w: %w", ErrSpecsUnavailable, s.failure.Err()))
+}
+
+// joinIndexLoad returns the index load in flight, starting one when none is. The loader clears loading before it
+// closes done, so a caller that finds none after that point starts a new load, which a failed load needs for a retry.
+func (s *SpecStore) joinIndexLoad(ctx context.Context) *indexLoad {
+	s.loadMu.Lock()
+	defer s.loadMu.Unlock()
+	if s.loading != nil {
+		return s.loading
+	}
+	l := &indexLoad{done: make(chan struct{})}
+	s.loading = l
+	loadCtx := context.WithoutCancel(ctx)
+	go func() {
+		l.ix = s.index.Get(loadCtx)
+		s.loadMu.Lock()
+		s.loading = nil
+		s.loadMu.Unlock()
+		close(l.done)
+	}()
+
+	return l
 }
 
 // File returns the body of f at commit sha, verified against f's blob id: from the disk cache when a cached copy
