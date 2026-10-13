@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -399,15 +400,24 @@ func (s *search) matches(id string) bool {
 }
 
 // summaries reads the files' summaries concurrently and reports the first error by file position, so the answer
-// does not depend on which download finished first.
+// does not depend on which download finished first. After the first error it schedules no further file. Every file
+// before the failed one was already scheduled and runs to the end, so the first error in file order is the same as
+// when every file runs.
 func (s *search) summaries(ctx context.Context, files []IndexFile) ([]*FileSummary, error) {
 	out := make([]*FileSummary, len(files))
 	errs := make([]error, len(files))
+	var failed atomic.Bool
 	var g errgroup.Group
 	g.SetLimit(maxLookupDownloads)
 	for i, f := range files {
+		if failed.Load() {
+			break
+		}
 		g.Go(func() error {
 			out[i], errs[i] = s.d.store.Summary(ctx, s.ix.SHA, f, s.budget)
+			if errs[i] != nil {
+				failed.Store(true)
+			}
 
 			return nil
 		})

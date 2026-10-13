@@ -237,6 +237,35 @@ func TestSpecStore_IndexWaitHonorsTheCallersContext(t *testing.T) {
 	}
 }
 
+// TestSpecStore_IndexCancelledCallerStartsNoLoad pins that a caller whose context has already ended, with no load in
+// flight, returns its own context error and starts no load, and that the next live caller then loads. The listing is
+// held until after the check, so a load the cancelled caller started would still be in flight when it is looked for.
+func TestSpecStore_IndexCancelledCallerStartsNoLoad(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	release := make(chan struct{})
+	s, _ := newTestStore(t, newRawServer(), func(context.Context, *http.Client, string) (*Listing, error) {
+		calls.Add(1)
+		<-release
+
+		return listingOf(computeNew), nil
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	ix, err := s.Index(ctx)
+	wantCancelled(t, indexResult{ix, err})
+	s.loadMu.Lock()
+	started := s.loading != nil
+	s.loadMu.Unlock()
+	close(release)
+	if started {
+		t.Fatal("a cancelled caller started an index load")
+	}
+	if ix, err = s.Index(t.Context()); err != nil || ix.SHA != testSHA || calls.Load() != 1 {
+		t.Fatalf("Index = %+v, %v after %d listings, want a fresh load", ix, err, calls.Load())
+	}
+}
+
 // wantCancelled fails the test unless r is a cancelled caller's own context error.
 func wantCancelled(t *testing.T, r indexResult) {
 	t.Helper()

@@ -187,7 +187,10 @@ func (s *SpecStore) Index(ctx context.Context) (*Index, error) {
 	if ix := s.index.TryPeek(); ix != nil {
 		return ix, nil
 	}
-	l := s.joinIndexLoad(ctx)
+	l, err := s.joinIndexLoad(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSpecsUnavailable, err)
+	}
 	select {
 	case <-ctx.Done():
 		return nil, fmt.Errorf("%w: %w", ErrSpecsUnavailable, ctx.Err())
@@ -202,11 +205,16 @@ func (s *SpecStore) Index(ctx context.Context) (*Index, error) {
 
 // joinIndexLoad returns the index load in flight, starting one when none is. The loader clears loading before it
 // closes done, so a caller that finds none after that point starts a new load, which a failed load needs for a retry.
-func (s *SpecStore) joinIndexLoad(ctx context.Context) *indexLoad {
+// A caller whose context has ended joins a load in flight but never starts one; with none in flight it gets its
+// context's error.
+func (s *SpecStore) joinIndexLoad(ctx context.Context) (*indexLoad, error) {
 	s.loadMu.Lock()
 	defer s.loadMu.Unlock()
 	if s.loading != nil {
-		return s.loading
+		return s.loading, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	l := &indexLoad{done: make(chan struct{})}
 	s.loading = l
@@ -219,7 +227,7 @@ func (s *SpecStore) joinIndexLoad(ctx context.Context) *indexLoad {
 		close(l.done)
 	}()
 
-	return l
+	return l, nil
 }
 
 // File returns the body of f at commit sha, verified against f's blob id: from the disk cache when a cached copy

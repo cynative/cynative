@@ -1100,3 +1100,45 @@ func TestDocsReference_DoneContextBeforeTheNamespace(t *testing.T) {
 		t.Fatalf("done lookup, missing namespace = %+v after %d index loads; want unavailable", res, f.indexCount())
 	}
 }
+
+// TestDocsReference_SummaryErrorStopsScheduling pins that a dir's summaries stop at the first error. The first file
+// fails at once while every other file read holds its slot. Inside a synctest bubble, Wait returns once the lookup is
+// durably blocked: with the stop, the loop has scheduled no file past the one that took the failed file's slot and
+// waits for the group; without it, the loop waits for a slot to schedule the next file, which it reads once the held
+// reads are released. How many files before that bound start depends on when the failure lands, so only the bound is
+// pinned.
+func TestDocsReference_SummaryErrorStopsScheduling(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		files := make([]fixtureFile, 3*maxLookupDownloads)
+		for i := range files {
+			files[i] = fixtureFile{
+				"A", kindStable, "2024-01-01", fmt.Sprintf("f%02d.json", i),
+				specOps("2024-01-01", fmt.Sprintf("Op%02d_Get", i)),
+			}
+		}
+		f := specFixture(files...)
+		f.summaryErr[files[0].path()] = errors.New("summary failed")
+		release := make(chan struct{})
+		f.onSummary = func() { <-release }
+		done := make(chan apiref.Result)
+		go func() { done <- lookup(t, f, "Op00_Get", "") }()
+		synctest.Wait()
+		close(release)
+		res := <-done
+		const reason = "a spec file could not be loaded: summary failed; 0 version dirs searched; pass model with " +
+			"an api-version dir name to search one version"
+		if res.Outcome != apiref.OutcomeUnavailable || res.Reason != reason || res.Reference != nil {
+			t.Fatalf("result = %+v", res)
+		}
+		for i, file := range files {
+			got := f.summaryCount(file.path())
+			switch {
+			case i == 0 && got != 1:
+				t.Errorf("the failing file read %d times, want 1", got)
+			case i > maxLookupDownloads && got != 0:
+				t.Errorf("file %d read %d times after the first error, want 0", i, got)
+			}
+		}
+	})
+}
