@@ -273,7 +273,7 @@
         },
         "pagination": {
           "style": "link-header",
-          "input_token": "page",
+          "token_param": "page",
           "page_size": "per_page"
         },
         "source": {

@@ -21,6 +21,7 @@ import (
 	"github.com/cynative/cynative/internal/auth/authtest"
 	"github.com/cynative/cynative/internal/auth/aws"
 	"github.com/cynative/cynative/internal/auth/github"
+	"github.com/cynative/cynative/internal/redact"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/tools"
 	"github.com/cynative/cynative/internal/transport"
@@ -293,8 +294,13 @@ func runScript(t *testing.T, inner []schema.InvokableTool, code string) (string,
 func TestAPIReferenceContract_IAMXMLGuidance(t *testing.T) {
 	t.Parallel()
 
-	_, out, _ := runRef(t, []auth.Provider{&stubAWS{docs: awsDocumenter(t, "iam", "iam.json", "iam")}},
+	raw, _, _ := runRef(t, []auth.Provider{&stubAWS{docs: awsDocumenter(t, "iam", "iam.json", "iam")}},
 		`{"connector":"aws","service":"iam","operation":"ListRoles"}`)
+	// The model reads the result through the redactor, so assert on what survives it.
+	var out refOut
+	if err := json.Unmarshal([]byte(redact.New().Redact(raw)), &out); err != nil {
+		t.Fatal(err)
+	}
 	resp, ok := out.Reference["response"].(map[string]any)
 	if !ok {
 		t.Fatalf("reference has no response object: %+v", out.Reference)
@@ -307,7 +313,7 @@ func TestAPIReferenceContract_IAMXMLGuidance(t *testing.T) {
 	}
 
 	pg, ok := out.Reference["pagination"].(map[string]any)
-	if !ok || pg["input_token"] != "Marker" || pg["output_token"] != "Marker" {
+	if !ok || pg["token_param"] != "Marker" || pg["next_token_field"] != "Marker" {
 		t.Errorf("pagination = %+v, want Marker as input and output token", out.Reference["pagination"])
 	}
 
