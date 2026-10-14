@@ -500,3 +500,169 @@ func TestClassify_MarksOnlyZeroSurvivors(t *testing.T) {
 		t.Fatalf("ambiguous = %v, want ErrClassifierUnknownOp and no unmatched marker", err)
 	}
 }
+
+// sslPolicyIndex holds compute's sslPolicies.get and listAvailableFeatures, whose
+// literal last segment also fits get's {sslPolicy} (#377). The keys are chosen by the caller so a test can put either GET
+// first in the classifier's sorted walk.
+func sslPolicyIndex(getKey, listKey string) MethodIndex {
+	const base = "projects/{project}/global/sslPolicies/"
+
+	return MethodIndex{
+		getKey: {
+			ID: "compute.sslPolicies.get", HTTPMethod: "GET", ServicePath: "compute/v1/",
+			FlatPath: base + "{sslPolicy}",
+		},
+		listKey: {
+			ID: "compute.sslPolicies.listAvailableFeatures", HTTPMethod: "GET", ServicePath: "compute/v1/",
+			FlatPath: base + "listAvailableFeatures",
+		},
+	}
+}
+
+// TestClassify_LiteralSegmentWins pins the precedence Google's path matcher
+// applies: where two templates first differ, a literal segment beats a
+// placeholder, whatever order the index lists them in and however many literals
+// each has; a custom verb is not part of that comparison; and a placeholder
+// route still wins a request whose method the literal route does not serve.
+func TestClassify_LiteralSegmentWins(t *testing.T) {
+	t.Parallel()
+
+	const ssl = "https://compute.googleapis.com/compute/v1/projects/p/global/sslPolicies/"
+
+	verbIdx := MethodIndex{
+		"svc.res.verb":  {ID: "svc.res.verb", HTTPMethod: "POST", FlatPath: "v1/res/{res}:run"},
+		"svc.mine.verb": {ID: "svc.mine.verb", HTTPMethod: "POST", FlatPath: "v1/res/mine:run"},
+	}
+	verbPlaceholderFirstIdx := MethodIndex{
+		"svc.a.verb": {ID: "svc.a.verb", HTTPMethod: "POST", FlatPath: "v1/res/{res}:run"},
+		"svc.b.verb": {ID: "svc.b.verb", HTTPMethod: "POST", FlatPath: "v1/res/mine:run"},
+	}
+	postOnlyIdx := MethodIndex{
+		"svc.get":  {ID: "svc.get", HTTPMethod: "GET", FlatPath: "v1/res/{res}"},
+		"svc.post": {ID: "svc.post", HTTPMethod: "POST", FlatPath: "v1/res/mine"},
+	}
+	leftmostIdx := MethodIndex{
+		"svc.a": {ID: "svc.a", HTTPMethod: "GET", FlatPath: "v1/{x}/b/c"},
+		"svc.b": {ID: "svc.b", HTTPMethod: "GET", FlatPath: "v1/a/{y}/{z}"},
+	}
+
+	tieThenBetterIdx := MethodIndex{
+		"svc.a1": {ID: "svc.a1", HTTPMethod: "GET", FlatPath: "v1/{x}/{y}"},
+		"svc.a2": {ID: "svc.a2", HTTPMethod: "GET", FlatPath: "v1/{p}/{q}"},
+		"svc.c":  {ID: "svc.c", HTTPMethod: "GET", FlatPath: "v1/{x}/b"},
+	}
+	sameIDIdx := MethodIndex{
+		"svc.dup":    {ID: "svc.dup", HTTPMethod: "GET", FlatPath: "v1/res/mine"},
+		"svc.dup~v2": {ID: "svc.dup", HTTPMethod: "GET", FlatPath: "v1/res/mine"},
+		"svc.get":    {ID: "svc.get", HTTPMethod: "GET", FlatPath: "v1/res/{res}"},
+	}
+
+	cases := []struct {
+		name, method, url, want string
+		idx                     MethodIndex
+	}{
+		{"tie then better", "GET", "https://example.googleapis.com/v1/a/b", "svc.c", tieThenBetterIdx},
+		{"same id ties with itself", "GET", "https://example.googleapis.com/v1/res/mine", "svc.dup", sameIDIdx},
+		{
+			"literal after placeholder", "GET", ssl + "listAvailableFeatures",
+			"compute.sslPolicies.listAvailableFeatures", sslPolicyIndex("a.get", "b.list"),
+		},
+		{
+			"literal before placeholder", "GET", ssl + "listAvailableFeatures",
+			"compute.sslPolicies.listAvailableFeatures", sslPolicyIndex("b.get", "a.list"),
+		},
+		{
+			"other names keep the get", "GET", ssl + "my-policy",
+			"compute.sslPolicies.get", sslPolicyIndex("a.get", "b.list"),
+		},
+		{"leftmost difference decides", "GET", "https://example.googleapis.com/v1/a/b/c", "svc.b", leftmostIdx},
+		{"literal route lacks the method", "GET", "https://example.googleapis.com/v1/res/mine", "svc.get", postOnlyIdx},
+		{"verb base compared", "POST", "https://example.googleapis.com/v1/res/mine:run", "svc.mine.verb", verbIdx},
+		{
+			"verb base compared, placeholder first", "POST", "https://example.googleapis.com/v1/res/mine:run",
+			"svc.b.verb", verbPlaceholderFirstIdx,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := Classify(tc.idx, classifyView(t, tc.method, tc.url))
+			if err != nil || got != tc.want {
+				t.Fatalf("Classify = %q, %v, want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// TestClassify_LiteralWinsOnlyWithinAReading pins that the precedence ranks the
+// templates one reading matched and never overrides a disagreement between
+// readings. The escaped reading of listAvailable%46eatures keeps the escape, so
+// only get's {sslPolicy} matches it; the decoded reading spells the literal, so
+// listAvailableFeatures wins there. Two readings naming two methods stay
+// ambiguous.
+func TestClassify_LiteralWinsOnlyWithinAReading(t *testing.T) {
+	t.Parallel()
+
+	v := classifyView(t, "GET",
+		"https://compute.googleapis.com/compute/v1/projects/p/global/sslPolicies/listAvailable%46eatures")
+
+	id, err := Classify(sslPolicyIndex("a.get", "b.list"), v)
+	if !errors.Is(err, ErrClassifierUnknownOp) || !strings.Contains(err.Error(), "2 methods match") {
+		t.Fatalf("Classify = %q, %v, want 2 methods match", id, err)
+	}
+}
+
+// TestClassify_LiteralRankingStillDenies pins the requests the precedence must
+// leave ambiguous: two best routes to different methods, and two routes to
+// different methods where any literal matched only up to case, the losing route
+// included. The path matcher the ranking follows looks
+// literals up exactly, so it routes listavailablefeatures to {sslPolicy}, and
+// v1/a/b to v1/{x}/{y}; ranking the case-folded match would pick the other
+// method in both.
+func TestClassify_LiteralRankingStillDenies(t *testing.T) {
+	t.Parallel()
+
+	const ssl = "https://compute.googleapis.com/compute/v1/projects/p/global/sslPolicies/"
+
+	bestTieIdx := MethodIndex{
+		"svc.a": {ID: "svc.a", HTTPMethod: "GET", FlatPath: "v1/res/mine"},
+		"svc.b": {ID: "svc.b", HTTPMethod: "GET", FlatPath: "v1/res/mine"},
+		"svc.c": {ID: "svc.c", HTTPMethod: "GET", FlatPath: "v1/res/{res}"},
+	}
+	foldedLoserIdx := MethodIndex{
+		"svc.exact":  {ID: "svc.exact", HTTPMethod: "GET", FlatPath: "v1/a/{x}"},
+		"svc.folded": {ID: "svc.folded", HTTPMethod: "GET", FlatPath: "v1/{y}/B"},
+	}
+	foldedVerbIdx := MethodIndex{
+		"svc.cased": {ID: "svc.cased", HTTPMethod: "POST", FlatPath: "v1/res/Mine:run"},
+		"svc.res":   {ID: "svc.res", HTTPMethod: "POST", FlatPath: "v1/res/{res}:run"},
+	}
+	laterLiteralIdx := MethodIndex{
+		"svc.cased":   {ID: "svc.cased", HTTPMethod: "GET", FlatPath: "v1/A/b"},
+		"svc.generic": {ID: "svc.generic", HTTPMethod: "GET", FlatPath: "v1/{x}/{y}"},
+	}
+
+	cases := []struct {
+		name, method, url string
+		idx               MethodIndex
+	}{
+		{"best routes tie", "GET", "https://example.googleapis.com/v1/res/mine", bestTieIdx},
+		{"case-folded losing literal", "GET", "https://example.googleapis.com/v1/a/b", foldedLoserIdx},
+		{"case-folded verb base", "POST", "https://example.googleapis.com/v1/res/mine:run", foldedVerbIdx},
+		{"case-folded last literal", "GET", ssl + "listavailablefeatures", sslPolicyIndex("a.get", "b.list")},
+		{"case-folded literal before a deciding one", "GET", "https://example.googleapis.com/v1/a/b", laterLiteralIdx},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			id, err := Classify(tc.idx, classifyView(t, tc.method, tc.url))
+			if !errors.Is(err, ErrClassifierUnknownOp) || !strings.Contains(err.Error(), "2 methods match") {
+				t.Fatalf("Classify = %q, %v, want 2 methods match", id, err)
+			}
+		})
+	}
+}

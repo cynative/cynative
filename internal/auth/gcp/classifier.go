@@ -15,7 +15,9 @@ import (
 // classified and the survivors are pooled: Google's frontend routes the path as
 // sent, so a percent-encoded slash stays inside its segment there while the
 // decoded path splits on it, and a request whose readings name different
-// methods is an ambiguity the gate denies. Deterministic. Pure.
+// methods is an ambiguity the gate denies. Within one reading the most specific
+// template wins when every match spells its literals exactly (see
+// appendSurvivors). Deterministic. Pure.
 func Classify(idx MethodIndex, v authreq.View) (string, error) {
 	method := strings.ToUpper(v.Method)
 
@@ -49,8 +51,18 @@ func Classify(idx MethodIndex, v authreq.View) (string, error) {
 	}
 }
 
-// appendSurvivors appends every method in idx whose template matches reqSegs and
-// that no earlier reading already named. The authoritative Discovery id (md.ID)
+// appendSurvivors appends the methods in idx that win reqSegs and that no
+// earlier reading already named. Among the methods whose template matches, only
+// the most specific win (see moreSpecific). The ranking applies only when every
+// match spells its literals exactly as the request does: a template literal
+// matches up to case here, but the path matcher moreSpecific follows looks
+// literals up exactly, so for GET .../sslPolicies/listavailablefeatures it never
+// sees listAvailableFeatures and routes to {sslPolicy}. Ranking such a match
+// could pick the method the server did not, so every match is kept and two
+// distinct methods stay ambiguous. A literal that matched only up to case
+// disables the ranking even on a losing match: the gate keeps the rule
+// conservative rather than modeling which matches the server would skip. The
+// authoritative Discovery id (md.ID)
 // is used, never the map key: the multi-version merge may store a method under a
 // disambiguated key when its id collides with a sibling version (see
 // mergeServiceDocs). Deduping by id keeps two index entries that resolve to the
@@ -63,19 +75,98 @@ func appendSurvivors(
 	method string,
 	reqSegs []string,
 ) []string {
+	var (
+		best    []string
+		winners []string
+		matched []string
+		folded  bool
+	)
+
 	for _, key := range keys {
 		md := idx[key]
 		if !strings.EqualFold(md.HTTPMethod, method) {
 			continue
 		}
 
-		if matchTemplate(effectiveTemplate(md), reqSegs) && !seen[md.ID] {
-			seen[md.ID] = true
-			survivors = append(survivors, md.ID)
+		tSegs := splitSegments(effectiveTemplate(md))
+		if !matchTemplate(tSegs, reqSegs) {
+			continue
+		}
+
+		matched = append(matched, md.ID)
+		folded = folded || !literalsExact(tSegs, reqSegs)
+
+		rank := 1
+		if winners != nil {
+			rank = moreSpecific(tSegs, best)
+		}
+
+		switch {
+		case rank > 0:
+			best, winners = tSegs, []string{md.ID}
+		case rank == 0:
+			winners = append(winners, md.ID)
+		}
+	}
+
+	if folded {
+		winners = matched
+	}
+
+	for _, id := range winners {
+		if !seen[id] {
+			seen[id] = true
+			survivors = append(survivors, id)
 		}
 	}
 
 	return survivors
+}
+
+// moreSpecific compares two templates that match the same request, so they have
+// the same length. At the first segment where one is a literal and the other a
+// placeholder, the literal wins: it returns 1 when a wins there, -1 when b does,
+// and 0 when no segment tells them apart. This is the precedence of the path
+// matcher in grpc-httpjson-transcoding, the open-source HTTP-to-gRPC
+// transcoder for Google's HTTP rules (PathMatcherNode::LookupPath tries the
+// exact literal child before the {param} child and backtracks only when that
+// subtree has no match), so a literal last segment such as
+// sslPolicies/listAvailableFeatures routes to its own method, not to the
+// sibling get's {sslPolicy}. A custom verb does not count: two segments that
+// match the same request carry the same verb, and only the base is compared.
+func moreSpecific(a, b []string) int {
+	for i := range a {
+		aLit, bLit := !isPlaceholder(segmentBase(a[i])), !isPlaceholder(segmentBase(b[i]))
+		if aLit != bLit {
+			if aLit {
+				return 1
+			}
+
+			return -1
+		}
+	}
+
+	return 0
+}
+
+// literalsExact reports whether every literal segment of tSegs is spelled in
+// rSegs exactly, not only up to case. The custom verb is left out because
+// segmentEqual already compares it exactly.
+func literalsExact(tSegs, rSegs []string) bool {
+	for i, ts := range tSegs {
+		if base := segmentBase(ts); !isPlaceholder(base) && base != segmentBase(rSegs[i]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// segmentBase returns a template segment without its custom verb.
+func segmentBase(seg string) string {
+	base, _, _ := strings.Cut(seg, ":")
+
+	return base
 }
 
 // trimEmptyEdges drops the empty segments a leading or trailing '/' leaves, so a
@@ -107,14 +198,12 @@ func effectiveTemplate(md MethodDescriptor) string {
 	return strings.Trim(strings.TrimSuffix(md.ServicePath, "/")+"/"+strings.TrimPrefix(rel, "/"), "/")
 }
 
-// matchTemplate reports whether rSegs matches template anchored, full-segment,
+// matchTemplate reports whether rSegs matches tSegs anchored, full-segment,
 // treating {placeholder} segments as single-segment wildcards. The custom-verb
-// (:verb) and literal-verb (/start) discriminators fall out of exact segment
+// (:verb) and literal-verb (/start) discriminators fall out of segment
 // matching: a template with a trailing /start or :encrypt only matches a request
-// carrying that exact suffix.
-func matchTemplate(template string, rSegs []string) bool {
-	tSegs := splitSegments(template)
-
+// carrying that suffix (the verb exactly, the literal up to case).
+func matchTemplate(tSegs, rSegs []string) bool {
 	if len(tSegs) != len(rSegs) {
 		return false
 	}
