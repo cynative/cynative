@@ -13,6 +13,11 @@ type rule struct {
 	keywords []string
 	re       *regexp.Regexp
 	repl     string
+	// notKey skips a match that ':' follows, after any whitespace: the match was an
+	// object key, not the array element the rule is for. RE2 has no lookahead, and
+	// consuming the delimiter after the element would hide the next element's
+	// leading ',' from the next match.
+	notKey bool
 }
 
 // contentRules returns the body/value redaction rules in application order.
@@ -98,19 +103,19 @@ func contentRules() []rule {
 // command array, or a signing query param keeps its key/param and gets its
 // value replaced, so the surrounding document stays well-formed.
 func credentialRules() []rule {
-	// Every multi-word name is underscore-optional so snake_case (secret_access_key),
-	// Pascal/camelCase (SecretAccessKey, accessToken), and the no-separator apikey all
-	// match under the (?i:) flag. Single words (secret/password) stay literal.
+	// Every multi-word name takes an optional '_' or '-' between words, so snake_case
+	// (secret_access_key), kebab-case (api-key), Pascal/camelCase (SecretAccessKey,
+	// accessToken) and the no-separator apikey all match under the (?i:) flag. Single words (secret/password) stay literal.
 	// `(?:[a-z0-9]+_)+token` catches the whole snake_case "*_token" family GitLab
 	// returns to owners/admins — including MULTI-component names (runners_token,
 	// registration_token, incoming_email_token, …) that a single-component pattern
 	// would miss — which the bare `token` alternative alone would not match.
-	const credName = `access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
+	const credName = `access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|passphrase|secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
 	// keyEnd is a JSON key or variable name that ENDS in a credential word, so
 	// DB_PASSWORD, webhookSecret and stripeApiKey match the way the YAML and env
 	// rules already allow. Bare "token" takes no prefix: nextPageToken, pageToken
 	// and NextToken are pagination cursors the model has to send back.
-	const keyEnd = `[\w.-]*(?:access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key)|(?:[a-z0-9]+_)+token|token`
+	const keyEnd = `[\w.-]*(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|passphrase|secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key)|(?:[a-z0-9]+_)+token|token`
 	// flagArg is a command-line flag whose name ends in a credential word
 	// (--token, --db-password, --api-key, ...), with any hyphenated prefix. Unlike
 	// keyEnd it lets "token" take a prefix: a --page-token in a workload's args is
@@ -128,11 +133,8 @@ func credentialRules() []rule {
 		jsonEnd    = `(?:(")|\\?\z)`
 		jsonFields = `(?:\s*,\s*"` + jsonValue + `"\s*:\s*(?:"` + jsonValue + `"|[\w.+-]+))*?`
 		// jsonElement opens an array element: the '[' or ',' before it rules out a
-		// member value, which follows ':'. A ',' also opens an object key, so a key
-		// spelled like a joined flag ({"x":1,"--token=a":"b"}) loses its tail; telling
-		// the two apart would mean consuming the delimiter after the element, which
-		// hides the next flag from the next match. Only the leading delimiter is
-		// consumed, so the next element's ',' is still there for the next match.
+		// member value, which follows ':'. Only the leading delimiter is consumed, so
+		// the next element's ',' is still there for the next match.
 		jsonElement = `[\[,]\s*"`
 	)
 
@@ -168,9 +170,19 @@ func credentialRules() []rule {
 			),
 			repl: `${1}` + placeholder("credential-field"),
 		},
-		{ // Command-line flag with its value in the same array element: "--password=...".
-			re:   regexp.MustCompile(`(` + jsonElement + flagArg + `=)` + jsonValue + jsonEnd),
+		{ // YAML value/name pair: the same pair with "value:" first.
+			re: regexp.MustCompile(
+				`(?m)^([ \t]*-[ \t]+(?i:value):[ \t]*)[^\s\[][^\r\n]*?` +
+					`([ \t]*\r?\n[ \t]*(?i:name):[ \t]*["']?(?i:` + keyEnd + `)["']?[ \t]*\r?)$`,
+			),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
+		},
+		{ // Command-line flag with its value in the same array element: "--password=...".
+			// A ',' also opens an object key, so a key spelled like a joined flag
+			// ({"x":1,"--token=a":"b"}) is skipped by notKey.
+			re:     regexp.MustCompile(`(` + jsonElement + flagArg + `=)` + jsonValue + jsonEnd),
+			repl:   `${1}` + placeholder("credential-field") + `${2}`,
+			notKey: true,
 		},
 		{ // Command-line flag with its value in the next array element:
 			// ["--token","..."]. A next element that starts with "--" is read as another

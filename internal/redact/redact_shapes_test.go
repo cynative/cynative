@@ -138,6 +138,37 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			want: "DB_PASSWD=" + field + "\nssh_passphrase: " + field + "\n<Passphrase>" + field + "</Passphrase><passwd>" + field + "</passwd>",
 		},
 		{
+			name: "kebab case keys",
+			in:   `{"service-api-key":"a","access-token":"b"}` + "\nx-secret-access-key: c\nDB-API-KEY=d",
+			want: `{"service-api-key":"` + field + `","access-token":"` + field + `"}` +
+				"\nx-secret-access-key: " + field + "\nDB-API-KEY=" + field,
+		},
+		{
+			name: "kebab case name value pair",
+			in:   `[{"name":"stripe-api-key","value":"opaque"}]`,
+			want: `[{"name":"stripe-api-key","value":"` + field + `"}]`,
+		},
+		{
+			name: "yaml value name pair",
+			in:   "env:\n  - value: hunter2\n    name: DB_PASSWORD\n  - value: db.internal\n    name: DB_HOST\n",
+			want: "env:\n  - value: " + field + "\n    name: DB_PASSWORD\n  - value: db.internal\n    name: DB_HOST\n",
+		},
+		{
+			name: "yaml value name pair capitalized crlf at end",
+			in:   "- Value: hunter2  \r\n  Name: \"API_KEY\"\r",
+			want: "- Value: " + field + "  \r\n  Name: \"API_KEY\"\r",
+		},
+		{
+			name: "yaml value name pair keeps a token label",
+			in:   "- value: ghp_" + strings.Repeat("a", 36) + "\n  name: GH_TOKEN\n",
+			want: "- value: [REDACTED:github-token]\n  name: GH_TOKEN\n",
+		},
+		{
+			name: "joined flag keys skipped and array elements redacted",
+			in:   `{"x":1,"--token=a":2,"--token=b" : 3,"args":["--token=c","--token=d"]}`,
+			want: `{"x":1,"--token=a":2,"--token=b" : 3,"args":["--token=` + field + `","--token=` + field + `"]}`,
+		},
+		{
 			name: "boolean flag before a credential flag",
 			in:   `["--generate-secret","--password","x"]`,
 			want: `["--generate-secret","--password","` + field + `"]`,

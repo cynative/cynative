@@ -999,15 +999,15 @@ def run_canary(records, spec, canary, target):
 # credName mirrors internal/redact credentialRules' key vocabulary exactly (the
 # underscore-optional, multi-component *_token family included), so the parser
 # recognizes the same credential-named fields the production redactor targets.
-_CRED_NAME = (r"access_?token|refresh_?token|id_?token|client_?secret|secret|password|passwd|passphrase|"
-              r"secret_?access_?key|session_?token|api_?key|apikey|private_?key|"
+_CRED_NAME = (r"access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|passphrase|"
+              r"secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key|"
               r"(?:[a-z0-9]+_)+token|token")
 
 # _KEY_END mirrors rules.go keyEnd: a key or variable name that ENDS in a credential
 # word (DB_PASSWORD, webhookSecret), except bare "token", which takes no prefix so
 # pagination cursors (nextPageToken, NextToken) are not read as credentials.
-_KEY_END = (r"[\w.-]*(?:access_?token|refresh_?token|id_?token|client_?secret|secret|password|"
-            r"passwd|passphrase|secret_?access_?key|session_?token|api_?key|apikey|private_?key)|"
+_KEY_END = (r"[\w.-]*(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|"
+            r"passwd|passphrase|secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key)|"
             r"(?:[a-z0-9]+_)+token|token")
 # _FLAG_ARG mirrors rules.go flagArg: a command-line flag ending in a credential word.
 _FLAG_ARG = (r"--[\w-]*(?:token|password|passwd|passphrase|secret|api[-_]?key|"
@@ -1063,9 +1063,13 @@ _POSITIONAL_RULES = (
                 + _KEY_END + r')"', re.I), "credential-field"),
     (re.compile(r"^[ \t]*-[ \t]+name:[ \t]*[\"']?(?:" + _KEY_END + r")[\"']?[ \t]*\r?\n[ \t]*value:[ \t]*"
                 r"([^\s\[][^\r\n]*)", re.I | re.M), "credential-field"),
+    (re.compile(r"^[ \t]*-[ \t]+value:[ \t]*([^\s\[][^\r\n]*?)[ \t]*\r?\n[ \t]*name:[ \t]*[\"']?(?:"
+                + _KEY_END + r")[\"']?[ \t]*\r?$", re.I | re.M), "credential-field"),
     # A credential flag in a JSON array element, joined ("--password=v") or with its
-    # value in the next element; a next element starting "--" is another flag.
-    (re.compile(r'[\[,]\s*"' + _FLAG_ARG + r'=(' + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
+    # value in the next element; a next element starting "--" is another flag. The
+    # joined form skips an object key spelled like a flag, as rules.go's notKey does.
+    (re.compile(r'[\[,]\s*"' + _FLAG_ARG + r'=(' + _JSON_VALUE + r')(?:"(?!\s*:)|\\?\Z)', re.I),
+     "credential-field"),
     (re.compile(r'[\[,]\s*"' + _FLAG_ARG + r'"\s*,\s*"((?:[^-"\\]|\\[\s\S]|-(?:[^-"\\]|\\[\s\S]))'
                 + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
     (re.compile(r"<(?:" + _CRED_NAME + r")>([^<]*)</[A-Za-z0-9_:.-]+>", re.I), "credential-field"),
@@ -2178,15 +2182,18 @@ def _shared_selftest():
             # "--db-password=v" on its own also reads as an env line.
             ("flag_joined", '["--db-password=%s' % live_secret),
             ("flag_separate", '["--generate-secret","--token","%s"]' % live_secret),
+            ("kebab_key", '{"service-api-key":"%s"}' % live_secret),
+            ("yaml_pair_reversed", "- value: %s\n  name: DB_PASSWORD\n" % live_secret),
         ]
         # The same shapes with nothing to flag: a pagination cursor, a non-credential
-        # pair, a flag-shaped member value, values the redactor already replaced, and a
-        # boolean flag whose next element is another flag, not its value.
+        # pair, a flag-shaped member value, values the redactor already replaced, a
+        # boolean flag whose next element is another flag, and a flag-shaped object key.
         shape307_clean = _body_line(
             '{"nextPageToken":"%s","items":[{"name":"DB_HOST","value":"%s"}],"t":"--token","public":"%s",'
             '"env":[{"name":"DB_PASSWORD","value":"[REDACTED:credential-field]"}],'
             '"args":["--token","[REDACTED:credential-field]"],'
-            '"cmd":["--no-generate-secret","--client-name","%s"]}' % (live_secret, live_secret, live_secret, live_secret))
+            '"cmd":["--no-generate-secret","--client-name","%s"],"--token=%s":1}'
+            % (live_secret, live_secret, live_secret, live_secret, live_secret))
         # --live-secrets edge paths (class-1 file mechanism): an empty file is valid
         # (ambient-credential runs enumerate no env secret) and a missing/unreadable path
         # is a wiring bug that fails closed.

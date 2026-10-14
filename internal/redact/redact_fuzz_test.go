@@ -26,6 +26,8 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`{"args":["--token","hunter2","--password=hunter2","--token-file","/t"]}`)
 	f.Add(`["--generate-secret","--password","x",{"text":"--token","public":"d"}]`)
 	f.Add("{\"password\":\"sig=x\\\nTAIL")
+	f.Add(`{"service-api-key":"a","x":1,"--token=k":2,"a":["--token=v"]}`)
+	f.Add("- value: v\n  name: DB_PASSWORD\n")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {
