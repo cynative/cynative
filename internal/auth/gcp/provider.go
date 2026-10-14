@@ -77,7 +77,18 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 		return err
 	}
 
-	methodID, err := Classify(idx, v)
+	classifyFn := Classify
+	// ParseHost accepted v.Hostname, which NewView lower-cased, so trimming the one trailing dot is all
+	// normalizeHost would still change about it.
+	if service == storageService && (isWWW || isStorageJSONHost(strings.TrimSuffix(v.Hostname, "."))) {
+		// Storage's JSON API routes the path as sent: GET .../o/x%2Facl reads the object x/acl on its own
+		// endpoints and on www.googleapis.com, so the decoded reading names an operation it never runs. A bucket
+		// host (<bucket>.storage.googleapis.com) serves the XML API, which reads the whole path as an object key,
+		// so it keeps pooling both readings.
+		classifyFn = ClassifyAsSent
+	}
+
+	methodID, err := classifyFn(idx, v)
 	if err != nil {
 		// Classify has no service context; the hint needs it to find the service's methods.
 		if um, ok := errors.AsType[*authreq.UnmatchedRequestError](err); ok {

@@ -87,6 +87,39 @@ func TestPathReadings(t *testing.T) {
 	}
 }
 
+func TestWireReadings(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+		want [][]string
+	}{
+		{"plain path reads once", "https://x.example.com/a/b", [][]string{{"a", "b"}}},
+		{"an encoded slash stays inside its segment", "https://x.example.com/a/b%2Fc", [][]string{{"a", "b%2Fc"}}},
+		{
+			"a trailing slash also reads with the empty segment dropped",
+			"https://x.example.com/a%2Fb/",
+			[][]string{{"a%2Fb", ""}, {"a%2Fb"}},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, c.raw, nil)
+			if err != nil {
+				t.Fatalf("new request %q: %v", c.raw, err)
+			}
+
+			if got := authreq.NewView(req, "").WireReadings(); !equalReadings(got, c.want) {
+				t.Errorf("WireReadings() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
 func TestHasDotSegment(t *testing.T) {
 	t.Parallel()
 

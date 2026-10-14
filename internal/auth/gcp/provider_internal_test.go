@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/cynative/cynative/internal/auth/authreq"
@@ -844,5 +845,82 @@ func TestProviderAuthorizeAction_MarksOnlyAZeroSurvivorMiss(t *testing.T) {
 	if err := p.AuthorizeAction(context.Background(), providerView(t, "GET", base+"instances"),
 		gcpArgs(t, "compute")); err != nil {
 		t.Errorf("the allowed read is now denied: %v", err)
+	}
+}
+
+// subResourceProvider builds a Provider over Cloud Storage and a non-Storage
+// service that each carry a read and a sibling with one more literal segment,
+// granting only the two reads.
+func subResourceProvider() *Provider {
+	example := MethodIndex{
+		"example.things.get": {
+			ID: "example.things.get", HTTPMethod: "GET", FlatPath: "v1/things/{thingsId}",
+		},
+		"example.things.acl": {
+			ID: "example.things.acl", HTTPMethod: "GET", FlatPath: "v1/things/{thingsId}/acl",
+		},
+	}
+	data := DiscoveryData{
+		Services: map[string]ServiceDoc{
+			"storage": {
+				RootURL: "https://storage.googleapis.com/", ServicePath: "storage/v1/", Methods: objectACLIndex(),
+			},
+			"example": {RootURL: "https://example.googleapis.com/", Methods: example},
+		},
+	}
+	cat := newCatalog(func(context.Context) (DiscoveryData, error) { return data, nil })
+
+	permCat := map[string]bool{
+		"storage.objects.get": true,
+		"example.things.get":  true,
+		"example.things.acl":  true,
+	}
+	perms := NewPermissionResolver(permCat, defaultPrefixMap(), emptyDataset{})
+	eval := newRoleEvaluator(map[string]bool{"storage.objects.get": true, "example.things.get": true})
+
+	return NewProvider(cat, perms, eval, "roles/viewer")
+}
+
+// TestProviderAuthorizeAction_StorageReadsThePathAsSent: an object named like a
+// sub-resource (x/acl) is the object read Storage serves on both hosts that
+// carry the JSON API, while a literal /acl still classifies as the ACL list and
+// is denied. A bucket host and a non-Storage service keep pooling both
+// readings, so the same shape there stays ambiguous.
+func TestProviderAuthorizeAction_StorageReadsThePathAsSent(t *testing.T) {
+	t.Parallel()
+
+	p := subResourceProvider()
+
+	for _, raw := range []string{
+		"https://storage.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+		"https://www.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+		"https://storage.googleapis.com./storage/v1/b/bk/o/x%2Facl",
+		"https://www.googleapis.com./storage/v1/b/bk/o/x%2Facl",
+		"https://storage.mtls.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+		"https://storage.us-central1.rep.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+		"https://us-central1-storage.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+	} {
+		if err := p.AuthorizeAction(t.Context(), providerView(t, "GET", raw), gcpArgs(t, "storage")); err != nil {
+			t.Errorf("AuthorizeAction(%s) = %v, want allowed", raw, err)
+		}
+	}
+
+	err := p.AuthorizeAction(t.Context(),
+		providerView(t, "GET", "https://storage.googleapis.com/storage/v1/b/bk/o/x/acl"), gcpArgs(t, "storage"))
+	if !errors.Is(err, ErrPermissionUnresolved) || !strings.Contains(err.Error(), "storage.objectAccessControls.list") {
+		t.Errorf("literal acl err = %v, want it classified as storage.objectAccessControls.list and denied", err)
+	}
+
+	// A bucket host serves the XML API, which reads the whole path as an object key, so it keeps both readings.
+	err = p.AuthorizeAction(t.Context(),
+		providerView(t, "GET", "https://bk.storage.googleapis.com/storage/v1/b/bk/o/x%2Facl"), gcpArgs(t, "storage"))
+	if !errors.Is(err, ErrClassifierUnknownOp) || !strings.Contains(err.Error(), "2 methods match") {
+		t.Errorf("bucket host err = %v, want the 2-method ambiguity", err)
+	}
+
+	err = p.AuthorizeAction(t.Context(),
+		providerView(t, "GET", "https://example.googleapis.com/v1/things/x%2Facl"), gcpArgs(t, "example"))
+	if !errors.Is(err, ErrClassifierUnknownOp) || !strings.Contains(err.Error(), "2 methods match") {
+		t.Errorf("non-storage err = %v, want the 2-method ambiguity", err)
 	}
 }
