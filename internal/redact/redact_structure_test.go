@@ -82,9 +82,9 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "  db_password: " + field + " # c\n  x: y\n",
 		},
 		{
-			name: "yaml unclosed quote stops at the indentation",
-			in:   "password: \"first\n  second\nnext: keep\n",
-			want: "password: " + field + "\nnext: keep\n",
+			name: "yaml unclosed quote runs to the end of content",
+			in:   "x: y\npassword: \"first\n  second\nnext: keep\n",
+			want: "x: y\npassword: " + field,
 		},
 		{
 			name: "yaml quoted value with lines after the closing quote",
@@ -190,6 +190,17 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			name: "yaml quoted value with properties on the next line",
 			in:   "password:\n  &pw \"synthetic: secret\"\n- name: DB_PASSWORD\n  value:\n    !!str 'first\ntail: x'\ntoken:\n  &a\n  plain\n",
 			want: "password: " + field + "\n- name: DB_PASSWORD\n  value: " + field + "\ntoken: " + field + "\n",
+		},
+		{
+			name: "yaml quoted keys",
+			in:   "\"password\": |\n  a\n- \"name\": DB_PASSWORD\n  \"value\": b\n- 'name': 'API_KEY'\n  'value': 'c'\n",
+			want: "\"password\": " + field + "\n- \"name\": DB_PASSWORD\n  \"value\": " + field +
+				"\n- 'name': 'API_KEY'\n  'value': " + field + "\n",
+		},
+		{
+			name: "pretty printed json pair keeps its quotes",
+			in:   "{\n  \"name\": \"DB_PASSWORD\",\n  \"value\": \"x\",\n  \"n\": 1\n}",
+			want: "{\n  \"name\": \"DB_PASSWORD\",\n  \"value\": \"" + field + "\",\n  \"n\": 1\n}",
 		},
 		{
 			name: "json escaped key",
@@ -364,6 +375,27 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 				`["--password","` + field + `","-c","app --token ` + field + `"]`,
 		},
 		{
+			name: "shell command value with command substitutions",
+			in: `["sh","-c","app --password=$(printf '%s' \"a)\" | (cat)) b; x --token ` + "`cat f`" +
+				` y; z --token $(z"]`,
+			want: `["sh","-c","app --password=` + field + ` b; x --token ` + field + ` y; z --token ` + field + `"]`,
+		},
+		{
+			name: "shell command substitution edge 1",
+			in:   "[\"sh\", \"-c\", \"a --token `x\\\\`y` b; c --token $(e \\\\) \\\"q\\\\\\\"r) \\\" s) d; e --token $(f \\\"open\"]",
+			want: "[\"sh\", \"-c\", \"a --token [REDACTED:credential-field] b; c --token [REDACTED:credential-field] d; e --token [REDACTED:credential-field]\"]",
+		},
+		{
+			name: "shell command substitution edge 2",
+			in:   "[\"sh\", \"-c\", \"g --token `zz\"]",
+			want: "[\"sh\", \"-c\", \"g --token [REDACTED:credential-field]\"]",
+		},
+		{
+			name: "shell command substitution edge 3",
+			in:   "[\"sh\", \"-c\", \"h --token $(i 'open\"]",
+			want: "[\"sh\", \"-c\", \"h --token [REDACTED:credential-field]\"]",
+		},
+		{
 			name: "flag value starting with two dashes before a positional argument",
 			in:   `["app","--password","--hunter2","input.txt"],["sh","-c","app --password --hunter2 input.txt"]`,
 			want: `["app","--password","` + field + `","input.txt"],["sh","-c","app --password ` + field + ` input.txt"]`,
@@ -451,6 +483,7 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		"- name: &n\n  value: public\n",
 		"name:\n  DB_PASSWORD\n  more\nvalue: public\n",
 		`["sh","-x","app --token x"]`,
+		"{\n  \"name\": \"DB_PASSWORD\",\n  \"value\": 123\n}",
 		`["sh","-o"]`,
 		`["sh",""]`,
 		`["echo","app --token x"]`,

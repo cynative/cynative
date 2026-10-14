@@ -1044,7 +1044,8 @@ _KEY_END_FULL = re.compile(r"(?:" + _KEY_END + r")\Z", re.I | re.A)
 _DIRECT_KEY = re.compile(r"[\w.-]*(?:" + _CRED_SUFFIX + r")\Z", re.I | re.A)
 _FLAG_FULL = re.compile(r"(?:" + _FLAG_ARG + r")\Z", re.I | re.A)
 _FLAG_JOINED = re.compile(r"(?:" + _FLAG_ARG + r")=", re.I | re.A)
-_YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+)[ \t]*:(?:[ \t]+|\Z)")
+_YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')"
+                       r"[ \t]*:(?:[ \t]+|\Z)")
 _YAML_MAPPING_LINE = re.compile(r":(?:[ \t]|[ \t]*\Z)")
 _YAML_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|\Z)")
 _YAML_PROPS = re.compile(r"(?:[&!][^ \t]*(?:[ \t]+|\Z))*")
@@ -1230,6 +1231,9 @@ def _yaml_extent(s, lines, i, e):
             if last > closing:
                 e["end"] = lines[last][1]
             e["multi"] = last > i
+        else:
+            last = len(lines) - 1
+            e["end"], e["multi"] = lines[last][1], last > i
     elif not e["multi"]:
         e["end"] = e["first"] + len(_strip_comment(v).rstrip(" \t"))
     return last
@@ -1255,7 +1259,7 @@ def _yaml_entries(s, lines):
             out.append({"key": "", "col": _indent(text), "item": False, "multi": False})
             i += 1
             continue
-        e = {"key": g.group(2), "col": g.end(1), "item": "-" in g.group(1),
+        e = {"key": _unquote(g.group(2)), "json": g.group(2)[0] == '"', "col": g.end(1), "item": "-" in g.group(1),
              "colon": lines[i][0] + g.end(2) + text[g.end(2):].index(":") + 1,
              "start": lines[i][0] + g.end(0), "below": False, "multi": False}
         e["end"] = e["first"] = e["start"]
@@ -1283,6 +1287,59 @@ def _yaml_mappings(es):
     return ids
 
 
+def _json_scalar(v):
+    """True when v, without a trailing comma, parses as a JSON scalar, as the
+    json.Valid check in yamlValue."""
+    if v.endswith(","):
+        v = v[:-1]
+    try:
+        json.loads(v)
+    except ValueError:
+        return False
+    return True
+
+
+def _quote_end(d, j):
+    """The offset of the quote closing the one at d[j], or len(d), as quoteEnd."""
+    k = j + 1
+    while k < len(d):
+        if d[j] == '"' and d[k] == "\\":
+            k += 1
+        elif d[k] == d[j]:
+            return k
+        k += 1
+    return len(d)
+
+
+def _expansion_end(d, i):
+    """The offset after the command substitution starting at d[i], as expansionEnd."""
+    if d[i] == "`":
+        j = i + 1
+        while j < len(d):
+            if d[j] == "\\":
+                j += 1
+            elif d[j] == "`":
+                return j + 1
+            j += 1
+        return len(d)
+    if d.startswith("$(", i):
+        depth, j = 0, i + 1
+        while j < len(d):
+            if d[j] == "\\":
+                j += 1
+            elif d[j] in "\"'":
+                j = _quote_end(d, j)
+            elif d[j] == "(":
+                depth += 1
+            elif d[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    return j + 1
+            j += 1
+        return len(d)
+    return i
+
+
 def _find_yaml(s):
     if ":" not in s:
         return []
@@ -1295,7 +1352,7 @@ def _find_yaml(s):
         if not ((ids[i] in named and e["key"].lower() == "value")
                 or (e["multi"] and _DIRECT_KEY.match(e["key"]))):
             continue
-        if e["end"] == e["start"]:
+        if e["end"] == e["start"] or (e["json"] and _json_scalar(s[e["first"]:e["end"]])):
             continue
         start = e["colon"] if e["below"] else e["start"]
         out.append(_Found(s[start:e["end"]], start, e["end"]))
@@ -1399,8 +1456,10 @@ def _shell_words(d):
                     add(i + 1)
                 i += 2
             else:
-                add(i)
-                i += 1
+                end = max(_expansion_end(d, i), i + 1)
+                while i < end:
+                    add(i)
+                    i += 1
         i = min(i, len(d))
         if text or quoted:
             out.append((start, i, "".join(text), at))
@@ -2040,6 +2099,8 @@ def _structural_spans():
         (_find_commands, '["--password","sh","-c","app --token y"]', [("y", 37, 38), ("sh", 15, 17)]),
         (_find_yaml, "password:\n  &pw \"a\nb\"\nn: p\n", [("\n  &pw \"a\nb\"", 9, 21)]),
         (_find_commands, '["\\u002d\\u002dpassword","y"]', [("y", 25, 26)]),
+        (_find_yaml, "x: y\npassword: \"first\nTAIL\nnext: k\n", [("\"first\nTAIL\nnext: k\n", 15, 35)]),
+        (_find_commands, '["sh","-c","app --password=$(printf a b) c"]', [("$(printf a b)", 27, 40)]),
         (_find_yaml, "password: &pw |\n  # x\nnext: p\n", [("&pw |\n  # x", 10, 21)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"\\u0068i"}', [("hi", 21, 28)]),
     ]
@@ -2739,6 +2800,8 @@ def _shared_selftest():
             ("flag_value_dashes_before_positional", '["app","--password","--%s","input.txt"]' % live_secret),
             ("shell_after_options", '["bash","--noprofile","-o","pipefail","-ec","app --token %s"]' % live_secret),
             ("flag_hyphens_escaped", '["\\u002d\\u002dpassword","%s"]' % live_secret),
+            ("shell_value_substitution", '["sh","-c","app --password=$(printf %s)"]' % live_secret),
+            ("yaml_quoted_key_block", '"password": |\n  %s\n' % live_secret),
             ("flag_spelled_with_escapes", '["--passw\\u006frd","%s"]' % live_secret),
             ("shell_flag_line_join", '["sh","-c","app --pass\\\\\\nword %s"]' % live_secret),
         ]
@@ -2844,6 +2907,9 @@ def _shared_selftest():
             for name, body in shape401_leaks
         ] + [
             ("cred_401_clean", 0, lambda: _guard(lambda: cp([shape401_clean]))),
+            ("cred_401_pretty_json_clean", 0, lambda: _guard(lambda: cp([_body_line(
+                '{\n  "name": "DB_PASSWORD",\n  "value": "[REDACTED:credential-field]",\n  "n": 1\n}\n'
+                '{\n  "name": "DB_PASSWORD",\n  "value": 123\n}')]))),
             # --live-secrets edge paths: a missing/unreadable file fails closed, an empty
             # file is valid (class-1 skipped) and leaves an otherwise-clean scan clean.
             ("cred_missing_secrets_file", 4, lambda: _guard(lambda: cp([clean_line], p_missing_secrets))),

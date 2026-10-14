@@ -327,13 +327,70 @@ func (w *shellWord) read(d string, i int) int {
 			}
 			i += escapeWidth
 		default:
-			w.add(d, i, 0)
-			i++
+			// A command substitution is part of the word, operators and blanks in it
+			// included.
+			for end := max(expansionEnd(d, i), i+1); i < end; i++ {
+				w.add(d, i, 0)
+			}
 		}
 	}
 	w.text = string(w.buf)
 
 	return min(i, len(d))
+}
+
+// expansionEnd returns the offset after the command substitution, $(...) with its
+// parentheses balanced or a backquoted one, that starts at d[i], the end of d when
+// it is not closed, or i when none starts there.
+func expansionEnd(d string, i int) int {
+	switch {
+	case d[i] == '`':
+		for j := i + 1; j < len(d); j++ {
+			switch d[j] {
+			case '\\':
+				j++
+			case '`':
+				return j + 1
+			}
+		}
+
+		return len(d)
+	case strings.HasPrefix(d[i:], "$("):
+		depth := 0
+		for j := i + 1; j < len(d); j++ {
+			switch d[j] {
+			case '\\':
+				j++
+			case '\'', '"':
+				j = quoteEnd(d, j)
+			case '(':
+				depth++
+			case ')':
+				if depth--; depth == 0 {
+					return j + 1
+				}
+			}
+		}
+
+		return len(d)
+	}
+
+	return i
+}
+
+// quoteEnd returns the offset of the quote that closes the one at d[j], or the end
+// of d; a double-quoted string skips its backslash escapes.
+func quoteEnd(d string, j int) int {
+	for k := j + 1; k < len(d); k++ {
+		switch {
+		case d[j] == '"' && d[k] == '\\':
+			k++
+		case d[k] == d[j]:
+			return k
+		}
+	}
+
+	return len(d)
 }
 
 // single reads a single-quoted string from d[i:], after its opening quote, and

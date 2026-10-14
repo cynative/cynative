@@ -1,6 +1,7 @@
 package redact
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -74,11 +75,13 @@ type matchers struct {
 
 func newMatchers(credName, keyEnd, flagArg string) matchers {
 	return matchers{
-		direct:         regexp.MustCompile(`^[\w.-]*(?i:` + credName + `)$`),
-		keyEnd:         regexp.MustCompile(`^(?i:` + keyEnd + `)$`),
-		flag:           regexp.MustCompile(`^(?:` + flagArg + `)$`),
-		joined:         regexp.MustCompile(`^(?:` + flagArg + `)=`),
-		yamlKey:        regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)([\w.-]+)[ \t]*:(?:[ \t]+|$)`),
+		direct: regexp.MustCompile(`^[\w.-]*(?i:` + credName + `)$`),
+		keyEnd: regexp.MustCompile(`^(?i:` + keyEnd + `)$`),
+		flag:   regexp.MustCompile(`^(?:` + flagArg + `)$`),
+		joined: regexp.MustCompile(`^(?:` + flagArg + `)=`),
+		yamlKey: regexp.MustCompile(
+			`^([ \t]*(?:-[ \t]+)*)([\w.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]+|$)`,
+		),
 		mappingLine:    regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
 		quotedKey:      regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
 		props:          regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
@@ -114,6 +117,7 @@ type yamlEntry struct {
 	end   int    // offset just past the value's last byte; equal to start when empty
 	below bool   // the value starts on a later line, so the replacement needs a space
 	multi bool   // the value runs past its key line
+	json  bool   // the key is double-quoted, as a pretty-printed JSON member's is
 }
 
 func splitLines(s string) []yamlLine {
@@ -178,8 +182,13 @@ func nameValue(s string, e yamlEntry) string {
 
 // yamlValue adds the span that replaces e's value, unless it has none or an
 // earlier rule already replaced it.
+//
+// Under a double-quoted key a value that parses as a JSON scalar, with the comma
+// that may follow it, is a pretty-printed JSON member: the JSON passes read it, and
+// replacing it here would drop its quotes and break the document.
 func (m matchers) yamlValue(s string, e yamlEntry, spans []span) []span {
-	if e.end == e.start || m.done(s[e.start:e.end]) {
+	if e.end == e.start || m.done(s[e.start:e.end]) ||
+		e.json && json.Valid([]byte(strings.TrimSuffix(s[e.first:e.end], ","))) {
 		return spans
 	}
 	if e.below {
@@ -209,7 +218,8 @@ func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 			continue
 		}
 		e := yamlEntry{
-			key:   text[g[4]:g[5]],
+			key:   unquote(text[g[4]:g[5]]),
+			json:  text[g[4]] == '"',
 			col:   g[3],
 			item:  strings.Contains(text[:g[3]], "-"),
 			colon: lines[i].start + g[5] + strings.IndexByte(text[g[5]:], ':') + 1,
@@ -261,6 +271,11 @@ func (m matchers) extent(s string, lines []yamlLine, i int, e *yamlEntry) int {
 				e.end = lines[last].end
 			}
 			e.multi = last > i
+		} else {
+			// A quote that never closes (a value cut at the content cap) holds the rest
+			// of the content, whatever its indentation.
+			last = len(lines) - 1
+			e.end, e.multi = lines[last].end, last > i
 		}
 	case !e.multi:
 		e.end = e.first + len(strings.TrimRight(stripComment(v), " \t"))
