@@ -179,9 +179,9 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			want: `["--token","` + field + `"]`,
 		},
 		{
-			name: "json name value pair redacts the first value member",
+			name: "json name value pair redacts every value member",
 			in:   `{"name":"DB_PASSWORD","value":"hunter2","type":"PLAINTEXT","Value":"public"}`,
-			want: `{"name":"DB_PASSWORD","value":"` + field + `","type":"PLAINTEXT","Value":"public"}`,
+			want: `{"name":"DB_PASSWORD","value":"` + field + `","type":"PLAINTEXT","Value":"` + field + `"}`,
 		},
 		{
 			name: "json truncated value after a backslash and newline",

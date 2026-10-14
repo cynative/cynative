@@ -28,6 +28,16 @@ func FuzzRedact(f *testing.F) {
 	f.Add("{\"password\":\"sig=x\\\nTAIL")
 	f.Add(`{"service-api-key":"a","x":1,"--token=k":2,"a":["--token=v"]}`)
 	f.Add("- value: v\n  name: DB_PASSWORD\n")
+	f.Add("- name: DB_PASSWORD # c\n  meta:\n    a: b\n  value: |\n    x\n\n    y\n- name: N\n")
+	f.Add("password: \"a\\\" \nb\"\ntoken: 'it''s\n  x'\napi_key:\n\n  v\nsecret:\n  k: v\n")
+	f.Add(`{"DB_PASSW\u004fRD":"a","value":"b","value":1,"n\u0061me":"API_KEY","x":[{"y":2e999}]}`)
+	f.Add(`{"name":"DB_PASSWORD","meta":{},"value":"hunt`)
+	f.Add(`["sh","-c","app --token 'a b' --password=\"c\\\" d\" e\\ f --api-key","--password","--x"]`)
+	f.Add(`["bash","-ec","app --token 'abc`)
+	f.Add("00000000,\"--token\",\"--pAsswd=")
+	f.Add(",\"sh\",\"-c\",\"--pAsswd= ")
+	f.Add("pAsswd: \"\"\n 00")
+	f.Add("0: \"\ntoken:\n 0ApikeY:\"")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

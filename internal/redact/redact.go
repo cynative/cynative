@@ -52,27 +52,13 @@ func (r *Redactor) Redact(s string) string {
 	return s
 }
 
-// apply runs one rule over s, skipping each match that ':' follows when the rule
-// is notKey.
+// apply runs one rule over s.
 func (ru rule) apply(s string) string {
-	if !ru.notKey {
-		return ru.re.ReplaceAllString(s, ru.repl)
+	if ru.fn != nil {
+		return ru.fn(s)
 	}
 
-	var b strings.Builder
-
-	last := 0
-	for _, m := range ru.re.FindAllStringSubmatchIndex(s, -1) {
-		if strings.HasPrefix(strings.TrimLeft(s[m[1]:], " \t\r\n"), ":") {
-			continue
-		}
-		b.WriteString(s[last:m[0]])
-		b.Write(ru.re.ExpandString(nil, ru.repl, s, m))
-		last = m[1]
-	}
-	b.WriteString(s[last:])
-
-	return b.String()
+	return ru.re.ReplaceAllString(s, ru.repl)
 }
 
 // RedactPreservingLocation redacts s like Redact but leaves redirect Location
@@ -110,10 +96,12 @@ func (r *Redactor) RedactPreservingLocation(s string) string {
 }
 
 // locationSentinel is a placeholder carrying no rule keyword or secret-shaped
-// content (NUL delimiters never occur in HTTP text), so a stashed Location URL
-// passes through Redact untouched and is restored verbatim.
+// content, so a stashed Location URL passes through Redact untouched and is
+// restored verbatim. Its delimiters are U+E000, a private-use character that is
+// valid inside a JSON string, so the structural JSON pass can still read a body
+// whose Location was stashed.
 func locationSentinel(i int) string {
-	return "\x00cynative-loc-" + strconv.Itoa(i) + "\x00"
+	return "\ue000cynative-loc-" + strconv.Itoa(i) + "\ue000"
 }
 
 // RedactHeader rewrites h in place. A denylisted header's values become
