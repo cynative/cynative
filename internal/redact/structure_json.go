@@ -96,22 +96,24 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 		}
 	}
 
-	// A shell command element is read as words by shellSpans only, so the two
-	// readings never disagree about where its values end. A shell name or "-c"
-	// that is itself a flag's value is replaced, so it starts no command: a second
-	// Redact could not see it either.
-	var out []span
-
+	// A shell command element is read as words by shellSpans, and only so, unless
+	// its shell name or "-c" is itself a flag's value. That name is replaced, so a
+	// second Redact reads the element as a plain array element; it is read both
+	// ways here, the array reading first so its wider span wins, and the second
+	// Redact finds nothing left.
 	values := m.flagValues(words)
 	taken := make(map[int]bool, len(values))
 	for _, v := range values {
 		taken[v.index] = taken[v.index] || v.offset == 0
 	}
+
+	var out, shellOut []span
+
 	shell := make(map[int]bool)
 	for i := 2; i < len(elems); i++ {
-		if m.shell.MatchString(words[i-2]) && m.shellFlag.MatchString(words[i-1]) && !taken[i-2] && !taken[i-1] {
-			shell[i] = true
-			out = append(out, m.shellSpans(s, elems[i])...)
+		if m.shell.MatchString(words[i-2]) && m.shellFlag.MatchString(words[i-1]) {
+			shell[i] = !taken[i-2] && !taken[i-1]
+			shellOut = append(shellOut, m.shellSpans(s, elems[i])...)
 		}
 	}
 	for _, v := range values {
@@ -127,7 +129,7 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 		}
 	}
 
-	return out
+	return append(out, shellOut...)
 }
 
 // shellSpans finds the credential values among the words of a shell command

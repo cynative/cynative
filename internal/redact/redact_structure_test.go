@@ -187,6 +187,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "password: " + field + "\n- name:\n    DB_PASSWORD\n  value: " + field + "\n",
 		},
 		{
+			name: "yaml quoted value with properties on the next line",
+			in:   "password:\n  &pw \"synthetic: secret\"\n- name: DB_PASSWORD\n  value:\n    !!str 'first\ntail: x'\ntoken:\n  &a\n  plain\n",
+			want: "password: " + field + "\n- name: DB_PASSWORD\n  value: " + field + "\ntoken: " + field + "\n",
+		},
+		{
 			name: "json escaped key",
 			in:   `{"DB_PASSW\u004fRD":"hunter2","public":"x"}`,
 			want: `{"DB_PASSW\u004fRD":"` + field + `","public":"x"}`,
@@ -353,9 +358,10 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `["sh","-c","app --token ` + field + `"]`,
 		},
 		{
-			name: "shell name taken as a flag value starts no command",
-			in:   `["--pAsswd","sh","-c","--token= "]`,
-			want: `["--pAsswd","` + field + `","-c","--token=` + field + `"]`,
+			name: "shell command whose shell name is a flag value",
+			in:   `["--pAsswd","sh","-c","--token= "],["--password","sh","-c","app --token secret"]`,
+			want: `["--pAsswd","` + field + `","-c","--token=` + field + `"],` +
+				`["--password","` + field + `","-c","app --token ` + field + `"]`,
 		},
 		{
 			name: "flag value starting with two dashes",

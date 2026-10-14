@@ -1160,7 +1160,8 @@ def _scalar_below(s, lines, i, col):
         if _blank_or_comment(text):
             continue
         t = text.lstrip(" \t")
-        key = _YAML_QUOTED_KEY.match(t) if t[0] in "\"'" else _YAML_MAPPING_LINE.search(_strip_comment(t))
+        k = t[len(_YAML_PROPS.match(t).group(0)):]
+        key = k and (_YAML_QUOTED_KEY.match(k) if k[0] in "\"'" else _YAML_MAPPING_LINE.search(_strip_comment(k)))
         if _indent(text) <= col or t == "-" or t.startswith("- ") or t[0] in "[{" or key:
             return -1
         return j
@@ -1210,6 +1211,9 @@ def _yaml_extent(s, lines, i, e):
             return i
         e["below"] = True
         e["first"] = lines[line][0] + _indent(s[lines[line][0]:lines[line][1]])
+        p = len(_YAML_PROPS.match(s, e["first"], lines[line][1]).group(0))
+        if e["first"] + p < lines[line][1]:
+            e["first"] += p
     elif v[0] in "[{" and not v.startswith("[REDACTED:"):
         return i
     v = s[e["first"]:lines[line][1]]
@@ -1448,9 +1452,9 @@ def _find_commands(s):
         taken = {i for i, off in values if off == 0}
         shell = set()
         for i in range(2, len(elems)):
-            if (_SHELL.match(words[i - 2]) and _SHELL_FLAG.match(words[i - 1])
-                    and i - 2 not in taken and i - 1 not in taken):
-                shell.add(i)
+            if _SHELL.match(words[i - 2]) and _SHELL_FLAG.match(words[i - 1]):
+                if i - 2 not in taken and i - 1 not in taken:
+                    shell.add(i)
                 out.extend(_shell_found(s, elems[i]))
         for i, off in values:
             if i not in shell:
@@ -2020,6 +2024,8 @@ def _structural_spans():
         (_find_commands, '["--passw\\u006frd","x"]', [("x", 20, 21)]),
         (_find_commands, '["--passw\\u006frd=b\\u0020c"]', [("b c", 18, 26)]),
         (_find_commands, '["\\u0073h","-c","app --token y"]', [("y", 29, 30)]),
+        (_find_commands, '["--password","sh","-c","app --token y"]', [("y", 37, 38), ("sh", 15, 17)]),
+        (_find_yaml, "password:\n  &pw \"a\nb\"\nn: p\n", [("\n  &pw \"a\nb\"", 9, 21)]),
         (_find_yaml, "password: &pw |\n  # x\nnext: p\n", [("&pw |\n  # x", 10, 21)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"\\u0068i"}', [("hi", 21, 28)]),
     ]
@@ -2715,6 +2721,7 @@ def _shared_selftest():
             ("flag_value_cut_after_placeholder",
              '["--password","[REDACTED:credential-field]\\q%s"]' % live_secret),
             ("shell_value_cut_after_placeholder", '["sh","-c","app --token [REDACTED:jwt]\\q%s"]' % live_secret),
+            ("yaml_quoted_value_after_props_below", "password:\n  &pw \"a: %s\"\n" % live_secret),
             ("flag_spelled_with_escapes", '["--passw\\u006frd","%s"]' % live_secret),
             ("shell_flag_line_join", '["sh","-c","app --pass\\\\\\nword %s"]' % live_secret),
         ]

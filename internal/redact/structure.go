@@ -236,6 +236,9 @@ func (m matchers) extent(s string, lines []yamlLine, i int, e *yamlEntry) int {
 		}
 		e.below = true
 		e.first = lines[line].start + indentOf(s[lines[line].start:lines[line].end])
+		if p := len(m.props.FindString(s[e.first:lines[line].end])); e.first+p < lines[line].end {
+			e.first += p
+		}
 	} else if (v[0] == '[' || v[0] == '{') && !strings.HasPrefix(v, "[REDACTED:") {
 		return i
 	}
@@ -310,10 +313,14 @@ func (m matchers) scalarBelow(s string, lines []yamlLine, i, col int) int {
 }
 
 // mappingKey reports whether line t, without its indentation, holds a mapping
-// key. A quoted line is a key only when ':' follows its closing quote, since the
-// quotes can hold ": " themselves; any other line is one when it holds ": " or ends
-// in ':', which a plain scalar line cannot.
+// key. Anchor and tag properties come off first. A quoted line is a key only
+// when ':' follows its closing quote, since the quotes can hold ": " themselves;
+// any other line is one when it holds ": " or ends in ':', which a plain scalar
+// line cannot.
 func (m matchers) mappingKey(t string) bool {
+	if t = t[len(m.props.FindString(t)):]; t == "" {
+		return false
+	}
 	if t[0] == '"' || t[0] == '\'' {
 		return m.quotedKey.MatchString(t)
 	}
