@@ -1462,8 +1462,10 @@ def _find_commands(s):
         taken = {i for i, off in values if off == 0}
         shell = set()
         for i in range(len(elems)):
+            if not _SHELL.match(words[i]):
+                continue
             c = _shell_command(words, i)
-            if _SHELL.match(words[i]) and i < c < len(elems):
+            if i < c < len(elems):
                 if not any(k in taken for k in range(i, c)):
                     shell.add(c)
                 out.extend(_shell_found(s, elems[c]))

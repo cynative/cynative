@@ -125,7 +125,11 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 
 	shell := make(map[int]bool)
 	for i := range elems {
-		if c := m.shellCommand(words, i); m.shell.MatchString(words[i]) && c > i && c < len(elems) {
+		if !m.shell.MatchString(words[i]) {
+			continue
+		}
+		// Only a shell name starts the scan, so each run of options is read once.
+		if c := m.shellCommand(words, i); c > i && c < len(elems) {
 			shell[c] = !slices.Contains(takenIn(taken, i, c), true)
 			shellOut = append(shellOut, m.shellSpans(s, elems[c])...)
 		}
