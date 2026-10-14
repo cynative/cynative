@@ -41,9 +41,27 @@ const googleapisSuffix = ".googleapis.com"
 // in the bucket-subdomain host dispatch (e.g. bucket.storage.googleapis.com).
 const storageService = "storage"
 
-// storageJSONHost is the dedicated host of Cloud Storage's JSON API. Unlike a
-// bucket host it routes /storage/v1 paths as sent.
-const storageJSONHost = "storage.googleapis.com"
+// isStorageJSONHost reports whether host, already normalized, is one of Cloud
+// Storage's own JSON API endpoints: storage.googleapis.com,
+// storage.mtls.googleapis.com or a regional storage.<location>.rep.googleapis.com.
+// Each was probed to route /storage/v1 paths as sent. A bucket host
+// (<bucket>.storage.googleapis.com) serves the XML API instead, and the legacy
+// <location>-storage form was never probed, so neither is listed.
+func isStorageJSONHost(host string) bool {
+	body := strings.TrimSuffix(host, googleapisSuffix)
+	if body == storageService || body == storageService+".mtls" {
+		return true
+	}
+
+	loc, ok := strings.CutPrefix(body, storageService+".")
+	if !ok {
+		return false
+	}
+
+	loc, ok = strings.CutSuffix(loc, ".rep")
+
+	return ok && loc != "" && !strings.Contains(loc, ".")
+}
 
 // ParseHost normalizes and structurally classifies host, returning a candidate
 // ParsedHost or ErrHostPattern. Pure: no I/O, no ctx.

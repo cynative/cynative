@@ -248,3 +248,28 @@ func TestDispatchHostUnreachableBranches(t *testing.T) {
 		t.Errorf("dispatchHost(multi-dot non-matching): want ErrHostPattern, got %v", err)
 	}
 }
+
+func TestIsStorageJSONHost(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]bool{
+		"storage.googleapis.com":                 true,
+		"storage.mtls.googleapis.com":            true,
+		"storage.us-central1.rep.googleapis.com": true,
+		"bk.storage.googleapis.com":              false, // a bucket host serves the XML API.
+		"a.b.storage.googleapis.com":             false,
+		"us-central1-storage.googleapis.com":     false, // legacy locational form, never probed.
+		"storage.a.b.rep.googleapis.com":         false,
+		"storage..rep.googleapis.com":            false,
+		"us-central1.rep.googleapis.com":         false,
+		"storage.us-central1.googleapis.com":     false,
+		"compute.googleapis.com":                 false,
+		"www.googleapis.com":                     false,
+	}
+
+	for host, want := range cases {
+		if got := isStorageJSONHost(host); got != want {
+			t.Errorf("isStorageJSONHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}

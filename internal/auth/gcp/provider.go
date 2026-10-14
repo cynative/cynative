@@ -80,11 +80,11 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 	classifyFn := Classify
 	// ParseHost accepted v.Hostname, which NewView lower-cased, so trimming the one trailing dot is all
 	// normalizeHost would still change about it.
-	if service == storageService && (isWWW || strings.TrimSuffix(v.Hostname, ".") == storageJSONHost) {
-		// Storage's JSON API routes the path as sent: GET .../o/x%2Facl reads the object x/acl on
-		// storage.googleapis.com and www.googleapis.com, so the decoded reading names an operation it never runs.
-		// A bucket host (<bucket>.storage.googleapis.com) serves the XML API, which reads the whole path as an
-		// object key, so it keeps pooling both readings.
+	if service == storageService && (isWWW || isStorageJSONHost(strings.TrimSuffix(v.Hostname, "."))) {
+		// Storage's JSON API routes the path as sent: GET .../o/x%2Facl reads the object x/acl on its own
+		// endpoints and on www.googleapis.com, so the decoded reading names an operation it never runs. A bucket
+		// host (<bucket>.storage.googleapis.com) serves the XML API, which reads the whole path as an object key,
+		// so it keeps pooling both readings.
 		classifyFn = ClassifyAsSent
 	}
 
