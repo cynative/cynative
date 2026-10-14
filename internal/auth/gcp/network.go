@@ -43,14 +43,18 @@ const storageService = "storage"
 
 // isStorageJSONHost reports whether host, already normalized, is one of Cloud
 // Storage's own JSON API endpoints: storage.googleapis.com,
-// storage.mtls.googleapis.com or a regional storage.<location>.rep.googleapis.com.
-// Each was probed to route /storage/v1 paths as sent. A bucket host
-// (<bucket>.storage.googleapis.com) serves the XML API instead, and the legacy
-// <location>-storage form was never probed, so neither is listed.
+// storage.mtls.googleapis.com, a regional storage.<location>.rep.googleapis.com
+// or a locational <location>-storage.googleapis.com. Each was probed to route
+// /storage/v1 paths as sent. A bucket host (<bucket>.storage.googleapis.com)
+// serves the XML API instead, so it is not listed.
 func isStorageJSONHost(host string) bool {
 	body := strings.TrimSuffix(host, googleapisSuffix)
 	if body == storageService || body == storageService+".mtls" {
 		return true
+	}
+
+	if loc, ok := strings.CutSuffix(body, "-"+storageService); ok {
+		return isLocationLabel(loc)
 	}
 
 	loc, ok := strings.CutPrefix(body, storageService+".")
@@ -60,7 +64,12 @@ func isStorageJSONHost(host string) bool {
 
 	loc, ok = strings.CutSuffix(loc, ".rep")
 
-	return ok && loc != "" && !strings.Contains(loc, ".")
+	return ok && isLocationLabel(loc)
+}
+
+// isLocationLabel reports whether loc is a single non-empty DNS label.
+func isLocationLabel(loc string) bool {
+	return loc != "" && !strings.Contains(loc, ".")
 }
 
 // ParseHost normalizes and structurally classifies host, returning a candidate

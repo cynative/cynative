@@ -898,6 +898,7 @@ func TestProviderAuthorizeAction_StorageReadsThePathAsSent(t *testing.T) {
 		"https://www.googleapis.com./storage/v1/b/bk/o/x%2Facl",
 		"https://storage.mtls.googleapis.com/storage/v1/b/bk/o/x%2Facl",
 		"https://storage.us-central1.rep.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+		"https://us-central1-storage.googleapis.com/storage/v1/b/bk/o/x%2Facl",
 	} {
 		if err := p.AuthorizeAction(t.Context(), providerView(t, "GET", raw), gcpArgs(t, "storage")); err != nil {
 			t.Errorf("AuthorizeAction(%s) = %v, want allowed", raw, err)

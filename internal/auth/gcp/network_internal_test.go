@@ -258,7 +258,9 @@ func TestIsStorageJSONHost(t *testing.T) {
 		"storage.us-central1.rep.googleapis.com": true,
 		"bk.storage.googleapis.com":              false, // a bucket host serves the XML API.
 		"a.b.storage.googleapis.com":             false,
-		"us-central1-storage.googleapis.com":     false, // legacy locational form, never probed.
+		"us-central1-storage.googleapis.com":     true,
+		"-storage.googleapis.com":                false,
+		"a.us-central1-storage.googleapis.com":   false,
 		"storage.a.b.rep.googleapis.com":         false,
 		"storage..rep.googleapis.com":            false,
 		"us-central1.rep.googleapis.com":         false,
