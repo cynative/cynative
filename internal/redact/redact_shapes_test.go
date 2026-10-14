@@ -169,9 +169,14 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			want: `{"x":1,"--token=a":2,"--token=b" : 3,"args":["--token=` + field + `","--token=` + field + `"]}`,
 		},
 		{
-			name: "boolean flag before a credential flag",
+			name: "credential flag taken as a flag value is still read as a flag",
 			in:   `["--generate-secret","--password","x"]`,
-			want: `["--generate-secret","--password","` + field + `"]`,
+			want: `["--generate-secret","` + field + `","` + field + `"]`,
+		},
+		{
+			name: "negated flag takes no value",
+			in:   `["--no-generate-secret","--password","x"]`,
+			want: `["--no-generate-secret","--password","` + field + `"]`,
 		},
 		{
 			name: "separate flag value with a single leading dash",
@@ -179,9 +184,9 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			want: `["--token","` + field + `"]`,
 		},
 		{
-			name: "json name value pair redacts the first value member",
+			name: "json name value pair redacts every value member",
 			in:   `{"name":"DB_PASSWORD","value":"hunter2","type":"PLAINTEXT","Value":"public"}`,
-			want: `{"name":"DB_PASSWORD","value":"` + field + `","type":"PLAINTEXT","Value":"public"}`,
+			want: `{"name":"DB_PASSWORD","value":"` + field + `","type":"PLAINTEXT","Value":"` + field + `"}`,
 		},
 		{
 			name: "json truncated value after a backslash and newline",

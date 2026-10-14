@@ -8,16 +8,13 @@ func placeholder(label string) string { return "[REDACTED:" + label + "]" }
 // rule is one redaction pattern: run re only when one of keywords is present
 // (a cheap pre-gate over multi-MiB bodies), then ReplaceAllString with repl.
 // For whole-match rules repl is the literal placeholder; for capture rules repl
-// is a template using ${1}/${2} so the surrounding key/param is preserved.
+// is a template using ${1}/${2} so the surrounding key/param is preserved. A
+// structural rule sets fn instead of re and rewrites the content itself.
 type rule struct {
 	keywords []string
 	re       *regexp.Regexp
 	repl     string
-	// notKey skips a match that ':' follows, after any whitespace: the match was an
-	// object key, not the array element the rule is for. RE2 has no lookahead, and
-	// consuming the delimiter after the element would hide the next element's
-	// leading ',' from the next match.
-	notKey bool
+	fn       func(string) string
 }
 
 // contentRules returns the body/value redaction rules in application order.
@@ -101,7 +98,9 @@ func contentRules() []rule {
 // credentialRules returns value-substitution rules: a credential-named JSON/XML
 // field, a name/value pair whose name is a credential, a credential flag in a
 // command array, or a signing query param keeps its key/param and gets its
-// value replaced, so the surrounding document stays well-formed.
+// value replaced. The structural passes that follow the regexes read the content
+// the regexes left, so a second Redact reads the same structure; FuzzRedact checks
+// that it changes nothing.
 func credentialRules() []rule {
 	// Every multi-word name takes an optional '_' or '-' between words, so snake_case
 	// (secret_access_key), kebab-case (api-key), Pascal/camelCase (SecretAccessKey,
@@ -132,13 +131,16 @@ func credentialRules() []rule {
 		jsonValue  = `(?:(?s:\\.)|[^"\\])*`
 		jsonEnd    = `(?:(")|\\?\z)`
 		jsonFields = `(?:\s*,\s*"` + jsonValue + `"\s*:\s*(?:"` + jsonValue + `"|[\w.+-]+))*?`
-		// jsonElement opens an array element: the '[' or ',' before it rules out a
-		// member value, which follows ':'. Only the leading delimiter is consumed, so
-		// the next element's ',' is still there for the next match.
-		jsonElement = `[\[,]\s*"`
 	)
 
+	m := newMatchers(credName, keyEnd, flagArg)
+
 	return []rule{
+		// YAML name/value pairs ("- name: DB_PASSWORD" with a "value:" sibling, in either
+		// order, with comments or other fields between) and values that run over several
+		// lines under a credential-named key (block scalars, continued quoted or plain
+		// scalars). Indentation decides both, which RE2 cannot compare.
+		{keywords: []string{":"}, fn: m.yaml},
 		{ // JSON: "key":"value", closed or truncated to end-of-content. One rule for
 			// both, since the prefixed key makes each pass over a large body costly.
 			re:   regexp.MustCompile(`("(?i:` + keyEnd + `)"\s*:\s*")` + jsonValue + jsonEnd),
@@ -159,42 +161,6 @@ func credentialRules() []rule {
 			),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
 		},
-		{ // YAML name/value pair: "- name: DB_PASSWORD" with "value: ..." on the next
-			// line, as kubectl prints pod env. Same '[' exclusion as the YAML rule below,
-			// and the same residual: a value continued on later lines (a multi-line
-			// quoted or block scalar) keeps its continuation. RE2 cannot compare the two
-			// lines' indentation, so a "value:" line that belongs to another mapping is
-			// redacted too.
-			re: regexp.MustCompile(
-				`(?m)^([ \t]*-[ \t]+(?i:name):[ \t]*["']?(?i:` + keyEnd + `)["']?[ \t]*\r?\n[ \t]*(?i:value):[ \t]*)([^\s\[][^\r\n]*)`,
-			),
-			repl: `${1}` + placeholder("credential-field"),
-		},
-		{ // YAML value/name pair: the same pair with "value:" first.
-			re: regexp.MustCompile(
-				`(?m)^([ \t]*-[ \t]+(?i:value):[ \t]*)[^\s\[][^\r\n]*?` +
-					`([ \t]*\r?\n[ \t]*(?i:name):[ \t]*["']?(?i:` + keyEnd + `)["']?[ \t]*\r?)$`,
-			),
-			repl: `${1}` + placeholder("credential-field") + `${2}`,
-		},
-		{ // Command-line flag with its value in the same array element: "--password=...".
-			// A ',' also opens an object key, so a key spelled like a joined flag
-			// ({"x":1,"--token=a":"b"}) is skipped by notKey.
-			re:     regexp.MustCompile(`(` + jsonElement + flagArg + `=)` + jsonValue + jsonEnd),
-			repl:   `${1}` + placeholder("credential-field") + `${2}`,
-			notKey: true,
-		},
-		{ // Command-line flag with its value in the next array element:
-			// ["--token","..."]. A next element that starts with "--" is read as another
-			// flag, not a value: taking it would hide a credential flag behind a boolean
-			// one (["--generate-secret","--password","x"]) and leave its value in place,
-			// at the cost of leaving a value that itself starts with "--". Not covered: a
-			// flag inside one shell string ("sh","-c","app --token x").
-			re: regexp.MustCompile(
-				`(` + jsonElement + flagArg + `"\s*,\s*")(?:[^-"\\]|(?s:\\.)|-(?:[^-"\\]|(?s:\\.)))` + jsonValue + jsonEnd,
-			),
-			repl: `${1}` + placeholder("credential-field") + `${2}`,
-		},
 		{ // XML: <key>value</key>.
 			re:   regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*(</[A-Za-z0-9_:.-]+>)`),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
@@ -204,9 +170,9 @@ func credentialRules() []rule {
 			// anchored so a prose "token:" mid-line is not matched. The value's first
 			// char excludes '[' so an already-redacted "[REDACTED:…]" (a token-shape
 			// rule fired first) keeps its precise label and inline lists are skipped.
-			// Covers kubeconfig / k8s-manifest piped input. NOT covered (RE2 cannot do
-			// indentation-relative matching): YAML block scalars ("token: |" + indented
-			// value) — documented residual; nor a high-entropy value under a key whose
+			// Covers kubeconfig / k8s-manifest piped input. This rule replaces the key
+			// line only; the YAML pass above and below removes the lines a multi-line
+			// value continues on. NOT covered: a high-entropy value under a key whose
 			// name is not a credential word (the deliberate no-entropy boundary).
 			re: regexp.MustCompile(
 				`(?m)^([ \t]*(?:-[ \t]+)?[\w.-]*(?i:` + credName + `)[ \t]*:[ \t]*)([^\s\[][^\r\n]*)`,
@@ -235,6 +201,16 @@ func credentialRules() []rule {
 			re:   regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*<?\z`),
 			repl: `${1}` + placeholder("credential-field"),
 		},
+		// The structural passes below read what the regexes left, so a second Redact
+		// finds the same structure this one leaves: a regex that drops a quote or a
+		// ',"' can change where a quoted value ends or where an array run starts.
+		// A credential flag in a command array, joined ("--password=v") or with its
+		// value in the next element, and one in the command string of ["sh","-c",...].
+		// A flag's hyphens may be spelled as JSON escapes.
+		{keywords: []string{"--", `\u002d`, `\u002D`}, fn: m.commands},
+		// The YAML pass again.
+		{keywords: []string{":"}, fn: m.yaml},
+		{fn: m.objects},
 	}
 }
 

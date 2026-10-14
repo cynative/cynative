@@ -207,7 +207,7 @@ import sys
 from urllib.parse import quote_plus, unquote_plus
 
 sys.path.insert(0, sys.argv[4])
-from connector_audit.engine import _CONTENT_RULES, _POSITIONAL_RULES, _read_live_secrets
+from connector_audit.engine import _CONTENT_RULES, _POSITIONAL_RULES, _read_live_secrets, _redacted
 
 src, dst, secrets_path = sys.argv[1], sys.argv[2], (sys.argv[3] or None)
 secrets = [s for s in _read_live_secrets(secrets_path) if s] if secrets_path else []
@@ -239,7 +239,7 @@ def redact_decoded_matches(t, decoded):
     for rx, label in _POSITIONAL_RULES:
         for m in rx.finditer(decoded):
             val = m.group(1)
-            if not val or val.startswith("[REDACTED"):
+            if not val or _redacted(val, rx):
                 continue
             t = t.replace(val, "[REDACTED:%s]" % label)
             enc = quote_plus(val)
@@ -251,8 +251,8 @@ def redact_decoded_matches(t, decoded):
 def has_secret(t):
     """True when a class-1 live secret, a class-2 shape, or a class-3 positional
     credential value appears in `t` - the same detection the credential prepass runs,
-    over the same imported rules. A "[REDACTED..." value carries none of these shapes
-    and the class-3 loop skips it, so an already-redacted line reads clean."""
+    over the same imported rules. A placeholder carries none of these shapes and the
+    class-3 loop skips a value that is exactly one, so an already-redacted line reads clean."""
     for secret in secrets:
         if secret and secret in t:
             return True
@@ -262,7 +262,7 @@ def has_secret(t):
     for rx, _label in _POSITIONAL_RULES:
         for m in rx.finditer(t):
             val = m.group(1)
-            if val and not val.startswith("[REDACTED"):
+            if val and not _redacted(val, rx):
                 return True
     return False
 
@@ -281,7 +281,7 @@ def redact_literal(t):
     for rx, label in _POSITIONAL_RULES:
         def repl(m, _label=label):
             val = m.group(1)
-            if not val or val.startswith("[REDACTED"):
+            if not val or _redacted(val, rx):
                 return m.group(0)
             whole = m.group(0)
             s, e = m.start(1) - m.start(0), m.end(1) - m.start(0)

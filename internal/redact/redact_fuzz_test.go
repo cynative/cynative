@@ -28,6 +28,30 @@ func FuzzRedact(f *testing.F) {
 	f.Add("{\"password\":\"sig=x\\\nTAIL")
 	f.Add(`{"service-api-key":"a","x":1,"--token=k":2,"a":["--token=v"]}`)
 	f.Add("- value: v\n  name: DB_PASSWORD\n")
+	f.Add("- name: DB_PASSWORD # c\n  meta:\n    a: b\n  value: |\n    x\n\n    y\n- name: N\n")
+	f.Add("password: \"a\\\" \nb\"\ntoken: 'it''s\n  x'\napi_key:\n\n  v\nsecret:\n  k: v\n")
+	f.Add(`{"DB_PASSW\u004fRD":"a","value":"b","value":1,"n\u0061me":"API_KEY","x":[{"y":2e999}]}`)
+	f.Add(`{"name":"DB_PASSWORD","meta":{},"value":"hunt`)
+	f.Add(`["sh","-c","app --token 'a b' --password=\"c\\\" d\" e\\ f --api-key","--password","--x"]`)
+	f.Add(`["bash","-ec","app --token 'abc`)
+	f.Add("00000000,\"--token\",\"--pAsswd=")
+	f.Add(",\"sh\",\"-c\",\"--pAsswd= ")
+	f.Add("pAsswd: \"\"\n 00")
+	f.Add("0: \"\ntoken:\n 0ApikeY:\"")
+	f.Add("pAsswd=,\"\r,\"--pAsswd=")
+	f.Add("\"password\": |\n  a\n- 'name': API_KEY\n  'value': \"b\nc")
+	f.Add(`["sh","-c","a --token $(e \") (\" ` + "`x`" + `) b --password ` + "`y")
+	f.Add(`["bash","--noprofile","-o","pipefail","+O","x","-ec","app --password --p in"],` +
+		`["\u002d\u002dtoken","--no-x","--no-token","v"]`)
+	f.Add(",\"--pAsswd\",\"sh\",\"-c\",\"--token= ")
+	f.Add("password:\n  \"a: b\"\nx:\n  'c: d'\n")
+	f.Add(`["--password","[REDACTED:jwt]\q","sh","-c","app --token [REDACTED:jwt]\qs"]`)
+	f.Add(",\"sh\",\"-c\",\"--pAsswd\\\"=\\\" ")
+	f.Add(
+		"data:\n  c: |\n    - name: DB_PASSWORD\n        # c\n      value: x\npassword:\n# c\n  \"a\nb\"\nsecret:\n  \"k\": v\ntoken: [\n  a\n]\n",
+	)
+	f.Add(`["sh","-c","a \"--pass\"word x; b --pass\\word=\"y z\" # --token q\r\n--token \u00`)
+	f.Add("{\"public\":\"cynative-loc-0\",\"Location\":[\"https://e.test/x?sig=abc\"]}")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {
