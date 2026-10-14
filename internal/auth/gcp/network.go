@@ -41,6 +41,10 @@ const googleapisSuffix = ".googleapis.com"
 // in the bucket-subdomain host dispatch (e.g. bucket.storage.googleapis.com).
 const storageService = "storage"
 
+// storageJSONHost is the dedicated host of Cloud Storage's JSON API. Unlike a
+// bucket host it routes /storage/v1 paths as sent.
+const storageJSONHost = "storage.googleapis.com"
+
 // ParseHost normalizes and structurally classifies host, returning a candidate
 // ParsedHost or ErrHostPattern. Pure: no I/O, no ctx.
 func ParseHost(host string) (ParsedHost, error) {

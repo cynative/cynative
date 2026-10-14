@@ -666,3 +666,49 @@ func TestClassify_LiteralRankingStillDenies(t *testing.T) {
 		})
 	}
 }
+
+// objectACLIndex pairs the object read with the object ACL list, whose template
+// is the read's plus a trailing acl segment.
+func objectACLIndex() MethodIndex {
+	idx := objectIndex()
+	idx["storage.objectAccessControls.list"] = MethodDescriptor{
+		ID:          "storage.objectAccessControls.list",
+		HTTPMethod:  "GET",
+		ServicePath: "storage/v1/",
+		Path:        "b/{bucket}/o/{object}/acl",
+	}
+
+	return idx
+}
+
+// TestClassifyAsSent_ObjectNamedLikeASubResource: the object x/acl travels as
+// x%2Facl. The wire reading names the object read and the decoded reading the
+// ACL list, so Classify denies it as ambiguous while ClassifyAsSent, which reads
+// the path as Storage routes it, resolves the read. A literal /acl still names
+// the ACL list.
+func TestClassifyAsSent_ObjectNamedLikeASubResource(t *testing.T) {
+	t.Parallel()
+
+	encoded := classifyView(t, http.MethodGet, "https://storage.googleapis.com/storage/v1/b/bk/o/x%2Facl")
+
+	if _, err := Classify(objectACLIndex(), encoded); err == nil ||
+		!strings.Contains(err.Error(), "2 methods match") {
+		t.Fatalf("Classify err = %v, want it to report 2 methods match", err)
+	}
+
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"https://storage.googleapis.com/storage/v1/b/bk/o/x%2Facl", "storage.objects.get"},
+		{"https://storage.googleapis.com/storage/v1/b/bk/o/x/acl", "storage.objectAccessControls.list"},
+		{"https://storage.googleapis.com/storage/v1/b/bk/o/x%2Facl/", "storage.objects.get"},
+	}
+
+	for _, c := range cases {
+		id, err := ClassifyAsSent(objectACLIndex(), classifyView(t, http.MethodGet, c.raw))
+		if err != nil || id != c.want {
+			t.Errorf("ClassifyAsSent(%s) = %q, %v; want %q", c.raw, id, err, c.want)
+		}
+	}
+}

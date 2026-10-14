@@ -41,8 +41,21 @@ import (
 // reads as "/", which is what net/http writes as the request target for one.
 func (v View) PathReadings() [][]string {
 	readings := appendReading(nil, pathSegments(v.EscapedPath))
-	readings = appendReading(readings, pathSegments(v.Path))
 
+	return withTrailingDrops(appendReading(readings, pathSegments(v.Path)))
+}
+
+// WireReadings returns the wire reading of [View.PathReadings] alone, with its
+// trailing-slash-dropped form when it has one. It is for a gate whose server is
+// known to route the path as sent, where the decoded reading names an operation
+// that server never runs.
+func (v View) WireReadings() [][]string {
+	return withTrailingDrops(appendReading(nil, pathSegments(v.EscapedPath)))
+}
+
+// withTrailingDrops appends the trailing-slash-dropped form of each reading in
+// readings, as described on [View.PathReadings].
+func withTrailingDrops(readings [][]string) [][]string {
 	// Offer the trailing-slash-dropped form of each reading gathered so far.
 	// original pins the count before this loop can grow it, so a reading this
 	// loop appends is never itself trimmed again.

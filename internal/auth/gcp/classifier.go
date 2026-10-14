@@ -19,6 +19,19 @@ import (
 // template wins when every match spells its literals exactly (see
 // appendSurvivors). Deterministic. Pure.
 func Classify(idx MethodIndex, v authreq.View) (string, error) {
+	return classify(idx, v, v.PathReadings())
+}
+
+// ClassifyAsSent is [Classify] over the wire reading alone, for a service whose
+// server routes the path exactly as sent. Cloud Storage's JSON API is one: GET
+// .../o/x%2Facl reads the object named x/acl, while the decoded reading names
+// the object ACL list, and pooling both readings would deny the object read as
+// ambiguous.
+func ClassifyAsSent(idx MethodIndex, v authreq.View) (string, error) {
+	return classify(idx, v, v.WireReadings())
+}
+
+func classify(idx MethodIndex, v authreq.View, readings [][]string) (string, error) {
 	method := strings.ToUpper(v.Method)
 
 	keys := slices.Sorted(maps.Keys(idx)) // deterministic iteration.
@@ -27,7 +40,7 @@ func Classify(idx MethodIndex, v authreq.View) (string, error) {
 
 	var survivors []string
 
-	for _, segs := range v.PathReadings() {
+	for _, segs := range readings {
 		survivors = appendSurvivors(survivors, seen, idx, keys, method, trimEmptyEdges(segs))
 	}
 
