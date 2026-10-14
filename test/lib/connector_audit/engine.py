@@ -1046,6 +1046,7 @@ _FLAG_FULL = re.compile(r"(?:" + _FLAG_ARG + r")\Z", re.I | re.A)
 _FLAG_JOINED = re.compile(r"(?:" + _FLAG_ARG + r")=", re.I | re.A)
 _YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+)[ \t]*:(?:[ \t]+|\Z)")
 _YAML_MAPPING_LINE = re.compile(r":(?:[ \t]|[ \t]*\Z)")
+_YAML_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|\Z)")
 _YAML_PROPS = re.compile(r"(?:[&!][^ \t]*(?:[ \t]+|\Z))*")
 _HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 _YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
@@ -1159,8 +1160,8 @@ def _scalar_below(s, lines, i, col):
         if _blank_or_comment(text):
             continue
         t = text.lstrip(" \t")
-        if (_indent(text) <= col or t == "-" or t.startswith("- ") or t[0] in "[{"
-                or _YAML_MAPPING_LINE.search(_strip_comment(t))):
+        key = _YAML_QUOTED_KEY.match(t) if t[0] in "\"'" else _YAML_MAPPING_LINE.search(_strip_comment(t))
+        if _indent(text) <= col or t == "-" or t.startswith("- ") or t[0] in "[{" or key:
             return -1
         return j
     return -1
@@ -1411,14 +1412,20 @@ def _array_run(s, q):
 
 
 def _shell_found(s, e):
-    start, end = e[0], e[1]
+    start, end, stop, closed = e
     cmd, raw = _decode_json_string(s[start:end])
+    partial = raw[-1] < end - start
     words = _shell_words(cmd)
     out = []
     for i, off in _flag_values([w[2] for w in words]):
         w_start, w_end, text, at = words[i]
         dec_start = at[off - 1] + 1 if off > 0 else w_start
-        out.append(_Found(text[off:], start + raw[dec_start], start + raw[w_end]))
+        if partial and w_end == len(cmd):
+            # A word that runs into a bad escape takes the bytes after it, so its
+            # value is the raw text, which no placeholder check can mistake.
+            out.append(_Found(s[start + raw[dec_start]:stop - closed], start + raw[dec_start], stop - closed))
+        else:
+            out.append(_Found(text[off:], start + raw[dec_start], start + raw[w_end]))
     return out
 
 
@@ -1437,16 +1444,23 @@ def _find_commands(s):
             word, offsets = _decode_json_string(raw) if "\\" in raw else (raw, None)
             words.append(word)
             raws.append(offsets)
+        values = _flag_values(words)
+        taken = {i for i, off in values if off == 0}
         shell = set()
         for i in range(2, len(elems)):
-            if _SHELL.match(words[i - 2]) and _SHELL_FLAG.match(words[i - 1]):
+            if (_SHELL.match(words[i - 2]) and _SHELL_FLAG.match(words[i - 1])
+                    and i - 2 not in taken and i - 1 not in taken):
                 shell.add(i)
                 out.extend(_shell_found(s, elems[i]))
-        for i, off in _flag_values(words):
+        for i, off in values:
             if i not in shell:
-                start, _end, stop, closed = elems[i]
+                start, end_, stop, closed = elems[i]
                 raw_off = raws[i][off] if raws[i] is not None else off
-                out.append(_Found(words[i][off:], start + raw_off, stop - closed))
+                # A value decoded only up to a bad escape is reported raw, so a
+                # placeholder prefix does not pass for the whole value.
+                cut = raws[i] is not None and raws[i][-1] < end_ - start
+                value = s[start + raw_off:stop - closed] if cut else words[i][off:]
+                out.append(_Found(value, start + raw_off, stop - closed))
         pos = max(end, m.end())
 
 
@@ -2697,6 +2711,10 @@ def _shared_selftest():
             ("shell_flag_spelled_with_quotes", '["sh","-c","app \\"--pass\\"word %s"]' % live_secret),
             ("yaml_block_after_anchor", "password: &pw |\n  # %s\nnext: public\n" % live_secret),
             ("yaml_name_on_next_line", "- name:\n    DB_PASSWORD\n  value: %s\n" % live_secret),
+            ("yaml_quoted_value_holding_colon", "password:\n  \"a: %s\"\n" % live_secret),
+            ("flag_value_cut_after_placeholder",
+             '["--password","[REDACTED:credential-field]\\q%s"]' % live_secret),
+            ("shell_value_cut_after_placeholder", '["sh","-c","app --token [REDACTED:jwt]\\q%s"]' % live_secret),
             ("flag_spelled_with_escapes", '["--passw\\u006frd","%s"]' % live_secret),
             ("shell_flag_line_join", '["sh","-c","app --pass\\\\\\nword %s"]' % live_secret),
         ]

@@ -182,6 +182,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "- name:\n    DB_PASSWORD # c\n  value: " + field + "\n",
 		},
 		{
+			name: "yaml quoted value on the next line holding a colon",
+			in:   "password:\n  \"synthetic: secret\"\n- name:\n    DB_PASSWORD\n  value:\n    'a: b'\n",
+			want: "password: " + field + "\n- name:\n    DB_PASSWORD\n  value: " + field + "\n",
+		},
+		{
 			name: "json escaped key",
 			in:   `{"DB_PASSW\u004fRD":"hunter2","public":"x"}`,
 			want: `{"DB_PASSW\u004fRD":"` + field + `","public":"x"}`,
@@ -299,7 +304,7 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 		{
 			name: "shell command read up to an escape cut at the cap",
 			in:   `["sh","-c","app --token x\u00`,
-			want: `["sh","-c","app --token ` + field + `\u00`,
+			want: `["sh","-c","app --token ` + field,
 		},
 		{
 			name: "shell command joined flag inside quotes",
@@ -336,6 +341,21 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			name: "shell command with an empty quoted value",
 			in:   `["sh","-c","app --password \"\""]`,
 			want: `["sh","-c","app --password ` + field + `"]`,
+		},
+		{
+			name: "flag value cut at a bad escape after a placeholder",
+			in:   `["--password","[REDACTED:credential-field]\qsecret","--token=[REDACTED:jwt]\u+041"]`,
+			want: `["--password","` + field + `","--token=` + field + `"]`,
+		},
+		{
+			name: "shell value cut at a bad escape after a placeholder",
+			in:   `["sh","-c","app --token [REDACTED:jwt]\qsecret"]`,
+			want: `["sh","-c","app --token ` + field + `"]`,
+		},
+		{
+			name: "shell name taken as a flag value starts no command",
+			in:   `["--pAsswd","sh","-c","--token= "]`,
+			want: `["--pAsswd","` + field + `","-c","--token=` + field + `"]`,
 		},
 		{
 			name: "flag value starting with two dashes",

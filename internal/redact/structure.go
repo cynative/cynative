@@ -54,9 +54,10 @@ type matchers struct {
 	// flag is a whole credential flag; joined is one with "=" and its value after it.
 	flag, joined *regexp.Regexp
 	// yamlKey splits a "key: value" line into its indentation and "- " markers and its
-	// key; mappingLine is any line that holds a mapping key, whatever the key's
-	// spelling; props is the anchor and tag properties that may open a value.
-	yamlKey, mappingLine, props *regexp.Regexp
+	// key; mappingLine is any unquoted line that holds a mapping key, whatever the
+	// key's spelling, and quotedKey a line that opens with a quoted key; props is
+	// the anchor and tag properties that may open a value.
+	yamlKey, mappingLine, quotedKey, props *regexp.Regexp
 	// block is a YAML block scalar indicator.
 	block *regexp.Regexp
 	// placeholder is a value an earlier rule already replaced, kept for its label.
@@ -78,6 +79,7 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		joined:      regexp.MustCompile(`^(?:` + flagArg + `)=`),
 		yamlKey:     regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)([\w.-]+)[ \t]*:(?:[ \t]+|$)`),
 		mappingLine: regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
+		quotedKey:   regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
 		props:       regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
 		block:       regexp.MustCompile(`^[|>][0-9+-]*$`),
 		placeholder: regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
@@ -297,7 +299,7 @@ func (m matchers) scalarBelow(s string, lines []yamlLine, i, col int) int {
 		}
 		t := strings.TrimLeft(text, " \t")
 		if indentOf(text) <= col || t == "-" || strings.HasPrefix(t, "- ") || strings.IndexByte("[{", t[0]) >= 0 ||
-			m.mappingLine.MatchString(stripComment(t)) {
+			m.mappingKey(t) {
 			return -1
 		}
 
@@ -305,6 +307,18 @@ func (m matchers) scalarBelow(s string, lines []yamlLine, i, col int) int {
 	}
 
 	return -1
+}
+
+// mappingKey reports whether line t, without its indentation, holds a mapping
+// key. A quoted line is a key only when ':' follows its closing quote, since the
+// quotes can hold ": " themselves; any other line is one when it holds ": " or ends
+// in ':', which a plain scalar line cannot.
+func (m matchers) mappingKey(t string) bool {
+	if t[0] == '"' || t[0] == '\'' {
+		return m.quotedKey.MatchString(t)
+	}
+
+	return m.mappingLine.MatchString(stripComment(t))
 }
 
 // closeQuote returns the offset of the quote that closes the YAML scalar opened at

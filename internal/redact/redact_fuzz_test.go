@@ -39,6 +39,9 @@ func FuzzRedact(f *testing.F) {
 	f.Add("pAsswd: \"\"\n 00")
 	f.Add("0: \"\ntoken:\n 0ApikeY:\"")
 	f.Add("pAsswd=,\"\r,\"--pAsswd=")
+	f.Add(",\"--pAsswd\",\"sh\",\"-c\",\"--token= ")
+	f.Add("password:\n  \"a: b\"\nx:\n  'c: d'\n")
+	f.Add(`["--password","[REDACTED:jwt]\q","sh","-c","app --token [REDACTED:jwt]\qs"]`)
 	f.Add(",\"sh\",\"-c\",\"--pAsswd\\\"=\\\" ")
 	f.Add(
 		"data:\n  c: |\n    - name: DB_PASSWORD\n        # c\n      value: x\npassword:\n# c\n  \"a\nb\"\nsecret:\n  \"k\": v\ntoken: [\n  a\n]\n",

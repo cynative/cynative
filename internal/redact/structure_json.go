@@ -97,22 +97,32 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	}
 
 	// A shell command element is read as words by shellSpans only, so the two
-	// readings never disagree about where its values end.
+	// readings never disagree about where its values end. A shell name or "-c"
+	// that is itself a flag's value is replaced, so it starts no command: a second
+	// Redact could not see it either.
 	var out []span
 
+	values := m.flagValues(words)
+	taken := make(map[int]bool, len(values))
+	for _, v := range values {
+		taken[v.index] = taken[v.index] || v.offset == 0
+	}
 	shell := make(map[int]bool)
 	for i := 2; i < len(elems); i++ {
-		if m.shell.MatchString(words[i-2]) && m.shellFlag.MatchString(words[i-1]) {
+		if m.shell.MatchString(words[i-2]) && m.shellFlag.MatchString(words[i-1]) && !taken[i-2] && !taken[i-1] {
 			shell[i] = true
 			out = append(out, m.shellSpans(s, elems[i])...)
 		}
 	}
-	for _, v := range m.flagValues(words) {
+	for _, v := range values {
 		e, off := elems[v.index], v.offset
 		if raws[v.index] != nil {
 			off = raws[v.index][off]
 		}
-		if !shell[v.index] && !m.done(words[v.index][v.offset:]) {
+		// A value decoded only up to a bad escape is not done even when that prefix
+		// is a placeholder: the bytes after the escape are part of it too.
+		done := m.done(words[v.index][v.offset:]) && !cut(raws[v.index], e)
+		if !shell[v.index] && !done {
 			out = append(out, span{e.start + off, e.stop - boolInt(e.closed), placeholder("credential-field")})
 		}
 	}
@@ -125,6 +135,7 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 // rest of the element keeps its exact spelling, escapes included.
 func (m matchers) shellSpans(s string, e element) []span {
 	cmd, raw := decodeJSONString(s[e.start:e.end])
+	partial := cut(raw, e)
 	words := shellWords(cmd)
 	texts := make([]string, len(words))
 	for i, w := range words {
@@ -142,9 +153,14 @@ func (m matchers) shellSpans(s string, e element) []span {
 			start = w.at[v.offset-1] + 1
 			repl += closeShellQuote(w.quote[v.offset-1])
 		}
-		if !m.done(w.text[v.offset:]) {
-			out = append(out, span{e.start + raw[start], e.start + raw[w.end], repl})
+		// A word that runs into a bad escape also takes the bytes after it.
+		end := e.start + raw[w.end]
+		if partial && w.end == len(cmd) {
+			end = e.stop - boolInt(e.closed)
+		} else if m.done(w.text[v.offset:]) {
+			continue
 		}
+		out = append(out, span{e.start + raw[start], end, repl})
 	}
 
 	return out
@@ -336,6 +352,12 @@ func (w *shellWord) add(d string, j int, q byte) {
 	w.buf = append(w.buf, d[j])
 	w.at = append(w.at, j)
 	w.quote = append(w.quote, q)
+}
+
+// cut reports whether decodeJSONString stopped before the end of e's body. raw is
+// nil for an element with no escape, which decodes whole.
+func cut(raw []int, e element) bool {
+	return raw != nil && raw[len(raw)-1] < e.end-e.start
 }
 
 func boolInt(b bool) int {
