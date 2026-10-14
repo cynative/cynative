@@ -206,7 +206,8 @@ func credentialRules() []rule {
 		// ',"' can change where a quoted value ends or where an array run starts.
 		// A credential flag in a command array, joined ("--password=v") or with its
 		// value in the next element, and one in the command string of ["sh","-c",...].
-		{keywords: []string{"--"}, fn: m.commands},
+		// A flag's hyphens may be spelled as JSON escapes.
+		{keywords: []string{"--", `\u002d`, `\u002D`}, fn: m.commands},
 		// The YAML pass again.
 		{keywords: []string{":"}, fn: m.yaml},
 		{fn: m.objects},

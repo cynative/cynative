@@ -169,9 +169,14 @@ func TestRedact_ConfigurationCredentialShapes(t *testing.T) {
 			want: `{"x":1,"--token=a":2,"--token=b" : 3,"args":["--token=` + field + `","--token=` + field + `"]}`,
 		},
 		{
-			name: "boolean flag before a credential flag",
+			name: "credential flag taken as a flag value is still read as a flag",
 			in:   `["--generate-secret","--password","x"]`,
-			want: `["--generate-secret","--password","` + field + `"]`,
+			want: `["--generate-secret","` + field + `","` + field + `"]`,
+		},
+		{
+			name: "negated flag takes no value",
+			in:   `["--no-generate-secret","--password","x"]`,
+			want: `["--no-generate-secret","--password","` + field + `"]`,
 		},
 		{
 			name: "separate flag value with a single leading dash",

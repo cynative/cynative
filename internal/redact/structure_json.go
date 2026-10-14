@@ -2,6 +2,7 @@ package redact
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -20,9 +21,10 @@ type element struct {
 type wordValue struct{ index, offset int }
 
 // flagValues finds the credential values in a command line: the part after '=' of
-// a joined "--password=v", and the word after a separate "--password". A next word
-// starting with "--" is read as another flag, not a value, only when a word that
-// does not start with '-' follows it, the way a flag that takes a value would.
+// a joined "--password=v", and the word after a separate "--password", whatever
+// that word looks like. A flag starting with "--no-" negates an option and takes
+// no value. A word taken as a value that is itself a credential flag is still read
+// as one, so its own value is found too.
 func (m matchers) flagValues(words []string) []wordValue {
 	var out []wordValue
 
@@ -32,16 +34,28 @@ func (m matchers) flagValues(words []string) []wordValue {
 
 			continue
 		}
-		if !m.flag.MatchString(w) || i+1 >= len(words) {
-			continue
+		if m.flag.MatchString(w) && i+1 < len(words) && !strings.HasPrefix(w, "--no-") {
+			out = append(out, wordValue{i + 1, 0})
 		}
-		if strings.HasPrefix(words[i+1], "--") && i+2 < len(words) && !strings.HasPrefix(words[i+2], "-") {
-			continue
-		}
-		out = append(out, wordValue{i + 1, 0})
 	}
 
 	return out
+}
+
+// shellCommand returns the index of the command a shell named at words[i] runs, or
+// -1: the word after the option that holds 'c', past any other options and the
+// argument of those that take one.
+func (m matchers) shellCommand(words []string, i int) int {
+	for j := i + 1; j < len(words) && words[j] != "" && strings.IndexByte("-+", words[j][0]) >= 0; j++ {
+		switch {
+		case m.shellFlag.MatchString(words[j]):
+			return j + 1
+		case m.shellArgOption.MatchString(words[j]):
+			j++
+		}
+	}
+
+	return -1
 }
 
 // commands redacts credential values in runs of JSON string array elements, and
@@ -97,7 +111,7 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	}
 
 	// A shell command element is read as words by shellSpans, and only so, unless
-	// its shell name or "-c" is itself a flag's value. That name is replaced, so a
+	// its shell name or one of the options before it is itself a flag's value. That name is replaced, so a
 	// second Redact reads the element as a plain array element; it is read both
 	// ways here, the array reading first so its wider span wins, and the second
 	// Redact finds nothing left.
@@ -110,10 +124,10 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	var out, shellOut []span
 
 	shell := make(map[int]bool)
-	for i := 2; i < len(elems); i++ {
-		if m.shell.MatchString(words[i-2]) && m.shellFlag.MatchString(words[i-1]) {
-			shell[i] = !taken[i-2] && !taken[i-1]
-			shellOut = append(shellOut, m.shellSpans(s, elems[i])...)
+	for i := range elems {
+		if c := m.shellCommand(words, i); m.shell.MatchString(words[i]) && c > i && c < len(elems) {
+			shell[c] = !slices.Contains(takenIn(taken, i, c), true)
+			shellOut = append(shellOut, m.shellSpans(s, elems[c])...)
 		}
 	}
 	for _, v := range values {
@@ -354,6 +368,16 @@ func (w *shellWord) add(d string, j int, q byte) {
 	w.buf = append(w.buf, d[j])
 	w.at = append(w.at, j)
 	w.quote = append(w.quote, q)
+}
+
+// takenIn returns whether each of the words from i up to c is a flag's value.
+func takenIn(taken map[int]bool, i, c int) []bool {
+	out := make([]bool, 0, c-i)
+	for k := i; k < c; k++ {
+		out = append(out, taken[k])
+	}
+
+	return out
 }
 
 // cut reports whether decodeJSONString stopped before the end of e's body. raw is

@@ -364,6 +364,22 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 				`["--password","` + field + `","-c","app --token ` + field + `"]`,
 		},
 		{
+			name: "flag value starting with two dashes before a positional argument",
+			in:   `["app","--password","--hunter2","input.txt"],["sh","-c","app --password --hunter2 input.txt"]`,
+			want: `["app","--password","` + field + `","input.txt"],["sh","-c","app --password ` + field + ` input.txt"]`,
+		},
+		{
+			name: "shell command after other shell options",
+			in:   `["sh","-x","-c","app --password a"],["bash","--noprofile","-o","pipefail","-ec","app --token b"]`,
+			want: `["sh","-x","-c","app --password ` + field + `"],` +
+				`["bash","--noprofile","-o","pipefail","-ec","app --token ` + field + `"]`,
+		},
+		{
+			name: "flag hyphens spelled with json escapes",
+			in:   `["\u002d\u002Dpassword","a"],["sh","-c","app \u002d\u002dtoken b"]`,
+			want: `["\u002d\u002Dpassword","` + field + `"],["sh","-c","app \u002d\u002dtoken ` + field + `"]`,
+		},
+		{
 			name: "flag value starting with two dashes",
 			in:   `["--password","--x"]`,
 			want: `["--password","` + field + `"]`,
@@ -434,6 +450,9 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		"password:\n  foo/bar: public\n",
 		"- name: &n\n  value: public\n",
 		"name:\n  DB_PASSWORD\n  more\nvalue: public\n",
+		`["sh","-x","app --token x"]`,
+		`["sh","-o"]`,
+		`["sh",""]`,
 		`["echo","app --token x"]`,
 		`["sh","-c","app --token-file /t --verbose"]`,
 		`["sh","-c","app --password"]`,

@@ -1052,6 +1052,7 @@ _HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 _YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
 _SHELL = re.compile(r"(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z")
 _SHELL_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
+_SHELL_ARG_OPTION = re.compile(r"(?:[-+][oO]|--rcfile|--init-file)\Z")
 _RUN_START = re.compile(r'[\[,]' + _WS + r'*"')
 _ELEMENT = re.compile(r'"((?:\\[\s\S]|[^"\\])*)(")?')
 _SEPARATOR = re.compile(_WS + r'*,' + _WS + r'*"')
@@ -1309,12 +1310,21 @@ def _flag_values(words):
         if m:
             out.append((i, m.end()))
             continue
-        if not _FLAG_FULL.match(w) or i + 1 >= len(words):
-            continue
-        if words[i + 1].startswith("--") and i + 2 < len(words) and not words[i + 2].startswith("-"):
-            continue
-        out.append((i + 1, 0))
+        if _FLAG_FULL.match(w) and i + 1 < len(words) and not w.startswith("--no-"):
+            out.append((i + 1, 0))
     return out
+
+
+def _shell_command(words, i):
+    """The index of the command a shell named at words[i] runs, or -1, as shellCommand."""
+    j = i + 1
+    while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
+        if _SHELL_FLAG.match(words[j]):
+            return j + 1
+        if _SHELL_ARG_OPTION.match(words[j]):
+            j += 1
+        j += 1
+    return -1
 
 
 def _decode_json_string(body):
@@ -1434,7 +1444,7 @@ def _shell_found(s, e):
 
 
 def _find_commands(s):
-    if "--" not in s:
+    if "--" not in s and "\\u002d" not in s.lower():
         return []
     out, pos = [], 0
     while True:
@@ -1451,11 +1461,12 @@ def _find_commands(s):
         values = _flag_values(words)
         taken = {i for i, off in values if off == 0}
         shell = set()
-        for i in range(2, len(elems)):
-            if _SHELL.match(words[i - 2]) and _SHELL_FLAG.match(words[i - 1]):
-                if i - 2 not in taken and i - 1 not in taken:
-                    shell.add(i)
-                out.extend(_shell_found(s, elems[i]))
+        for i in range(len(elems)):
+            c = _shell_command(words, i)
+            if _SHELL.match(words[i]) and i < c < len(elems):
+                if not any(k in taken for k in range(i, c)):
+                    shell.add(c)
+                out.extend(_shell_found(s, elems[c]))
         for i, off in values:
             if i not in shell:
                 start, end_, stop, closed = elems[i]
@@ -2026,6 +2037,7 @@ def _structural_spans():
         (_find_commands, '["\\u0073h","-c","app --token y"]', [("y", 29, 30)]),
         (_find_commands, '["--password","sh","-c","app --token y"]', [("y", 37, 38), ("sh", 15, 17)]),
         (_find_yaml, "password:\n  &pw \"a\nb\"\nn: p\n", [("\n  &pw \"a\nb\"", 9, 21)]),
+        (_find_commands, '["\\u002d\\u002dpassword","y"]', [("y", 25, 26)]),
         (_find_yaml, "password: &pw |\n  # x\nnext: p\n", [("&pw |\n  # x", 10, 21)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"\\u0068i"}', [("hi", 21, 28)]),
     ]
@@ -2722,6 +2734,9 @@ def _shared_selftest():
              '["--password","[REDACTED:credential-field]\\q%s"]' % live_secret),
             ("shell_value_cut_after_placeholder", '["sh","-c","app --token [REDACTED:jwt]\\q%s"]' % live_secret),
             ("yaml_quoted_value_after_props_below", "password:\n  &pw \"a: %s\"\n" % live_secret),
+            ("flag_value_dashes_before_positional", '["app","--password","--%s","input.txt"]' % live_secret),
+            ("shell_after_options", '["bash","--noprofile","-o","pipefail","-ec","app --token %s"]' % live_secret),
+            ("flag_hyphens_escaped", '["\\u002d\\u002dpassword","%s"]' % live_secret),
             ("flag_spelled_with_escapes", '["--passw\\u006frd","%s"]' % live_secret),
             ("shell_flag_line_join", '["sh","-c","app --pass\\\\\\nword %s"]' % live_secret),
         ]

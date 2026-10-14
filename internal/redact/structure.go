@@ -62,9 +62,10 @@ type matchers struct {
 	block *regexp.Regexp
 	// placeholder is a value an earlier rule already replaced, kept for its label.
 	placeholder *regexp.Regexp
-	// shell is a shell program and shellFlag the option that makes it run its next
-	// argument as a command.
-	shell, shellFlag *regexp.Regexp
+	// shell is a shell program, shellFlag the option that makes it run its next
+	// argument as a command, and shellArgOption an option that takes the next
+	// argument as its own.
+	shell, shellFlag, shellArgOption *regexp.Regexp
 	// runStart opens a JSON array element, element reads one string element (closed,
 	// or truncated to end of content), separator leads to the next string element and
 	// keyColon marks an object key.
@@ -73,22 +74,23 @@ type matchers struct {
 
 func newMatchers(credName, keyEnd, flagArg string) matchers {
 	return matchers{
-		direct:      regexp.MustCompile(`^[\w.-]*(?i:` + credName + `)$`),
-		keyEnd:      regexp.MustCompile(`^(?i:` + keyEnd + `)$`),
-		flag:        regexp.MustCompile(`^(?:` + flagArg + `)$`),
-		joined:      regexp.MustCompile(`^(?:` + flagArg + `)=`),
-		yamlKey:     regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)([\w.-]+)[ \t]*:(?:[ \t]+|$)`),
-		mappingLine: regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
-		quotedKey:   regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
-		props:       regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
-		block:       regexp.MustCompile(`^[|>][0-9+-]*$`),
-		placeholder: regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
-		shell:       regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
-		shellFlag:   regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
-		runStart:    regexp.MustCompile(`[\[,]\s*"`),
-		element:     regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
-		separator:   regexp.MustCompile(`^\s*,\s*"`),
-		keyColon:    regexp.MustCompile(`^\s*:`),
+		direct:         regexp.MustCompile(`^[\w.-]*(?i:` + credName + `)$`),
+		keyEnd:         regexp.MustCompile(`^(?i:` + keyEnd + `)$`),
+		flag:           regexp.MustCompile(`^(?:` + flagArg + `)$`),
+		joined:         regexp.MustCompile(`^(?:` + flagArg + `)=`),
+		yamlKey:        regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)([\w.-]+)[ \t]*:(?:[ \t]+|$)`),
+		mappingLine:    regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
+		quotedKey:      regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
+		props:          regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
+		block:          regexp.MustCompile(`^[|>][0-9+-]*$`),
+		placeholder:    regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
+		shell:          regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
+		shellFlag:      regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
+		shellArgOption: regexp.MustCompile(`^(?:[-+][oO]|--rcfile|--init-file)$`),
+		runStart:       regexp.MustCompile(`[\[,]\s*"`),
+		element:        regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
+		separator:      regexp.MustCompile(`^\s*,\s*"`),
+		keyColon:       regexp.MustCompile(`^\s*:`),
 	}
 }
 
