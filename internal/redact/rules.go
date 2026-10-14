@@ -98,9 +98,9 @@ func contentRules() []rule {
 // credentialRules returns value-substitution rules: a credential-named JSON/XML
 // field, a name/value pair whose name is a credential, a credential flag in a
 // command array, or a signing query param keeps its key/param and gets its
-// value replaced, so the surrounding document stays well-formed. The structural
-// JSON pass runs last, so it reads the content every regex has already rewritten
-// and a second Redact finds nothing new.
+// value replaced. The structural passes that follow the regexes read the content
+// the regexes left, so a second Redact reads the same structure; FuzzRedact checks
+// that it changes nothing.
 func credentialRules() []rule {
 	// Every multi-word name takes an optional '_' or '-' between words, so snake_case
 	// (secret_access_key), kebab-case (api-key), Pascal/camelCase (SecretAccessKey,

@@ -239,7 +239,7 @@ def redact_decoded_matches(t, decoded):
     for rx, label in _POSITIONAL_RULES:
         for m in rx.finditer(decoded):
             val = m.group(1)
-            if not val or _redacted(val):
+            if not val or _redacted(val, rx):
                 continue
             t = t.replace(val, "[REDACTED:%s]" % label)
             enc = quote_plus(val)
@@ -262,7 +262,7 @@ def has_secret(t):
     for rx, _label in _POSITIONAL_RULES:
         for m in rx.finditer(t):
             val = m.group(1)
-            if val and not _redacted(val):
+            if val and not _redacted(val, rx):
                 return True
     return False
 
@@ -281,7 +281,7 @@ def redact_literal(t):
     for rx, label in _POSITIONAL_RULES:
         def repl(m, _label=label):
             val = m.group(1)
-            if not val or _redacted(val):
+            if not val or _redacted(val, rx):
                 return m.group(0)
             whole = m.group(0)
             s, e = m.start(1) - m.start(0), m.end(1) - m.start(0)

@@ -83,10 +83,17 @@ func (m matchers) run(s string, q int) ([]element, int) {
 	}
 }
 
+// commandSpans reads the elements decoded, so a flag or a shell name spelled with
+// JSON escapes is still recognized; raws maps a decoded element back to its raw
+// bytes, and is nil for an element with no escape.
 func (m matchers) commandSpans(s string, elems []element) []span {
 	words := make([]string, len(elems))
+	raws := make([][]int, len(elems))
 	for i, e := range elems {
 		words[i] = s[e.start:e.end]
+		if strings.IndexByte(words[i], '\\') >= 0 {
+			words[i], raws[i] = decodeJSONString(words[i])
+		}
 	}
 
 	// A shell command element is read as words by shellSpans only, so the two
@@ -101,9 +108,12 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 		}
 	}
 	for _, v := range m.flagValues(words) {
-		e := elems[v.index]
+		e, off := elems[v.index], v.offset
+		if raws[v.index] != nil {
+			off = raws[v.index][off]
+		}
 		if !shell[v.index] && !m.done(words[v.index][v.offset:]) {
-			out = append(out, span{e.start + v.offset, e.stop - boolInt(e.closed), placeholder("credential-field")})
+			out = append(out, span{e.start + off, e.stop - boolInt(e.closed), placeholder("credential-field")})
 		}
 	}
 
@@ -153,7 +163,9 @@ const (
 // decodeJSONString decodes the body of a JSON string up to its first invalid or
 // incomplete escape (one cut off at the content cap), so the words before it are
 // still read. raw maps each byte of the result, and its end, to the offset in the
-// body where that byte's character starts.
+// body where that byte's character starts. Each \u escape is decoded on its own,
+// so a surrogate pair becomes two U+FFFD; only the ASCII bytes around it matter
+// to the words read from it.
 func decodeJSONString(body string) (string, []int) {
 	var b strings.Builder
 
@@ -210,6 +222,8 @@ type shellWord struct {
 	text       string
 	at         []int
 	quote      []byte
+	quoted     bool   // the word held quotes, so an empty text is still a word
+	buf        []byte // the text while it is read
 }
 
 // closeShellQuote spells the quote q closes inside a JSON string.
@@ -224,11 +238,12 @@ func closeShellQuote(q byte) string {
 	return ""
 }
 
-// shellWords splits a POSIX shell command into words. Quotes and backslashes are
-// removed the way the shell removes them, so a flag spelled "--pass"word or
-// --pass\word is read as --password. Unquoted ; & | < > ( ) end a word and a #
-// at the start of a word comments out the rest of the line. Expansions, here
-// documents and other syntax are not interpreted.
+// shellWords splits a POSIX shell command into words. Quotes, backslashes and
+// backslash-newline line joins are removed the way the shell removes them, so a
+// flag spelled "--pass"word, --pass\word or --pass\ followed by a newline and
+// word is read as --password. Unquoted ; & | < > ( ) end a word and a # at the
+// start of a word comments out the rest of the line. Expansions, here documents
+// and other syntax are not interpreted.
 func shellWords(d string) []shellWord {
 	var out []shellWord
 
@@ -248,7 +263,9 @@ func shellWords(d string) []shellWord {
 			w := shellWord{start: i}
 			i = w.read(d, i)
 			w.end = i
-			out = append(out, w)
+			if w.text != "" || w.quoted {
+				out = append(out, w)
+			}
 		}
 	}
 }
@@ -260,41 +277,65 @@ const (
 
 // read consumes one word from d[i:] and returns the offset after it.
 func (w *shellWord) read(d string, i int) int {
-	var b []byte
-
-	add := func(j int, q byte) {
-		b = append(b, d[j])
-		w.at = append(w.at, j)
-		w.quote = append(w.quote, q)
-	}
 	for i < len(d) && strings.IndexByte(shellBlank+shellOperators, d[i]) < 0 {
 		switch d[i] {
 		case '\'':
-			for i++; i < len(d) && d[i] != '\''; i++ {
-				add(i, '\'')
-			}
-			i++
+			i = w.single(d, i+1)
 		case '"':
-			for i++; i < len(d) && d[i] != '"'; i++ {
-				if d[i] == '\\' && i+1 < len(d) && strings.IndexByte("$`\"\\", d[i+1]) >= 0 {
-					i++
-				}
-				add(i, '"')
-			}
-			i++
+			i = w.double(d, i+1)
 		case '\\':
-			if i+1 < len(d) {
-				add(i+1, 0)
+			// A backslash before a newline joins the lines; before anything else it
+			// quotes that byte.
+			if i+1 < len(d) && d[i+1] != '\n' {
+				w.add(d, i+1, 0)
 			}
 			i += escapeWidth
 		default:
-			add(i, 0)
+			w.add(d, i, 0)
 			i++
 		}
 	}
-	w.text = string(b)
+	w.text = string(w.buf)
 
 	return min(i, len(d))
+}
+
+// single reads a single-quoted string from d[i:], after its opening quote, and
+// returns the offset after its closing quote.
+func (w *shellWord) single(d string, i int) int {
+	w.quoted = true
+	for ; i < len(d) && d[i] != '\''; i++ {
+		w.add(d, i, '\'')
+	}
+
+	return i + 1
+}
+
+// double reads a double-quoted string from d[i:], after its opening quote, and
+// returns the offset after its closing quote. A backslash quotes $ ` " \ and
+// joins a line; before anything else it is kept.
+func (w *shellWord) double(d string, i int) int {
+	w.quoted = true
+	for ; i < len(d) && d[i] != '"'; i++ {
+		if d[i] == '\\' && i+1 < len(d) && d[i+1] == '\n' {
+			i++ // the loop steps past the newline
+
+			continue
+		}
+		if d[i] == '\\' && i+1 < len(d) && strings.IndexByte("$`\"\\", d[i+1]) >= 0 {
+			i++
+		}
+		w.add(d, i, '"')
+	}
+
+	return i + 1
+}
+
+// add appends d[j] to the word's text, read inside quote q.
+func (w *shellWord) add(d string, j int, q byte) {
+	w.buf = append(w.buf, d[j])
+	w.at = append(w.at, j)
+	w.quote = append(w.quote, q)
 }
 
 func boolInt(b bool) int {

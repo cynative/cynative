@@ -2,8 +2,7 @@ package redact
 
 import "testing"
 
-// TestGated covers the keyword pre-gate, including the keyword-less branch that
-// the production rule set does not yet exercise (a later task adds such a rule).
+// TestGated covers the keyword pre-gate, including the keyword-less branch.
 func TestGated(t *testing.T) {
 	t.Parallel()
 

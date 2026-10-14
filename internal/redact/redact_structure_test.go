@@ -162,6 +162,26 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "password: " + field + "\n",
 		},
 		{
+			name: "yaml block scalar after an anchor",
+			in:   "password: &pw |\n  # synthetic-secret\nnext: public\n",
+			want: "password: " + field + "\nnext: public\n",
+		},
+		{
+			name: "yaml quoted value after a tag",
+			in:   "password: !!str \"first\nsynthetic-tail\"\nnext: public\n",
+			want: "password: " + field + "\nnext: public\n",
+		},
+		{
+			name: "yaml pair value with an anchor",
+			in:   "- name: DB_PASSWORD\n  value: &pw |\n    # s\n",
+			want: "- name: DB_PASSWORD\n  value: " + field + "\n",
+		},
+		{
+			name: "yaml pair with the name on the next line",
+			in:   "- name:\n    DB_PASSWORD # c\n  value: synthetic-secret\n",
+			want: "- name:\n    DB_PASSWORD # c\n  value: " + field + "\n",
+		},
+		{
 			name: "json escaped key",
 			in:   `{"DB_PASSW\u004fRD":"hunter2","public":"x"}`,
 			want: `{"DB_PASSW\u004fRD":"` + field + `","public":"x"}`,
@@ -297,6 +317,27 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "pAsswd=" + field + "\r,\"--pAsswd=" + field,
 		},
 		{
+			name: "shell command flag joined across a backslash newline",
+			in:   `["sh","-c","app --pass\\\nword a; app \"--pass\\\nword\" b; app --token \\\n c"]`,
+			want: `["sh","-c","app --pass\\\nword ` + field + `; app \"--pass\\\nword\" ` + field +
+				`; app --token \\\n ` + field + `"]`,
+		},
+		{
+			name: "flag spelled with json escapes",
+			in:   `["--passw\u006frd","a","--passw\u006frd=b\u0020c"]`,
+			want: `["--passw\u006frd","` + field + `","--passw\u006frd=` + field + `"]`,
+		},
+		{
+			name: "shell spelled with json escapes",
+			in:   `["/bin\/sh","-c","app --password a"],["\u0073h","-\u0063","app --password b"]`,
+			want: `["/bin\/sh","-c","app --password ` + field + `"],["\u0073h","-\u0063","app --password ` + field + `"]`,
+		},
+		{
+			name: "shell command with an empty quoted value",
+			in:   `["sh","-c","app --password \"\""]`,
+			want: `["sh","-c","app --password ` + field + `"]`,
+		},
+		{
 			name: "flag value starting with two dashes",
 			in:   `["--password","--x"]`,
 			want: `["--password","` + field + `"]`,
@@ -363,6 +404,10 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`["sh","-c","echo ok # --token public"]`,
 		`["sh","-c","app --password"]`,
 		`["sh","-c","app --token \u00zz"]`,
+		"secret:\n  café: public\n",
+		"password:\n  foo/bar: public\n",
+		"- name: &n\n  value: public\n",
+		"name:\n  DB_PASSWORD\n  more\nvalue: public\n",
 		`["echo","app --token x"]`,
 		`["sh","-c","app --token-file /t --verbose"]`,
 		`["sh","-c","app --password"]`,
