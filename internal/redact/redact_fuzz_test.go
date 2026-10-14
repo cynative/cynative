@@ -38,6 +38,13 @@ func FuzzRedact(f *testing.F) {
 	f.Add(",\"sh\",\"-c\",\"--pAsswd= ")
 	f.Add("pAsswd: \"\"\n 00")
 	f.Add("0: \"\ntoken:\n 0ApikeY:\"")
+	f.Add("pAsswd=,\"\r,\"--pAsswd=")
+	f.Add(",\"sh\",\"-c\",\"--pAsswd\\\"=\\\" ")
+	f.Add(
+		"data:\n  c: |\n    - name: DB_PASSWORD\n        # c\n      value: x\npassword:\n# c\n  \"a\nb\"\nsecret:\n  \"k\": v\ntoken: [\n  a\n]\n",
+	)
+	f.Add(`["sh","-c","a \"--pass\"word x; b --pass\\word=\"y z\" # --token q\r\n--token \u00`)
+	f.Add("{\"public\":\"cynative-loc-0\",\"Location\":[\"https://e.test/x?sig=abc\"]}")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

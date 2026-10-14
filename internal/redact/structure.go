@@ -18,9 +18,10 @@ type span struct {
 	repl       string
 }
 
-// applySpans rebuilds s with every span replaced. A span that overlaps an earlier
-// one is dropped: the earlier span already covers its bytes. So is an empty span
-// at the end of the previous one, which would add a second placeholder there.
+// applySpans rebuilds s with every span replaced. A span that starts inside an
+// earlier one is dropped, and so is an empty span at the end of the previous one,
+// which would add a second placeholder there. Every pass that produces two such
+// spans produces the outer one first, so the bytes of the dropped one are covered.
 func applySpans(s string, spans []span) string {
 	if len(spans) == 0 {
 		return s
@@ -52,8 +53,11 @@ type matchers struct {
 	keyEnd *regexp.Regexp
 	// flag is a whole credential flag; joined is one with "=" and its value after it.
 	flag, joined *regexp.Regexp
-	// yamlKey splits a "key: value" line into its indentation and "- " markers and its key.
-	yamlKey *regexp.Regexp
+	// yamlKey splits a "key: value" line into its indentation and "- " markers and its
+	// key; quotedKey is a line that opens with a quoted key.
+	yamlKey, quotedKey *regexp.Regexp
+	// block is a YAML block scalar indicator.
+	block *regexp.Regexp
 	// placeholder is a value an earlier rule already replaced, kept for its label.
 	placeholder *regexp.Regexp
 	// shell is a shell program and shellFlag the option that makes it run its next
@@ -72,6 +76,8 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		flag:        regexp.MustCompile(`^(?:` + flagArg + `)$`),
 		joined:      regexp.MustCompile(`^(?:` + flagArg + `)=`),
 		yamlKey:     regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)([\w.-]+)[ \t]*:(?:[ \t]+|$)`),
+		quotedKey:   regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
+		block:       regexp.MustCompile(`^[|>][0-9+-]*$`),
 		placeholder: regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
 		shell:       regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
 		shellFlag:   regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
@@ -164,8 +170,11 @@ func (m matchers) yamlValue(s string, e yamlEntry, spans []span) []span {
 	return append(spans, span{e.start, e.end, placeholder("credential-field")})
 }
 
-// yamlEntries reads every non-blank, non-comment line, skipping the lines a value
-// runs over.
+// yamlEntries reads every non-blank, non-comment line. The value of a key the
+// pass acts on (a credential-named key, "name" or "value") is read to its end and
+// the lines it runs over are skipped; any other key's lines are read as entries
+// too, so a pair inside an embedded document (a ConfigMap's "config.yaml: |") is
+// still found.
 func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 	var out []yamlEntry
 
@@ -187,35 +196,43 @@ func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 			colon: lines[i].start + g[5] + strings.IndexByte(text[g[5]:], ':') + 1,
 			start: lines[i].start + g[1],
 		}
-		i = m.extent(s, lines, i, &e)
+		e.end = e.start
+		if m.direct.MatchString(e.key) || strings.EqualFold(e.key, "name") || strings.EqualFold(e.key, "value") {
+			i = m.extent(s, lines, i, &e)
+		}
 		out = append(out, e)
 	}
 
 	return out
 }
 
-// extent sets e's value end and returns the index of the value's last line.
+// extent sets e's value end and returns the index of the value's last line. A
+// value that is empty on its key line continues on a later line only as a scalar;
+// a nested mapping, sequence or flow collection there, or one starting on the key
+// line, is not a value this pass replaces.
 func (m matchers) extent(s string, lines []yamlLine, i int, e *yamlEntry) int {
-	v := s[e.start:lines[i].end]
-	if v == "" || v[0] == '#' {
-		if !m.scalarBelow(s, lines, i, e.col) {
-			e.end = e.start
-
+	first, line := e.start, i
+	if v := s[e.start:lines[i].end]; v == "" || v[0] == '#' {
+		if line = m.scalarBelow(s, lines, i, e.col); line < 0 {
 			return i
 		}
 		e.below = true
+		first = lines[line].start + indentOf(s[lines[line].start:lines[line].end])
+	} else if (v[0] == '[' || v[0] == '{') && !strings.HasPrefix(v, "[REDACTED:") {
+		return i
 	}
-	last := continuation(s, lines, i, e.col)
+	v := s[first:lines[line].end]
+	last := continuation(s, lines, line, e.col, m.block.MatchString(strings.TrimSpace(stripComment(v))))
 	e.multi = last > i
 	e.end = lines[last].end
 
 	switch {
-	case !e.below && (v[0] == '"' || v[0] == '\''):
-		if q := closeQuote(s, e.start); q >= 0 {
+	case v[0] == '"' || v[0] == '\'':
+		if q := closeQuote(s, first); q >= 0 {
 			// Lines indented past the key after the closing quote are not valid YAML,
 			// but they belong to this value as they would to a plain one.
-			closing := lineOf(lines, i, q)
-			last = continuation(s, lines, closing, e.col)
+			closing := lineOf(lines, line, q)
+			last = continuation(s, lines, closing, e.col, false)
 			e.end = q + 1
 			if last > closing {
 				e.end = lines[last].end
@@ -230,14 +247,15 @@ func (m matchers) extent(s string, lines []yamlLine, i int, e *yamlEntry) int {
 }
 
 // continuation returns the index of the last line after line i that is indented
-// past col, with blank lines between such lines included and blank lines after
-// the last one left out.
-func continuation(s string, lines []yamlLine, i, col int) int {
+// past col. Blank lines between such lines are included and blank lines after the
+// last one left out; so are comment lines, except in a block scalar, where a line
+// starting with '#' is content.
+func continuation(s string, lines []yamlLine, i, col int, block bool) int {
 	last := i
 
 	for j := i + 1; j < len(lines); j++ {
 		text := s[lines[j].start:lines[j].end]
-		if strings.TrimLeft(text, " \t") == "" {
+		if strings.TrimLeft(text, " \t") == "" || !block && blankOrComment(text) {
 			continue
 		}
 		if indentOf(text) <= col {
@@ -249,22 +267,27 @@ func continuation(s string, lines []yamlLine, i, col int) int {
 	return last
 }
 
-// scalarBelow reports whether an empty value on line i continues as a scalar on
-// the next non-blank line: one indented past col that opens no nested mapping or
-// sequence. Only that line is read, so a nested mapping costs nothing here.
-func (m matchers) scalarBelow(s string, lines []yamlLine, i, col int) bool {
+// scalarBelow returns the index of the line an empty value on line i continues
+// on, or -1. That is the next line that is neither blank nor a comment, when it is
+// indented past col and does not open a block sequence ("-"), a mapping (a plain
+// or quoted key followed by ':') or a flow collection ('[' or '{'). Only that line
+// is read, so a nested mapping costs nothing here.
+func (m matchers) scalarBelow(s string, lines []yamlLine, i, col int) int {
 	for j := i + 1; j < len(lines); j++ {
 		text := s[lines[j].start:lines[j].end]
-		if strings.TrimLeft(text, " \t") == "" {
+		if blankOrComment(text) {
 			continue
 		}
-		trimmed := strings.TrimLeft(text, " \t")
+		t := strings.TrimLeft(text, " \t")
+		if indentOf(text) <= col || t == "-" || strings.HasPrefix(t, "- ") || strings.IndexByte("[{", t[0]) >= 0 ||
+			m.yamlKey.MatchString(t) || m.quotedKey.MatchString(t) {
+			return -1
+		}
 
-		return indentOf(text) > col && trimmed != "-" && !strings.HasPrefix(trimmed, "- ") &&
-			!m.yamlKey.MatchString(trimmed)
+		return j
 	}
 
-	return false
+	return -1
 }
 
 // closeQuote returns the offset of the quote that closes the YAML scalar opened at

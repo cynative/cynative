@@ -161,9 +161,6 @@ func credentialRules() []rule {
 			),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
 		},
-		// A credential flag in a command array, joined ("--password=v") or with its value
-		// in the next element, and one in the command string of ["sh","-c",...].
-		{keywords: []string{"--"}, fn: m.commands},
 		{ // XML: <key>value</key>.
 			re:   regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*(</[A-Za-z0-9_:.-]+>)`),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
@@ -204,9 +201,13 @@ func credentialRules() []rule {
 			re:   regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*<?\z`),
 			repl: `${1}` + placeholder("credential-field"),
 		},
-		// The YAML pass again, over what the regexes left: a regex that rewrote a quote
-		// can change where a quoted value ends, and a second Redact has to read the
-		// same structure this one leaves.
+		// The structural passes below read what the regexes left, so a second Redact
+		// finds the same structure this one leaves: a regex that drops a quote or a
+		// ',"' can change where a quoted value ends or where an array run starts.
+		// A credential flag in a command array, joined ("--password=v") or with its
+		// value in the next element, and one in the command string of ["sh","-c",...].
+		{keywords: []string{"--"}, fn: m.commands},
+		// The YAML pass again.
 		{keywords: []string{":"}, fn: m.yaml},
 		{fn: m.objects},
 	}

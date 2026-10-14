@@ -132,19 +132,49 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "0: \"\ntoken: " + field,
 		},
 		{
+			name: "yaml pair inside a block scalar",
+			in:   "data:\n  config.yaml: |\n    - name: DB_PASSWORD\n      value: synthetic-secret\n",
+			want: "data:\n  config.yaml: |\n    - name: DB_PASSWORD\n      value: " + field + "\n",
+		},
+		{
+			name: "yaml pair with an indented comment line between",
+			in:   "- name: DB_PASSWORD\n    # comment\n  value: synthetic-secret\n",
+			want: "- name: DB_PASSWORD\n    # comment\n  value: " + field + "\n",
+		},
+		{
+			name: "yaml value on the next line after a comment line",
+			in:   "password:\n# comment\n  synthetic-secret\nnext: public\n",
+			want: "password: " + field + "\nnext: public\n",
+		},
+		{
+			name: "yaml quoted value starting on the next line",
+			in:   "password:\n  \"first\nsynthetic-tail\"\nnext: public\n",
+			want: "password: " + field + "\nnext: public\n",
+		},
+		{
+			name: "yaml block scalar with a line starting with a hash",
+			in:   "password: |\n  a\n  # b\nx: y\n",
+			want: "password: " + field + "\nx: y\n",
+		},
+		{
+			name: "yaml continued value after a placeholder",
+			in:   "password: [REDACTED:jwt]\n  tail\n",
+			want: "password: " + field + "\n",
+		},
+		{
 			name: "json escaped key",
-			in:   `{"DB_PASSWORD":"hunter2","public":"x"}`,
-			want: `{"DB_PASSWORD":"` + field + `","public":"x"}`,
+			in:   `{"DB_PASSW\u004fRD":"hunter2","public":"x"}`,
+			want: `{"DB_PASSW\u004fRD":"` + field + `","public":"x"}`,
 		},
 		{
 			name: "json escaped key truncated",
-			in:   `{"DB_PASSWORD":"hunter2`,
-			want: `{"DB_PASSWORD":"` + field,
+			in:   `{"DB_PASSW\u004fRD":"hunter2`,
+			want: `{"DB_PASSW\u004fRD":"` + field,
 		},
 		{
 			name: "json escaped pair name and member",
-			in:   `[{"name":"DB_PASSWORD","value":"hunter2"}]`,
-			want: `[{"name":"DB_PASSWORD","value":"` + field + `"}]`,
+			in:   `[{"n\u0061me":"DB_PASSW\u004fRD","v\u0061lue":"hunter2"}]`,
+			want: `[{"n\u0061me":"DB_PASSW\u004fRD","v\u0061lue":"` + field + `"}]`,
 		},
 		{
 			name: "json duplicate value after the name",
@@ -199,7 +229,7 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 		{
 			name: "shell command truncated after a backslash",
 			in:   `["sh","-c","app --token hunt\`,
-			want: `["sh","-c","app --token ` + field,
+			want: `["sh","-c","app --token ` + field + `\`,
 		},
 		{
 			name: "shell command with an unclosed single quote",
@@ -220,6 +250,51 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			name: "flag before a shell command element",
 			in:   `["sh","-c","--token","x"]`,
 			want: `["sh","-c","--token","` + field + `"]`,
+		},
+		{
+			name: "shell command flag spelled with quotes and a backslash",
+			in:   `["sh","-c","app \"--password\" a; app --pass\"word\" b; app --pass\\word c"]`,
+			want: `["sh","-c","app \"--password\" ` + field + `; app --pass\"word\" ` + field + `; app --pass\\word ` + field + `"]`,
+		},
+		{
+			name: "shell command value with a carriage return",
+			in:   `["sh","-c","app --password first\rsynthetic-tail"]`,
+			want: `["sh","-c","app --password ` + field + `"]`,
+		},
+		{
+			name: "shell command keeps escapes and operators outside the value",
+			in:   `["sh","-c","app --password x; echo \u0067hp_` + strings.Repeat("a", 36) + `"]`,
+			want: `["sh","-c","app --password ` + field + `; echo \u0067hp_` + strings.Repeat("a", 36) + `"]`,
+		},
+		{
+			name: "shell command joined flag with an escaped quoted value",
+			in:   `["sh","-c","app --password=\"a b\"z\u0020next"]`,
+			want: `["sh","-c","app --password=` + field + `\u0020next"]`,
+		},
+		{
+			name: "shell command read up to an invalid escape",
+			in:   `["sh","-c","app --token x \q --password y"]`,
+			want: `["sh","-c","app --token ` + field + ` \q --password y"]`,
+		},
+		{
+			name: "shell command read up to an escape cut at the cap",
+			in:   `["sh","-c","app --token x\u00`,
+			want: `["sh","-c","app --token ` + field + `\u00`,
+		},
+		{
+			name: "shell command joined flag inside quotes",
+			in:   `["sh","-c","app \"--password=a b\" next '--token=c d' e"]`,
+			want: `["sh","-c","app \"--password=` + field + `\" next '--token=` + field + `' e"]`,
+		},
+		{
+			name: "shell command joined flag with a quoted empty value at the cut",
+			in:   `,"sh","-c","--pAsswd\"=\" `,
+			want: `,"sh","-c","--pAsswd\"=` + field + `\" `,
+		},
+		{
+			name: "flag array read after an env rule removed a quote",
+			in:   "pAsswd=,\"\r,\"--pAsswd=x",
+			want: "pAsswd=" + field + "\r,\"--pAsswd=" + field,
 		},
 		{
 			name: "flag value starting with two dashes",
@@ -275,18 +350,23 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		"- name: DB_PASSWORD\n- value: public\n",
 		"- name: DB_HOST # c\n  value: db.internal\n",
 		"name: DB_PASSWORD\n  value: nested\n",
-		`{"nextPageToken":"CgwI","items":[]}`,
+		`{"n\u0065xtPageToken":"CgwI","items":[]}`,
 		`{"name":"DB_HOST","value":"a","value":"b"}`,
 		`{"name":"DB_PASSWORD","valueFrom":{"value":"x"}}`,
 		`{"value":1,"name":"DB_PASSWORD","nested":{"value":"x"}}`,
 		`{"a":"\q","DB_PASSWORD":1}`,
 		`{"DB_PASSW\u004fRD" "x`,
+		"secret:\n  # comment\n  secretName: public-reference\n",
+		"secret:\n  \"secretName\": public-reference\n",
+		"token:\n  [public-reference]\n",
+		"token: [\n  public-reference\n]\nnext: public\n",
+		`["sh","-c","echo ok # --token public"]`,
+		`["sh","-c","app --password"]`,
+		`["sh","-c","app --token \u00zz"]`,
 		`["echo","app --token x"]`,
 		`["sh","-c","app --token-file /t --verbose"]`,
 		`["sh","-c","app --password"]`,
 		`["sh","-c",1]`,
-		// Not valid JSON, so the command string is not decoded.
-		`["sh","-c","app --token x \q"]`,
 		`[1,"-c","app --token x"]`,
 		`{"sh":"-c","x":"app --token x"}`,
 		`["--password"]`,
@@ -307,10 +387,25 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 func TestRedactPreservingLocation_StructuralPass(t *testing.T) {
 	t.Parallel()
 
-	in := `{"Location":["https://e.test/x?sig=abc"],"DB_PASSWORD":"hunter2"}`
-	want := `{"Location":["https://e.test/x?sig=abc"],"DB_PASSWORD":"[REDACTED:credential-field]"}`
+	in := `{"Location":["https://e.test/x?sig=abc"],"DB_PASSW\u004fRD":"hunter2"}`
+	want := `{"Location":["https://e.test/x?sig=abc"],"DB_PASSW\u004fRD":"[REDACTED:credential-field]"}`
 
 	if got := redact.New().RedactPreservingLocation(in); got != want {
+		t.Fatalf("RedactPreservingLocation(%q)\n got %q\nwant %q", in, got, want)
+	}
+}
+
+// TestRedactPreservingLocation_SuppliedSentinel redacts content that already holds
+// the sentinel delimiter like Redact does, so a supplied sentinel cannot move a
+// restored URL elsewhere.
+func TestRedactPreservingLocation_SuppliedSentinel(t *testing.T) {
+	t.Parallel()
+
+	in := "{\"public\":\"\ue000cynative-loc-0\ue000\",\"Location\":[\"https://e.test/x?sig=abc\"]}"
+	want := "{\"public\":\"\ue000cynative-loc-0\ue000\",\"Location\":[\"https://e.test/x?sig=[REDACTED:signed-url-signature]\"]}"
+
+	r := redact.New()
+	if got := r.RedactPreservingLocation(in); got != want {
 		t.Fatalf("RedactPreservingLocation(%q)\n got %q\nwant %q", in, got, want)
 	}
 }

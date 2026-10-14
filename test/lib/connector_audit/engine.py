@@ -1019,31 +1019,36 @@ _JSON_VALUE = r'(?:\\[\s\S]|[^"\\])*'
 _JSON_END = r'(?:"|\\?\Z)'
 _JSON_FIELDS = r'(?:\s*,\s*"' + _JSON_VALUE + r'"\s*:\s*(?:"' + _JSON_VALUE + r'"|[\w.+-]+))*?'
 
-# The structural passes in internal/redact (structure.go, structure_json.go), ported
-# line for line: a YAML value whose extent depends on indentation, a name/value pair
+# The structural passes in internal/redact (structure.go, structure_json.go),
+# mirrored: a YAML value whose extent depends on indentation, a name/value pair
 # split across a mapping, a credential flag among command-line array elements or in
-# the command string of ["sh","-c",...], and a JSON object whose credential member
-# is spelled with escapes or repeated. Go's \w and \s are ASCII, so these use re.A
-# and spell whitespace out. Each detector exposes finditer() and sub() the way a
-# compiled regex does, with the value as group(1), so the prepass and the e2e scrub
-# treat it like the regex rules. One mirror gap is accepted: Go also reads a JSON
-# body up to a syntax error or truncation and redacts a pair value there, while
-# json.loads reads nothing from an invalid body; the escaped-key regex below still
-# covers a truncated direct key.
+# the command string of ["sh","-c",...], and a JSON object member whose name is
+# spelled with escapes or repeated. Go's \w and \s are ASCII, so these patterns
+# spell both out; its (?i) folds the Unicode letters that fold to ASCII ones (the
+# long s, the Kelvin sign), which Python's re.I does too unless re.A is set. Each
+# detector exposes finditer() and sub() the way a compiled regex does, with the
+# value as group(1) and its exact span in the scanned text, so the prepass and the
+# e2e scrub use it like the regex rules. One gap remains: in a JSON body cut short
+# or broken, Go still pairs the members it read before the break, while json reads
+# no object it cannot finish; a direct key there is still found.
 _WS = r"[\t\n\f\r ]"
+_ASCII_KEY_END = _KEY_END.replace(r"\w", "A-Za-z0-9_")
 _PLACEHOLDER = re.compile(r"\[REDACTED:[a-z0-9-]+\]\Z")
-_KEY_END_FULL = re.compile(r"(?:" + _KEY_END + r")\Z", re.I | re.A)
-_DIRECT_KEY = re.compile(r"[\w.-]*(?:" + _CRED_NAME + r")\Z", re.I | re.A)
-_FLAG_FULL = re.compile(r"(?:" + _FLAG_ARG + r")\Z", re.I | re.A)
-_FLAG_JOINED = re.compile(r"(?:" + _FLAG_ARG + r")=", re.I | re.A)
-_YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([\w.-]+)[ \t]*:(?:[ \t]+|\Z)", re.A)
-_SHELL = re.compile(r"(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z", re.A)
+_KEY_END_FULL = re.compile(r"(?:" + _ASCII_KEY_END + r")\Z", re.I)
+_DIRECT_KEY = re.compile(r"[A-Za-z0-9_.-]*(?:" + _CRED_NAME + r")\Z", re.I)
+_FLAG_FULL = re.compile(r"(?:" + _FLAG_ARG.replace(r"\w", "A-Za-z0-9_") + r")\Z", re.I)
+_FLAG_JOINED = re.compile(r"(?:" + _FLAG_ARG.replace(r"\w", "A-Za-z0-9_") + r")=", re.I)
+_YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+)[ \t]*:(?:[ \t]+|\Z)")
+_YAML_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|\Z)")
+_YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
+_SHELL = re.compile(r"(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z")
 _SHELL_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
 _RUN_START = re.compile(r'[\[,]' + _WS + r'*"')
 _ELEMENT = re.compile(r'"((?:\\[\s\S]|[^"\\])*)(")?')
 _SEPARATOR = re.compile(_WS + r'*,' + _WS + r'*"')
 _KEY_COLON = re.compile(_WS + r"*:")
-_ANY_KEY = re.compile(r'"((?:\\[\s\S]|[^"\\])*)"' + _WS + r'*:' + _WS + r'*"(' + _JSON_VALUE + r')' + _JSON_END)
+_MEMBER_COLON = re.compile(_WS + r"*:" + _WS + r"*")
+_JSON_ESCAPES = {'"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
 
 
 def _redacted(val):
@@ -1053,8 +1058,9 @@ def _redacted(val):
 
 
 class _Found:
-    """A match-like hit from a structural detector. group(0) and group(1) are both the
-    value; start()/end() are its span in the scanned text."""
+    """A match-like hit from a structural detector: group(0) and group(1) are both
+    the value as the redactor reads it (decoded, unquoted), and start()/end() are
+    the exact span of its source bytes in the scanned text."""
 
     def __init__(self, value, start, end):
         self._value, self._start, self._end = value, start, end
@@ -1099,6 +1105,11 @@ def _blank(t):
     return t.lstrip(" \t") == ""
 
 
+def _blank_or_comment(t):
+    t = t.lstrip(" \t")
+    return t == "" or t[0] == "#"
+
+
 def _yaml_lines(s):
     """(start, end) of each line, without its line break or one trailing '\\r'."""
     out, start = [], 0
@@ -1111,11 +1122,11 @@ def _yaml_lines(s):
         start = nl + 1
 
 
-def _continuation(s, lines, i, col):
+def _continuation(s, lines, i, col, block):
     last = i
     for j in range(i + 1, len(lines)):
         text = s[lines[j][0]:lines[j][1]]
-        if _blank(text):
+        if _blank(text) or (not block and _blank_or_comment(text)):
             continue
         if _indent(text) <= col:
             break
@@ -1126,12 +1137,14 @@ def _continuation(s, lines, i, col):
 def _scalar_below(s, lines, i, col):
     for j in range(i + 1, len(lines)):
         text = s[lines[j][0]:lines[j][1]]
-        if _blank(text):
+        if _blank_or_comment(text):
             continue
-        trimmed = text.lstrip(" \t")
-        return (_indent(text) > col and trimmed != "-" and not trimmed.startswith("- ")
-                and not _YAML_KEY.match(trimmed))
-    return False
+        t = text.lstrip(" \t")
+        if (_indent(text) <= col or t == "-" or t.startswith("- ") or t[0] in "[{"
+                or _YAML_KEY.match(t) or _YAML_QUOTED_KEY.match(t)):
+            return -1
+        return j
+    return -1
 
 
 def _close_quote(s, start):
@@ -1168,20 +1181,25 @@ def _unquote(v):
 
 def _yaml_extent(s, lines, i, e):
     """Set e's value end (and below/multi) and return the index of its last line."""
+    first, line = e["start"], i
     v = s[e["start"]:lines[i][1]]
     if v == "" or v[0] == "#":
-        if not _scalar_below(s, lines, i, e["col"]):
-            e["end"] = e["start"]
+        line = _scalar_below(s, lines, i, e["col"])
+        if line < 0:
             return i
         e["below"] = True
-    last = _continuation(s, lines, i, e["col"])
+        first = lines[line][0] + _indent(s[lines[line][0]:lines[line][1]])
+    elif v[0] in "[{" and not v.startswith("[REDACTED:"):
+        return i
+    v = s[first:lines[line][1]]
+    last = _continuation(s, lines, line, e["col"], bool(_YAML_BLOCK.match(_strip_comment(v).strip())))
     e["multi"] = last > i
     e["end"] = lines[last][1]
-    if not e["below"] and v[0] in "\"'":
-        q = _close_quote(s, e["start"])
+    if v[0] in "\"'":
+        q = _close_quote(s, first)
         if q >= 0:
-            closing = _line_of(lines, i, q)
-            last = _continuation(s, lines, closing, e["col"])
+            closing = _line_of(lines, line, q)
+            last = _continuation(s, lines, closing, e["col"], False)
             e["end"] = q + 1
             if last > closing:
                 e["end"] = lines[last][1]
@@ -1195,7 +1213,7 @@ def _yaml_entries(s, lines):
     out, i = [], 0
     while i < len(lines):
         text = s[lines[i][0]:lines[i][1]]
-        if _blank(text) or text.lstrip(" \t")[0] == "#":
+        if _blank_or_comment(text):
             i += 1
             continue
         g = _YAML_KEY.match(text)
@@ -1206,7 +1224,10 @@ def _yaml_entries(s, lines):
         e = {"key": g.group(2), "col": g.end(1), "item": "-" in g.group(1),
              "colon": lines[i][0] + g.end(2) + text[g.end(2):].index(":") + 1,
              "start": lines[i][0] + g.end(0), "below": False, "multi": False}
-        i = _yaml_extent(s, lines, i, e) + 1
+        e["end"] = e["start"]
+        if _DIRECT_KEY.match(e["key"]) or e["key"].lower() in ("name", "value"):
+            i = _yaml_extent(s, lines, i, e)
+        i += 1
         out.append(e)
     return out
 
@@ -1264,31 +1285,80 @@ def _flag_values(words):
     return out
 
 
+def _decode_json_string(body):
+    """The body of a JSON string decoded up to its first invalid or incomplete escape,
+    with the offset in body each decoded character starts at, plus the end."""
+    out, raw, i = [], [], 0
+    while i < len(body):
+        if body[i] != "\\":
+            out.append(body[i])
+            raw.append(i)
+            i += 1
+            continue
+        nxt = body[i + 1]
+        if nxt == "u":
+            try:
+                ch = chr(int(body[i + 2:i + 6], 16)) if len(body) >= i + 6 else None
+            except ValueError:
+                ch = None
+            n = 6
+        else:
+            ch, n = _JSON_ESCAPES.get(nxt), 2
+        if ch is None:
+            break
+        out.append(ch)
+        raw.append(i)
+        i += n
+    raw.append(i)
+    return "".join(out), raw
+
+
 def _shell_words(d):
+    """(start, end, text, at) per word, as shellWords: quotes and backslashes removed,
+    at mapping each character of text to its offset in d."""
     out, i = [], 0
     while True:
-        while i < len(d) and d[i] in " \t\n\r":
+        while i < len(d) and d[i] in " \t\n":
             i += 1
         if i >= len(d):
             return out
-        start = i
-        while i < len(d) and d[i] not in " \t\n\r":
+        if d[i] == "#":
+            nl = d.find("\n", i)
+            i = len(d) if nl < 0 else nl + 1
+            continue
+        if d[i] in ";&|<>()":
+            i += 1
+            continue
+        start, text, at = i, [], []
+        while i < len(d) and d[i] not in " \t\n;&|<>()":
             c = d[i]
             if c == "'":
-                j = d.find("'", i + 1)
-                i = len(d) if j < 0 else j + 1
+                i += 1
+                while i < len(d) and d[i] != "'":
+                    text.append(d[i])
+                    at.append(i)
+                    i += 1
+                i += 1
             elif c == '"':
                 i += 1
                 while i < len(d) and d[i] != '"':
-                    if d[i] == "\\":
+                    if d[i] == "\\" and i + 1 < len(d) and d[i + 1] in "$`\"\\":
                         i += 1
+                    text.append(d[i])
+                    at.append(i)
                     i += 1
                 i += 1
             elif c == "\\":
+                if i + 1 < len(d):
+                    text.append(d[i + 1])
+                    at.append(i + 1)
                 i += 2
             else:
+                text.append(c)
+                at.append(i)
                 i += 1
-        out.append((start, min(i, len(d))))
+        i = min(i, len(d))
+        out.append((start, i, "".join(text), at))
 
 
 def _array_run(s, q):
@@ -1297,8 +1367,7 @@ def _array_run(s, q):
     out = []
     while True:
         g = _ELEMENT.match(s, q)
-        closed = g.group(2) is not None
-        if not closed:
+        if g.group(2) is None:
             out.append((q + 1, g.end(1), len(s), False))
             return out, len(s)
         stop = g.end()
@@ -1312,15 +1381,15 @@ def _array_run(s, q):
 
 
 def _shell_found(s, e):
-    start, end, stop, closed = e
-    try:
-        cmd = json.loads('"' + s[start:end] + '"')
-    except ValueError:
-        return []
-    bounds = _shell_words(cmd)
-    words = [cmd[a:b] for a, b in bounds]
-    return [_Found(cmd[bounds[i][0] + off:bounds[i][1]], start, stop - closed)
-            for i, off in _flag_values(words)]
+    start, end = e[0], e[1]
+    cmd, raw = _decode_json_string(s[start:end])
+    words = _shell_words(cmd)
+    out = []
+    for i, off in _flag_values([w[2] for w in words]):
+        w_start, w_end, text, at = words[i]
+        dec_start = at[off - 1] + 1 if off > 0 else w_start
+        out.append(_Found(text[off:], start + raw[dec_start], start + raw[w_end]))
+    return out
 
 
 def _find_commands(s):
@@ -1345,42 +1414,47 @@ def _find_commands(s):
         pos = max(end, m.end())
 
 
+def _json_text(raw):
+    """A JSON string body decoded, or as far as it decodes when it is cut short."""
+    return _decode_json_string(raw)[0]
+
+
 def _find_objects(s):
     """String values of credential-named members, and the "value" members of an object
     whose "name" member is a credential name, with names decoded, as objects()."""
     t = s.lstrip(" \t\r\n")
     if not t or t[0] not in "{[":
         return []
-    out = []
-    # A direct key spelled with escapes, closed or truncated: decode it and test it.
-    for m in _ANY_KEY.finditer(s):
-        if "\\" not in m.group(1):
-            continue
-        try:
-            key = json.loads('"' + m.group(1) + '"')
-        except ValueError:
-            continue
-        if _KEY_END_FULL.match(key):
-            out.append(_Found(m.group(2), m.start(2), m.end(2)))
-    found = []
+    paired = set()
 
     def hook(pairs):
-        named = any(k.lower() == "name" and isinstance(v, str) and _KEY_END_FULL.match(v) for k, v in pairs)
-        for k, v in pairs:
-            if isinstance(v, str) and (_KEY_END_FULL.match(k) or (named and k.lower() == "value")):
-                found.append(v)
+        if any(k.lower() == "name" and isinstance(v, str) and _KEY_END_FULL.match(v) for k, v in pairs):
+            paired.update(v for k, v in pairs if k.lower() == "value" and isinstance(v, str))
         return dict(pairs)
 
-    try:
-        json.loads(s, object_pairs_hook=hook)
-    except (ValueError, RecursionError):
-        return out
-    for v in found:
-        raw = json.dumps(v)[1:-1]
-        at = s.find(raw)
-        out.append(_Found(v, at, at + len(raw)) if at >= 0 else _Found(v, 0, 0))
+    # Read value after value (NDJSON too) up to the first syntax error, as Go's
+    # decoder does; members past it are not read.
+    dec, idx, stop = json.JSONDecoder(object_pairs_hook=hook), 0, len(s)
+    while True:
+        while idx < len(s) and s[idx] in " \t\r\n":
+            idx += 1
+        if idx >= len(s):
+            break
+        try:
+            _, idx = dec.raw_decode(s, idx)
+        except (ValueError, RecursionError) as e:
+            stop = getattr(e, "pos", idx)
+            break
+    # Every string, read once from left to right, so a member's span is exact.
+    out, strings = [], list(_ELEMENT.finditer(s))
+    for k, v in zip(strings, strings[1:]):
+        colon = _MEMBER_COLON.match(s, k.end())
+        if k.group(2) is None or k.start() > stop or colon is None or colon.end() != v.start():
+            continue
+        key, val = _json_text(k.group(1)), _json_text(v.group(1))
+        if _KEY_END_FULL.match(key) or (key.lower() == "value" and val in paired):
+            out.append(_Found(val, v.start(1), v.end(1) if v.group(2) else len(s)))
     return out
-
 
 
 # class-2: whole-content secret families (internal/redact contentRules), scanned
@@ -2566,6 +2640,9 @@ def _shared_selftest():
             ("shell_command_flag", '["sh","-c","app --token %s --port 80"]' % live_secret),
             ("flag_value_dashes", '["--password","--%s"]' % live_secret),
             ("placeholder_with_tail", '{"password":"[REDACTED:jwt]%s"}' % live_secret),
+            ("yaml_pair_in_block_scalar",
+             "data:\n  config.yaml: |\n    - name: DB_PASSWORD\n      value: %s\n" % live_secret),
+            ("shell_flag_spelled_with_quotes", '["sh","-c","app \\"--pass\\"word %s"]' % live_secret),
         ]
         # The redactor's output for those shapes, and shapes it leaves alone: a nested
         # mapping under a credential-named key, a pair split across two mappings, an
@@ -2576,7 +2653,8 @@ def _shared_selftest():
             "volumes:\n- name: db\n  secret:\n    secretName: %s\n"
             "items:\n  - name: DB_PASSWORD\nvalue: %s\n"
             '{"n\\u0065xtPageToken":"%s","args":["echo","app --token %s"],'
-            '"cmd":["sh","-c","app --token [REDACTED:credential-field] --port 80"]}'
+            '"cmd":["sh","-c","app --token [REDACTED:credential-field] --port 80"],'
+            '"DB_PASSW\\u004fRD":"\\u005bREDACTED:credential-field]"}'
             % (live_secret, live_secret, live_secret, live_secret))
         # --live-secrets edge paths (class-1 file mechanism): an empty file is valid
         # (ambient-credential runs enumerate no env secret) and a missing/unreadable path

@@ -65,8 +65,14 @@ func (ru rule) apply(s string) string {
 // URLs intact, mirroring RedactHeader's Location exemption so signed GitHub/S3
 // download redirects survive backstop redaction and stay followable.
 // It is for tool-result content at the sandbox and
-// model-egress boundaries; on content with no Location it equals Redact.
+// model-egress boundaries; on content with no Location it equals Redact. Content
+// that already holds the sentinel delimiter could steer a restored URL to another
+// place, so it is redacted like any other content, Location included.
 func (r *Redactor) RedactPreservingLocation(s string) string {
+	if strings.ContainsRune(s, sentinelDelim) {
+		return r.Redact(s)
+	}
+
 	var saved []string
 
 	stash := func(prefix, value, suffix string) string {
@@ -95,13 +101,16 @@ func (r *Redactor) RedactPreservingLocation(s string) string {
 	return s
 }
 
+// sentinelDelim delimits a location sentinel: U+E000, a private-use character
+// that is valid inside a JSON string, so the structural JSON pass can still read
+// a body whose Location was stashed.
+const sentinelDelim = '\ue000'
+
 // locationSentinel is a placeholder carrying no rule keyword or secret-shaped
 // content, so a stashed Location URL passes through Redact untouched and is
-// restored verbatim. Its delimiters are U+E000, a private-use character that is
-// valid inside a JSON string, so the structural JSON pass can still read a body
-// whose Location was stashed.
+// restored verbatim.
 func locationSentinel(i int) string {
-	return "\ue000cynative-loc-" + strconv.Itoa(i) + "\ue000"
+	return string(sentinelDelim) + "cynative-loc-" + strconv.Itoa(i) + string(sentinelDelim)
 }
 
 // RedactHeader rewrites h in place. A denylisted header's values become

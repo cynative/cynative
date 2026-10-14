@@ -1,8 +1,8 @@
 package redact
 
 import (
-	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -110,87 +110,192 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	return out
 }
 
-// shellSpans decodes a shell command element, redacts the credential values among
-// its words and re-encodes it when anything changed.
+// shellSpans finds the credential values among the words of a shell command
+// element and returns the raw spans that hold them. Only those bytes change; the
+// rest of the element keeps its exact spelling, escapes included.
 func (m matchers) shellSpans(s string, e element) []span {
-	var cmd string
-	if json.Unmarshal([]byte(`"`+s[e.start:e.end]+`"`), &cmd) != nil {
-		return nil
-	}
-	bounds := shellWords(cmd)
-	words := make([]string, len(bounds))
-	for i, b := range bounds {
-		words[i] = cmd[b[0]:b[1]]
+	cmd, raw := decodeJSONString(s[e.start:e.end])
+	words := shellWords(cmd)
+	texts := make([]string, len(words))
+	for i, w := range words {
+		texts[i] = w.text
 	}
 
-	var parts []span
+	var out []span
 
-	for _, v := range m.flagValues(words) {
-		b := bounds[v.index]
-		if !m.done(cmd[b[0]+v.offset : b[1]]) {
-			parts = append(parts, span{b[0] + v.offset, b[1], placeholder("credential-field")})
+	for _, v := range m.flagValues(texts) {
+		w := words[v.index]
+		start, repl := w.start, placeholder("credential-field")
+		if v.offset > 0 {
+			// A joined value starts after the '='. When the '=' is inside quotes, the
+			// span takes the closing quote too, so the replacement closes them again.
+			start = w.at[v.offset-1] + 1
+			repl += closeShellQuote(w.quote[v.offset-1])
+		}
+		if !m.done(w.text[v.offset:]) {
+			out = append(out, span{e.start + raw[start], e.start + raw[w.end], repl})
 		}
 	}
-	if len(parts) == 0 {
-		return nil
-	}
 
-	return []span{{e.start, e.stop - boolInt(e.closed), jsonStringBody(applySpans(cmd, parts))}}
+	return out
 }
 
-// shellWords splits a POSIX shell command into words, honoring single quotes,
-// double quotes with backslash escapes and a backslash outside quotes. Each word
-// is a [start, end) pair of offsets.
-func shellWords(d string) [][2]int {
-	var out [][2]int
+// jsonEscapes maps the byte after a backslash to the byte it stands for.
+const jsonEscapes = "\"\"\\\\//b\bf\fn\nr\rt\t"
 
-	i := 0
-	for {
-		for i < len(d) && isShellSpace(d[i]) {
+const (
+	// escapeWidth is a backslash and the byte it escapes.
+	escapeWidth = 2
+	// hexWidth is the four hex digits of a \u escape.
+	hexWidth = 4
+)
+
+// decodeJSONString decodes the body of a JSON string up to its first invalid or
+// incomplete escape (one cut off at the content cap), so the words before it are
+// still read. raw maps each byte of the result, and its end, to the offset in the
+// body where that byte's character starts.
+func decodeJSONString(body string) (string, []int) {
+	var b strings.Builder
+
+	raw := make([]int, 0, len(body)+1)
+	for i := 0; i < len(body); {
+		if body[i] != '\\' {
+			b.WriteByte(body[i])
+			raw = append(raw, i)
+			i++
+
+			continue
+		}
+		dec, n, ok := decodeEscape(body[i:])
+		if !ok {
+			return b.String(), append(raw, i)
+		}
+		b.WriteString(dec)
+		for range len(dec) {
+			raw = append(raw, i)
+		}
+		i += n
+	}
+
+	return b.String(), append(raw, len(body))
+}
+
+// decodeEscape decodes the escape at the start of esc, returning the text it
+// stands for and its length. An element's body never ends in a lone backslash
+// (the element pattern takes a backslash only with the byte after it), so esc
+// holds at least two bytes.
+func decodeEscape(esc string) (string, int, bool) {
+	if esc[1] == 'u' {
+		if len(esc) < escapeWidth+hexWidth {
+			return "", 0, false
+		}
+		v, err := strconv.ParseUint(esc[escapeWidth:escapeWidth+hexWidth], 16, 16)
+
+		return string(rune(v)), escapeWidth + hexWidth, err == nil
+	}
+	for k := 0; k < len(jsonEscapes); k += 2 {
+		if jsonEscapes[k] == esc[1] {
+			return jsonEscapes[k+1 : k+2], escapeWidth, true
+		}
+	}
+
+	return "", 0, false
+}
+
+// shellWord is one word of a shell command: its bounds in the command, its text
+// with quotes and escapes removed, and for each byte of the text the offset it
+// came from and the quote it was inside (0 for none).
+type shellWord struct {
+	start, end int
+	text       string
+	at         []int
+	quote      []byte
+}
+
+// closeShellQuote spells the quote q closes inside a JSON string.
+func closeShellQuote(q byte) string {
+	switch q {
+	case '"':
+		return `\"`
+	case '\'':
+		return "'"
+	}
+
+	return ""
+}
+
+// shellWords splits a POSIX shell command into words. Quotes and backslashes are
+// removed the way the shell removes them, so a flag spelled "--pass"word or
+// --pass\word is read as --password. Unquoted ; & | < > ( ) end a word and a #
+// at the start of a word comments out the rest of the line. Expansions, here
+// documents and other syntax are not interpreted.
+func shellWords(d string) []shellWord {
+	var out []shellWord
+
+	for i := 0; ; {
+		for i < len(d) && strings.IndexByte(shellBlank, d[i]) >= 0 {
 			i++
 		}
-		if i >= len(d) {
+		switch {
+		case i >= len(d):
 			return out
+		case d[i] == '#':
+			_, rest, _ := strings.Cut(d[i:], "\n")
+			i = len(d) - len(rest)
+		case strings.IndexByte(shellOperators, d[i]) >= 0:
+			i++
+		default:
+			w := shellWord{start: i}
+			i = w.read(d, i)
+			w.end = i
+			out = append(out, w)
 		}
-		start := i
-		for i < len(d) && !isShellSpace(d[i]) {
-			i = shellChar(d, i)
-		}
-		out = append(out, [2]int{start, min(i, len(d))})
 	}
 }
 
-// escapeWidth is a backslash and the byte it escapes.
-const escapeWidth = 2
+const (
+	shellBlank     = " \t\n"
+	shellOperators = ";&|<>()"
+)
 
-// shellChar returns the offset after the character, quoted string or escape that
-// starts at d[i].
-func shellChar(d string, i int) int {
-	switch d[i] {
-	case '\'':
-		if j := strings.IndexByte(d[i+1:], '\''); j >= 0 {
-			closing := i + 1 + j
+// read consumes one word from d[i:] and returns the offset after it.
+func (w *shellWord) read(d string, i int) int {
+	var b []byte
 
-			return closing + 1
-		}
-
-		return len(d)
-	case '"':
-		for i++; i < len(d) && d[i] != '"'; i++ {
-			if d[i] == '\\' {
-				i++
+	add := func(j int, q byte) {
+		b = append(b, d[j])
+		w.at = append(w.at, j)
+		w.quote = append(w.quote, q)
+	}
+	for i < len(d) && strings.IndexByte(shellBlank+shellOperators, d[i]) < 0 {
+		switch d[i] {
+		case '\'':
+			for i++; i < len(d) && d[i] != '\''; i++ {
+				add(i, '\'')
 			}
+			i++
+		case '"':
+			for i++; i < len(d) && d[i] != '"'; i++ {
+				if d[i] == '\\' && i+1 < len(d) && strings.IndexByte("$`\"\\", d[i+1]) >= 0 {
+					i++
+				}
+				add(i, '"')
+			}
+			i++
+		case '\\':
+			if i+1 < len(d) {
+				add(i+1, 0)
+			}
+			i += escapeWidth
+		default:
+			add(i, 0)
+			i++
 		}
-
-		return i + 1
-	case '\\':
-		return i + escapeWidth
 	}
+	w.text = string(b)
 
-	return i + 1
+	return min(i, len(d))
 }
-
-func isShellSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
 
 func boolInt(b bool) int {
 	if b {
@@ -198,18 +303,6 @@ func boolInt(b bool) int {
 	}
 
 	return 0
-}
-
-// jsonStringBody encodes v as the body of a JSON string, without its quotes.
-func jsonStringBody(v string) string {
-	var b bytes.Buffer
-
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(v) // A string always encodes; Encode cannot fail on one.
-	out := strings.TrimSuffix(b.String(), "\n")
-
-	return out[1 : len(out)-1]
 }
 
 // ---- JSON objects ------------------------------------------------------------
