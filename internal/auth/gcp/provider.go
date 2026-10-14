@@ -72,19 +72,24 @@ func (p *Provider) AuthorizeAction(ctx context.Context, v authreq.View, args aut
 		}
 	}
 
+	// ParseHost accepted v.Hostname, which NewView lower-cased, so trimming the one trailing dot is all
+	// normalizeHost would still change about it.
+	if service == storageService && !isWWW && !isStorageJSONHost(strings.TrimSuffix(v.Hostname, ".")) {
+		// Any other Storage host is a bucket host (<bucket>.storage.googleapis.com), which serves the XML API for
+		// every path: GET /storage/v1/b/bk/o there reads the object named storage/v1/b/bk/o, so a JSON API template
+		// names a method the server never runs.
+		return fmt.Errorf("%w: %q", ErrStorageXMLHost, v.Hostname)
+	}
+
 	idx, err := p.catalog.MethodIndex(ctx, service)
 	if err != nil {
 		return err
 	}
 
 	classifyFn := Classify
-	// ParseHost accepted v.Hostname, which NewView lower-cased, so trimming the one trailing dot is all
-	// normalizeHost would still change about it.
-	if service == storageService && (isWWW || isStorageJSONHost(strings.TrimSuffix(v.Hostname, "."))) {
+	if service == storageService {
 		// Storage's JSON API routes the path as sent: GET .../o/x%2Facl reads the object x/acl on its own
-		// endpoints and on www.googleapis.com, so the decoded reading names an operation it never runs. A bucket
-		// host (<bucket>.storage.googleapis.com) serves the XML API, which reads the whole path as an object key,
-		// so it keeps pooling both readings.
+		// endpoints and on www.googleapis.com, so the decoded reading names an operation it never runs.
 		classifyFn = ClassifyAsSent
 	}
 

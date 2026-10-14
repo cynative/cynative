@@ -13,4 +13,6 @@ var (
 	ErrRoleDisabled         = errors.New("gcp_hardening: allow-list role is disabled or deleted")
 	ErrInvalidRoleRef       = errors.New("gcp_hardening: invalid role reference")
 	ErrProjectUnresolved    = errors.New("gcp_hardening: caller project ID could not be resolved")
+	ErrStorageXMLHost       = errors.New(
+		"gcp_hardening: Cloud Storage host serves the XML API, which is not supported; use storage.googleapis.com")
 )
