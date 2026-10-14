@@ -999,9 +999,25 @@ def run_canary(records, spec, canary, target):
 # credName mirrors internal/redact credentialRules' key vocabulary exactly (the
 # underscore-optional, multi-component *_token family included), so the parser
 # recognizes the same credential-named fields the production redactor targets.
-_CRED_NAME = (r"access_?token|refresh_?token|id_?token|client_?secret|secret|password|"
-              r"secret_?access_?key|session_?token|api_?key|apikey|private_?key|"
+_CRED_NAME = (r"access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|passphrase|"
+              r"secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key|"
               r"(?:[a-z0-9]+_)+token|token")
+
+# _KEY_END mirrors rules.go keyEnd: a key or variable name that ENDS in a credential
+# word (DB_PASSWORD, webhookSecret), except bare "token", which takes no prefix so
+# pagination cursors (nextPageToken, NextToken) are not read as credentials.
+_KEY_END = (r"[\w.-]*(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|"
+            r"passwd|passphrase|secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key)|"
+            r"(?:[a-z0-9]+_)+token|token")
+# _FLAG_ARG mirrors rules.go flagArg: a command-line flag ending in a credential word.
+_FLAG_ARG = (r"--[\w-]*(?:token|password|passwd|passphrase|secret|api[-_]?key|"
+             r"secret[-_]?access[-_]?key|private[-_]?key|bearer)")
+# A JSON string body (any escape, a backslash before a newline included), its end (a
+# closing quote, or end of content for a value truncated at the cap), and a lazy run
+# of scalar members between a name and its value, as rules.go jsonValue/jsonEnd/jsonFields.
+_JSON_VALUE = r'(?:\\[\s\S]|[^"\\])*'
+_JSON_END = r'(?:"|\\?\Z)'
+_JSON_FIELDS = r'(?:\s*,\s*"' + _JSON_VALUE + r'"\s*:\s*(?:"' + _JSON_VALUE + r'"|[\w.+-]+))*?'
 
 # class-2: whole-content secret families (internal/redact contentRules), scanned
 # anywhere. Each is keyword-pre-gated - run the regex only when a cheap distinctive
@@ -1038,7 +1054,24 @@ _CONTENT_RULES = (
 # canary_url "u:p" and GitHub canary "Authorization: Bearer x" stay canary defects (1),
 # not leaks.
 _POSITIONAL_RULES = (
-    (re.compile(r'"(?:' + _CRED_NAME + r')"\s*:\s*"((?:\\.|[^"\\])*)"', re.I), "credential-field"),
+    (re.compile(r'"(?:' + _KEY_END + r')"\s*:\s*"(' + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
+    # Name/value pairs in either order (ECS, Batch, CodeBuild and Kubernetes env) and
+    # their YAML "- name:" / "value:" form, mirroring rules.go's pair rules.
+    (re.compile(r'"name"\s*:\s*"(?:' + _KEY_END + r')"' + _JSON_FIELDS + r'\s*,\s*"value"\s*:\s*"('
+                + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
+    (re.compile(r'"value"\s*:\s*"(' + _JSON_VALUE + r')"' + _JSON_FIELDS + r'\s*,\s*"name"\s*:\s*"(?:'
+                + _KEY_END + r')"', re.I), "credential-field"),
+    (re.compile(r"^[ \t]*-[ \t]+name:[ \t]*[\"']?(?:" + _KEY_END + r")[\"']?[ \t]*\r?\n[ \t]*value:[ \t]*"
+                r"([^\s\[][^\r\n]*)", re.I | re.M), "credential-field"),
+    (re.compile(r"^[ \t]*-[ \t]+value:[ \t]*([^\s\[][^\r\n]*?)[ \t]*\r?\n[ \t]*name:[ \t]*[\"']?(?:"
+                + _KEY_END + r")[\"']?[ \t]*\r?$", re.I | re.M), "credential-field"),
+    # A credential flag in a JSON array element, joined ("--password=v") or with its
+    # value in the next element; a next element starting "--" is another flag. The
+    # joined form skips an object key spelled like a flag, as rules.go's notKey does.
+    (re.compile(r'[\[,]\s*"' + _FLAG_ARG + r'=(' + _JSON_VALUE + r')(?:"(?!\s*:)|\\?\Z)', re.I),
+     "credential-field"),
+    (re.compile(r'[\[,]\s*"' + _FLAG_ARG + r'"\s*,\s*"((?:[^-"\\]|\\[\s\S]|-(?:[^-"\\]|\\[\s\S]))'
+                + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
     (re.compile(r"<(?:" + _CRED_NAME + r")>([^<]*)</[A-Za-z0-9_:.-]+>", re.I), "credential-field"),
     # YAML "key: value" line: the key ENDS in a credential name, so DB_/AWS_/client-
     # prefixes are allowed, plus an optional "- " sequence-item marker. Line-anchored
@@ -2134,6 +2167,33 @@ def _shared_selftest():
         env_cred_line = _jline("c1", "attempt", {
             "method": "GET", "url": "https://iam.amazonaws.com/", "auth_provider": "aws",
             "body": "AWS_SECRET_ACCESS_KEY=" + live_secret})
+        # class-3 (#307 shapes): a neutral value under a prefixed JSON key, in a
+        # name/value pair (both orders, JSON and YAML) or after a credential flag. As
+        # above, no --live-secrets file, so only the class-3 rule can flag each one.
+        def _body_line(body):
+            return _jline("c1", "attempt", {
+                "method": "GET", "url": "https://iam.amazonaws.com/", "auth_provider": "aws", "body": body})
+        shape307_leaks = [
+            ("prefixed_key", '{"DB_PASSWD":"%s"}' % live_secret),
+            ("name_value", '[{"name":"DB_PASSWORD","type":"PLAINTEXT","value":"%s"}]' % live_secret),
+            ("value_name", '[{"value":"%s","name":"API_KEY"}]' % live_secret),
+            ("yaml_pair", "- Name: DB_PASSWORD\n  Value: %s\n" % live_secret),
+            # Truncated, so the body does not parse into elements: a parsed element
+            # "--db-password=v" on its own also reads as an env line.
+            ("flag_joined", '["--db-password=%s' % live_secret),
+            ("flag_separate", '["--generate-secret","--token","%s"]' % live_secret),
+            ("kebab_key", '{"service-api-key":"%s"}' % live_secret),
+            ("yaml_pair_reversed", "- value: %s\n  name: DB_PASSWORD\n" % live_secret),
+        ]
+        # The same shapes with nothing to flag: a pagination cursor, a non-credential
+        # pair, a flag-shaped member value, values the redactor already replaced, a
+        # boolean flag whose next element is another flag, and a flag-shaped object key.
+        shape307_clean = _body_line(
+            '{"nextPageToken":"%s","items":[{"name":"DB_HOST","value":"%s"}],"t":"--token","public":"%s",'
+            '"env":[{"name":"DB_PASSWORD","value":"[REDACTED:credential-field]"}],'
+            '"args":["--token","[REDACTED:credential-field]"],'
+            '"cmd":["--no-generate-secret","--client-name","%s"],"--token=%s":1}'
+            % (live_secret, live_secret, live_secret, live_secret, live_secret))
         # --live-secrets edge paths (class-1 file mechanism): an empty file is valid
         # (ambient-credential runs enumerate no env secret) and a missing/unreadable path
         # is a wiring bug that fails closed.
@@ -2213,6 +2273,11 @@ def _shared_selftest():
             # class-3 new rules: a credential-named YAML/env line leaks its value.
             ("cred_yaml_credential_field", 4, lambda: _guard(lambda: cp([yaml_cred_line]))),
             ("cred_env_credential_field", 4, lambda: _guard(lambda: cp([env_cred_line]))),
+        ] + [
+            ("cred_307_" + name, 4, (lambda line: lambda: _guard(lambda: cp([line])))(_body_line(body)))
+            for name, body in shape307_leaks
+        ] + [
+            ("cred_307_clean", 0, lambda: _guard(lambda: cp([shape307_clean]))),
             # --live-secrets edge paths: a missing/unreadable file fails closed, an empty
             # file is valid (class-1 skipped) and leaves an otherwise-clean scan clean.
             ("cred_missing_secrets_file", 4, lambda: _guard(lambda: cp([clean_line], p_missing_secrets))),

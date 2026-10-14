@@ -18,6 +18,16 @@ func FuzzRedact(f *testing.F) {
 	f.Add("Bearer eyJhbGci.eyJzdWIi.sig123_-")
 	f.Add("")
 	f.Add(string([]byte{0xff, 0xfe, 'h', 'i'}))
+	f.Add(`{"Variables":{"DB_PASSWORD":"hunter2","nextPageToken":"CgwI"}}`)
+	f.Add(`[{"name":"DB_PASSWORD","value":"hunter2"},{"name":"DB_HOST","value":"db.internal"}]`)
+	f.Add(`[{"value":"hunter2","name":"API_KEY"}]`)
+	f.Add(`[{"name":"DB_PASSWORD","value":"hunt`)
+	f.Add("env:\n  - name: DB_PASSWORD\n    value: hunter2\n")
+	f.Add(`{"args":["--token","hunter2","--password=hunter2","--token-file","/t"]}`)
+	f.Add(`["--generate-secret","--password","x",{"text":"--token","public":"d"}]`)
+	f.Add("{\"password\":\"sig=x\\\nTAIL")
+	f.Add(`{"service-api-key":"a","x":1,"--token=k":2,"a":["--token=v"]}`)
+	f.Add("- value: v\n  name: DB_PASSWORD\n")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

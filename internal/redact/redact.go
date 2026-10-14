@@ -46,10 +46,33 @@ func (r *Redactor) Redact(s string) string {
 		if !gated(s, ru.keywords) {
 			continue
 		}
-		s = ru.re.ReplaceAllString(s, ru.repl)
+		s = ru.apply(s)
 	}
 
 	return s
+}
+
+// apply runs one rule over s, skipping each match that ':' follows when the rule
+// is notKey.
+func (ru rule) apply(s string) string {
+	if !ru.notKey {
+		return ru.re.ReplaceAllString(s, ru.repl)
+	}
+
+	var b strings.Builder
+
+	last := 0
+	for _, m := range ru.re.FindAllStringSubmatchIndex(s, -1) {
+		if strings.HasPrefix(strings.TrimLeft(s[m[1]:], " \t\r\n"), ":") {
+			continue
+		}
+		b.WriteString(s[last:m[0]])
+		b.Write(ru.re.ExpandString(nil, ru.repl, s, m))
+		last = m[1]
+	}
+	b.WriteString(s[last:])
+
+	return b.String()
 }
 
 // RedactPreservingLocation redacts s like Redact but leaves redirect Location
