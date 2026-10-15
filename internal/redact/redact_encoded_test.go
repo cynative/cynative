@@ -262,3 +262,80 @@ func TestRedact_JSONEncodedNestingBound(t *testing.T) {
 		t.Errorf("five levels: got %q, want it unchanged", got)
 	}
 }
+
+// TestRedact_SigningParamStopsAtEscapedQuote pins that a signing or session
+// param value ends before a backslash that escapes a quote (#410), so the
+// placeholder never takes the backslash and leaves the quote to close the JSON
+// string early. Any other escape stays part of the value.
+func TestRedact_SigningParamStopsAtEscapedQuote(t *testing.T) {
+	t.Parallel()
+
+	const (
+		field = "[REDACTED:credential-field]"
+		sig   = "[REDACTED:signed-url-signature]"
+		token = "[REDACTED:aws-session-token]"
+		bs    = "\x5c"
+	)
+
+	r := redact.New()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "array element ending in an escaped quote",
+			in:   `["sig=x\"tail","{\"DB_PASSWORD\":\"hunter2\"}"]`,
+			want: `["sig=` + sig + `\"tail","{\"DB_PASSWORD\":\"` + field + `\"}"]`,
+		},
+		{
+			name: "member value ending in an escaped quote",
+			in:   `{"u":"https://e.test/o?sig=abc\"","password":"p"}`,
+			want: `{"u":"https://e.test/o?sig=` + sig + `\"","password":"` + field + `"}`,
+		},
+		{
+			name: "escaped backslash before the closing quote",
+			in:   `{"u":"sig=ab\\","n":1}`,
+			want: `{"u":"sig=` + sig + `","n":1}`,
+		},
+		{
+			name: "escaped backslash then an escaped quote",
+			in:   `{"u":"sig=ab\\\"c"}`,
+			want: `{"u":"sig=` + sig + `\"c"}`,
+		},
+		{
+			name: "other escapes stay in a value outside a json document",
+			in:   `response={"u":"X-Amz-Security-Token=ab` + bs + `/cd` + bs + `u002bef+gh"}`,
+			want: `response={"u":"X-Amz-Security-Token=` + token + `"}`,
+		},
+		{
+			name: "backslash before a line break stays",
+			in:   "sig=ab" + bs + "\npassword: x\n",
+			want: "sig=" + sig + bs + "\npassword: " + field + "\n",
+		},
+		{
+			name: "backslash before an ampersand stays",
+			in:   "sig=ab" + bs + "&t=1",
+			want: "sig=" + sig + bs + "&t=1",
+		},
+		{
+			name: "plain text value keeps every character",
+			in:   `X-Amz-Signature=ab+cd/ef=` + "\n",
+			want: `X-Amz-Signature=` + sig + "\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := r.Redact(tc.in)
+			if got != tc.want {
+				t.Fatalf("Redact(%q)\n got  %q\n want %q", tc.in, got, tc.want)
+			}
+			if again := r.Redact(got); again != got {
+				t.Fatalf("second Redact changed %q to %q", got, again)
+			}
+		})
+	}
+}

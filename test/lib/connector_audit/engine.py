@@ -1070,10 +1070,12 @@ def _redacted(val, rx=None):
     whole value, so it must be exactly one placeholder: one followed by more text
     (a continued YAML value after a token label) is a leak. A regex rule's capture
     can run past the placeholder into the serialization around it (the escaped
-    newline after sig=[REDACTED:...] in a raw audit line), so a prefix is enough."""
+    newline after sig=[REDACTED:...] in a raw audit line), so a prefix is enough. A
+    capture of backslashes alone is that serialization around an empty value (the
+    escaped quote of "sig=\\\"" in a raw line), which the redactor leaves as it is."""
     if isinstance(rx, _Detector):
         return bool(_PLACEHOLDER.match(val))
-    return val.startswith("[REDACTED")
+    return val.startswith("[REDACTED") or not val.strip("\\")
 
 
 def _fold(t):
@@ -2727,6 +2729,14 @@ def _shared_selftest():
         redacted_line = _jline("c1", "result",
                                {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
                                result="response body: [REDACTED:jwt] ok", outcome="ok")
+        # an empty signing param value before a JSON escaped quote, which the redactor
+        # leaves as it is (#410), and one whose value follows a backslash.
+        sig_empty_line = _jline("c1", "result",
+                                {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
+                                result='["u?sig=\\"a","u?X-Amz-Security-Token=\\"b"]', outcome="ok")
+        sig_backslash_line = _jline("c1", "result",
+                                    {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
+                                    result="sig=\\" + live_secret, outcome="ok")
         # the non-secret witness fact (a project number) must not be mistaken for a leak.
         witness_line = _jline("c1", "result", {
             "method": "GET",
@@ -2893,6 +2903,8 @@ def _shared_selftest():
             ("cred_userinfo_nonsecret_ok", 0, lambda: _guard(lambda: cp([ui_plain_line]))),
             ("cred_authhdr_bearer_ok", 0, lambda: _guard(lambda: cp([authhdr_line]))),
             ("cred_redacted_placeholder_ok", 0, lambda: _guard(lambda: cp([redacted_line]))),
+            ("cred_signing_empty_value_ok", 0, lambda: _guard(lambda: cp([sig_empty_line]))),
+            ("cred_signing_value_after_backslash", 4, lambda: _guard(lambda: cp([sig_backslash_line]))),
             ("cred_witness_fact_ok", 0, lambda: _guard(lambda: cp([witness_line]))),
             ("cred_percent_encoded_secret", 4, lambda: _guard(lambda: cp([enc_line], p_secrets))),
             ("cred_multiline_blob_leaked", 4, lambda: _guard(lambda: cp([multi_leak_line], p_secrets_multi))),
