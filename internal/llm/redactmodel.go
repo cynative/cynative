@@ -10,8 +10,8 @@ import (
 
 // RedactingChatModel wraps a schema.ChatModel and redacts all message content
 // sent to the provider — TextBlock text (every role) and ToolResultBlock content
-// — leaving ToolCallBlock (model-authored code) and the tool schemas
-// untouched. Tool-result content is redacted with RedactPreservingLocation so a
+// — leaving ToolCallBlock (model-authored code), ReasoningBlock (backend replay
+// state) and the tool schemas untouched. Tool-result content is redacted with RedactPreservingLocation so a
 // signed redirect Location URL survives (transport leaves it intact for
 // redirect-following); operator/model text is fully redacted.
 // It copies the transcript rather than mutating it, so it is safe to share
@@ -69,11 +69,12 @@ func (m *RedactingChatModel) redactGenerateError(err error) error {
 
 // redactMessage returns a copy of msg with a fresh Content slice in which text
 // and tool-result blocks are redacted, so the original message is never mutated.
-// schema.Block is a sealed interface: the only block the default arm passes
-// through today is ToolCallBlock (model-authored JS/JSON — redacting it could
-// corrupt valid code, and by construction the model never held a raw secret to
-// embed). Any NEW content-bearing Block variant added to internal/schema must
-// gain its own redaction case here, or it would reach the provider unredacted.
+// schema.Block is a sealed interface: ReasoningBlock has its own pass-through
+// case below, and the only block the default arm passes through today is
+// ToolCallBlock (model-authored JS/JSON — redacting it could corrupt valid code,
+// and by construction the model never held a raw secret to embed). Any NEW
+// content-bearing Block variant added to internal/schema must gain its own case
+// here, or it would reach the provider unredacted.
 func (m *RedactingChatModel) redactMessage(msg *schema.Message) *schema.Message {
 	blocks := make([]schema.Block, len(msg.Content))
 	for i, blk := range msg.Content {
@@ -85,6 +86,13 @@ func (m *RedactingChatModel) redactMessage(msg *schema.Message) *schema.Message 
 				ToolCallID: b.ToolCallID,
 				Content:    m.redactor.RedactPreservingLocation(b.Content),
 			}
+		case schema.ReasoningBlock:
+			// Backend replay state goes back to the backend that issued it, unchanged:
+			// replay formats can require signed or encrypted fields byte for byte, and
+			// the aggregate text follows the same rule. cynative never renders, audits
+			// or logs it itself and never hands it to a tool; the SDK's own log lines
+			// pass through the redacting logger.
+			blocks[i] = b
 		default:
 			// ToolCallBlock today (see doc comment); a future content-bearing
 			// variant MUST be added as an explicit redaction case above.
