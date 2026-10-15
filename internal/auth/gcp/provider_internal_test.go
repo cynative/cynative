@@ -884,8 +884,8 @@ func subResourceProvider() *Provider {
 // TestProviderAuthorizeAction_StorageReadsThePathAsSent: an object named like a
 // sub-resource (x/acl) is the object read Storage serves on both hosts that
 // carry the JSON API, while a literal /acl still classifies as the ACL list and
-// is denied. A bucket host and a non-Storage service keep pooling both
-// readings, so the same shape there stays ambiguous.
+// is denied. A non-Storage service keeps pooling both readings, so the same
+// shape there stays ambiguous.
 func TestProviderAuthorizeAction_StorageReadsThePathAsSent(t *testing.T) {
 	t.Parallel()
 
@@ -911,16 +911,41 @@ func TestProviderAuthorizeAction_StorageReadsThePathAsSent(t *testing.T) {
 		t.Errorf("literal acl err = %v, want it classified as storage.objectAccessControls.list and denied", err)
 	}
 
-	// A bucket host serves the XML API, which reads the whole path as an object key, so it keeps both readings.
-	err = p.AuthorizeAction(t.Context(),
-		providerView(t, "GET", "https://bk.storage.googleapis.com/storage/v1/b/bk/o/x%2Facl"), gcpArgs(t, "storage"))
-	if !errors.Is(err, ErrClassifierUnknownOp) || !strings.Contains(err.Error(), "2 methods match") {
-		t.Errorf("bucket host err = %v, want the 2-method ambiguity", err)
-	}
-
 	err = p.AuthorizeAction(t.Context(),
 		providerView(t, "GET", "https://example.googleapis.com/v1/things/x%2Facl"), gcpArgs(t, "example"))
 	if !errors.Is(err, ErrClassifierUnknownOp) || !strings.Contains(err.Error(), "2 methods match") {
 		t.Errorf("non-storage err = %v, want the 2-method ambiguity", err)
+	}
+}
+
+// TestProviderAuthorizeAction_DeniesStorageBucketHost: a bucket host serves the
+// XML API, which reads the whole path as an object key, so a JSON API template
+// there names a method the server never runs. The role grants
+// storage.objects.get and the path matches storage.objects.get, yet the request
+// is denied, with or without a trailing dot. Paths that classify to an ungranted
+// method or to none still get ErrStorageXMLHost, which pins the deny ahead of
+// classification.
+func TestProviderAuthorizeAction_DeniesStorageBucketHost(t *testing.T) {
+	t.Parallel()
+
+	p := subResourceProvider()
+
+	jsonHost := providerView(t, "GET", "https://storage.googleapis.com/storage/v1/b/bk/o/x")
+	if err := p.AuthorizeAction(t.Context(), jsonHost, gcpArgs(t, "storage")); err != nil {
+		t.Fatalf("JSON host object read = %v, want allowed", err)
+	}
+
+	for _, raw := range []string{
+		"https://bk.storage.googleapis.com/storage/v1/b/bk/o/x",
+		"https://bk.storage.googleapis.com./storage/v1/b/bk/o/x",
+		"https://a.b.storage.googleapis.com/storage/v1/b/bk/o/x",
+		"https://bk.storage.googleapis.com/storage/v1/b/bk/o/x%2Facl",
+		"https://bk.storage.googleapis.com/storage/v1/b/bk/o/x/acl", // classifies to a method the role lacks.
+		"https://bk.storage.googleapis.com/no/such/template",
+	} {
+		err := p.AuthorizeAction(t.Context(), providerView(t, "GET", raw), gcpArgs(t, "storage"))
+		if !errors.Is(err, ErrStorageXMLHost) {
+			t.Errorf("AuthorizeAction(%s) = %v, want ErrStorageXMLHost", raw, err)
+		}
 	}
 }
