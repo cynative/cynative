@@ -1070,12 +1070,13 @@ def _redacted(val, rx=None):
     whole value, so it must be exactly one placeholder: one followed by more text
     (a continued YAML value after a token label) is a leak. A regex rule's capture
     can run past the placeholder into the serialization around it (the escaped
-    newline after sig=[REDACTED:...] in a raw audit line), so a prefix is enough. A
-    capture of backslashes alone is that serialization around an empty value (the
-    escaped quote of "sig=\\\"" in a raw line), which the redactor leaves as it is."""
+    newline after sig=[REDACTED:...] in a raw audit line), so a prefix is enough. For
+    a signing or session param, a capture of backslashes alone is that serialization
+    around an empty value (the escaped quote of "sig=\\\"" in a raw line), which the
+    redactor leaves as it is."""
     if isinstance(rx, _Detector):
         return bool(_PLACEHOLDER.match(val))
-    return val.startswith("[REDACTED") or not val.strip("\\")
+    return val.startswith("[REDACTED") or (rx in _SIGNING_PARAM_RES and not val.strip("\\"))
 
 
 def _fold(t):
@@ -1622,6 +1623,16 @@ _CONTENT_RULES = (
 # anywhere-scan already flags them exactly when the value is a real secret, so the AWS
 # canary_url "u:p" and GitHub canary "Authorization: Bearer x" stay canary defects (1),
 # not leaks.
+# The signing and session query params of class-3. The redactor leaves an empty value
+# before a JSON escaped quote as it is (#410), so only these rules accept a capture of
+# backslashes alone.
+_SIGNING_PARAM_RULES = (
+    (re.compile(r"(?:X-Amz-Signature|X-Goog-Signature|Signature|sig)=([^&\"'\s]+)", re.I),
+     "signed-url-signature"),
+    (re.compile(r"(?:X-Amz-Security-Token)=([^&\"'\s]+)", re.I), "aws-session-token"),
+)
+_SIGNING_PARAM_RES = frozenset(rx for rx, _label in _SIGNING_PARAM_RULES)
+
 _POSITIONAL_RULES = (
     (re.compile(r'"(?:' + _KEY_END + r')"\s*:\s*"(' + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
     # Name/value pairs in either order (ECS, Batch, CodeBuild and Kubernetes env),
@@ -1650,10 +1661,7 @@ _POSITIONAL_RULES = (
     # piped input.
     (re.compile(r"^[ \t]*(?:export[ \t]+)?[\w.-]*(?:" + _CRED_SUFFIX + r")[ \t]*=[ \t]*([^\s\[][^\r\n]*)",
                 re.I | re.M), "credential-field"),
-    (re.compile(r"(?:X-Amz-Signature|X-Goog-Signature|Signature|sig)=([^&\"'\s]+)", re.I),
-     "signed-url-signature"),
-    (re.compile(r"(?:X-Amz-Security-Token)=([^&\"'\s]+)", re.I), "aws-session-token"),
-)
+) + _SIGNING_PARAM_RULES
 
 
 def _read_live_secrets(secrets_path):
@@ -2905,6 +2913,11 @@ def _shared_selftest():
             ("cred_redacted_placeholder_ok", 0, lambda: _guard(lambda: cp([redacted_line]))),
             ("cred_signing_empty_value_ok", 0, lambda: _guard(lambda: cp([sig_empty_line]))),
             ("cred_signing_value_after_backslash", 4, lambda: _guard(lambda: cp([sig_backslash_line]))),
+            # the backslash exemption is the signing params' alone: a credential field
+            # whose value is backslashes still fails closed.
+            ("cred_yaml_backslash_value", 4, lambda: _guard(lambda: cp([_body_line("password: \\\\")]))),
+            ("cred_env_backslash_value", 4, lambda: _guard(lambda: cp([_body_line("PASSWORD=\\\\")]))),
+            ("cred_xml_backslash_value", 4, lambda: _guard(lambda: cp([_body_line("<password>\\\\</password>")]))),
             ("cred_witness_fact_ok", 0, lambda: _guard(lambda: cp([witness_line]))),
             ("cred_percent_encoded_secret", 4, lambda: _guard(lambda: cp([enc_line], p_secrets))),
             ("cred_multiline_blob_leaked", 4, lambda: _guard(lambda: cp([multi_leak_line], p_secrets_multi))),
