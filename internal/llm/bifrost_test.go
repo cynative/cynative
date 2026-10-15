@@ -12,11 +12,17 @@ func assistantResp(content string) *schemas.BifrostChatResponse {
 		Role:    schemas.ChatMessageRoleAssistant,
 		Content: &schemas.ChatMessageContent{ContentStr: new(content)},
 	}
+
+	return messageResp(&msg)
+}
+
+// messageResp wraps one message in a single-choice non-streaming response.
+func messageResp(msg *schemas.ChatMessage) *schemas.BifrostChatResponse {
 	return &schemas.BifrostChatResponse{ //nolint:exhaustruct // only Choices needed
 		Choices: []schemas.BifrostResponseChoice{
 			{ //nolint:exhaustruct // only ChatNonStreamResponseChoice needed
 				ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
-					Message: &msg,
+					Message: msg,
 				},
 			},
 		},
