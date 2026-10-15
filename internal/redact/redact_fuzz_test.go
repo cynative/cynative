@@ -44,6 +44,7 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`["bash","--noprofile","-o","pipefail","+O","x","-ec","app --password --p in"],` +
 		`["\u002d\u002dtoken","--no-x","--no-token","v"]`)
 	f.Add(",\"--pAsswd\",\"sh\",\"-c\",\"--token= ")
+	f.Add(`["sh","--password","-o","sh","--rcfile","bash","-c","--token=a b","sh","+o","sh","-x"]`)
 	f.Add("password:\n  \"a: b\"\nx:\n  'c: d'\n")
 	f.Add(`["--password","[REDACTED:jwt]\q","sh","-c","app --token [REDACTED:jwt]\qs"]`)
 	f.Add(",\"sh\",\"-c\",\"--pAsswd\\\"=\\\" ")

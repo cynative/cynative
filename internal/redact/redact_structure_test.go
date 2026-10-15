@@ -288,6 +288,18 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `["sh","-c","--pAsswd=` + field + ` `,
 		},
 		{
+			name: "shell names that share a run of options",
+			in:   `["sh","--rcfile","sh","-o","bash","-c","app --token x","sh","--rcfile","sh","-x","--token","y"]`,
+			want: `["sh","--rcfile","sh","-o","bash","-c","app --token ` + field + `","sh","--rcfile","sh","-x","--token","` + field + `"]`,
+		},
+		{
+			// The first shell's options hold a flag's value and the second's do not;
+			// the second decides, so the command is read only as shell words.
+			name: "the last shell name before a command decides how it is read",
+			in:   `["sh","--password","-o","sh","-c","--token=a b"]`,
+			want: `["sh","--password","` + field + `","sh","-c","--token=` + field + ` b"]`,
+		},
+		{
 			name: "flag before a shell command element",
 			in:   `["sh","-c","--token","x"]`,
 			want: `["sh","-c","--token","` + field + `"]`,
