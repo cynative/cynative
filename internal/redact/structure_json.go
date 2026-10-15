@@ -161,17 +161,22 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 // shellCommands finds the command element each shell name runs and reads it as
 // words. shell reports, for each command element, whether it is read only so.
 // Several shell names can reach one command; the last one decides how it is read,
-// and its words are read once.
+// and its words are read once. Most arrays name no shell, so the scan state is
+// built at the first shell name.
 func (m matchers) shellCommands(s string, elems []element, words []string, taken map[int]bool) (map[int]bool, []span) {
-	before := takenBefore(taken, len(elems))
-	shell := make(map[int]bool)
-	memo := make(map[int]int)
-
-	var out []span
+	var (
+		before []int
+		shell  map[int]bool
+		memo   map[int]int
+		out    []span
+	)
 
 	for i := range elems {
 		if !m.shell.MatchString(words[i]) {
 			continue
+		}
+		if before == nil {
+			before, shell, memo = takenBefore(taken, len(elems)), make(map[int]bool), make(map[int]int)
 		}
 		if c := m.commandFrom(words, memo, i+1); c > i && c < len(elems) {
 			_, seen := shell[c]
