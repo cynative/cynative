@@ -21,15 +21,9 @@ type rule struct {
 // Whole-match token & structural rules first, then value-substitution rules.
 func contentRules() []rule {
 	return []rule{
-		// PEM private key: match through the END marker, or to end-of-content
-		// when it is absent (truncation-safe — no key bytes leak at the cap).
-		{
-			keywords: []string{"PRIVATE KEY"},
-			re: regexp.MustCompile(
-				`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\z)`,
-			),
-			repl: placeholder("pem-private-key"),
-		},
+		// PEM private key, through the END marker or to the end of the JSON string
+		// or content it sits in (see pemKeys).
+		{keywords: []string{"PRIVATE KEY"}, fn: newPEMKeys().apply},
 		// Base64-encoded PEM block (kubeconfig client-key-data, k8s secret data, …):
 		// "LS0tLS1CRUdJTi" is the base64 of the "-----BEGIN " marker — a stable,
 		// low-false-positive prefix — so a base64'd private key is caught whatever
