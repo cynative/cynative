@@ -543,7 +543,7 @@ jobs:
       # NOTE: v3.2.0 takes a Client ID via `client-id`, not `app-id`.
       - name: Mint the read-only fixture App token
         id: apptoken
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.GH_E2E_APP_CLIENT_ID }}
           private-key: ${{ secrets.GH_E2E_APP_PRIVATE_KEY }}
