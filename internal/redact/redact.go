@@ -19,6 +19,8 @@ type Redactor struct {
 	headerDeny map[string]struct{}
 	locDump    *regexp.Regexp
 	locJSON    *regexp.Regexp
+	// marks is a run of placeholders, which the encoded pass aligns on.
+	marks *regexp.Regexp
 }
 
 // New builds a Redactor with the production rule set and header denylist.
@@ -36,12 +38,40 @@ func New() *Redactor {
 		// URL) is still redacted rather than preserved.
 		locDump: regexp.MustCompile(`(?im)^(location:[ \t]*)((?:https?://|//|/)\S*)`),
 		locJSON: regexp.MustCompile(`(?i)("location"\s*:\s*\[\s*")((?:https?://|//|/)[^"]*)(")`),
+		marks:   regexp.MustCompile(`(?:\[REDACTED:[a-z0-9-]+\])+`),
 	}
 }
 
+// maxNesting bounds how many levels of JSON-encoded strings Redact reads into.
+const maxNesting = 4
+
 // Redact replaces every secret-shaped substring in s with its type placeholder.
-// Placeholders contain no secret-shaped substrings, so Redact is idempotent.
+// Placeholders contain no secret-shaped substrings, so Redact is idempotent. A
+// placeholder the encoded pass writes into a string can change how the rules read
+// the content around it, so when that pass changes s the rules run over it again,
+// which leaves nothing for a second Redact to find.
 func (r *Redactor) Redact(s string) string {
+	s = r.apply(s)
+	if t := r.encoded(s, maxNesting-1); t != s {
+		s = r.apply(t)
+	}
+
+	return s
+}
+
+// redact runs the rules over s, then over the decoded content of the JSON strings
+// in s, depth levels deep.
+func (r *Redactor) redact(s string, depth int) string {
+	s = r.apply(s)
+	if depth > 0 {
+		s = r.encoded(s, depth-1)
+	}
+
+	return s
+}
+
+// apply runs every rule over s.
+func (r *Redactor) apply(s string) string {
 	for _, ru := range r.rules {
 		if !gated(s, ru.keywords) {
 			continue

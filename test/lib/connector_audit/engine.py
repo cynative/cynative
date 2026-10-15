@@ -1035,9 +1035,12 @@ _JSON_FIELDS = r'(?:\s*,\s*"' + _JSON_VALUE + r'"\s*:\s*(?:"' + _JSON_VALUE + r'
 # the scanned text, so the prepass and the e2e scrub use it like the regex rules.
 # Known differences: in a JSON body cut short or broken, Go still pairs the members
 # it read before the break, while json reads no object it cannot finish (a direct
-# key there is still found); and the prepass expands JSON strings before scanning,
-# so it sees a token Go left in its escaped spelling (\u0067hp_...), as it did
-# before these passes.
+# key there is still found). Go also redacts the decoded content of JSON strings
+# (internal/redact/encoded.go) as the prepass expands them, with these differences:
+# Go reads only a string that holds an escape, keys included, four levels deep at
+# most, and reads a surrogate pair as two U+FFFD; and past an error it reads only a
+# string that is never closed, while the prepass expands only a string json.loads
+# parses whole.
 _WS = r"[\t\n\f\r ]"
 _PLACEHOLDER = re.compile(r"\[REDACTED:[a-z0-9-]+\]\Z")
 _KEY_END_FULL = re.compile(r"(?:" + _KEY_END + r")\Z", re.I | re.A)
