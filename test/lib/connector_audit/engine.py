@@ -1070,13 +1070,13 @@ def _redacted(val, rx=None):
     whole value, so it must be exactly one placeholder: one followed by more text
     (a continued YAML value after a token label) is a leak. A regex rule's capture
     can run past the placeholder into the serialization around it (the escaped
-    newline after sig=[REDACTED:...] in a raw audit line), so a prefix is enough. For
-    a signing or session param, a capture of backslashes alone is that serialization
-    around an empty value (the escaped quote of "sig=\\\"" in a raw line), which the
-    redactor leaves as it is."""
+    newline after sig=[REDACTED:...] in a raw audit line), so a prefix is enough. A
+    signing or session param value of one backslash before a character that ends it
+    is left as it is by the redactor (#410), so the spellings of that one backslash
+    in _LONE_BACKSLASH pass."""
     if isinstance(rx, _Detector):
         return bool(_PLACEHOLDER.match(val))
-    return val.startswith("[REDACTED") or (rx in _SIGNING_PARAM_RES and not val.strip("\\"))
+    return val.startswith("[REDACTED") or (rx in _SIGNING_PARAM_RES and val in _LONE_BACKSLASH)
 
 
 def _fold(t):
@@ -1623,15 +1623,19 @@ _CONTENT_RULES = (
 # anywhere-scan already flags them exactly when the value is a real secret, so the AWS
 # canary_url "u:p" and GitHub canary "Authorization: Bearer x" stay canary defects (1),
 # not leaks.
-# The signing and session query params of class-3. The redactor leaves an empty value
-# before a JSON escaped quote as it is (#410), so only these rules accept a capture of
-# backslashes alone.
+# The signing and session query params of class-3. The redactor leaves a value that is
+# one backslash before a character that ends it as it is (#410), so only these rules
+# accept that backslash as a capture.
 _SIGNING_PARAM_RULES = (
     (re.compile(r"(?:X-Amz-Signature|X-Goog-Signature|Signature|sig)=([^&\"'\s]+)", re.I),
      "signed-url-signature"),
     (re.compile(r"(?:X-Amz-Security-Token)=([^&\"'\s]+)", re.I), "aws-session-token"),
 )
 _SIGNING_PARAM_RES = frozenset(rx for rx, _label in _SIGNING_PARAM_RULES)
+# One backslash as the scan spells it: in a decoded value, in a raw line, and in a raw
+# line before an escaped quote. Two backslashes, which the redactor replaces, reach the
+# raw line as four.
+_LONE_BACKSLASH = ("\\", "\\" * 2, "\\" * 3)
 
 _POSITIONAL_RULES = (
     (re.compile(r'"(?:' + _KEY_END + r')"\s*:\s*"(' + _JSON_VALUE + r')' + _JSON_END, re.I), "credential-field"),
@@ -2741,7 +2745,11 @@ def _shared_selftest():
         # leaves as it is (#410), and one whose value follows a backslash.
         sig_empty_line = _jline("c1", "result",
                                 {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
-                                result='["u?sig=\\"a","u?X-Amz-Security-Token=\\"b"]', outcome="ok")
+                                result='["u?sig=\\"a","u?X-Amz-Security-Token=\\"b"] u?sig=\\&t=1', outcome="ok")
+        # two backslashes are a value the redactor replaces, so leaving them is a miss.
+        sig_pair_line = _jline("c1", "result",
+                               {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
+                               result="u?sig=\\\\&t=1", outcome="ok")
         sig_backslash_line = _jline("c1", "result",
                                     {"method": "GET", "url": "https://api.github.com/", "auth_provider": "github"},
                                     result="sig=\\" + live_secret, outcome="ok")
@@ -2913,6 +2921,7 @@ def _shared_selftest():
             ("cred_redacted_placeholder_ok", 0, lambda: _guard(lambda: cp([redacted_line]))),
             ("cred_signing_empty_value_ok", 0, lambda: _guard(lambda: cp([sig_empty_line]))),
             ("cred_signing_value_after_backslash", 4, lambda: _guard(lambda: cp([sig_backslash_line]))),
+            ("cred_signing_backslash_pair", 4, lambda: _guard(lambda: cp([sig_pair_line]))),
             # the backslash exemption is the signing params' alone: a credential field
             # whose value is backslashes still fails closed.
             ("cred_yaml_backslash_value", 4, lambda: _guard(lambda: cp([_body_line("password: \\\\")]))),
