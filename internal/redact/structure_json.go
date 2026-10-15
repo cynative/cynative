@@ -2,7 +2,6 @@ package redact
 
 import (
 	"encoding/json"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -42,20 +41,38 @@ func (m matchers) flagValues(words []string) []wordValue {
 	return out
 }
 
-// shellCommand returns the index of the command a shell named at words[i] runs, or
-// -1: the word after the option that holds 'c', past any other options and the
-// argument of those that take one.
-func (m matchers) shellCommand(words []string, i int) int {
-	for j := i + 1; j < len(words) && words[j] != "" && strings.IndexByte("-+", words[j][0]) >= 0; j++ {
-		switch {
-		case m.shellFlag.MatchString(words[j]):
-			return j + 1
-		case m.shellArgOption.MatchString(words[j]):
+// commandFrom returns the index of the command a shell runs when its options
+// start at words[j]: the word after the option that holds 'c', past any other
+// options and the argument of those that take one. That is len(words) when the
+// option is the last word, and -1 when the options end without one. For one word
+// list the answer depends only on j, so memo keeps it for every option the scan
+// reads, and a later scan that reaches one of them stops there. Each option is
+// matched once however many shell names share its run.
+func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
+	var path []int
+
+	c := -1
+	for ; j < len(words) && words[j] != "" && strings.IndexByte("-+", words[j][0]) >= 0; j++ {
+		if known, ok := memo[j]; ok {
+			c = known
+
+			break
+		}
+		path = append(path, j)
+		if m.shellFlag.MatchString(words[j]) {
+			c = j + 1
+
+			break
+		}
+		if m.shellArgOption.MatchString(words[j]) {
 			j++
 		}
 	}
+	for _, p := range path {
+		memo[p] = c
+	}
 
-	return -1
+	return c
 }
 
 // commands redacts credential values in runs of JSON string array elements, and
@@ -121,19 +138,10 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 		taken[v.index] = taken[v.index] || v.offset == 0
 	}
 
-	var out, shellOut []span
+	shell, shellOut := m.shellCommands(s, elems, words, taken)
 
-	shell := make(map[int]bool)
-	for i := range elems {
-		if !m.shell.MatchString(words[i]) {
-			continue
-		}
-		// Only a shell name starts the scan, so each run of options is read once.
-		if c := m.shellCommand(words, i); c > i && c < len(elems) {
-			shell[c] = !slices.Contains(takenIn(taken, i, c), true)
-			shellOut = append(shellOut, m.shellSpans(s, elems[c])...)
-		}
-	}
+	var out []span
+
 	for _, v := range values {
 		e, off := elems[v.index], v.offset
 		if raws[v.index] != nil {
@@ -148,6 +156,38 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	}
 
 	return append(out, shellOut...)
+}
+
+// shellCommands finds the command element each shell name runs and reads it as
+// words. shell reports, for each command element, whether it is read only so.
+// Several shell names can reach one command; the last one decides how it is read,
+// and its words are read once. Most arrays name no shell, so the scan state is
+// built at the first shell name.
+func (m matchers) shellCommands(s string, elems []element, words []string, taken map[int]bool) (map[int]bool, []span) {
+	var (
+		before []int
+		shell  map[int]bool
+		memo   map[int]int
+		out    []span
+	)
+
+	for i := range elems {
+		if !m.shell.MatchString(words[i]) {
+			continue
+		}
+		if before == nil {
+			before, shell, memo = takenBefore(taken, len(elems)), make(map[int]bool), make(map[int]int)
+		}
+		if c := m.commandFrom(words, memo, i+1); c > i && c < len(elems) {
+			_, seen := shell[c]
+			shell[c] = before[c] == before[i]
+			if !seen {
+				out = append(out, m.shellSpans(s, elems[c])...)
+			}
+		}
+	}
+
+	return shell, out
 }
 
 // shellSpans finds the credential values among the words of a shell command
@@ -431,11 +471,12 @@ func (w *shellWord) add(d string, j int, q byte) {
 	w.quote = append(w.quote, q)
 }
 
-// takenIn returns whether each of the words from i up to c is a flag's value.
-func takenIn(taken map[int]bool, i, c int) []bool {
-	out := make([]bool, 0, c-i)
-	for k := i; k < c; k++ {
-		out = append(out, taken[k])
+// takenBefore counts, for each index up to n, the words before it that are a
+// flag's value, so a range of words holds one exactly when its two ends differ.
+func takenBefore(taken map[int]bool, n int) []int {
+	out := make([]int, n+1)
+	for k := range n {
+		out[k+1] = out[k] + boolInt(taken[k])
 	}
 
 	return out
