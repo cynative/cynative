@@ -205,7 +205,7 @@ const (
 func decodeJSONString(body string) (string, []int) {
 	var b strings.Builder
 
-	raw := make([]int, 0, len(body)+1)
+	raw := make([]int, 0, len(body))
 	for i := 0; i < len(body); {
 		if body[i] != '\\' {
 			b.WriteByte(body[i])
