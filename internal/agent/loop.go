@@ -367,9 +367,9 @@ func (a *Agent) acceptTurn(
 // invalid-JSON arguments through raw, which can fail every subsequent request
 // in the session), and the reason belongs to the whole generation, so a call
 // that happens to parse proves nothing about the batch. The turn's prose is
-// kept byte-identical in a text-only projection (a whitespace-only projection
-// is skipped, like a blank turn); the retry carries a host directive in place
-// of the calls. At maxConsecutiveTruncated in a row the run gives up with
+// kept byte-identical in a projection without the calls, together with the
+// turn's reasoning (a whitespace-only projection is skipped, like a blank
+// turn); the retry carries a host directive in place of the calls. At maxConsecutiveTruncated in a row the run gives up with
 // errOutputLimit, through haltOr, so an operator stop or budget crossing that
 // raced in is reported as itself.
 func (a *Agent) refuseTruncatedCalls(
@@ -379,6 +379,13 @@ func (a *Agent) refuseTruncatedCalls(
 
 	if text := msg.Text(); strings.TrimSpace(text) != "" {
 		projected := schema.AssistantMessage(text, nil)
+		// Keep the turn's reasoning with its prose: a strict backend rejects an
+		// assistant turn replayed without it. The calls stay quarantined, so this
+		// cannot dispatch anything; whether the reasoning is complete is best
+		// effort, since StopLength does not say.
+		if r := msg.Reasoning(); r != nil {
+			projected.Content = append([]schema.Block{*r}, projected.Content...)
+		}
 		turn = append(turn, projected)
 		a.renderTurn(projected, rs.out)
 	}
