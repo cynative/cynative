@@ -88,8 +88,9 @@ cannot move any of these lines.
   line the LLM SDK logs. Reasoning a model returns goes back unredacted to the
   backend that produced it on later turns of the same run, because replay
   formats can require it byte for byte. cynative never displays, audits or
-  logs it itself; an SDK warning that echoes it is redacted for secrets like
-  any other line, but its ordinary text can still print.
+  logs it itself; an SDK warning or upstream error message that echoes it is
+  redacted for secrets like any other line, but its ordinary text can still
+  print.
 - **Memory and concurrency bugs** - pure Go, no cgo; the full test suite
   runs under Go's race detector.
 - **Untested paths** - 100% statement coverage enforced in CI.

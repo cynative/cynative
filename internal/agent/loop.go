@@ -369,9 +369,10 @@ func (a *Agent) acceptTurn(
 // that happens to parse proves nothing about the batch. The turn's prose is
 // kept byte-identical in a projection without the calls, together with the
 // turn's reasoning (a whitespace-only projection is skipped, like a blank
-// turn); the retry carries a host directive in place of the calls. At maxConsecutiveTruncated in a row the run gives up with
-// errOutputLimit, through haltOr, so an operator stop or budget crossing that
-// raced in is reported as itself.
+// turn); the retry carries a host directive in place of the calls. At
+// maxConsecutiveTruncated in a row the run gives up with errOutputLimit,
+// through haltOr, so an operator stop or budget crossing that raced in is
+// reported as itself.
 func (a *Agent) refuseTruncatedCalls(
 	turn []*schema.Message, msg *schema.Message, rs *runState,
 ) ([]*schema.Message, error) {

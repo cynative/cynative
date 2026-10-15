@@ -9,11 +9,12 @@ import (
 )
 
 // RedactingChatModel wraps a schema.ChatModel and redacts all message content
-// sent to the provider — TextBlock text (every role) and ToolResultBlock content
-// — leaving ToolCallBlock (model-authored code), ReasoningBlock (backend replay
-// state) and the tool schemas untouched. Tool-result content is redacted with RedactPreservingLocation so a
-// signed redirect Location URL survives (transport leaves it intact for
-// redirect-following); operator/model text is fully redacted.
+// sent to the provider (TextBlock text in every role, and ToolResultBlock
+// content), leaving ToolCallBlock (model-authored code), ReasoningBlock (backend
+// replay state) and the tool schemas untouched. Tool-result content is
+// redacted with RedactPreservingLocation so a signed redirect Location URL
+// survives (transport leaves it intact for redirect-following); operator/model
+// text is fully redacted.
 // It copies the transcript rather than mutating it, so it is safe to share
 // across the main loop, task sub-agents, and the concurrent verifier panel.
 type RedactingChatModel struct {
@@ -71,7 +72,7 @@ func (m *RedactingChatModel) redactGenerateError(err error) error {
 // and tool-result blocks are redacted, so the original message is never mutated.
 // schema.Block is a sealed interface: ReasoningBlock has its own pass-through
 // case below, and the only block the default arm passes through today is
-// ToolCallBlock (model-authored JS/JSON — redacting it could corrupt valid code,
+// ToolCallBlock (model-authored JS/JSON: redacting it could corrupt valid code,
 // and by construction the model never held a raw secret to embed). Any NEW
 // content-bearing Block variant added to internal/schema must gain its own case
 // here, or it would reach the provider unredacted.
