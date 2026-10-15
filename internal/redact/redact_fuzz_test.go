@@ -52,6 +52,15 @@ func FuzzRedact(f *testing.F) {
 	)
 	f.Add(`["sh","-c","a \"--pass\"word x; b --pass\\word=\"y z\" # --token q\r\n--token \u00`)
 	f.Add("{\"public\":\"cynative-loc-0\",\"Location\":[\"https://e.test/x?sig=abc\"]}")
+	f.Add(`"{\"DB_PASSWORD\":\"hunter2\"}"`)
+	f.Add(`{"r":"\"{\\\"token\\\":\\\"t\\\"}\"","n":[1,"{\"name\":\"API_KEY\",\"value\":\"k\"}"]}`)
+	f.Add(`{"r": "{\"password\":\"hunt\u00`)
+	f.Add(`{"r":"{\"password\":\"hunt\`)
+	f.Add(`{"a" "b\"c"}`)
+	f.Add(`"\u003cpassword>x"`)
+	f.Add(`["token: x\npassword:\n  y\nend: \u0041","a\nAPI_KEY=k1\n\u0073ig=zz\nPASSWORD=p2"]`)
+	f.Add(`["sig=x\"tail","{\"DB_PASSWORD\":\"hunter2\"}"]`)
+	f.Add(`[1e1000,"\u0073ig=x\n{\"password\":\"x\"}"]`)
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

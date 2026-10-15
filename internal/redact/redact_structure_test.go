@@ -304,8 +304,13 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 		},
 		{
 			name: "shell command keeps escapes and operators outside the value",
+			in:   `["sh","-c","app --password x; echo \u0067o"]`,
+			want: `["sh","-c","app --password ` + field + `; echo \u0067o"]`,
+		},
+		{
+			name: "shell command with a token spelled with an escape",
 			in:   `["sh","-c","app --password x; echo \u0067hp_` + strings.Repeat("a", 36) + `"]`,
-			want: `["sh","-c","app --password ` + field + `; echo \u0067hp_` + strings.Repeat("a", 36) + `"]`,
+			want: `["sh","-c","app --password ` + field + `; echo [REDACTED:github-token]"]`,
 		},
 		{
 			name: "shell command joined flag with an escaped quoted value",
