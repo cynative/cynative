@@ -61,6 +61,7 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`"\u003cpassword>x"`)
 	f.Add(`["token: x\npassword:\n  y\nend: \u0041","a\nAPI_KEY=k1\n\u0073ig=zz\nPASSWORD=p2"]`)
 	f.Add(`["sig=x\"tail","{\"DB_PASSWORD\":\"hunter2\"}"]`)
+	f.Add("{\"u\":\"sig=ab\\\\\\\"c\"}\nsig=ab\\\npassword: x\nsig=ab\\&t=1")
 	f.Add(`[1e1000,"\u0073ig=x\n{\"password\":\"x\"}"]`)
 
 	r := redact.New()

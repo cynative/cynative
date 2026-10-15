@@ -110,6 +110,13 @@ func credentialRules() []rule {
 	// registration_token, incoming_email_token, …) that a single-component pattern
 	// would miss — which the bare `token` alternative alone would not match.
 	const credName = `access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|secret|password|passwd|passphrase|secret[_-]?access[_-]?key|session[_-]?token|api[_-]?key|apikey|private[_-]?key|(?:[a-z0-9]+_)+token|token` //nolint:lll // single indivisible alternation
+	// signingValue is a signing or session query param value: up to '&', a quote
+	// or whitespace, where a backslash is taken only together with the character
+	// after it. A backslash before a character that ends the value, or at the end
+	// of the content, is left out, so the value is [^&"'\s]+ minus that one
+	// backslash, and a value that is only that backslash does not match. Taking
+	// the backslash of a JSON \" would let the quote end the string (#410).
+	const signingValue = `(?:[^&"'\s\\]|\\[^&"'\s])+`
 	// keyEnd is a JSON key or variable name that ENDS in a credential word, so
 	// DB_PASSWORD, webhookSecret and stripeApiKey match the way the YAML and env
 	// rules already allow. Bare "token" takes no prefix: nextPageToken, pageToken
@@ -188,11 +195,11 @@ func credentialRules() []rule {
 			repl: `${1}` + placeholder("credential-field"),
 		},
 		{ // Signed-URL signature query param (bodies only; never the exempt Location header).
-			re:   regexp.MustCompile(`((?i:X-Amz-Signature|X-Goog-Signature|Signature|sig)=)[^&"'\s]+`),
+			re:   regexp.MustCompile(`((?i:X-Amz-Signature|X-Goog-Signature|Signature|sig)=)` + signingValue),
 			repl: `${1}` + placeholder("signed-url-signature"),
 		},
 		{ // AWS presigned-URL session token (temp-credential calls embed it as a query param).
-			re:   regexp.MustCompile(`((?i:X-Amz-Security-Token)=)[^&"'\s]+`),
+			re:   regexp.MustCompile(`((?i:X-Amz-Security-Token)=)` + signingValue),
 			repl: `${1}` + placeholder("aws-session-token"),
 		},
 		{ // XML credential value truncated to end-of-content (no closing tag);
