@@ -3,8 +3,9 @@ package llm
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 
-	bifrost "github.com/maximhq/bifrost/core"
 	bschemas "github.com/maximhq/bifrost/core/schemas"
 
 	"github.com/cynative/cynative/internal/schema"
@@ -20,6 +21,7 @@ type BifrostChatModel struct {
 	newBackend         func(context.Context, bschemas.BifrostConfig) (BifrostBackend, error)
 	recordUsage        func(schema.Usage)
 	redactLog          func(string) string
+	logOut             io.Writer
 	provider           string
 	model              string
 	reasoningEffort    string
@@ -45,6 +47,7 @@ func NewBifrostChatModel(
 		newBackend:         bifrostShellInit,
 		recordUsage:        func(schema.Usage) {},
 		redactLog:          func(s string) string { return s },
+		logOut:             os.Stderr,
 		provider:           account.Entry.Provider,
 		model:              account.Entry.Model,
 		reasoningEffort:    account.Entry.ReasoningEffort,
@@ -58,7 +61,7 @@ func NewBifrostChatModel(
 		ctx,
 		bschemas.BifrostConfig{ //nolint:exhaustruct // optional Bifrost fields intentionally omitted
 			Account: account,
-			Logger:  redactingLogger{inner: bifrost.NewDefaultLogger(bschemas.LogLevelWarn), redact: m.redactLog},
+			Logger:  redactingLogger{out: m.logOut, redact: m.redactLog},
 		},
 	)
 	if err != nil {

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"io"
 
 	bschemas "github.com/maximhq/bifrost/core/schemas"
 )
@@ -19,4 +20,9 @@ func WithBackendFactory(
 	f func(context.Context, bschemas.BifrostConfig) (BifrostBackend, error),
 ) ChatModelOption {
 	return func(m *BifrostChatModel) { m.newBackend = f }
+}
+
+// WithLogOutput replaces stderr as the writer Bifrost's log lines go to.
+func WithLogOutput(w io.Writer) ChatModelOption {
+	return func(m *BifrostChatModel) { m.logOut = w }
 }
