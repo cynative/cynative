@@ -25,8 +25,8 @@ func contentRules() []rule {
 		// or content it sits in (see pemKeys).
 		{keywords: []string{"PRIVATE KEY"}, fn: newPEMKeys().apply},
 		// Base64-encoded PEM block (kubeconfig client-key-data, k8s secret data, …):
-		// "LS0tLS1CRUdJTi" is the base64 of the "-----BEGIN " marker — a stable,
-		// low-false-positive prefix — so a base64'd private key is caught whatever
+		// "LS0tLS1CRUdJTi" is the base64 of the "-----BEGIN " marker, a stable,
+		// low-false-positive prefix, so a base64'd private key is caught whatever
 		// the surrounding key name, which the keyword-based field rules cannot see.
 		// The trailing group consumes newline-wrapped continuation lines so a base64
 		// block split at 64 columns is redacted whole, not just its first line.
@@ -35,8 +35,13 @@ func contentRules() []rule {
 			// Continuation lines require ≥32 base64 chars so a following short token
 			// (a "users:" / "name:" key line) is not swallowed, while real 64-column
 			// wrapped lines are. A final partial line <32 chars may be left, which is
-			// a non-reconstructable key tail.
-			re:   regexp.MustCompile(`LS0tLS1CRUdJTi[A-Za-z0-9+/=]+(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+/=]{32,})*`),
+			// a non-reconstructable key tail. Inside a JSON string a line break or tab
+			// is spelled \n, \r or \t and "/" may be spelled \/, with more
+			// backslashes in a string encoded inside another, so a run of backslashes
+			// before one of those letters is read as that character (#419). The
+			// \uXXXX spelling of these characters is not read.
+			re: regexp.MustCompile(`LS0tLS1CRUdJTi(?:[A-Za-z0-9+/=]|\\+/)+` +
+				`(?:(?:[ \t]|\\+t)*(?:\r?\n|(?:\\+r)?\\+n)(?:[ \t]|\\+t)*(?:[A-Za-z0-9+/=]|\\+/){32,})*`),
 			repl: placeholder("base64-pem"),
 		},
 		// JWT: signature segment optional so a payload-truncated token is still redacted.
