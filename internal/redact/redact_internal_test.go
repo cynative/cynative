@@ -86,3 +86,35 @@ func TestCommandSpans_SharedCommandReadOnce(t *testing.T) {
 		t.Errorf("commandSpans = %v, want one span", got)
 	}
 }
+
+// TestSkipToken pins where the encoded pass looks for the next JSON value after a
+// read stops: past the string it stopped in, escaped quotes and all, so no quote
+// inside it starts a read over the rest; at the token when it is no string, such
+// as a separator the read did not expect, so a string after it is still read; and
+// nowhere when the string is never closed.
+func TestSkipToken(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		in     string
+		before int
+		want   int
+	}{
+		{"string with an invalid escape", `"a\q\"b" x`, 0, 8},
+		{"separator before a string", `"a" : "b" x`, 3, 4},
+		{"separator before a string never closed", `"a" : "b\q`, 3, -1},
+		{"token that is no string", `{"a":1 x`, 6, 7},
+		{"string never closed", `"a\q\"b`, 0, -1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := skipToken(tc.in, tc.before); got != tc.want {
+				t.Errorf("skipToken(%q, %d) = %d, want %d", tc.in, tc.before, got, tc.want)
+			}
+		})
+	}
+}

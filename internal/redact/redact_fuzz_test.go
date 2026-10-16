@@ -77,6 +77,11 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`{"r":"{\"h\":\"<b>x</b>\"}\u0020","s":"<password>hunter2 sig=abc<xyz"}`)
 	f.Add(`{"k":"LS0tLS1CRUdJTiBQ\r\n` + strings.Repeat("QUJD", 16) + `\nname","r":"{\"k\":\"LS0tLS1CRUdJTi\\nx\"}"}`)
 	f.Add("[\"LS0tLS1CRUdJTi\"\n" + strings.Repeat("QUJD", 8) + ",LS0tLS1CRUdJTi\\")
+	f.Add(`got {"DB_PASSW\u004fRD":"hunter2"} {name} [1] x {"a b {"t\u006fken":"v"} {"a":NaN}`)
+	f.Add(`"a\"b" x "{\"password\":\"p\"}" 5" {"r":"{\"token\":\"t\"}"} {"API_KEY":"hunt`)
+	f.Add("HTTP/1.1 200 OK\r\nX: {\"a\r\n\r\n[{\"n\\u0061me\":\"API_KEY\",\"value\":\"k\"}]")
+	f.Add(`"token:\b"\u0073ig=0`)
+	f.Add("\"\x00\\\"pAsswd\\\":\\\"\\\"pAsswd\\\":\\\"")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

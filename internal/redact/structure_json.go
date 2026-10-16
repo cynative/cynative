@@ -516,15 +516,52 @@ type object struct {
 // objects redacts, in every JSON object, the string value of each member whose
 // decoded name is a credential name, and every "value" member of an object whose
 // "name" member is one. Decoding the names catches spellings with escapes and
-// repeated members, which the line regexes cannot see. The decoder reads values
-// one after another, so NDJSON is covered too; at the first syntax error it stops,
-// and a credential value cut off there is redacted to the end of content.
+// repeated members, which the line regexes cannot see. A JSON value can start
+// anywhere in the content, such as the body of an HTTP dump after its headers, so
+// a read starts at each '{' or '[' no earlier read took (see jsonStarts). The decoder reads values one
+// after another, so NDJSON is covered too, and a credential value cut off at a
+// syntax error is redacted to the end of content.
 func (m matchers) objects(s string) string {
-	t := strings.TrimLeft(s, " \t\r\n")
-	if t == "" || t[0] != '{' && t[0] != '[' {
-		return s
+	var spans []span
+
+	jsonStarts(s, "{[", func(start int) (int, bool) {
+		found, resume := m.objectsFrom(s, start)
+		spans = append(spans, found...)
+
+		return resume, false
+	})
+
+	return applySpans(s, spans)
+}
+
+// jsonStarts calls read for each offset in s where a byte of starts may begin a
+// JSON value and no earlier read took it. read returns the offset to look from
+// next, at or after the token it stopped at, and whether nothing after that is
+// left to read; the next start is after this one either way. A later read never
+// starts inside a string an earlier read took: text before a value can open a
+// string that the value's first quote closes, as in x {"a {"key":"v"}, but each
+// escaped quote in that string could start a new read over the rest, and a rule
+// that redacts the string can remove the escape, so a second Redact would read
+// differently.
+func jsonStarts(s, starts string, read func(start int) (int, bool)) {
+	for pos := 0; ; {
+		k := strings.IndexAny(s[pos:], starts)
+		if k < 0 {
+			return
+		}
+		next, done := read(pos + k)
+		if done {
+			return
+		}
+		pos = max(next, pos+k+1)
 	}
-	dec := json.NewDecoder(strings.NewReader(s))
+}
+
+// objectsFrom reads JSON values from s[start:] up to the first syntax error or the
+// end of content, and returns the spans of their credential members and where to
+// look for the next JSON value.
+func (m matchers) objectsFrom(s string, start int) ([]span, int) {
+	dec := json.NewDecoder(strings.NewReader(s[start:]))
 	dec.UseNumber()
 
 	var (
@@ -533,7 +570,7 @@ func (m matchers) objects(s string) string {
 	)
 
 	for {
-		before := int(dec.InputOffset())
+		before := start + int(dec.InputOffset())
 		tok, err := dec.Token()
 		if err != nil {
 			spans = m.truncated(s, before, stack, spans)
@@ -541,7 +578,7 @@ func (m matchers) objects(s string) string {
 				spans = m.objectSpans(o, spans)
 			}
 
-			return applySpans(s, spans)
+			return spans, before
 		}
 
 		var top *object
@@ -559,7 +596,7 @@ func (m matchers) objects(s string) string {
 				top.key, top.wantValue = v, true
 			default:
 				q := before + strings.IndexByte(s[before:], '"')
-				top.members = append(top.members, member{top.key, v, q + 1, int(dec.InputOffset()) - 1})
+				top.members = append(top.members, member{top.key, v, q + 1, start + int(dec.InputOffset()) - 1})
 				top.wantValue = false
 			}
 		default:

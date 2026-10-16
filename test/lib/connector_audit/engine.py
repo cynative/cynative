@@ -1038,9 +1038,9 @@ _JSON_FIELDS = r'(?:\s*,\s*"' + _JSON_VALUE + r'"\s*:\s*(?:"' + _JSON_VALUE + r'
 # key there is still found). Go also redacts the decoded content of JSON strings
 # (internal/redact/encoded.go) as the prepass expands them, with these differences:
 # Go reads only a string that holds an escape, keys included, four levels deep at
-# most, and reads a surrogate pair as two U+FFFD; and past an error it reads only a
-# string that is never closed, while the prepass expands only a string json.loads
-# parses whole.
+# most, and reads a surrogate pair as two U+FFFD; it reads a string that is never
+# closed to the end of content, and past any other error it reads on from the next
+# token, while the prepass expands only a string json.loads parses whole.
 _WS = r"[\t\n\f\r ]"
 _PLACEHOLDER = re.compile(r"\[REDACTED:[a-z0-9-]+\]\Z")
 _KEY_END_FULL = re.compile(r"(?:" + _KEY_END + r")\Z", re.I | re.A)
@@ -1548,12 +1548,27 @@ def _json_text(raw):
     return _decode_json_string(raw)[0]
 
 
+# A '{' or '[' a JSON value can follow. A read from any other fails at once and finds
+# nothing, and every JSONDecodeError counts the lines before its position, so skipping
+# those keeps a run of braces in prose linear. Reads that do start and then fail, as
+# in '{}x' repeated, still pay that count each, which grows with the square of the
+# length (about 0.1 s at the 32 KB default response cap).
+_JSON_START = re.compile(r'\{(?=' + _WS + r'*["}])|\[(?=' + _WS + r'*[-0-9"\[\]{tfn])')
+
+
+def _no_constant(name):
+    """Go's decoder rejects NaN and Infinity. The error carries no position, so the
+    read reports no member of the value it was in, where Go may report the members
+    before it: this finds less, never more."""
+    raise ValueError("not JSON: " + name)
+
+
 def _find_objects(s):
     """String values of credential-named members, and the "value" members of an object
-    whose "name" member is a credential name, with names decoded, as objects()."""
-    t = s.lstrip(" \t\r\n")
-    if not t or t[0] not in "{[":
-        return []
+    whose "name" member is a credential name, with names decoded, as objects(). Like
+    Go, it reads a JSON value from every '{' or '[' a previous read did not cover, so an
+    object after other text (an HTTP dump's body) is read too, and a read that stops at
+    a syntax error resumes there."""
     paired = set()
 
     def hook(pairs):
@@ -1561,24 +1576,38 @@ def _find_objects(s):
             paired.update(v for k, v in pairs if k.lower() == "value" and isinstance(v, str))
         return dict(pairs)
 
-    # Read value after value (NDJSON too) up to the first syntax error, as Go's
-    # decoder does; members past it are not read.
-    dec, idx, stop = json.JSONDecoder(object_pairs_hook=hook), 0, len(s)
+    dec, out, pos = json.JSONDecoder(object_pairs_hook=hook, parse_constant=_no_constant), [], 0
     while True:
-        while idx < len(s) and s[idx] in " \t\r\n":
-            idx += 1
-        if idx >= len(s):
-            break
-        try:
-            _, idx = dec.raw_decode(s, idx)
-        except (ValueError, RecursionError) as e:
-            stop = getattr(e, "pos", idx)
-            break
-    # Every string, read once from left to right, so a member's span is exact.
-    out, strings = [], list(_ELEMENT.finditer(s))
-    for k, v in zip(strings, strings[1:]):
+        start = _JSON_START.search(s, pos)
+        if start is None:
+            return out
+        # Read value after value (NDJSON too) up to the first syntax error, as Go's
+        # decoder does; members past it are not read.
+        idx, stop = start.start(), len(s)
+        while True:
+            while idx < len(s) and s[idx] in " \t\r\n":
+                idx += 1
+            if idx >= len(s):
+                break
+            try:
+                _, idx = dec.raw_decode(s, idx)
+            except (ValueError, RecursionError) as e:
+                stop = getattr(e, "pos", idx)
+                break
+        out.extend(_object_members(s, start.start(), stop, paired))
+        pos = max(stop, start.start() + 1)
+
+
+def _object_members(s, start, stop, paired):
+    """The credential members of the JSON text a read took from start up to stop: a
+    string that ends before stop, a colon, and a string value that starts by stop (it
+    may run past it, cut off). Only the read's own text is searched for keys, so a
+    run of '{' that opens no JSON costs one short search each."""
+    out = []
+    for k in _ELEMENT.finditer(s, start, stop):
         colon = _MEMBER_COLON.match(s, k.end())
-        if k.group(2) is None or k.start() > stop or colon is None or colon.end() != v.start():
+        v = _ELEMENT.match(s, colon.end()) if colon and k.group(2) else None
+        if v is None or v.start() > stop:
             continue
         key, val = _json_text(k.group(1)), _json_text(v.group(1))
         if _KEY_END_FULL.match(_fold(key)) or (key.lower() == "value" and val in paired):
@@ -2107,6 +2136,11 @@ def _structural_spans():
         (_find_commands, '["sh","-c","app --password=$(printf a b) c"]', [("$(printf a b)", 27, 40)]),
         (_find_yaml, "password: &pw |\n  # x\nnext: p\n", [("&pw |\n  # x", 10, 21)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"\\u0068i"}', [("hi", 21, 28)]),
+        (_find_objects, 'got {x} {"DB_PASSW\\u004fRD":"hi"} x {"token":"t"}', [("hi", 29, 31), ("t", 46, 47)]),
+        (_find_objects, '{"a":1 "DB_PASSW\\u004fRD":"x"}', []),
+        (_find_objects, '{"a":NaN,"DB_PASSW\\u004fRD":"x"}', []),
+        (_find_objects, 'got ["DB_PASSW\\u004fRD":"x"]', []),
+        (_find_objects, '{"DB_PASSW\\u004fRD":"a\\qb"}', [("a", 21, 25)]),
     ]
     for find, text, want in cases:
         got = [(f.group(1), f.start(), f.end()) for f in find(text)]
