@@ -64,7 +64,7 @@ func (a *Agent) Welcome(ctx context.Context) (string, error) {
 	text := resp.Text()
 	a.history = append(a.history,
 		schema.UserMessage(welcomeUserInstruction),
-		schema.AssistantMessage(text, nil))
+		historyAnswer(text, resp.Reasoning()))
 
 	return text, nil
 }

@@ -129,6 +129,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 		rs.answerTruncated = true
 		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
+	rs.answerReasoning = msg.Reasoning()
 
 	return msg.Text(), nil
 }

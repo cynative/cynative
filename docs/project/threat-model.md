@@ -86,7 +86,7 @@ cannot move any of these lines.
 - **Credential leakage** - no credential store; secrets are redacted from
   tool results, the audit log (readable only by the running user) and every
   line the LLM SDK logs. Reasoning a model returns goes back unredacted to the
-  backend that produced it on later turns of the same run, because replay
+  backend that produced it on later turns of the same session, because replay
   formats can require it byte for byte. cynative never displays, audits or
   logs it itself; an SDK warning or upstream error message that echoes it is
   redacted for secrets like any other line, but its ordinary text can still

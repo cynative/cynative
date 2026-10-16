@@ -178,6 +178,9 @@ type runState struct {
 	// output limit, so a caller can mark a conclusion the model did not finish.
 	// It lives here, not on *Agent, so concurrent sub-runs stay race-free.
 	answerTruncated bool
+	// answerReasoning is the reasoning returned with the turn that produced this
+	// run's answer, nil when it carried none, so Run can keep its text in history.
+	answerReasoning *schema.ReasoningBlock
 }
 
 // runScopedTool is implemented by the in-package orchestration tools that need
@@ -357,6 +360,7 @@ func (a *Agent) acceptTurn(
 		rs.answerTruncated = true
 		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
+	rs.answerReasoning = msg.Reasoning()
 
 	return turn, nil, msg.Text(), true, nil
 }

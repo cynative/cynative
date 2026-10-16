@@ -228,7 +228,7 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 		return err
 	}
 
-	a.history = append(a.history, schema.UserMessage(task), schema.AssistantMessage(answer, nil))
+	a.history = append(a.history, schema.UserMessage(task), historyAnswer(answer, rs.answerReasoning))
 
 	return nil
 }
