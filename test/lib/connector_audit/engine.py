@@ -1550,9 +1550,9 @@ def _json_text(raw):
 
 # A '{' or '[' a JSON value can follow. A read from any other fails at once and finds
 # nothing, and every JSONDecodeError counts the lines before its position, so skipping
-# those keeps a run of braces in prose linear. Reads that do start and then fail, as
-# in '{}x' repeated, still pay that count each, which grows with the square of the
-# length (about 0.1 s at the 32 KB default response cap).
+# those keeps a run of braces in prose linear. A read that starts and then fails
+# inside a value, as in '{"a"' repeated, still pays that count, which grows with the
+# square of the length.
 _JSON_START = re.compile(r'\{(?=' + _WS + r'*["}])|\[(?=' + _WS + r'*[-0-9"\[\]{tfn])')
 
 
@@ -1588,6 +1588,11 @@ def _find_objects(s):
             while idx < len(s) and s[idx] in " \t\r\n":
                 idx += 1
             if idx >= len(s):
+                break
+            # No value starts here, so raw_decode would raise at idx; stopping without
+            # it skips building a JSONDecodeError, which counts the lines before idx.
+            if s[idx] not in '-0123456789"{[tfnNI':
+                stop = idx
                 break
             try:
                 _, idx = dec.raw_decode(s, idx)
@@ -2140,6 +2145,7 @@ def _structural_spans():
         (_find_objects, '{"a":1 "DB_PASSW\\u004fRD":"x"}', []),
         (_find_objects, '{"a":NaN,"DB_PASSW\\u004fRD":"x"}', []),
         (_find_objects, 'got ["DB_PASSW\\u004fRD":"x"]', []),
+        (_find_objects, '{"token":"a"} x {"token":"b"}', [("a", 10, 11), ("b", 26, 27)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"a\\qb"}', [("a", 21, 25)]),
     ]
     for find, text, want in cases:
