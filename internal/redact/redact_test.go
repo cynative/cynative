@@ -235,6 +235,135 @@ func TestRedact_PEMEndsAtStringQuote(t *testing.T) {
 	}
 }
 
+func TestRedact_XMLEndsAtStringQuote(t *testing.T) {
+	t.Parallel()
+
+	r := redact.New()
+	field := "[REDACTED:credential-field]"
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "closing tag in a later string",
+			in:   `{"a":"<password>","b":{"c":"</password>"},"r":"{\"password\":\"hunter2\"}"}`,
+			want: `{"a":"<password>` + field + `","b":{"c":"</password>"},"r":"{\"password\":\"` + field + `\"}"}`,
+		},
+		{
+			name: "closing tag in the same string",
+			in:   `{"x":"<password>p\"q</password>","n":1}`,
+			want: `{"x":"<password>` + field + `</password>","n":1}`,
+		},
+		{
+			name: "tags in an encoded string",
+			in:   `{"r":"{\"a\":\"<secret>\",\"b\":\"</secret>\",\"password\":\"hunter2\"}"}`,
+			want: `{"r":"{\"a\":\"<secret>` + field + `\",\"b\":\"</secret>\",\"password\":\"` + field + `\"}"}`,
+		},
+		{
+			name: "cut at the content cap",
+			in:   `{"a":"<password>","b":"</password>","c":"<token>hunt`,
+			want: `{"a":"<password>` + field + `","b":"</password>","c":"<token>` + field,
+		},
+		{
+			name: "string without a credential tag kept as written",
+			in:   `{"h":"<b>x</b> \/"}`,
+			want: `{"h":"<b>x</b> \/"}`,
+		},
+		{
+			name: "escapes in the string keep their spelling",
+			in:   `{"x":"<password>p</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+			want: `{"x":"<password>` + field + `</password> [REDACTED:github-token]"}`,
+		},
+		{
+			name: "escaped angle bracket inside the value",
+			in:   `{"x":"<password>hunter2\u003cx</password>"}`,
+			want: `{"x":"<password>` + field + `</password>"}`,
+		},
+		{
+			name: "escapes in an encoded string",
+			in:   `{"r":"{\"x\":\"<password>p</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"}`,
+			want: `{"r":"{\"x\":\"<password>` + field + `</password> [REDACTED:github-token]\"}"}`,
+		},
+		{
+			name: "truncated value after a rule removes a later tag",
+			in:   `<password>hunter2 sig=abc<xyz`,
+			want: `<password>` + field,
+		},
+		{
+			name: "encoded string without a credential tag kept as written",
+			in:   `{"r":"{\"h\":\"<b>x</b>\"}\u0020"}`,
+			want: `{"r":"{\"h\":\"<b>x</b>\"}\u0020"}`,
+		},
+		{
+			name: "escapes in a string after a bare value",
+			in:   `0 "{\"x\":\"<password>p</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"`,
+			want: `0 "{\"x\":\"<password>` + field + `</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"`,
+		},
+		{
+			name: "escapes beside an encoded value keep their spelling",
+			in:   `{"r":"{\"x\":\"<password>p</password>\",\"y\":\"\u0061\"}"}`,
+			want: `{"r":"{\"x\":\"<password>` + field + `</password>\",\"y\":\"\u0061\"}"}`,
+		},
+		{
+			name: "string between the tags is not redacted",
+			in:   `["<password>","hunter2","</password>"]`,
+			want: `["<password>` + field + `","hunter2","</password>"]`,
+		},
+		{
+			name: "XML document matched as a whole",
+			in:   `<a><password>x"y</password></a>`,
+			want: `<a><password>` + field + `</password></a>`,
+		},
+		{
+			name: "JSON after prose is matched as a whole",
+			in:   `got {"a":"<password>","b":"</password>","c":1}`,
+			want: `got {"a":"<password>` + field + `</password>","c":1}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := r.Redact(tc.in)
+			if got != tc.want {
+				t.Errorf("Redact(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+			}
+			if again := r.Redact(got); again != got {
+				t.Errorf("not idempotent: %q became %q", got, again)
+			}
+		})
+	}
+}
+
+func TestRedact_XMLBelowNestingBound(t *testing.T) {
+	t.Parallel()
+
+	r := redact.New()
+	field := "[REDACTED:credential-field]"
+
+	// The strings of four levels are read. A document in a third-level string has
+	// its strings read on their own; one in a fourth-level string is matched as it
+	// is spelled there, across its strings.
+	cases := []struct {
+		levels   int
+		in, want string
+	}{
+		{3, `{"a":"<password>","b":"</password>","n":1}`, `{"a":"<password>` + field + `","b":"</password>","n":1}`},
+		{4, `{"a":"<password>","b":"</password>","n":1}`, `{"a":"<password>` + field + `</password>","n":1}`},
+	}
+	for _, tc := range cases {
+		in, want := tc.in, tc.want
+		for range tc.levels {
+			in, want = wrapRaw(in), wrapRaw(want)
+		}
+		if got := r.Redact(in); got != want {
+			t.Errorf("%d levels: Redact(%q)\n got %q\nwant %q", tc.levels, in, got, want)
+		}
+	}
+}
+
 func TestRedact_PEMBelowNestingBound(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +429,19 @@ func TestRedact_PEMEncodedStringKeepsMembers(t *testing.T) {
 	if again := r.Redact(got); again != got {
 		t.Errorf("not idempotent: %q became %q", got, again)
 	}
+}
+
+// wrapRaw returns s as the "r" member of a JSON object, leaving <, > and & as
+// written.
+func wrapRaw(s string) string {
+	var b strings.Builder
+
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	// Encoding a string into a builder cannot fail.
+	_ = enc.Encode(s)
+
+	return `{"r":` + strings.TrimSuffix(b.String(), "\n") + `}`
 }
 
 // wrapJSON returns s as the "r" member of a JSON object.
