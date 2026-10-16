@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/cynative/cynative/internal/schema"
@@ -133,5 +134,57 @@ func TestRun_HostWrittenFailureNoticeStaysOutOfHistory(t *testing.T) {
 	}
 	if len(a.history) != 0 {
 		t.Errorf("history = %+v, want the host-written notice kept out of it", a.history)
+	}
+	if !slices.Equal(a.unanswered, []string{"scan"}) {
+		t.Errorf("unanswered = %q, want the failed question queued for the next one", a.unanswered)
+	}
+}
+
+func TestWithUnanswered_JoinsEveryQueuedQuestion(t *testing.T) {
+	t.Parallel()
+
+	got := withUnanswered([]string{"a", "b"}, "c")
+	want := unansweredPrefix + "a\n\n" + unansweredPrefix + "b\n\nc"
+	if got != want {
+		t.Errorf("withUnanswered = %q, want %q", got, want)
+	}
+}
+
+func TestRun_FailedQuestionCarriesIntoTheNextQuestion(t *testing.T) {
+	t.Parallel()
+
+	// Run 1: three failing calls, then the summary Generate errors (scriptErr), so
+	// the run ends with the host notice. Run 2: the model answers directly.
+	model := &genScriptModel{gens: []schema.Generation{
+		plainTurn(toolCall("c1", "fail_tool", "{}")),
+		plainTurn(toolCall("c2", "fail_tool", "{}")),
+		plainTurn(toolCall("c3", "fail_tool", "{}")),
+		{Message: nil},
+		plainTurn(schema.AssistantMessage("found it", nil)),
+	}}
+	cfg := haltBaseConfig()
+	cfg.Model = model
+	cfg.Cfg.MaxConsecutiveFailures = 3
+	cfg.Tools = []schema.InvokableTool{&failingTool{name: "fail_tool"}}
+	a := New(context.Background(), cfg)
+
+	if err := a.Run(context.Background(), "scan the bucket", &bytes.Buffer{}); err != nil {
+		t.Fatalf("Run 1: %v", err)
+	}
+	if err := a.Run(context.Background(), "use project X", &bytes.Buffer{}); err != nil {
+		t.Fatalf("Run 2: %v", err)
+	}
+
+	req := model.seen[len(model.seen)-1]
+	last := req[len(req)-1]
+	want := "Earlier question, which ended without an answer: scan the bucket\n\nuse project X"
+	if last.Role != schema.User || last.Text() != want {
+		t.Errorf("question sent = %q, want %q", last.Text(), want)
+	}
+	if n := len(a.history); n != 2 || a.history[0].Text() != want || a.history[1].Text() != "found it" {
+		t.Errorf("history = %+v, want the combined question and its answer", a.history)
+	}
+	if len(a.unanswered) != 0 {
+		t.Errorf("unanswered = %q, want it cleared once a question is answered", a.unanswered)
 	}
 }
