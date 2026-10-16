@@ -1,48 +1,62 @@
 package llm
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 
 	bschemas "github.com/maximhq/bifrost/core/schemas"
 )
 
-// redactingLogger wraps the logger handed to Bifrost so every line is redacted
-// before it is printed. Bifrost logs upstream error text, which can echo request
-// content, including reasoning replayed unredacted to the backend that issued it.
-// Each line is formatted here, redacted, and passed on as the argument of "%s",
-// so a "%" in the redacted text is printed, never read as a verb.
+// redactingLogger is the logger handed to Bifrost. It redacts every line and
+// writes it to out, stderr in production, so SDK diagnostics never mix with the
+// answer on stdout (Bifrost's default logger prints warnings to stdout). Bifrost
+// logs upstream error text, which can echo request content, including reasoning
+// replayed unredacted to the backend that issued it. Each line is written as one
+// JSON object, so a control character in upstream text reaches the terminal
+// escaped, never raw. Lines below warn are dropped, the level cynative ran
+// Bifrost's default logger at.
 type redactingLogger struct {
-	inner  bschemas.Logger
+	out    io.Writer
 	redact func(string) string
 }
 
 var _ bschemas.Logger = redactingLogger{}
 
-// line formats one log call and redacts the result.
-func (l redactingLogger) line(msg string, args []any) string {
-	return l.redact(fmt.Sprintf(msg, args...))
+// logLine is the JSON shape of one written line.
+type logLine struct {
+	Level   string `json:"level"`
+	Message string `json:"message"`
 }
 
-// Debug logs a redacted debug line.
-func (l redactingLogger) Debug(msg string, args ...any) { l.inner.Debug("%s", l.line(msg, args)) }
+// write formats one log call, redacts it and writes it at level.
+func (l redactingLogger) write(level, msg string, args []any) {
+	// Encoding a struct of two strings cannot fail, and a failed write to
+	// stderr has nowhere better to be reported, so the error is dropped.
+	_ = json.NewEncoder(l.out).Encode(logLine{Level: level, Message: l.redact(fmt.Sprintf(msg, args...))})
+}
 
-// Info logs a redacted info line.
-func (l redactingLogger) Info(msg string, args ...any) { l.inner.Info("%s", l.line(msg, args)) }
+// Debug drops a debug line.
+func (redactingLogger) Debug(string, ...any) {}
 
-// Warn logs a redacted warning line.
-func (l redactingLogger) Warn(msg string, args ...any) { l.inner.Warn("%s", l.line(msg, args)) }
+// Info drops an info line.
+func (redactingLogger) Info(string, ...any) {}
 
-// Error logs a redacted error line.
-func (l redactingLogger) Error(msg string, args ...any) { l.inner.Error("%s", l.line(msg, args)) }
+// Warn writes a redacted warning line.
+func (l redactingLogger) Warn(msg string, args ...any) { l.write("warn", msg, args) }
 
-// Fatal logs a redacted fatal line.
-func (l redactingLogger) Fatal(msg string, args ...any) { l.inner.Fatal("%s", l.line(msg, args)) }
+// Error writes a redacted error line.
+func (l redactingLogger) Error(msg string, args ...any) { l.write("error", msg, args) }
 
-// SetLevel forwards the level to the inner logger.
-func (l redactingLogger) SetLevel(level bschemas.LogLevel) { l.inner.SetLevel(level) }
+// Fatal writes a redacted fatal line. It does not exit: Bifrost core never
+// calls it, and ending the process is the cli's decision.
+func (l redactingLogger) Fatal(msg string, args ...any) { l.write("fatal", msg, args) }
 
-// SetOutputType forwards the output type to the inner logger.
-func (l redactingLogger) SetOutputType(t bschemas.LoggerOutputType) { l.inner.SetOutputType(t) }
+// SetLevel is ignored; the level is fixed at warn. Bifrost core never calls it.
+func (redactingLogger) SetLevel(bschemas.LogLevel) {}
+
+// SetOutputType is ignored; lines are always JSON. Bifrost core never calls it.
+func (redactingLogger) SetOutputType(bschemas.LoggerOutputType) {}
 
 // LogHTTPRequest drops structured HTTP access logs. Their fields bypass the
 // line redaction above, and no chat path in Bifrost core emits them.

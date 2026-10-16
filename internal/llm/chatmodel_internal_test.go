@@ -1,7 +1,9 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -47,5 +49,24 @@ func TestWithLogRedactor_NilKeepsIdentity(t *testing.T) {
 	l, ok := loggerConfigured(t, WithLogRedactor(nil)).(redactingLogger)
 	if !ok || l.redact("SECRET") != "SECRET" {
 		t.Errorf("logger = %#v, want a redactingLogger that leaves lines unchanged", l)
+	}
+}
+
+func TestNewBifrostChatModel_LogsToStderrByDefault(t *testing.T) {
+	t.Parallel()
+
+	l, ok := loggerConfigured(t).(redactingLogger)
+	if !ok || l.out != os.Stderr {
+		t.Errorf("logger = %#v, want a redactingLogger writing to stderr", l)
+	}
+}
+
+func TestWithLogOutput_WiresTheBifrostLogger(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	loggerConfigured(t, WithLogOutput(&out)).Warn("w")
+	if got, want := out.String(), `{"level":"warn","message":"w"}`+"\n"; got != want {
+		t.Errorf("output = %q, want %q", got, want)
 	}
 }
