@@ -178,6 +178,14 @@ type runState struct {
 	// output limit, so a caller can mark a conclusion the model did not finish.
 	// It lives here, not on *Agent, so concurrent sub-runs stay race-free.
 	answerTruncated bool
+	// answerReasoning is the reasoning returned with the turn that produced this
+	// run's answer, nil when it carried none, so Run can keep its text in history.
+	answerReasoning *schema.ReasoningBlock
+	// hostAnswer marks an answer cynative wrote itself rather than the model (the
+	// failure summary's fallback notice). Run keeps it out of the Q&A history:
+	// it is not a model turn, so it has no reasoning to replay, and some backends
+	// reject any earlier assistant turn without one.
+	hostAnswer bool
 }
 
 // runScopedTool is implemented by the in-package orchestration tools that need
@@ -357,6 +365,7 @@ func (a *Agent) acceptTurn(
 		rs.answerTruncated = true
 		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
+	rs.answerReasoning = msg.Reasoning()
 
 	return turn, nil, msg.Text(), true, nil
 }
@@ -367,11 +376,12 @@ func (a *Agent) acceptTurn(
 // invalid-JSON arguments through raw, which can fail every subsequent request
 // in the session), and the reason belongs to the whole generation, so a call
 // that happens to parse proves nothing about the batch. The turn's prose is
-// kept byte-identical in a text-only projection (a whitespace-only projection
-// is skipped, like a blank turn); the retry carries a host directive in place
-// of the calls. At maxConsecutiveTruncated in a row the run gives up with
-// errOutputLimit, through haltOr, so an operator stop or budget crossing that
-// raced in is reported as itself.
+// kept byte-identical in a projection without the calls, together with the
+// turn's reasoning (a whitespace-only projection is skipped, like a blank
+// turn); the retry carries a host directive in place of the calls. At
+// maxConsecutiveTruncated in a row the run gives up with errOutputLimit,
+// through haltOr, so an operator stop or budget crossing that raced in is
+// reported as itself.
 func (a *Agent) refuseTruncatedCalls(
 	turn []*schema.Message, msg *schema.Message, rs *runState,
 ) ([]*schema.Message, error) {
@@ -379,6 +389,13 @@ func (a *Agent) refuseTruncatedCalls(
 
 	if text := msg.Text(); strings.TrimSpace(text) != "" {
 		projected := schema.AssistantMessage(text, nil)
+		// Keep the turn's reasoning with its prose: a strict backend rejects an
+		// assistant turn replayed without it. The calls stay quarantined, so this
+		// cannot dispatch anything; whether the reasoning is complete is best
+		// effort, since StopLength does not say.
+		if r := msg.Reasoning(); r != nil {
+			projected.Content = append([]schema.Block{*r}, projected.Content...)
+		}
 		turn = append(turn, projected)
 		a.renderTurn(projected, rs.out)
 	}

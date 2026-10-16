@@ -122,6 +122,7 @@ type Agent struct {
 	maxIter         int
 	maxSubagentIter int
 	history         []*schema.Message    // Q&A only: user questions + final answers.
+	unanswered      []string             // Questions that ended in a host-written notice, carried into the next one.
 	metrics         *metrics.Accumulator // Session telemetry (mirrors Config.Metrics); nil is a safe no-op.
 	// deniedResult is the trusted approval-denial sentinel; results equal to it are
 	// not framed as untrusted data (mirrors Config.DeniedToolResult).
@@ -208,7 +209,8 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 	seed := make([]*schema.Message, 0, len(a.history)+seedExtra)
 	seed = append(seed, schema.SystemMessage(a.systemPrompt))
 	seed = append(seed, a.history...)
-	seed = append(seed, schema.UserMessage(task))
+	question := withUnanswered(a.unanswered, task)
+	seed = append(seed, schema.UserMessage(question))
 
 	answer, err := a.run(ctx, rs, seed, a.maxIter)
 	if err != nil {
@@ -228,7 +230,12 @@ func (a *Agent) Run(ctx context.Context, task string, w io.Writer) error {
 		return err
 	}
 
-	a.history = append(a.history, schema.UserMessage(task), schema.AssistantMessage(answer, nil))
+	if rs.hostAnswer {
+		a.unanswered = append(a.unanswered, task)
+	} else {
+		a.history = append(a.history, schema.UserMessage(question), historyAnswer(answer, rs.answerReasoning))
+		a.unanswered = nil
+	}
 
 	return nil
 }

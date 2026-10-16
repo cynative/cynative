@@ -84,8 +84,13 @@ cannot move any of these lines.
   agent. Every audited tool call records the agent's name, source and file
   digest.
 - **Credential leakage** - no credential store; secrets are redacted from
-  tool results and the audit log, which is readable only by the running
-  user.
+  tool results, the audit log (readable only by the running user) and every
+  line the LLM SDK logs. Reasoning a model returns goes back unredacted to the
+  backend that produced it on later turns of the same session, because replay
+  formats can require it byte for byte. cynative never displays, audits or
+  logs it itself; an SDK warning or upstream error message that echoes it is
+  redacted for secrets like any other line, but its ordinary text can still
+  print.
 - **Memory and concurrency bugs** - pure Go, no cgo; the full test suite
   runs under Go's race detector.
 - **Untested paths** - 100% statement coverage enforced in CI.

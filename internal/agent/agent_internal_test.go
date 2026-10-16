@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2963,5 +2964,123 @@ func TestRun_BlankTruncatedTurn_HasNoTruncationNotice(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), truncatedAnswerNotice) {
 		t.Errorf("output = %q, want only the output-limit notice", buf.String())
+	}
+}
+
+// withReasoning prepends a reasoning block carrying text to msg and returns msg.
+func withReasoning(msg *schema.Message, text *string) *schema.Message {
+	msg.Content = append([]schema.Block{schema.ReasoningBlock{Text: text}}, msg.Content...)
+
+	return msg
+}
+
+// assistantReasoning lists the aggregate reasoning pointers of the assistant
+// messages in a transcript, in order.
+func assistantReasoning(msgs []*schema.Message) []*string {
+	var out []*string
+	for _, m := range msgs {
+		if r := m.Reasoning(); m.Role == schema.Assistant && r != nil {
+			out = append(out, r.Text)
+		}
+	}
+
+	return out
+}
+
+func TestRun_ReplaysEachTurnsReasoning(t *testing.T) {
+	t.Parallel()
+
+	r1, r2, r3 := "r1", "r2", "r3"
+	call := func(id string) []schema.ToolCallBlock {
+		return []schema.ToolCallBlock{{ID: id, Name: "echo", Arguments: "{}"}}
+	}
+	m := &genScriptModel{gens: []schema.Generation{
+		plainTurn(withReasoning(schema.AssistantMessage("", call("c1")), &r1)),
+		plainTurn(withReasoning(schema.AssistantMessage("", call("c2")), &r2)),
+		plainTurn(withReasoning(schema.AssistantMessage("", call("c3")), &r3)),
+		plainTurn(schema.AssistantMessage("final", nil)),
+	}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: nil}})
+
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(m.seen) != 4 {
+		t.Fatalf("Generate called %d times, want 4", len(m.seen))
+	}
+	want := []*string{&r1, &r2, &r3}
+	for k := 1; k <= 3; k++ {
+		if got := assistantReasoning(m.seen[k]); !slices.Equal(got, want[:k]) {
+			t.Errorf("request %d carries reasoning %v, want the first %d turns' own blocks", k, got, k)
+		}
+	}
+}
+
+func TestRun_TruncatedToolCallTurn_ProjectionKeepsReasoning(t *testing.T) {
+	t.Parallel()
+
+	why := "why"
+	trunc := truncatedCallTurn("partial", `{"url": "https://exa`)
+	withReasoning(trunc.Message, &why)
+	ran := false
+	m := &genScriptModel{gens: []schema.Generation{trunc, plainTurn(schema.AssistantMessage("final", nil))}}
+	a := newTestAgent(m, map[string]schema.InvokableTool{"echo": &echoTool{ran: &ran}})
+
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if ran {
+		t.Fatal("a truncated call was dispatched")
+	}
+	var projected *schema.Message
+	for _, msg := range m.seen[1] {
+		if msg.Role == schema.Assistant {
+			projected = msg
+		}
+	}
+	if projected == nil || projected.Text() != "partial" || len(projected.ToolCalls()) != 0 {
+		t.Fatalf("projected = %+v, want the prose alone, without calls", projected)
+	}
+	if r := projected.Reasoning(); r == nil || r.Text != &why {
+		t.Errorf("projected reasoning = %#v, want the truncated turn's own block", r)
+	}
+}
+
+func TestRun_ReasoningOnlyTurnIsStillBlank(t *testing.T) {
+	t.Parallel()
+
+	thought := "only thinking"
+	blank := &schema.Message{Role: schema.Assistant, Content: []schema.Block{schema.ReasoningBlock{Text: &thought}}}
+	m := &genScriptModel{gens: []schema.Generation{
+		{Message: blank, StopReason: schema.StopNormal},
+		plainTurn(schema.AssistantMessage("final", nil)),
+	}}
+	a := newTestAgent(m, nil)
+
+	answer, err := a.run(context.Background(), &runState{depth: 0, out: io.Discard}, nil, 5)
+	if err != nil || answer != "final" {
+		t.Fatalf("run = %q, %v; want the final answer", answer, err)
+	}
+	if got := assistantReasoning(m.seen[1]); len(got) != 0 {
+		t.Errorf("the reasoning-only turn was appended to the retry: %v", got)
+	}
+}
+
+func TestRun_RenderingHidesReasoning(t *testing.T) {
+	t.Parallel()
+
+	hidden := "HIDDEN-REASONING"
+	m := &genScriptModel{gens: []schema.Generation{
+		plainTurn(withReasoning(schema.AssistantMessage("VISIBLE-ANSWER", nil), &hidden)),
+	}}
+	a := newTestAgent(m, nil)
+	a.renderer = echoRenderer
+	var out bytes.Buffer
+
+	if _, err := a.run(context.Background(), &runState{depth: 0, out: &out}, nil, 5); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if s := out.String(); !strings.Contains(s, "VISIBLE-ANSWER") || strings.Contains(s, hidden) {
+		t.Errorf("rendered %q, want the answer shown and the reasoning hidden", s)
 	}
 }

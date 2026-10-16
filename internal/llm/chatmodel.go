@@ -19,6 +19,7 @@ type BifrostChatModel struct {
 	backend            BifrostBackend
 	newBackend         func(context.Context, bschemas.BifrostConfig) (BifrostBackend, error)
 	recordUsage        func(schema.Usage)
+	redactLog          func(string) string
 	provider           string
 	model              string
 	reasoningEffort    string
@@ -26,9 +27,9 @@ type BifrostChatModel struct {
 }
 
 // ChatModelOption configures a BifrostChatModel at construction time.
-// WithUsageRecorder (options.go) is the production-facing option wired by the cli
-// composition root; the remaining options are test-only (see export_test.go) and
-// replace the backend factory.
+// WithUsageRecorder and WithLogRedactor (options.go) are the production-facing
+// options wired by the cli composition root; the remaining options are test-only
+// (see export_test.go) and replace the backend factory.
 type ChatModelOption func(*BifrostChatModel)
 
 // NewBifrostChatModel constructs a chat model backed by Bifrost. The backend
@@ -43,6 +44,7 @@ func NewBifrostChatModel(
 	m := &BifrostChatModel{ //nolint:exhaustruct // backend set below
 		newBackend:         bifrostShellInit,
 		recordUsage:        func(schema.Usage) {},
+		redactLog:          func(s string) string { return s },
 		provider:           account.Entry.Provider,
 		model:              account.Entry.Model,
 		reasoningEffort:    account.Entry.ReasoningEffort,
@@ -56,7 +58,7 @@ func NewBifrostChatModel(
 		ctx,
 		bschemas.BifrostConfig{ //nolint:exhaustruct // optional Bifrost fields intentionally omitted
 			Account: account,
-			Logger:  bifrost.NewDefaultLogger(bschemas.LogLevelWarn),
+			Logger:  redactingLogger{inner: bifrost.NewDefaultLogger(bschemas.LogLevelWarn), redact: m.redactLog},
 		},
 	)
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/cynative/cynative/internal/config"
 	"github.com/cynative/cynative/internal/interrupt"
 	"github.com/cynative/cynative/internal/llm"
+	"github.com/cynative/cynative/internal/redact"
 	"github.com/cynative/cynative/internal/schema"
 	"github.com/cynative/cynative/internal/tools"
 	"github.com/cynative/cynative/internal/ui"
@@ -210,6 +211,7 @@ func newDeps() *deps {
 				ctx,
 				&llm.FileAccount{Entry: cfg.LLM},
 				llm.WithUsageRecorder(recordUsage),
+				llm.WithLogRedactor(redact.New().Redact),
 			)
 		},
 		newHTTPRequestTool:   tools.NewHTTPRequestTool,

@@ -10,4 +10,5 @@ func TestIsBlockMethods(t *testing.T) {
 	TextBlock{}.isBlock()
 	ToolCallBlock{}.isBlock()
 	ToolResultBlock{}.isBlock()
+	ReasoningBlock{}.isBlock()
 }

@@ -53,9 +53,37 @@ type ToolResultBlock struct {
 	Content    string
 }
 
+// ReasoningBlock is the reasoning a backend returned with an assistant turn,
+// kept only so later requests of the same run can hand it back. It is replay
+// state, not prose: Text, ToolCalls and ToolResults ignore it, and cynative
+// never renders, audits or logs it itself. Every field is kept exactly as the
+// backend adapter received it, so a signed or encrypted entry stays valid on
+// replay.
+type ReasoningBlock struct {
+	// Text is the aggregate reasoning text, nil when the backend sent none.
+	Text *string
+	// Details are the ordered reasoning entries, signatures and encrypted
+	// payloads included.
+	Details []ReasoningDetail
+}
+
+// ReasoningDetail is one reasoning entry. Type names its kind, such as
+// "reasoning.text" or "reasoning.encrypted". Pointer fields keep an absent
+// value distinct from an empty one.
+type ReasoningDetail struct {
+	ID        *string
+	Index     int
+	Type      string
+	Summary   *string
+	Text      *string
+	Signature *string
+	Data      *string
+}
+
 func (TextBlock) isBlock()       {}
 func (ToolCallBlock) isBlock()   {}
 func (ToolResultBlock) isBlock() {}
+func (ReasoningBlock) isBlock()  {}
 
 // SystemMessage builds a system-role message with a single text block.
 func SystemMessage(text string) *Message {
@@ -123,4 +151,16 @@ func (m *Message) ToolResults() []ToolResultBlock {
 	}
 
 	return out
+}
+
+// Reasoning returns the message's reasoning block, or nil when it has none. A
+// backend adapter adds at most one per message.
+func (m *Message) Reasoning() *ReasoningBlock {
+	for _, blk := range m.Content {
+		if r, ok := blk.(ReasoningBlock); ok {
+			return &r
+		}
+	}
+
+	return nil
 }
