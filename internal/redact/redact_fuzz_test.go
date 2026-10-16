@@ -68,6 +68,8 @@ func FuzzRedact(f *testing.F) {
 	f.Add("[\"-----BEGIN PRIVATE KEY-----\\nComment: \\\"x\\\" \\n\"\n]\necho \"-----BEGIN PRIVATE KEY-----\" k")
 	f.Add(`"-----BEGIN PRIVATE KEY-----"MIIE-----END PRIVATE KEY-----`)
 	f.Add(`{"k":"-----BEGIN PRIVATE KEY-----\ud83d\ude00x\u005d","p":"PRIVATE KEY a<b \/"}`)
+	f.Add(`{"k":"LS0tLS1CRUdJTiBQ\r\n` + strings.Repeat("QUJD", 16) + `\nname","r":"{\"k\":\"LS0tLS1CRUdJTi\\nx\"}"}`)
+	f.Add("[\"LS0tLS1CRUdJTi\"\n" + strings.Repeat("QUJD", 8) + ",LS0tLS1CRUdJTi\\")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

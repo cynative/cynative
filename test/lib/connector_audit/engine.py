@@ -1596,7 +1596,8 @@ _CONTENT_RULES = (
      re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|\Z)", re.S),
      "pem-private-key"),
     (("LS0tLS1CRUdJTi",),
-     re.compile(r"LS0tLS1CRUdJTi[A-Za-z0-9+/=]+(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+/=]{32,})*"),
+     re.compile(r"LS0tLS1CRUdJTi(?:[A-Za-z0-9+/=]|\\+/)+"
+                r"(?:(?:[ \t]|\\+t)*(?:\r?\n|(?:\\+r)?\\+n)(?:[ \t]|\\+t)*(?:[A-Za-z0-9+/=]|\\+/){32,})*"),
      "base64-pem"),
     (("eyJ",), re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?"), "jwt"),
     (("ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"),
