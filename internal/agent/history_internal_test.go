@@ -153,7 +153,7 @@ func TestWithUnanswered_JoinsEveryQueuedQuestion(t *testing.T) {
 func TestRun_FailedQuestionCarriesIntoTheNextQuestion(t *testing.T) {
 	t.Parallel()
 
-	// Run 1: three failing calls, then the summary Generate errors (scriptErr), so
+	// Run 1: three failing calls, then the summary Generate returns no message, so
 	// the run ends with the host notice. Run 2: the model answers directly.
 	model := &genScriptModel{gens: []schema.Generation{
 		plainTurn(toolCall("c1", "fail_tool", "{}")),
