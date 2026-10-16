@@ -240,7 +240,7 @@ llm:
   model: gpt-5.5
   api_key: env.OPENAI_API_KEY
   network_config:                 # common fields shown; see schemas.NetworkConfig for the full set
-    base_url: https://my-proxy.example.com/v1
+    base_url: https://my-proxy.example.com  # no /v1: the provider appends /v1/chat/completions
     default_request_timeout_in_seconds: 60
     max_retries: 3
     extra_headers:

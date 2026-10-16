@@ -21,7 +21,7 @@ llm:
   model: gpt-5
   api_key: env.OPENAI_API_KEY     # optional — falls back to OPENAI_API_KEY
   network_config:
-    base_url: https://api.openai.com/v1
+    base_url: https://api.openai.com
     default_request_timeout_in_seconds: 60
     max_retries: 3
   openai_config:
@@ -55,7 +55,9 @@ For the full set, see Bifrost's [`schemas.OpenAIConfig`](https://github.com/maxi
 
 Many proxies (LiteLLM, vLLM with `--api-key`, OpenRouter) speak the OpenAI
 Chat Completions API. Point cynative at them by overriding
-`network_config.base_url`:
+`network_config.base_url`. Leave `/v1` off: the provider appends
+`/v1/chat/completions` itself, so a base URL ending in `/v1` requests
+`/v1/v1/chat/completions` and gets a 404.
 
 ```yaml
 llm:
@@ -63,7 +65,7 @@ llm:
   model: my-deployment-name
   api_key: env.MY_PROXY_KEY
   network_config:
-    base_url: https://my-proxy.example.com/v1
+    base_url: https://my-proxy.example.com
 ```
 
 ## Links
