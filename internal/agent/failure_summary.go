@@ -17,8 +17,9 @@ const stopSummaryDirective = "You have stopped because you hit several consecuti
 	"supplying the value. Be direct; do not apologize at length."
 
 // deterministicFailureNotice is the fallback answer when the summary turn errors or
-// returns blank text — so the halt is never silently dropped from history (an empty
-// completion would otherwise look like an iteration-limit exit).
+// returns blank text, so the operator always gets an explanation (an empty
+// completion would otherwise look like an iteration-limit exit). Run keeps it out of
+// the Q&A history, as it does for a run that ends without an answer.
 const deterministicFailureNotice = "I stopped after repeated tool failures and could not " +
 	"summarize the cause. Please check the required inputs (e.g. an account/project ID, region, " +
 	"or credentials) and tell me how to proceed."
