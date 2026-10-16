@@ -63,6 +63,11 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`["sig=x\"tail","{\"DB_PASSWORD\":\"hunter2\"}"]`)
 	f.Add("{\"u\":\"sig=ab\\\\\\\"c\"}\nsig=ab\\\npassword: x\nsig=ab\\&t=1")
 	f.Add(`[1e1000,"\u0073ig=x\n{\"password\":\"x\"}"]`)
+	f.Add(`{"a":"-----BEGIN PRIVATE KEY-----","b":{"c":"-----END PRIVATE KEY-----"},"r":"{\"token\":\"t\"}"}`)
+	f.Add(`{"r":"{\"k\":\"-----BEGIN PRIVATE KEY-----\\\nMII\\\"}\"}","t":"-----BEGIN PRIVATE KEY-----\`)
+	f.Add("[\"-----BEGIN PRIVATE KEY-----\\nComment: \\\"x\\\" \\n\"\n]\necho \"-----BEGIN PRIVATE KEY-----\" k")
+	f.Add(`"-----BEGIN PRIVATE KEY-----"MIIE-----END PRIVATE KEY-----`)
+	f.Add(`{"k":"-----BEGIN PRIVATE KEY-----\ud83d\ude00x\u005d","p":"PRIVATE KEY a<b \/"}`)
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

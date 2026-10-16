@@ -1,9 +1,12 @@
 package redact_test
 
 import (
+	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/cynative/cynative/internal/redact"
 )
@@ -108,6 +111,207 @@ func TestRedact_PEMOpenEndedTruncated(t *testing.T) {
 	if !strings.Contains(got, "[REDACTED:pem-private-key]") {
 		t.Errorf("missing pem placeholder: %q", got)
 	}
+}
+
+func TestRedact_PEMEndsAtStringQuote(t *testing.T) {
+	t.Parallel()
+
+	r := redact.New()
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "END marker in a later string",
+			in:   `{"a":"-----BEGIN PRIVATE KEY-----","b":{"c":"-----END PRIVATE KEY-----"},"r":"{\"password\":\"hunter2\"}"}`,
+			want: `{"a":"[REDACTED:pem-private-key]","b":{"c":"-----END PRIVATE KEY-----"},` +
+				`"r":"{\"password\":\"[REDACTED:credential-field]\"}"}`,
+		},
+		{
+			name: "no END marker",
+			in:   `{"x":"-----BEGIN PRIVATE KEY-----"}`,
+			want: `{"x":"[REDACTED:pem-private-key]"}`,
+		},
+		{
+			name: "END marker in the same string",
+			in:   `{"k":"-----BEGIN RSA PRIVATE KEY-----\nMIIE\\\/x\n-----END RSA PRIVATE KEY-----\n","n":1}`,
+			want: `{"k":"[REDACTED:pem-private-key]\n","n":1}`,
+		},
+		{
+			name: "key in an encoded string",
+			in:   `{"r":"{\"k\":\"-----BEGIN PRIVATE KEY-----\\nMIIE\",\"password\":\"hunter2\"}"}`,
+			want: `{"r":"{\"k\":\"[REDACTED:pem-private-key]\",\"password\":\"[REDACTED:credential-field]\"}"}`,
+		},
+		{
+			name: "encoded string that is not valid JSON",
+			in:   `{"r":"{\"k\":\"-----BEGIN PRIVATE KEY-----\nMIIE\"}","n":1}`,
+			want: `{"r":"{\"k\":\"[REDACTED:pem-private-key]","n":1}`,
+		},
+		{
+			name: "escaped whitespace before the end of an encoded string",
+			in:   `{"r":"{\"k\":\"-----BEGIN PRIVATE KEY-----\"\n}","n":1}`,
+			want: `{"r":"{\"k\":\"[REDACTED:pem-private-key]\"\n}","n":1}`,
+		},
+		{
+			name: "quoted header followed by a comma",
+			in:   `{"k":"-----BEGIN RSA PRIVATE KEY-----\nComment: \"a\", b\n\nMIIE\n-----END RSA PRIVATE KEY-----","n":1}`,
+			want: `{"k":"[REDACTED:pem-private-key]","n":1}`,
+		},
+		{
+			name: "string without a key kept as written",
+			in:   `{"k":"the PRIVATE KEY field \/ \t"}`,
+			want: `{"k":"the PRIVATE KEY field \/ \t"}`,
+		},
+		{
+			name: "rest of the string keeps its text",
+			in:   `{"k":"a<b> -----BEGIN PRIVATE KEY-----\nMIIE","n":1}`,
+			want: `{"k":"a<b> [REDACTED:pem-private-key]","n":1}`,
+		},
+		{
+			name: "key bytes after a string are matched as a whole",
+			in:   `"-----BEGIN PRIVATE KEY-----"MIIE-----END PRIVATE KEY-----`,
+			want: `"[REDACTED:pem-private-key]`,
+		},
+		{
+			name: "key bytes after a string in an encoded string",
+			in:   `"\"-----BEGIN PRIVATE KEY-----\"MIIE-----END PRIVATE KEY-----"`,
+			want: `"\"[REDACTED:pem-private-key]"`,
+		},
+		{
+			name: "JSON after prose is matched as a whole",
+			in:   `got {"a":"-----BEGIN PRIVATE KEY-----","b":"-----END PRIVATE KEY-----","c":1}`,
+			want: `got {"a":"[REDACTED:pem-private-key]","c":1}`,
+		},
+		{
+			name: "escaped quote two levels down",
+			in:   `{"r":"{\"s\":\"{\\\"k\\\":\\\"-----BEGIN PRIVATE KEY-----\\\\nMIIE\\\"}\"}"}`,
+			want: `{"r":"{\"s\":\"{\\\"k\\\":\\\"[REDACTED:pem-private-key]\\\"}\"}"}`,
+		},
+		{
+			name: "cut at the content cap after a backslash",
+			in:   `{"k":"-----BEGIN PRIVATE KEY-----\nMIIE\`,
+			want: `{"k":"[REDACTED:pem-private-key]`,
+		},
+		{
+			name: "string closed before whitespace and a brace",
+			in:   "{\n  \"k\": \"-----BEGIN EC PRIVATE KEY-----\\nMHcC\\n\"\n}",
+			want: "{\n  \"k\": \"[REDACTED:pem-private-key]\"\n}",
+		},
+		{
+			name: "string closed before a bracket",
+			in:   `["-----BEGIN PRIVATE KEY-----\nMIIE"]`,
+			want: `["[REDACTED:pem-private-key]"]`,
+		},
+		{
+			name: "string closed at the end of content",
+			in:   `"-----BEGIN PRIVATE KEY-----\nMIIE"`,
+			want: `"[REDACTED:pem-private-key]"`,
+		},
+		{
+			name: "quoted header inside the string",
+			in:   `{"k":"-----BEGIN RSA PRIVATE KEY-----\nComment: \"<password>\"\n\nMIIE\n-----END RSA PRIVATE KEY-----","n":1}`,
+			want: `{"k":"[REDACTED:pem-private-key]","n":1}`,
+		},
+		{
+			name: "raw quote that ends no string",
+			in:   "echo \"-----BEGIN EC PRIVATE KEY-----\" > k\necho \"MHcC\" >> k\necho \"-----END EC PRIVATE KEY-----\" >> k",
+			want: "echo \"[REDACTED:pem-private-key]\" >> k",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := r.Redact(tc.in)
+			if got != tc.want {
+				t.Errorf("Redact(%q)\n got %q\nwant %q", tc.in, got, tc.want)
+			}
+			if again := r.Redact(got); again != got {
+				t.Errorf("not idempotent: %q became %q", got, again)
+			}
+		})
+	}
+}
+
+func TestRedact_PEMBelowNestingBound(t *testing.T) {
+	t.Parallel()
+
+	r := redact.New()
+
+	// The strings of four levels are read, so the content of the fifth, the object
+	// around the key's object, is matched as a whole, to its end. The four levels
+	// above it stay intact.
+	in := wrapJSON(t, `{"k":"-----BEGIN PRIVATE KEY-----","n":1}`)
+	want := `{"r":"{\"k\":\"[REDACTED:pem-private-key]`
+	for range 4 {
+		in, want = wrapJSON(t, in), wrapJSON(t, want)
+	}
+	if got := r.Redact(in); got != want {
+		t.Errorf("Redact(%q)\n got %q\nwant %q", in, got, want)
+	}
+}
+
+func TestRedact_PEMSurrogatePairs(t *testing.T) {
+	t.Parallel()
+
+	r := redact.New()
+
+	// The first key holds an escaped surrogate pair and the text between the keys
+	// two U+FFFD, which a decoder that reads each half alone would confuse.
+	bs, fffd := "\\", string(utf8.RuneError)
+	in := `"-----BEGIN PRIVATE KEY-----` + bs + `ud83d` + bs + `ude00-----END PRIVATE KEY-----` +
+		bs + `ufffd` + bs + `ufffd-----BEGIN PRIVATE KEY-----x-----END PRIVATE KEY-----"`
+	want := `"[REDACTED:pem-private-key]` + fffd + fffd + `[REDACTED:pem-private-key]"`
+	if got := r.Redact(in); got != want {
+		t.Errorf("Redact(%q)\n got %q\nwant %q", in, got, want)
+	}
+}
+
+func TestRedact_PEMEncodedStringKeepsMembers(t *testing.T) {
+	t.Parallel()
+
+	r := redact.New()
+
+	// Each key has no END marker and ends in "]", spelled as an escape, and the
+	// member between them holds an escaped surrogate pair. Only the two keys may
+	// change in the encoded document.
+	bs := "\\"
+	esc := bs + "u005d"
+	in := wrapJSON(t, `{"a":"-----BEGIN PRIVATE KEY-----x`+esc+`","s":"`+bs+`ud83d`+bs+`ude00",`+
+		`"b":"-----BEGIN PRIVATE KEY-----y`+esc+`","n":1}`)
+	got := r.Redact(in)
+
+	var outer map[string]string
+	if err := json.Unmarshal([]byte(got), &outer); err != nil || len(outer) != 1 {
+		t.Fatalf("Redact(%q) = %q, want one string member: %v", in, got, err)
+	}
+	var inner map[string]any
+	if err := json.Unmarshal([]byte(outer["r"]), &inner); err != nil {
+		t.Fatalf("encoded string %q is not JSON: %v", outer["r"], err)
+	}
+	want := map[string]any{
+		"a": "[REDACTED:pem-private-key]", "s": string(rune(0x1F600)), "b": "[REDACTED:pem-private-key]", "n": 1.0,
+	}
+	if !reflect.DeepEqual(inner, want) {
+		t.Errorf("encoded string = %v, want %v", inner, want)
+	}
+	if again := r.Redact(got); again != got {
+		t.Errorf("not idempotent: %q became %q", got, again)
+	}
+}
+
+// wrapJSON returns s as the "r" member of a JSON object.
+func wrapJSON(t *testing.T, s string) string {
+	t.Helper()
+
+	b, err := json.Marshal(map[string]string{"r": s})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return string(b)
 }
 
 func TestRedact_CredentialFieldAndSignedURL(t *testing.T) {
