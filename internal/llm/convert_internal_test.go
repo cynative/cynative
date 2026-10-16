@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 
@@ -585,5 +586,129 @@ func TestTextBlocks_EmptyContentAllocatesNothing(t *testing.T) {
 				t.Errorf("textBlocks = %#v, want nil", got)
 			}
 		})
+	}
+}
+
+func TestSchemaFromBifrostMessage_KeepsReasoningExactly(t *testing.T) {
+	t.Parallel()
+
+	agg := "first\nsecond\n"
+	id, txt, sig, data, sum := "d1", "first", "sig-a", "opaque==", "short"
+	empty := ""
+	bm := bschemas.ChatMessage{
+		Role: bschemas.ChatMessageRoleAssistant,
+		ChatAssistantMessage: &bschemas.ChatAssistantMessage{
+			Reasoning: &agg,
+			ReasoningDetails: []bschemas.ChatReasoningDetails{
+				{ID: &id, Index: 0, Type: bschemas.BifrostReasoningDetailsTypeText, Text: &txt, Signature: &sig},
+				{Index: 1, Type: bschemas.BifrostReasoningDetailsTypeEncrypted, Data: &data},
+				{Index: 2, Type: bschemas.BifrostReasoningDetailsTypeSummary, Summary: &sum, Text: &empty},
+			},
+		},
+	}
+
+	got := schemaFromBifrostMessage(bm)
+	rb, ok := got.Content[0].(schema.ReasoningBlock)
+	if !ok {
+		t.Fatalf("Content[0] = %#v, want the reasoning block first", got.Content[0])
+	}
+	want := schema.ReasoningBlock{Text: &agg, Details: []schema.ReasoningDetail{
+		{ID: &id, Index: 0, Type: "reasoning.text", Text: &txt, Signature: &sig},
+		{Index: 1, Type: "reasoning.encrypted", Data: &data},
+		{Index: 2, Type: "reasoning.summary", Summary: &sum, Text: &empty},
+	}}
+	if !reflect.DeepEqual(rb, want) {
+		t.Errorf("reasoning = %#v, want %#v", rb, want)
+	}
+	if rb.Details[2].Text == nil || *rb.Details[2].Text != "" {
+		t.Error("an empty detail text must stay a non-nil empty string")
+	}
+}
+
+func TestSchemaFromBifrostMessage_AggregateOnlyReasoning(t *testing.T) {
+	t.Parallel()
+
+	agg := "plain reasoning"
+	bm := bschemas.ChatMessage{
+		Role:                 bschemas.ChatMessageRoleAssistant,
+		ChatAssistantMessage: &bschemas.ChatAssistantMessage{Reasoning: &agg},
+	}
+
+	rb := schemaFromBifrostMessage(bm).Reasoning()
+	if rb == nil || rb.Text != &agg || rb.Details != nil {
+		t.Errorf("reasoning = %#v, want aggregate only with nil details", rb)
+	}
+}
+
+func TestSchemaFromBifrostMessage_NoReasoningNoBlock(t *testing.T) {
+	t.Parallel()
+
+	content := "hi"
+	bm := bschemas.ChatMessage{
+		Role:                 bschemas.ChatMessageRoleAssistant,
+		Content:              &bschemas.ChatMessageContent{ContentStr: &content},
+		ChatAssistantMessage: &bschemas.ChatAssistantMessage{},
+	}
+
+	if rb := schemaFromBifrostMessage(bm).Reasoning(); rb != nil {
+		t.Errorf("reasoning = %#v, want none", rb)
+	}
+}
+
+func TestSchemaToBifrostMessages_ReplaysReasoningWithCalls(t *testing.T) {
+	t.Parallel()
+
+	agg, txt, sig := "why\n", "why", "sig"
+	rb := schema.ReasoningBlock{Text: &agg, Details: []schema.ReasoningDetail{
+		{Index: 0, Type: "reasoning.text", Text: &txt, Signature: &sig},
+	}}
+	msg := &schema.Message{Role: schema.Assistant, Content: []schema.Block{
+		rb, schema.ToolCallBlock{ID: "c1", Name: "echo", Arguments: "{}"},
+	}}
+
+	out := schemaToBifrostMessages([]*schema.Message{msg})
+	am := out[0].ChatAssistantMessage
+	if am == nil || am.Reasoning != &agg || len(am.ToolCalls) != 1 {
+		t.Fatalf("assistant = %#v, want reasoning and the call together", am)
+	}
+	want := []bschemas.ChatReasoningDetails{{Index: 0, Type: "reasoning.text", Text: &txt, Signature: &sig}}
+	if !reflect.DeepEqual(am.ReasoningDetails, want) {
+		t.Errorf("details = %#v, want %#v", am.ReasoningDetails, want)
+	}
+}
+
+func TestSchemaToBifrostMessages_ReplaysReasoningWithoutCalls(t *testing.T) {
+	t.Parallel()
+
+	agg := "why"
+	msg := schema.AssistantMessage("answer", nil)
+	msg.Content = append([]schema.Block{schema.ReasoningBlock{Text: &agg}}, msg.Content...)
+
+	am := schemaToBifrostMessages([]*schema.Message{msg})[0].ChatAssistantMessage
+	if am == nil || am.Reasoning != &agg || am.ToolCalls != nil {
+		t.Errorf("assistant = %#v, want reasoning and no tool calls", am)
+	}
+}
+
+func TestReasoning_RoundTripKeepsEveryField(t *testing.T) {
+	t.Parallel()
+
+	agg, id, txt, sig, data, sum, empty := "agg\n", "d1", "t", "s", "enc", "sum", ""
+	in := []bschemas.ChatReasoningDetails{
+		{ID: &id, Index: 2, Type: bschemas.BifrostReasoningDetailsTypeText, Text: &txt, Signature: &sig},
+		{Index: 0, Type: bschemas.BifrostReasoningDetailsTypeEncrypted, Data: &data},
+		{Index: 1, Type: bschemas.BifrostReasoningDetailsTypeSummary, Summary: &sum, Text: &empty},
+	}
+	bm := bschemas.ChatMessage{
+		Role:                 bschemas.ChatMessageRoleAssistant,
+		ChatAssistantMessage: &bschemas.ChatAssistantMessage{Reasoning: &agg, ReasoningDetails: in},
+	}
+
+	out := schemaToBifrostMessages([]*schema.Message{schemaFromBifrostMessage(bm)})[0].ChatAssistantMessage
+	if out == nil || out.Reasoning != &agg {
+		t.Fatalf("aggregate = %#v, want the same pointer back", out)
+	}
+	if !reflect.DeepEqual(out.ReasoningDetails, in) {
+		t.Errorf("details = %#v, want %#v in the same order", out.ReasoningDetails, in)
 	}
 }

@@ -141,3 +141,40 @@ func TestToolCallsAndResults_SkipNonMatching(t *testing.T) {
 		t.Errorf("ToolResults = %+v", got)
 	}
 }
+
+func TestMessage_ReasoningIsReplayStateNotProse(t *testing.T) {
+	t.Parallel()
+
+	text, sig := "thinking it over", "sig-1"
+	rb := schema.ReasoningBlock{
+		Text:    &text,
+		Details: []schema.ReasoningDetail{{Index: 0, Type: "reasoning.text", Text: &text, Signature: &sig}},
+	}
+	m := &schema.Message{Role: schema.Assistant, Content: []schema.Block{
+		rb,
+		schema.TextBlock{Text: "answer"},
+		schema.ToolCallBlock{ID: "c1", Name: "echo", Arguments: "{}"},
+	}}
+
+	if got := m.Text(); got != "answer" {
+		t.Errorf("Text() = %q, want only the prose %q", got, "answer")
+	}
+	if n := len(m.ToolCalls()); n != 1 {
+		t.Errorf("ToolCalls() len = %d, want 1", n)
+	}
+	if n := len(m.ToolResults()); n != 0 {
+		t.Errorf("ToolResults() len = %d, want 0", n)
+	}
+	got := m.Reasoning()
+	if got == nil || got.Text != rb.Text || len(got.Details) != 1 || got.Details[0].Signature != &sig {
+		t.Errorf("Reasoning() = %#v, want the block itself", got)
+	}
+}
+
+func TestMessage_ReasoningNilWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	if got := schema.AssistantMessage("hi", nil).Reasoning(); got != nil {
+		t.Errorf("Reasoning() = %#v, want nil", got)
+	}
+}

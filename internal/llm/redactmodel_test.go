@@ -3,6 +3,7 @@ package llm_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -190,5 +191,35 @@ func TestRedactingChatModel_RedactGenerateError_PassthroughNonGenerateError(t *t
 
 	if !errors.Is(err, sentinel) {
 		t.Errorf("non-GenerateError should pass through unchanged, got %v", err)
+	}
+}
+
+func TestRedactingChatModel_PassesReasoningThroughUnchanged(t *testing.T) {
+	t.Parallel()
+
+	tok := ghToken()
+	agg, sig := "saw "+tok, "sig"
+	rb := schema.ReasoningBlock{Text: &agg, Details: []schema.ReasoningDetail{
+		{Index: 0, Type: "reasoning.text", Text: &agg, Signature: &sig},
+	}}
+	original := &schema.Message{Role: schema.Assistant, Content: []schema.Block{
+		rb, schema.TextBlock{Text: "prose " + tok},
+	}}
+	inner := &captureModel{}
+	m := llm.NewRedactingChatModel(inner, redact.New())
+
+	if _, err := m.Generate(context.Background(), []*schema.Message{original}, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	got := inner.last[0]
+	if r := got.Reasoning(); r == nil || !reflect.DeepEqual(*r, rb) || !strings.Contains(*r.Text, tok) {
+		t.Fatalf("reasoning = %#v, want it forwarded unchanged", r)
+	}
+	if s := got.Text(); strings.Contains(s, tok) || !strings.Contains(s, "[REDACTED:github-token]") {
+		t.Fatalf("assistant prose not redacted: %q", s)
+	}
+	if s := original.Content[1].(schema.TextBlock).Text; s != "prose "+tok {
+		t.Fatalf("caller message was mutated: %q", s)
 	}
 }

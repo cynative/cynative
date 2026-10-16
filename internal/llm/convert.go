@@ -77,10 +77,19 @@ func schemaToBifrostMessages(in []*schema.Message) []bschemas.ChatMessage {
 			bm.ChatToolMessage = &bschemas.ChatToolMessage{ToolCallID: &id} //nolint:exhaustruct // only ToolCallID used
 		}
 
-		if calls := m.ToolCalls(); len(calls) > 0 {
-			bm.ChatAssistantMessage = &bschemas.ChatAssistantMessage{ //nolint:exhaustruct // only ToolCalls populated
-				ToolCalls: schemaToBifrostToolCalls(calls),
+		calls := m.ToolCalls()
+		reasoning := m.Reasoning()
+		if len(calls) > 0 || reasoning != nil {
+			// One assistant struct carries both: assigning them separately would let the
+			// second assignment drop the first.
+			am := &bschemas.ChatAssistantMessage{}
+			if len(calls) > 0 {
+				am.ToolCalls = schemaToBifrostToolCalls(calls)
 			}
+			if reasoning != nil {
+				reasoningToBifrost(am, reasoning)
+			}
+			bm.ChatAssistantMessage = am
 		}
 
 		out = append(out, bm)
@@ -185,6 +194,11 @@ func deref(s *string) string {
 func schemaFromBifrostMessage(bm bschemas.ChatMessage) *schema.Message {
 	out := &schema.Message{Role: schema.Role(bm.Role)} //nolint:exhaustruct // optional fields set below
 
+	if bm.ChatAssistantMessage != nil {
+		if rb, ok := reasoningFromBifrost(bm.ChatAssistantMessage); ok {
+			out.Content = append(out.Content, rb)
+		}
+	}
 	out.Content = append(out.Content, textBlocks(bm.Content)...)
 
 	if bm.ChatAssistantMessage != nil {
@@ -206,6 +220,37 @@ func schemaFromBifrostMessage(bm bschemas.ChatMessage) *schema.Message {
 	}
 
 	return out
+}
+
+// reasoningFromBifrost copies a response's reasoning into a schema block,
+// reporting false when the response carried none. Every field is copied as is:
+// a signed or encrypted entry is only valid on replay byte for byte.
+func reasoningFromBifrost(am *bschemas.ChatAssistantMessage) (schema.ReasoningBlock, bool) {
+	if am.Reasoning == nil && len(am.ReasoningDetails) == 0 {
+		return schema.ReasoningBlock{}, false
+	}
+
+	rb := schema.ReasoningBlock{Text: am.Reasoning}
+	for _, d := range am.ReasoningDetails {
+		rb.Details = append(rb.Details, schema.ReasoningDetail{
+			ID: d.ID, Index: d.Index, Type: string(d.Type),
+			Summary: d.Summary, Text: d.Text, Signature: d.Signature, Data: d.Data,
+		})
+	}
+
+	return rb, true
+}
+
+// reasoningToBifrost writes a schema reasoning block back onto the outbound
+// assistant message, unchanged.
+func reasoningToBifrost(am *bschemas.ChatAssistantMessage, r *schema.ReasoningBlock) {
+	am.Reasoning = r.Text
+	for _, d := range r.Details {
+		am.ReasoningDetails = append(am.ReasoningDetails, bschemas.ChatReasoningDetails{
+			ID: d.ID, Index: d.Index, Type: bschemas.BifrostReasoningDetailsType(d.Type),
+			Summary: d.Summary, Text: d.Text, Signature: d.Signature, Data: d.Data,
+		})
+	}
 }
 
 // rollingCacheTurns is how many trailing text-bearing messages receive a cache

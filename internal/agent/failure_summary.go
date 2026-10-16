@@ -17,8 +17,9 @@ const stopSummaryDirective = "You have stopped because you hit several consecuti
 	"supplying the value. Be direct; do not apologize at length."
 
 // deterministicFailureNotice is the fallback answer when the summary turn errors or
-// returns blank text — so the halt is never silently dropped from history (an empty
-// completion would otherwise look like an iteration-limit exit).
+// returns blank text, so the operator always gets an explanation (an empty
+// completion would otherwise look like an iteration-limit exit). Run keeps it out of
+// the Q&A history, as it does for a run that ends without an answer.
 const deterministicFailureNotice = "I stopped after repeated tool failures and could not " +
 	"summarize the cause. Please check the required inputs (e.g. an account/project ID, region, " +
 	"or credentials) and tell me how to proceed."
@@ -59,7 +60,7 @@ func completePendingToolResults(turn []*schema.Message) []*schema.Message {
 // renders a host header, runs ONE tool-less Generate asking the model to name the wall
 // and the missing input, and returns that as the turn's answer (recorded to history so
 // an interactive follow-up resumes with context). A blank/errored completion falls back
-// to a deterministic notice. An interrupt arriving before or during the summary wins; a
+// to a deterministic notice, which Run keeps out of history. An interrupt arriving before or during the summary wins; a
 // context cancellation during the summary Generate propagates rather than degrading to a
 // successful notice; and a budget cross on that Generate returns errBudgetExceeded.
 func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema.Message) (string, error) {
@@ -98,6 +99,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 
 	if err != nil {
 		fmt.Fprintln(rs.out, deterministicFailureNotice)
+		rs.hostAnswer = true
 
 		return deterministicFailureNotice, nil //nolint:nilerr // Generate error is not fatal; fall back to deterministic notice.
 	}
@@ -108,6 +110,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 	}
 	if text == "" {
 		fmt.Fprintln(rs.out, deterministicFailureNotice)
+		rs.hostAnswer = true
 
 		return deterministicFailureNotice, nil
 	}
@@ -129,6 +132,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 		rs.answerTruncated = true
 		fmt.Fprintln(rs.out, truncatedAnswerNotice)
 	}
+	rs.answerReasoning = msg.Reasoning()
 
 	return msg.Text(), nil
 }
