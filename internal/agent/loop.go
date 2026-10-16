@@ -181,6 +181,11 @@ type runState struct {
 	// answerReasoning is the reasoning returned with the turn that produced this
 	// run's answer, nil when it carried none, so Run can keep its text in history.
 	answerReasoning *schema.ReasoningBlock
+	// hostAnswer marks an answer cynative wrote itself rather than the model (the
+	// failure summary's fallback notice). Run keeps it out of the Q&A history:
+	// it is not a model turn, so it has no reasoning to replay, and some backends
+	// reject any earlier assistant turn without one.
+	hostAnswer bool
 }
 
 // runScopedTool is implemented by the in-package orchestration tools that need

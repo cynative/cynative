@@ -59,7 +59,7 @@ func completePendingToolResults(turn []*schema.Message) []*schema.Message {
 // renders a host header, runs ONE tool-less Generate asking the model to name the wall
 // and the missing input, and returns that as the turn's answer (recorded to history so
 // an interactive follow-up resumes with context). A blank/errored completion falls back
-// to a deterministic notice. An interrupt arriving before or during the summary wins; a
+// to a deterministic notice, which Run keeps out of history. An interrupt arriving before or during the summary wins; a
 // context cancellation during the summary Generate propagates rather than degrading to a
 // successful notice; and a budget cross on that Generate returns errBudgetExceeded.
 func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema.Message) (string, error) {
@@ -98,6 +98,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 
 	if err != nil {
 		fmt.Fprintln(rs.out, deterministicFailureNotice)
+		rs.hostAnswer = true
 
 		return deterministicFailureNotice, nil //nolint:nilerr // Generate error is not fatal; fall back to deterministic notice.
 	}
@@ -108,6 +109,7 @@ func (a *Agent) failureSummary(ctx context.Context, rs *runState, turn []*schema
 	}
 	if text == "" {
 		fmt.Fprintln(rs.out, deterministicFailureNotice)
+		rs.hostAnswer = true
 
 		return deterministicFailureNotice, nil
 	}

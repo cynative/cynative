@@ -107,3 +107,31 @@ func TestFailureSummary_RecordsTheSummarysReasoning(t *testing.T) {
 		t.Errorf("answerReasoning = %#v, want the summary turn's reasoning", rs.answerReasoning)
 	}
 }
+
+func TestRun_HostWrittenFailureNoticeStaysOutOfHistory(t *testing.T) {
+	t.Parallel()
+
+	// Three failing calls trip the halt; the scripted model is then exhausted, so
+	// the summary Generate errors and the run answers with the host-written notice.
+	model := &scriptedModel{msgs: []*schema.Message{
+		toolCall("c1", "fail_tool", "{}"),
+		toolCall("c2", "fail_tool", "{}"),
+		toolCall("c3", "fail_tool", "{}"),
+	}}
+	cfg := haltBaseConfig()
+	cfg.Model = model
+	cfg.Cfg.MaxConsecutiveFailures = 3
+	cfg.Tools = []schema.InvokableTool{&failingTool{name: "fail_tool"}}
+	a := New(context.Background(), cfg)
+
+	var buf bytes.Buffer
+	if err := a.Run(context.Background(), "scan", &buf); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte(deterministicFailureNotice)) {
+		t.Fatalf("output %q lacks the host notice; the test did not reach the fallback", buf.String())
+	}
+	if len(a.history) != 0 {
+		t.Errorf("history = %+v, want the host-written notice kept out of it", a.history)
+	}
+}
