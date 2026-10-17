@@ -24,7 +24,7 @@ type xmlFields struct {
 }
 
 // apply redacts the element values in s, reading JSON strings maxNesting levels
-// deep. Content with a JSON syntax error is matched as a whole.
+// deep. Content that does not start as JSON is matched as a whole.
 func (p xmlFields) apply(s string) string {
 	spans, ok := p.strings(s, maxNesting-1)
 	if !ok {
@@ -35,11 +35,13 @@ func (p xmlFields) apply(s string) string {
 }
 
 // strings returns a span for each element value in the JSON strings of s and
-// reports whether s reads as a run of JSON values with no syntax error. A string
-// whose decoded body reads that way too is read the same way, depth levels
+// reports whether s starts as JSON, with a value read before any syntax error. A
+// string whose decoded body reads that way too is read the same way, depth levels
 // deeper, and any other string is matched over its body as written. When the
-// JSON ends early, as at the content cap, the token cut off there is matched as
-// written, to the end of content.
+// JSON ends early, at the content cap or at a syntax error, the rest of s from
+// the token that failed is matched as written. A syntax error can sit inside the
+// value a match replaces, so the strings before it are read the same way whether
+// or not it is still there, and a second Redact reads them as the first did.
 func (p xmlFields) strings(s string, depth int) ([]span, bool) {
 	dec := json.NewDecoder(strings.NewReader(s))
 	dec.UseNumber()
@@ -50,7 +52,7 @@ func (p xmlFields) strings(s string, depth int) ([]span, bool) {
 		before := int(dec.InputOffset())
 		tok, err := dec.Token()
 		if err != nil {
-			if _, bad := errors.AsType[*json.SyntaxError](err); bad {
+			if _, bad := errors.AsType[*json.SyntaxError](err); bad && before == 0 {
 				return nil, false
 			}
 
