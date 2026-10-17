@@ -1581,14 +1581,7 @@ def _find_objects(s):
 def _read_objects(s, constants):
     """The members found reading s from every start, with NaN, Infinity and -Infinity
     read as values when constants is true and rejected otherwise."""
-    paired = set()
-
-    def hook(pairs):
-        if any(k.lower() == "name" and isinstance(v, str) and _KEY_END_FULL.match(_fold(v)) for k, v in pairs):
-            paired.update(v for k, v in pairs if k.lower() == "value" and isinstance(v, str))
-        return dict(pairs)
-
-    dec = json.JSONDecoder(object_pairs_hook=hook, **({} if constants else {"parse_constant": _no_constant}))
+    dec = json.JSONDecoder(**({} if constants else {"parse_constant": _no_constant}))
     out, pos = [], 0
     while True:
         start = _JSON_START.search(s, pos)
@@ -1612,25 +1605,57 @@ def _read_objects(s, constants):
             except (ValueError, RecursionError) as e:
                 stop = getattr(e, "pos", idx)
                 break
-        out.extend(_object_members(s, start.start(), stop, paired))
+        out.extend(_object_members(s, start.start(), stop))
         pos = max(stop, start.start() + 1)
 
 
-def _object_members(s, start, stop, paired):
+_OBJECT_TOKEN = re.compile(r'["{}\[\]]')
+
+
+def _object_members(s, start, stop):
     """The credential members of the JSON text a read took from start up to stop: a
     string that ends before stop, a colon, and a string value that starts by stop (it
-    may run past it, cut off). Only the read's own text is searched for keys, so a
-    run of '{' that opens no JSON costs one short search each."""
-    out = []
-    for k in _ELEMENT.finditer(s, start, stop):
-        colon = _MEMBER_COLON.match(s, k.end())
-        v = _ELEMENT.match(s, colon.end()) if colon and k.group(2) else None
+    may run past it, cut off). Like Go, a "value" member pairs with a "name" member of
+    its own object only, and an object still open at stop is paired with the members
+    it holds so far. Only the read's own text is searched for keys, so a run of '{'
+    that opens no JSON costs one short search each."""
+    out, stack = [], []  # an open object's members, or None for an array
+    i = start
+    while True:
+        t = _OBJECT_TOKEN.search(s, i, stop)
+        if t is None:
+            break
+        c, i = t.group(), t.end()
+        if c in "{[":
+            stack.append([] if c == "{" else None)
+            continue
+        if c in "}]":
+            if stack:
+                out.extend(_credential_members(stack.pop()))
+            continue
+        # A string followed by a colon is a key. Outside an object one can only end
+        # where the read stopped, so its value starts after stop and is skipped.
+        k = _ELEMENT.match(s, t.start(), stop)
+        i = k.end()
+        colon = _MEMBER_COLON.match(s, i) if k.group(2) else None
+        v = _ELEMENT.match(s, colon.end()) if colon else None
         if v is None or v.start() > stop:
             continue
-        key, val = _json_text(k.group(1)), _json_text(v.group(1))
-        if _KEY_END_FULL.match(_fold(key)) or (key.lower() == "value" and val in paired):
-            out.append(_Found(val, v.start(1), v.end(1) if v.group(2) else len(s)))
+        found = _Found(_json_text(v.group(1)), v.start(1), v.end(1) if v.group(2) else len(s))
+        stack[-1].append((_json_text(k.group(1)), found))
+        i = v.end()
+    for members in stack:
+        out.extend(_credential_members(members))
     return out
+
+
+def _credential_members(members):
+    """The values of one object's credential-named members, and of its "value"
+    members when one of its "name" members is a credential name, as objectSpans."""
+    if members is None:
+        return []
+    named = any(k.lower() == "name" and _KEY_END_FULL.match(_fold(f.group(1))) for k, f in members)
+    return [f for k, f in members if _KEY_END_FULL.match(_fold(k)) or (named and k.lower() == "value")]
 
 
 # class-2: whole-content secret families (internal/redact contentRules), scanned
@@ -2163,6 +2188,11 @@ def _structural_spans():
         (_find_objects, 'got ["DB_PASSW\\u004fRD":"x"]', []),
         (_find_objects, '{"token":"a"} x {"token":"b"}', [("a", 10, 11), ("b", 26, 27)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"a\\qb"}', [("a", 21, 25)]),
+        (_find_objects, '{"n\\u0061me":"DB_PASSWORD","value":"hunter2', [("hunter2", 36, 43)]),
+        (_find_objects, '{"n\\u0061me":"DB_PASSWORD","value":"same","obj":{"value":"same"}}', [("same", 36, 40)]),
+        (_find_objects, '{"n\\u0061me":"API_KEY","value":"v"} {"value":"v"}', [("v", 32, 33)]),
+        (_find_objects, '{"value":"v","n\\u0061me":"API_KEY"}', [("v", 10, 11)]),
+        (_find_objects, '{"n\\u0061me":"API_KEY","o":{"value":"x"', []),
     ]
     for find, text, want in cases:
         got = [(f.group(1), f.start(), f.end()) for f in find(text)]
