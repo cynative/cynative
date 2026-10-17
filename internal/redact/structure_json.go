@@ -2,6 +2,7 @@ package redact
 
 import (
 	"encoding/json"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -521,15 +522,31 @@ type object struct {
 // a read starts at each '{' or '[' no earlier read took (see jsonStarts). The decoder reads values one
 // after another, so NDJSON is covered too, and a credential value cut off at a
 // syntax error is redacted to the end of content.
+//
+// Content that holds NaN or Infinity is read twice, with the constants rejected,
+// as Go's decoder does, and read as values (see constReader), and the spans of
+// both reads are kept. Reading past a constant finds the members after it, but it
+// can also take a '{' inside a string that a read stopped at the constant would
+// have started from, so neither read alone finds everything. Spans from the two
+// reads cannot partly overlap, so applySpans drops only duplicates: each is the
+// content of a member's string value, whose opening quote follows a colon and so
+// is never an escaped quote inside a string the other read took, and the content
+// holds no unescaped quote unless it runs to the end of content.
 func (m matchers) objects(s string) string {
 	var spans []span
 
-	jsonStarts(s, "{[", func(start int) (int, bool) {
-		found, resume := m.objectsFrom(s, start)
-		spans = append(spans, found...)
+	read := func(constants bool) {
+		jsonStarts(s, "{[", func(start int) (int, bool) {
+			found, resume := m.objectsFrom(s, start, constants)
+			spans = append(spans, found...)
 
-		return resume, false
-	})
+			return resume, false
+		})
+	}
+	read(false)
+	if strings.Contains(s, "NaN") || strings.Contains(s, "Infinity") {
+		read(true)
+	}
 
 	return applySpans(s, spans)
 }
@@ -559,9 +576,14 @@ func jsonStarts(s, starts string, read func(start int) (int, bool)) {
 
 // objectsFrom reads JSON values from s[start:] up to the first syntax error or the
 // end of content, and returns the spans of their credential members and where to
-// look for the next JSON value.
-func (m matchers) objectsFrom(s string, start int) ([]span, int) {
-	dec := json.NewDecoder(strings.NewReader(s[start:]))
+// look for the next JSON value. With constants, NaN, Infinity and -Infinity are
+// read as values (see constReader).
+func (m matchers) objectsFrom(s string, start int, constants bool) ([]span, int) {
+	var src io.Reader = strings.NewReader(s[start:])
+	if constants {
+		src = &constReader{s: s[start:]}
+	}
+	dec := json.NewDecoder(src)
 	dec.UseNumber()
 
 	var (
@@ -605,6 +627,63 @@ func (m matchers) objectsFrom(s string, start int) ([]span, int) {
 			}
 		}
 	}
+}
+
+// constReader reads s with each NaN, Infinity and -Infinity outside a JSON string
+// spelled as an empty array of the same length, so offsets do not move. Go's
+// decoder rejects the three, and a read that stopped at one would not pair the
+// members after it, while Python's json reads them as numbers (the connector
+// audit's prepass reads JSON with it). "Outside a string" is as read from the
+// start of s. An array cannot run into the bytes around it the way a number can,
+// so inside an object or array 1NaN, NaN1 and -NaN stay errors, as they are for
+// Python; between top-level values both read 1NaN and NaN1 as two values.
+type constReader struct {
+	s, pend    string
+	i          int
+	inStr, esc bool
+}
+
+func (r *constReader) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) && (r.pend != "" || r.i < len(r.s)) {
+		if r.pend == "" {
+			r.pend = r.next()
+		}
+		c := copy(p[n:], r.pend)
+		r.pend = r.pend[c:]
+		n += c
+	}
+	if r.pend == "" && r.i == len(r.s) {
+		return n, io.EOF
+	}
+
+	return n, nil
+}
+
+// next returns what the reader passes on for the bytes at i: a constant's array,
+// or the next byte.
+func (r *constReader) next() string {
+	rest := r.s[r.i:]
+	if !r.inStr {
+		for _, c := range [...]string{"NaN", "Infinity", "-Infinity"} {
+			if strings.HasPrefix(rest, c) {
+				r.i += len(c)
+
+				return "[" + strings.Repeat(" ", len(c)-len("[]")) + "]"
+			}
+		}
+	}
+	switch b := rest[0]; {
+	case r.esc:
+		r.esc = false
+	case r.inStr && b == '\\':
+		r.esc = true
+	case b == '"':
+		r.inStr = !r.inStr
+	}
+	r.i++
+
+	return rest[:1]
 }
 
 // delim opens or closes an object or array, collecting a closed object's spans.

@@ -81,6 +81,8 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`got {"DB_PASSW\u004fRD":"hunter2"} {name} [1] x {"a b {"t\u006fken":"v"} {"a":NaN}`)
 	f.Add(`"a\"b" x "{\"password\":\"p\"}" 5" {"r":"{\"token\":\"t\"}"} {"API_KEY":"hunt`)
 	f.Add("HTTP/1.1 200 OK\r\nX: {\"a\r\n\r\n[{\"n\\u0061me\":\"API_KEY\",\"value\":\"k\"}]")
+	f.Add(`{"a":"\\","b":"\"NaN","x":[NaN,-Infinity,Infinity],"DB_PASSW\u004fRD":"v"} -NaN 1NaN [Infinit`)
+	f.Add(`[NaN,"a {"DB_PASSW\u004fRD":"v"} {}1NaN"b {"t\u006fken":"w"}`)
 	f.Add(`"token:\b"\u0073ig=0`)
 	f.Add("\"\x00\\\"pAsswd\\\":\\\"\\\"pAsswd\\\":\\\"")
 

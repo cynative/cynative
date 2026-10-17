@@ -1553,7 +1553,7 @@ def _json_text(raw):
 # those keeps a run of braces in prose linear. A read that starts and then fails
 # inside a value, as in '{"a"' repeated, still pays that count, which grows with the
 # square of the length.
-_JSON_START = re.compile(r'\{(?=' + _WS + r'*["}])|\[(?=' + _WS + r'*[-0-9"\[\]{tfn])')
+_JSON_START = re.compile(r'\{(?=' + _WS + r'*["}])|\[(?=' + _WS + r'*[-0-9"\[\]{tfnNI])')
 
 
 def _no_constant(name):
@@ -1568,7 +1568,19 @@ def _find_objects(s):
     whose "name" member is a credential name, with names decoded, as objects(). Like
     Go, it reads a JSON value from every '{' or '[' a previous read did not cover, so an
     object after other text (an HTTP dump's body) is read too, and a read that stops at
-    a syntax error resumes there."""
+    a syntax error resumes there. Like Go, it reads text that holds NaN or Infinity
+    twice, with the constants rejected and read as values, and keeps what either read
+    finds."""
+    found = {(f.start(), f.end()): f for f in _read_objects(s, False)}
+    if "NaN" in s or "Infinity" in s:
+        for f in _read_objects(s, True):
+            found.setdefault((f.start(), f.end()), f)
+    return [found[k] for k in sorted(found)]
+
+
+def _read_objects(s, constants):
+    """The members found reading s from every start, with NaN, Infinity and -Infinity
+    read as values when constants is true and rejected otherwise."""
     paired = set()
 
     def hook(pairs):
@@ -1576,7 +1588,8 @@ def _find_objects(s):
             paired.update(v for k, v in pairs if k.lower() == "value" and isinstance(v, str))
         return dict(pairs)
 
-    dec, out, pos = json.JSONDecoder(object_pairs_hook=hook, parse_constant=_no_constant), [], 0
+    dec = json.JSONDecoder(object_pairs_hook=hook, **({} if constants else {"parse_constant": _no_constant}))
+    out, pos = [], 0
     while True:
         start = _JSON_START.search(s, pos)
         if start is None:
@@ -2143,7 +2156,10 @@ def _structural_spans():
         (_find_objects, '{"DB_PASSW\\u004fRD":"\\u0068i"}', [("hi", 21, 28)]),
         (_find_objects, 'got {x} {"DB_PASSW\\u004fRD":"hi"} x {"token":"t"}', [("hi", 29, 31), ("t", 46, 47)]),
         (_find_objects, '{"a":1 "DB_PASSW\\u004fRD":"x"}', []),
-        (_find_objects, '{"a":NaN,"DB_PASSW\\u004fRD":"x"}', []),
+        (_find_objects, '{"a":NaN,"DB_PASSW\\u004fRD":"x"}', [("x", 29, 30)]),
+        (_find_objects, '[Infinity,"a {",{"DB_PASSW\\u004fRD":"x"}]', [("x", 37, 38)]),
+        (_find_objects, '{"a":-NaN,"DB_PASSW\\u004fRD":"x"}', []),
+        (_find_objects, '[NaN,"a {"DB_PASSW\\u004fRD":"x"}', [("x", 29, 30)]),
         (_find_objects, 'got ["DB_PASSW\\u004fRD":"x"]', []),
         (_find_objects, '{"token":"a"} x {"token":"b"}', [("a", 10, 11), ("b", 26, 27)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"a\\qb"}', [("a", 21, 25)]),

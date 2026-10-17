@@ -238,6 +238,41 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `{"items":[{"name":"DB_PASSWORD","meta":{"a":[1,2e999]},"value":"` + field + `"}]}`,
 		},
 		{
+			name: "json escaped key after NaN",
+			in:   `{"x":NaN,"DB_PASSW\u004fRD":"hunter2"}`,
+			want: `{"x":NaN,"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json pair after Infinity and -Infinity",
+			in:   `{"a":[Infinity,-Infinity],"n\u0061me":"DB_PASSWORD","value":"hunter2"}`,
+			want: `{"a":[Infinity,-Infinity],"n\u0061me":"DB_PASSWORD","value":"` + field + `"}`,
+		},
+		{
+			name: "json escaped key after NaN in an encoded string",
+			in:   `{"b":"{\"x\":NaN,\"DB_PASSW\\u004fRD\":\"hunter2\"}"}`,
+			want: `{"b":"{\"x\":NaN,\"DB_PASSW\\u004fRD\":\"` + field + `\"}"}`,
+		},
+		{
+			name: "json NaN after strings that end in escapes",
+			in:   `{"a":"\\","b":"\"","x":NaN,"DB_PASSW\u004fRD":"hunter2"}`,
+			want: `{"a":"\\","b":"\"","x":NaN,"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json object after NaN inside a string a read past NaN takes",
+			in:   `[NaN,"a {"DB_PASSW\u004fRD":"v"}`,
+			want: `[NaN,"a {"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json object after top-level 1NaN inside a string",
+			in:   `{}1NaN"a {"DB_PASSW\u004fRD":"v"}`,
+			want: `{}1NaN"a {"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json key that spells NaN",
+			in:   `{"xNaN_s\u0065cret":"hunter2"}`,
+			want: `{"xNaN_s\u0065cret":"` + field + `"}`,
+		},
+		{
 			name: "json pair truncated after its name",
 			in:   `{"name":"DB_PASSWORD","meta":{},"value":"hunt`,
 			want: `{"name":"DB_PASSWORD","meta":{},"value":"` + field,
@@ -488,6 +523,10 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`{"value":1,"name":"DB_PASSWORD","nested":{"value":"x"}}`,
 		`{"a":"\q","DB_PASSWORD":1}`,
 		`{"DB_PASSW\u004fRD" "x`,
+		`{"x":-NaN,"DB_PASSW\u004fRD":"v"}`,
+		`{"x":1NaN,"DB_PASSW\u004fRD":"v"}`,
+		`{"x":NaN1,"DB_PASSW\u004fRD":"v"}`,
+		`{"x":nan,"DB_PASSW\u004fRD":"v"}`,
 		"secret:\n  # comment\n  secretName: public-reference\n",
 		"secret:\n  \"secretName\": public-reference\n",
 		"token:\n  [public-reference]\n",
