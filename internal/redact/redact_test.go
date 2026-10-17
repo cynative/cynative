@@ -317,6 +317,16 @@ func TestRedact_XMLEndsAtStringQuote(t *testing.T) {
 			want: `<a><password>` + field + `</password></a>`,
 		},
 		{
+			name: "strings before a syntax error read on their own",
+			in:   "{\"\":\"<pAsswd>\",\"<token>\x00",
+			want: `{"":"<pAsswd>` + field + `","<token>` + field,
+		},
+		{
+			name: "string between the tags before a syntax error is not redacted",
+			in:   `["<password>","hunter2","</password>"] x`,
+			want: `["<password>` + field + `","hunter2","</password>"] x`,
+		},
+		{
 			name: "JSON after prose is matched as a whole",
 			in:   `got {"a":"<password>","b":"</password>","c":1}`,
 			want: `got {"a":"<password>` + field + `</password>","c":1}`,

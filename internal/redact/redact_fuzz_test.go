@@ -70,6 +70,7 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`{"k":"-----BEGIN PRIVATE KEY-----\ud83d\ude00x\u005d","p":"PRIVATE KEY a<b \/"}`)
 	f.Add(`{"a":"<password>","b":{"c":"</password>"},"r":"{\"password\":\"hunter2\"}"}`)
 	f.Add(`{"a":"<password>","b":"</password>","c":"<token>hunt`)
+	f.Add("{\"\":\"<pAsswd>\",\"<token>\x00")
 	f.Add(`{"x":"<secret>p\"q</secret>"}<token>v`)
 	f.Add(`0 "{\"x\":\"<password>p</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"` +
 		` ["<token>","t","</token>"]`)
