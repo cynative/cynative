@@ -299,7 +299,7 @@ func TestRedact_XMLEndsAtStringQuote(t *testing.T) {
 		{
 			name: "escapes in a string after a bare value",
 			in:   `0 "{\"x\":\"<password>p</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"`,
-			want: `0 "{\"x\":\"<password>` + field + `</password> \u0067hp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"`,
+			want: `0 "{\"x\":\"<password>` + field + `</password> [REDACTED:github-token]\"}"`,
 		},
 		{
 			name: "escapes beside an encoded value keep their spelling",

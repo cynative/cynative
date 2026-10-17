@@ -14,29 +14,47 @@ import (
 // the rules replaced are written back, escaped, and the text around them keeps its
 // exact spelling (edits says when it cannot), so a second Redact reads the raw
 // text this one read. Only a string with an escape is redacted again, since one
-// without cannot hide a quoted member. The decoder stops at the first error, and a
-// string that is never closed after it is read to the end of content.
+// without cannot hide a quoted member. A JSON value can start anywhere in s (see
+// jsonStarts). The decoder stops at the first error, and a string that is never
+// closed after it is read to the end of content.
 func (r *Redactor) encoded(s string, depth int) string {
-	t := strings.TrimLeft(s, " \t\r\n")
-	if t == "" || strings.IndexByte(`{["`, t[0]) < 0 || !strings.Contains(s, `\`) {
+	if !strings.Contains(s, `\`) {
 		return s
 	}
-	dec := json.NewDecoder(strings.NewReader(s))
+
+	var spans []span
+
+	jsonStarts(s, `{["`, func(start int) (int, bool) {
+		found, resume, end := r.encodedFrom(s, start, depth)
+		spans = append(spans, found...)
+
+		return resume, end
+	})
+
+	return applySpans(s, spans)
+}
+
+// encodedFrom reads JSON values from s[start:] like objectsFrom and returns the
+// spans for the strings it redacts.
+func (r *Redactor) encodedFrom(s string, start, depth int) ([]span, int, bool) {
+	dec := json.NewDecoder(strings.NewReader(s[start:]))
 	dec.UseNumber()
 
 	var spans []span
 
 	for {
-		before := int(dec.InputOffset())
+		before := start + int(dec.InputOffset())
 		tok, err := dec.Token()
 		if err != nil {
-			return applySpans(s, r.openString(s, before, depth, spans))
+			next := skipToken(s, before)
+
+			return r.openString(s, before, depth, spans), next, next < 0
 		}
 		if _, ok := tok.(string); !ok {
 			continue
 		}
 		q := before + strings.IndexByte(s[before:], '"')
-		body := s[q+1 : int(dec.InputOffset())-1]
+		body := s[q+1 : start+int(dec.InputOffset())-1]
 		if strings.Contains(body, `\`) {
 			d, raw := decodeJSONString(body)
 			spans, _ = r.rewrite(d, raw, q+1, depth, spans)
@@ -49,12 +67,9 @@ func (r *Redactor) encoded(s string, depth int) string {
 // to the first invalid or incomplete escape; when the rules change that, the bytes
 // from there to the end of content are dropped too, so none of them is kept.
 func (r *Redactor) openString(s string, before, depth int, spans []span) []span {
-	rest := strings.TrimLeft(s[before:], " \t\r\n")
-	if rest != "" && (rest[0] == ':' || rest[0] == ',') {
-		rest = strings.TrimLeft(rest[1:], " \t\r\n")
-	}
-	body, open := openBody(rest)
-	if !open || !strings.Contains(body, `\`) {
+	rest := tokenAt(s, before)
+	body, end := openBody(rest)
+	if end >= 0 || !strings.Contains(body, `\`) {
 		return spans
 	}
 	at := len(s) - len(rest) + 1
@@ -167,25 +182,53 @@ func commonSuffix(a, b string) int {
 	}
 }
 
-// openBody returns the body of the JSON string that opens rest, without a lone
-// backslash at the end of content, and whether that string is never closed.
-func openBody(rest string) (string, bool) {
+// tokenAt returns s from the token a read stopped at, the one after before past
+// any blanks and one ':' or ','.
+func tokenAt(s string, before int) string {
+	rest := strings.TrimLeft(s[before:], " \t\r\n")
+	if rest != "" && (rest[0] == ':' || rest[0] == ',') {
+		rest = strings.TrimLeft(rest[1:], " \t\r\n")
+	}
+
+	return rest
+}
+
+// skipToken returns where to look for a JSON value after a read that stopped at
+// before: after the token there when it is a string, so no escaped quote in it
+// starts a new read, and at the token otherwise. It returns -1 when the string
+// openString reads is never closed, which leaves nothing after it to read (and a
+// read inside it could cross the spans openString wrote).
+func skipToken(s string, before int) int {
+	if _, end := openBody(tokenAt(s, before)); end < 0 {
+		return -1
+	}
+	tok := strings.TrimLeft(s[before:], " \t\r\n")
+	_, end := openBody(tok)
+
+	return len(s) - len(tok) + end
+}
+
+// openBody reads the JSON string that opens rest. It returns how far rest the
+// string runs, through its closing quote, which is 0 when rest opens no string;
+// when the string is never closed, it returns -1 and the string's body, without a
+// lone backslash at the end of content.
+func openBody(rest string) (string, int) {
 	if !strings.HasPrefix(rest, `"`) {
-		return "", false
+		return "", 0
 	}
 	for i := 1; i < len(rest); i++ {
 		switch rest[i] {
 		case '\\':
 			if i+1 == len(rest) {
-				return rest[1:i], true
+				return rest[1:i], -1
 			}
 			i++
 		case '"':
-			return "", false
+			return "", i + 1
 		}
 	}
 
-	return rest[1:], true
+	return rest[1:], -1
 }
 
 // escapeJSON spells v as the body of a JSON string.
