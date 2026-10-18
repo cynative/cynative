@@ -12,7 +12,7 @@ import (
 // "value" member of each flow mapping whose "name" member is a credential name. A
 // collection is read where a block value or a sequence item may start: after a
 // line's indentation and "- " markers, or after a "key: " on the line. A JSON
-// document is a flow collection too; a member whose key is double-quoted and whose
+// document is a flow collection too; a member whose key is a JSON string and whose
 // value is a JSON scalar or a double-quoted string, closed or cut off at the end
 // of content, is left to the JSON passes.
 func (m matchers) flows(s string, lines []yamlLine) []span {
@@ -146,7 +146,7 @@ func (p *flowParser) scalar(top *flowFrame) {
 	raw := p.s[start:p.i]
 	text := yamlScalar(raw)
 	if !top.value {
-		top.key, top.keyJSON = text, raw[0] == '"'
+		top.key, top.keyJSON = text, jsonKey(raw)
 
 		return
 	}

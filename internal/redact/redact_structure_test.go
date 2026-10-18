@@ -546,6 +546,21 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "x: {name: DB_PASSWORD, value: " + field + " # c",
 		},
 		{
+			name: "quoted key with an escape only YAML defines",
+			in:   "\"pass\\x77ord\": \"hunter2\"\nx: {\"api\\x5fkey\": \"k\"}\n",
+			want: "\"pass\\x77ord\": " + field + "\nx: {\"api\\x5fkey\": " + field + "}\n",
+		},
+		{
+			name: "shell options after the command option",
+			in:   `["sh","-c","-e","--","app --token x"]`,
+			want: `["sh","-c","-e","--","app --token ` + field + `"]`,
+		},
+		{
+			name: "nested shell options after the command option",
+			in:   `["sh","-c","bash -c -o pipefail -- 'app --password x'; bash -ce"]`,
+			want: `["sh","-c","bash -c -o pipefail -- ` + field + `; bash -ce"]`,
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,

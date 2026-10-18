@@ -73,9 +73,10 @@ type matchers struct {
 	// placeholder is a value an earlier rule already replaced, kept for its label.
 	placeholder *regexp.Regexp
 	// shell is a shell program, shellFlag the option that makes it run its next
-	// argument as a command, and shellArgOption an option that takes the next
+	// argument as a command, shortOption a short option or a run of them, and
+	// shellArgOption an option that takes the next
 	// argument as its own.
-	shell, shellFlag, shellArgOption *regexp.Regexp
+	shell, shellFlag, shortOption, shellArgOption *regexp.Regexp
 	// runStart opens a JSON array element, element reads one string element (closed,
 	// or truncated to end of content), separator leads to the next string element and
 	// keyColon marks an object key.
@@ -105,6 +106,7 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		placeholder:       regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
 		shell:             regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
 		shellFlag:         regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
+		shortOption:       regexp.MustCompile(`^[-+][A-Za-z]+$`),
 		shellArgOption:    regexp.MustCompile(`^(?:[-+][oO]|--rcfile|--init-file)$`),
 		runStart:          regexp.MustCompile(`[\[,]\s*"`),
 		element:           regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
@@ -257,7 +259,7 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 
 		return yamlEntry{
 			key:   yamlScalar(raw),
-			json:  raw[0] == '"',
+			json:  jsonKey(raw),
 			alone: raw[0] == '"' || raw[0] == '\'',
 			col:   g[3],
 			item:  strings.Contains(text[:g[3]], "-"),
@@ -442,6 +444,12 @@ func stripComment(v string) string {
 	}
 
 	return v
+}
+
+// jsonKey reports whether raw, a quoted key, is a JSON string, so the JSON passes
+// read it as YAML does. A key with an escape only YAML defines is not.
+func jsonKey(raw string) bool {
+	return raw[0] == '"' && json.Valid([]byte(raw))
 }
 
 // yamlScalar reads a quoted YAML scalar: a single-quoted one with each doubled

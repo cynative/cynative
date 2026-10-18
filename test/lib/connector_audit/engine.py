@@ -1066,6 +1066,7 @@ _HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 _YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
 _SHELL = re.compile(r"(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z")
 _SHELL_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
+_SHORT_OPTION = re.compile(r"[-+][A-Za-z]+\Z")
 _SHELL_ARG_OPTION = re.compile(r"(?:[-+][oO]|--rcfile|--init-file)\Z")
 _RUN_START = re.compile(r'[\[,]' + _WS + r'*"')
 _ELEMENT = re.compile(r'"((?:\\[\s\S]|[^"\\])*)(")?')
@@ -1310,7 +1311,7 @@ def _yaml_entry(s, lines, i):
     g = _YAML_KEY.match(text)
     if g is not None:
         raw = g.group(2)
-        e = {"key": _yaml_scalar(raw), "json": raw[0] == '"', "alone": raw[0] in "\"'", "col": g.end(1),
+        e = {"key": _yaml_scalar(raw), "json": raw[0] == '"' and _json_valid(raw), "alone": raw[0] in "\"'", "col": g.end(1),
              "item": "-" in g.group(1), "colon": lines[i][0] + g.end(2) + text[g.end(2):].index(":") + 1,
              "start": lines[i][0] + g.end(0), "below": False, "multi": False}
         e["end"] = e["first"] = e["start"]
@@ -1445,7 +1446,7 @@ def _read_flow(s, i):
         raw = s[start:i]
         text = _yaml_scalar(raw)
         if not top["value"]:
-            top["key"], top["json"] = text, raw[0] == '"'
+            top["key"], top["json"] = text, raw[0] == '"' and _json_valid(raw)
             return i
         top["value"] = False
         if top["mapping"] and top["key"].lower() == "name" and _KEY_END_FULL.match(_fold(text)):
@@ -1521,12 +1522,26 @@ def _flag_values(words):
     return out
 
 
+def _after_options(words, j):
+    """The index of the first word from words[j] on past short options, their
+    arguments and a "--", as afterOptions."""
+    while j < len(words):
+        if words[j] == "--":
+            return j + 1
+        if not _SHORT_OPTION.match(words[j]):
+            return j
+        if _SHELL_ARG_OPTION.match(words[j]):
+            j += 1
+        j += 1
+    return min(j, len(words))
+
+
 def _shell_command(words, i):
-    """The index of the command a shell named at words[i] runs, or -1, as shellCommand."""
+    """The index of the command a shell named at words[i] runs, or -1, as commandFrom."""
     j = i + 1
     while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
         if _SHELL_FLAG.match(words[j]):
-            return j + 1
+            return _after_options(words, j + 1)
         if _SHELL_ARG_OPTION.match(words[j]):
             j += 1
         j += 1
@@ -3113,6 +3128,8 @@ def _shared_selftest():
             ("yaml_quoted_key", '"pass\\x77ord": %s\n' % live_secret),
             ("yaml_explicit_key", '? password\n: %s\n' % live_secret),
             ("yaml_flow_pair", 'env:\n- {name: DB_PASSWORD, value: %s}\n' % live_secret),
+            ("yaml_key_yaml_only_escape", '"pass\\x77ord": "%s"\n' % live_secret),
+            ("shell_options_after_command_option", '["sh","-c","-e","--","app --token %s"]' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [

@@ -62,6 +62,7 @@ func FuzzRedact(f *testing.F) {
 	f.Add(
 		"? \"pass\\x77ord\"\n: a\n'token': b\nenv: [{name: DB_PASSWORD, value: &a c # d\n}, [api_key: e], {? secret : \"f",
 	)
+	f.Add(`["sh","-c","-e","-o","x","--","bash -c -x -- 'a --token b'"],"\"api\x5fkey\": \"c\""`)
 	f.Add("x: {password: [REDACTED:jwt]x, \"name\": \"API_KEY\", value: \"g\"}]")
 	f.Add(`"\u003cpassword>x"`)
 	f.Add(`["token: x\npassword:\n  y\nend: \u0041","a\nAPI_KEY=k1\n\u0073ig=zz\nPASSWORD=p2"]`)

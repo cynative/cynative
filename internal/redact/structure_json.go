@@ -43,9 +43,10 @@ func (m matchers) flagValues(words []string) []wordValue {
 }
 
 // commandFrom returns the index of the command a shell runs when its options
-// start at words[j]: the word after the option that holds 'c', past any other
-// options and the argument of those that take one. That is len(words) when the
-// option is the last word, and -1 when the options end without one. For one word
+// start at words[j]: the first word after the option that holds 'c' and the
+// options that follow it (see afterOptions), past any other options and the
+// argument of those that take one. That is len(words) when no word is left, and
+// -1 when the options end without one. For one word
 // list the answer depends only on j, so memo keeps it for every option the scan
 // reads, and a later scan that reaches one of them stops there. Each option is
 // matched once however many shell names share its run.
@@ -61,7 +62,7 @@ func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
 		}
 		path = append(path, j)
 		if m.shellFlag.MatchString(words[j]) {
-			c = j + 1
+			c = m.afterOptions(words, j+1)
 
 			break
 		}
@@ -74,6 +75,26 @@ func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
 	}
 
 	return c
+}
+
+// afterOptions returns the index of the first word from words[j] on that is not
+// a short option, the argument of one that takes one, or a "--", which ends the
+// options and is skipped too. A shell reads those after the option that holds
+// 'c' before it takes the command.
+func (m matchers) afterOptions(words []string, j int) int {
+	for ; j < len(words); j++ {
+		if words[j] == "--" {
+			return j + 1
+		}
+		if !m.shortOption.MatchString(words[j]) {
+			return j
+		}
+		if m.shellArgOption.MatchString(words[j]) {
+			j++
+		}
+	}
+
+	return min(j, len(words))
 }
 
 // commands redacts credential values in runs of JSON string array elements, and
