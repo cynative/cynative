@@ -207,9 +207,10 @@ func (p *flowParser) skipSpace() {
 		switch c := p.s[p.i]; {
 		case strings.IndexByte(" \t\r\n", c) >= 0:
 			p.i++
-		case c == '#':
-			// A token never starts with '#', so one here opens a comment, even
-			// right after a flow indicator.
+		case c == '#' && strings.IndexByte(" \t\r\n,[{", p.s[p.i-1]) >= 0:
+			// A comment follows a blank, or a flow indicator that opens an entry.
+			// Right after a ':' the '#' is read as the value, so a value spelled
+			// "#..." is replaced rather than skipped.
 			if nl := strings.IndexByte(p.s[p.i:], '\n'); nl >= 0 {
 				p.i += nl
 			} else {

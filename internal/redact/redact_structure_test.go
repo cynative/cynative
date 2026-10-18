@@ -653,6 +653,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "? \"pass\\\n  word\" # c\n: " + field + "\n? 'api_key'\n: " + field + "\n",
 		},
 		{
+			name: "flow value spelled with a leading hash right after the colon",
+			in:   "{\"password\":#a}\nx: {\"token\":#b, c: d}\n",
+			want: "{\"password\":" + field + "}\nx: {\"token\":" + field + ", c: d}\n",
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,

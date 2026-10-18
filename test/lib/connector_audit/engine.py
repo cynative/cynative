@@ -1466,11 +1466,11 @@ def _read_flow(s, i):
             frames[-1]["value"] = False
 
     def skip(i):
-        # A token never starts with '#', so one here opens a comment.
+        # A comment follows a blank or a flow indicator that opens an entry, as skipSpace.
         while i < len(s):
             if s[i] in " \t\r\n":
                 i += 1
-            elif s[i] == "#":
+            elif s[i] == "#" and s[i - 1] in " \t\r\n,[{":
                 nl = s.find("\n", i)
                 i = len(s) if nl < 0 else nl
             else:
@@ -3223,6 +3223,7 @@ def _shared_selftest():
             ("yaml_flow_comment_after_comma", "x: {name: DB_PASSWORD,# c\n value: %s}\n" % live_secret),
             ("yaml_flow_under_plain_key_with_slash", "config/app.yaml: {password: %s}\n" % live_secret),
             ("yaml_explicit_key_over_lines", '? "pass\\\n  word"\n: %s\n' % live_secret),
+            ("yaml_flow_hash_value_after_colon", '{"password":#%s}' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [
