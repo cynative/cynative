@@ -12,9 +12,9 @@ import (
 // "value" member of each flow mapping whose "name" member is a credential name. A
 // collection is read where a block value or a sequence item may start: after a
 // line's indentation and "- " markers, or after a "key: " on the line. A JSON
-// document is a flow collection too; a member whose key is a JSON string and whose
-// value is a JSON scalar or a double-quoted string, closed or cut off at the end
-// of content, is left to the JSON passes.
+// document is a flow collection too: under a key that is a JSON string, a
+// double-quoted value has its content replaced and keeps its quotes, and any
+// other JSON scalar is left as it is, as the JSON passes leave it.
 func (m matchers) flows(s string, lines []yamlLine) []span {
 	var spans []span
 
@@ -142,7 +142,8 @@ func (p *flowParser) scalar(top *flowFrame) {
 		return
 	}
 	start := p.i
-	p.i = p.scalarEnd(start)
+	end, closed := p.scalarEnd(start)
+	p.i = end
 	raw := p.s[start:p.i]
 	text := yamlScalar(raw)
 	if !top.value {
@@ -154,30 +155,36 @@ func (p *flowParser) scalar(top *flowFrame) {
 	if top.mapping && strings.EqualFold(top.key, "name") && p.m.keyEnd.MatchString(text) {
 		top.named = true
 	}
-	if p.m.done(raw) || p.m.done(text) || top.keyJSON && (raw[0] == '"' || json.Valid([]byte(raw))) {
+	sp := span{start, p.i, placeholder("credential-field")}
+	if top.keyJSON && raw[0] == '"' {
+		// A string under a key that is a JSON string keeps its quotes, as the JSON
+		// passes keep them, so a JSON document stays valid.
+		sp = span{start + 1, p.i - boolInt(closed), sp.repl}
+	}
+	if p.m.done(raw) || p.m.done(text) || p.m.done(p.s[sp.start:sp.end]) ||
+		top.keyJSON && raw[0] != '"' && json.Valid([]byte(raw)) {
 		return
 	}
-	sp := span{start, p.i, placeholder("credential-field")}
-	if p.m.direct.MatchString(top.key) {
+	if p.m.credentialKey(top.key, top.keyJSON) {
 		p.spans = append(p.spans, sp)
 	} else if top.mapping && strings.EqualFold(top.key, "value") {
 		top.values = append(top.values, sp)
 	}
 }
 
-// scalarEnd returns the offset after the scalar that starts at s[start]: after
-// its closing quote, or the end of content when it has none, for a quoted one.
-// A plain one, which may start with a placeholder, runs over lines up to a flow
-// indicator, a ':' before a blank or an indicator, or a comment, without the
-// blanks before that.
-func (p *flowParser) scalarEnd(start int) int {
+// scalarEnd returns the offset after the scalar that starts at s[start], and
+// whether it is a quoted one that closes: after its closing quote, or the end of
+// content when it has none, for a quoted one. A plain one, which may start with a
+// placeholder, runs over lines up to a flow indicator, a ':' before a blank or an
+// indicator, or a comment, without the blanks before that.
+func (p *flowParser) scalarEnd(start int) (int, bool) {
 	s := p.s
 	if s[start] == '"' || s[start] == '\'' {
 		if q := closeQuote(s, start); q >= 0 {
-			return q + 1
+			return q + 1, true
 		}
 
-		return len(s)
+		return len(s), false
 	}
 	end := start + max(p.m.placeholderAt(s, start), 1)
 	for i := end; i < len(s); i++ {
@@ -192,7 +199,7 @@ func (p *flowParser) scalarEnd(start int) int {
 		}
 	}
 
-	return end
+	return end, false
 }
 
 // skipSpace steps past blanks, line breaks and comments.

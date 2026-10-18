@@ -1059,15 +1059,15 @@ _YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\
                  "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\",
                  "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
 _YAML_HEX_ESCAPES = {"x": 2, "u": 4, "U": 8}
-_FLOW_LEAD = re.compile(r"[ \t]*(?:-[ \t]+)*")
-_FLOW_PROPS = re.compile(r"(?:[&!][^ \t\r\n,\[\]{}]*[ \t\r\n]*)*")
+_FLOW_LEAD = re.compile(r"[ \t]*(?:(?:-|:|\?|---)[ \t]+)*")
+_FLOW_PROPS = re.compile(r"(?:(?:!<[^>]*>|[&!][^ \t\r\n,\[\]{}]*)[ \t\r\n]*)*")
 _PLACEHOLDER_PREFIX = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
 _HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 _YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
 _SHELL = re.compile(r"(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z")
 _SHELL_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
 _SHORT_OPTION = re.compile(r"[-+][A-Za-z]+\Z")
-_SHELL_ARG_OPTION = re.compile(r"(?:[-+][oO]|--rcfile|--init-file)\Z")
+_SHELL_ARG_OPTION = re.compile(r"(?:[-+][A-Za-z]*[oO][A-Za-z]*|--rcfile|--init-file)\Z")
 _RUN_START = re.compile(r'[\[,]' + _WS + r'*"')
 _ELEMENT = re.compile(r'"((?:\\[\s\S]|[^"\\])*)(")?')
 _SEPARATOR = re.compile(_WS + r'*,' + _WS + r'*"')
@@ -1125,6 +1125,7 @@ class _Detector:
         out, last = [], 0
         for m in sorted(self._find(text), key=lambda f: f.start()):
             if m.start() < last:
+                last = max(last, m.end())
                 continue
             out.append(text[last:m.start()])
             out.append(repl(m))
@@ -1225,6 +1226,12 @@ def _yaml_scalar(v):
             i += 1
             continue
         esc = body[i + 1:i + 2]
+        if esc in ("\n", "\r"):
+            # An escaped line break joins the lines without the next one's indentation.
+            i += 3 if body.startswith("\r\n", i + 1) else 2
+            while i < len(body) and body[i] in " \t":
+                i += 1
+            continue
         if esc in _YAML_ESCAPES:
             out.append(_YAML_ESCAPES[esc])
             i += 2
@@ -1297,7 +1304,7 @@ def _yaml_entries(s, lines):
             i += 1
             continue
         i = line
-        if _DIRECT_KEY.match(_fold(e["key"])) or e["key"].lower() in ("name", "value"):
+        if _DIRECT_KEY.match(e["key"]) or e["key"].lower() in ("name", "value"):
             i = _yaml_extent(s, lines, i, e)
         i += 1
         out.append(e)
@@ -1351,18 +1358,6 @@ def _yaml_mappings(es):
     return ids
 
 
-def _json_scalar(v):
-    """True when v, without a trailing comma, parses as a JSON scalar, as the
-    json.Valid check in yamlValue."""
-    if v.endswith(","):
-        v = v[:-1]
-    try:
-        json.loads(v)
-    except ValueError:
-        return False
-    return True
-
-
 def _find_yaml(s):
     if ":" not in s:
         return []
@@ -1374,9 +1369,16 @@ def _find_yaml(s):
     out = []
     for i, e in enumerate(entries):
         if not ((ids[i] in named and e["key"].lower() == "value")
-                or ((e["multi"] or e["alone"]) and _DIRECT_KEY.match(_fold(e["key"])))):
+                or ((e["multi"] or e["alone"]) and _credential_key(e["key"], e["json"]))):
             continue
-        if e["end"] == e["start"] or (e["json"] and _json_scalar(s[e["first"]:e["end"]])):
+        if e["end"] == e["start"]:
+            continue
+        v = s[e["first"]:e["end"]]
+        v = v[:-1] if v.endswith(",") else v
+        if e["json"] and _json_valid(v):
+            # A JSON string keeps its quotes; any other JSON scalar is left, as yamlValue.
+            if v[0] == '"':
+                out.append(_Found(v[1:-1], e["first"] + 1, e["first"] + len(v) - 1))
             continue
         start = e["colon"] if e["below"] else e["start"]
         out.append(_Found(s[start:e["end"]], start, e["end"]))
@@ -1409,10 +1411,11 @@ def _find_flows(s, lines):
 
 
 def _flow_scalar_end(s, start):
-    """The offset after the flow scalar starting at s[start], as scalarEnd."""
+    """The offset after the flow scalar starting at s[start], and whether it is a quoted
+    one that closes, as scalarEnd."""
     if s[start] in "\"'":
         q = _close_quote(s, start)
-        return q + 1 if q >= 0 else len(s)
+        return (q + 1, True) if q >= 0 else (len(s), False)
     m = _PLACEHOLDER_PREFIX.match(s, start)
     end = m.end() if m else start + 1
     for i in range(end, len(s)):
@@ -1422,7 +1425,7 @@ def _flow_scalar_end(s, start):
             break
         if c not in " \t\r\n":
             end = i + 1
-    return end
+    return end, False
 
 
 def _read_flow(s, i):
@@ -1442,7 +1445,8 @@ def _read_flow(s, i):
         i += len(_FLOW_PROPS.match(s, i).group(0))
         if i >= len(s) or (s[i] in ",:[]{}" and not _PLACEHOLDER_PREFIX.match(s, i)):
             return i
-        start, i = i, _flow_scalar_end(s, i)
+        start = i
+        i, closed = _flow_scalar_end(s, i)
         raw = s[start:i]
         text = _yaml_scalar(raw)
         if not top["value"]:
@@ -1451,10 +1455,15 @@ def _read_flow(s, i):
         top["value"] = False
         if top["mapping"] and top["key"].lower() == "name" and _KEY_END_FULL.match(_fold(text)):
             top["named"] = True
-        if _PLACEHOLDER.match(raw) or _PLACEHOLDER.match(text) or (top["json"] and (raw[0] == '"' or _json_valid(raw))):
+        a, b = start, i
+        if top["json"] and raw[0] == '"':
+            # A string under a JSON-string key keeps its quotes, as in scalar().
+            a, b = start + 1, i - (1 if closed else 0)
+        if _PLACEHOLDER.match(raw) or _PLACEHOLDER.match(text) or _PLACEHOLDER.match(s[a:b]) \
+                or (top["json"] and raw[0] != '"' and _json_valid(raw)):
             return i
-        found = _Found(text if raw[0] in "\"'" else raw, start, i)
-        if _DIRECT_KEY.match(_fold(top["key"])):
+        found = _Found(s[a:b] if a > start else text if raw[0] in "\"'" else raw, a, b)
+        if _credential_key(top["key"], top["json"]):
             out.append(found)
         elif top["mapping"] and top["key"].lower() == "value":
             top["values"].append(found)
@@ -1500,13 +1509,23 @@ def _read_flow(s, i):
     return out, i
 
 
+def _reject_constant(_name):
+    raise ValueError("not JSON")
+
+
 def _json_valid(v):
-    """True when v parses as JSON, as json.Valid."""
+    """True when v parses as JSON, as json.Valid: NaN and Infinity, which json.loads
+    accepts, are not JSON."""
     try:
-        json.loads(v)
+        json.loads(v, parse_constant=_reject_constant)
     except ValueError:
         return False
     return True
+
+
+def _credential_key(key, is_json):
+    """True when a mapping key names a credential, as credentialKey."""
+    return bool(_KEY_END_FULL.match(_fold(key)) if is_json else _DIRECT_KEY.match(key))
 
 
 def _flag_values(words):
@@ -1541,7 +1560,7 @@ def _shell_command(words, i):
     j = i + 1
     while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
         if _SHELL_FLAG.match(words[j]):
-            return _after_options(words, j + 1)
+            return _after_options(words, j + 1 + (1 if _SHELL_ARG_OPTION.match(words[j]) else 0))
         if _SHELL_ARG_OPTION.match(words[j]):
             j += 1
         j += 1

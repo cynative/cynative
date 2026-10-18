@@ -566,6 +566,47 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `["sh","-c","bash -c -o pipefail -- ` + field + `; bash -ce"]`,
 		},
 		{
+			name: "nested shell whose command word overlaps an expanded value",
+			in:   `["sh","-c","echo sh -c --password=$(printf hunter2)"]`,
+			want: `["sh","-c","echo sh -c ` + field + `"]`,
+		},
+		{
+			name: "flow mapping mixing plain and JSON-string keys",
+			in:   "x: {name: DB_PASSWORD, \"value\": \"a\"}\ny: {public: b, \"pass\\u0077ord\": \"c\", \"pageToken\": \"d\"}\n",
+			want: "x: {name: DB_PASSWORD, \"value\": \"" + field + "\"}\ny: {public: b, \"pass\\u0077ord\": \"" + field +
+				"\", \"pageToken\": \"d\"}\n",
+		},
+		{
+			name: "yaml block value under an escaped JSON-string key",
+			in:   "a: b\n\"pass\\u0077ord\": \"c\",\n\"token\": 12\n",
+			want: "a: b\n\"pass\\u0077ord\": \"" + field + "\",\n\"token\": 12\n",
+		},
+		{
+			name: "flow collections after explicit, value and document markers",
+			in:   "? env\n: {password: a}\n--- {token: b}\n? [api_key: c]\n",
+			want: "? env\n: {password: " + field + "}\n--- {token: " + field + "}\n? [api_key: " + field + "]\n",
+		},
+		{
+			name: "flow value after a verbatim tag",
+			in:   "x: {password: !<tag:yaml.org,2002:str> a}\n",
+			want: "x: {password: !<tag:yaml.org,2002:str> " + field + "}\n",
+		},
+		{
+			name: "flow name joined over lines with an escaped line break",
+			in:   "x: {name: \"DB_PASS\\\n  WORD\", value: a}\ny: {name: \"API_\\\r\n\tKEY\", value: b}\n",
+			want: "x: {name: \"DB_PASS\\\n  WORD\", value: " + field + "}\ny: {name: \"API_\\\r\n\tKEY\", value: " + field + "}\n",
+		},
+		{
+			name: "shell option run that takes an argument",
+			in:   `["bash","-c","-eo","pipefail","app --password a","bash","-ceo","pipefail","app --token b"]`,
+			want: `["bash","-c","-eo","pipefail","app --password ` + field + `","bash","-ceo","pipefail","app --token ` + field + `"]`,
+		},
+		{
+			name: "json object at the start of a line with a constant JSON does not define",
+			in:   `{"x":-NaN,"DB_PASSW\u004fRD":"v","password":NaN}`,
+			want: `{"x":-NaN,"DB_PASSW\u004fRD":"` + field + `","password":` + field + `}`,
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,
@@ -656,10 +697,13 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`{"value":1,"name":"DB_PASSWORD","nested":{"value":"x"}}`,
 		`{"a":"\q","DB_PASSWORD":1}`,
 		`{"DB_PASSW\u004fRD" "x`,
-		`{"x":-NaN,"DB_PASSW\u004fRD":"v"}`,
-		`{"x":1NaN,"DB_PASSW\u004fRD":"v"}`,
-		`{"x":NaN1,"DB_PASSW\u004fRD":"v"}`,
-		`{"x":nan,"DB_PASSW\u004fRD":"v"}`,
+		// Text before each object keeps the YAML flow pass off it, so these pin the
+		// JSON object pass alone.
+		`got {"x":-NaN,"DB_PASSW\u004fRD":"v"}`,
+		`got {"x":1NaN,"DB_PASSW\u004fRD":"v"}`,
+		`got {"x":NaN1,"DB_PASSW\u004fRD":"v"}`,
+		`got {"x":nan,"DB_PASSW\u004fRD":"v"}`,
+		"{\n  \"nextPageToken\": \"a\",\n  \"n\\u0065xtToken\": |\n    b\n}\nx: {\"pageToken\": \"c\"}\n",
 		"secret:\n  # comment\n  secretName: public-reference\n",
 		"secret:\n  \"secretName\": public-reference\n",
 		"token:\n  [public-reference]\n",

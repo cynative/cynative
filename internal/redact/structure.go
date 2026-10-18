@@ -22,9 +22,9 @@ type span struct {
 }
 
 // applySpans rebuilds s with every span replaced. A span that starts inside an
-// earlier one is dropped, and so is an empty span at the end of the previous one,
-// which would add a second placeholder there. Every pass that produces two such
-// spans produces the outer one first, so the bytes of the dropped one are covered.
+// earlier one joins it, so the earlier replacement also covers the bytes up to
+// the later span's end, and an empty span at the end of the previous one is
+// dropped, since it would add a second placeholder there.
 func applySpans(s string, spans []span) string {
 	if len(spans) == 0 {
 		return s
@@ -36,6 +36,8 @@ func applySpans(s string, spans []span) string {
 	last, prev := 0, -1
 	for _, sp := range spans {
 		if sp.start < last || sp.start == prev && sp.end == sp.start {
+			last = max(last, sp.end)
+
 			continue
 		}
 		prev = sp.end
@@ -64,8 +66,9 @@ type matchers struct {
 	// explicitKey is a "? key" line and explicitValue the ": value" line that
 	// follows it.
 	explicitKey, explicitValue *regexp.Regexp
-	// flowLead is a line's indentation and "- " markers, flowProps the anchor and
-	// tag properties before a node in a flow collection, and placeholderPrefix a
+	// flowLead is a line's indentation and its "- ", "? ", ": " and "--- " markers,
+	// flowProps the anchor and tag properties, verbatim tags included, before a
+	// node in a flow collection, and placeholderPrefix a
 	// placeholder at the start of the text.
 	flowLead, flowProps, placeholderPrefix *regexp.Regexp
 	// block is a YAML block scalar indicator.
@@ -74,7 +77,7 @@ type matchers struct {
 	placeholder *regexp.Regexp
 	// shell is a shell program, shellFlag the option that makes it run its next
 	// argument as a command, shortOption a short option or a run of them, and
-	// shellArgOption an option that takes the next
+	// shellArgOption an option, or a run holding 'o' or 'O', that takes the next
 	// argument as its own.
 	shell, shellFlag, shortOption, shellArgOption *regexp.Regexp
 	// runStart opens a JSON array element, element reads one string element (closed,
@@ -99,20 +102,31 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		mappingLine:       regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
 		quotedKey:         regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
 		props:             regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
-		flowLead:          regexp.MustCompile(`^[ \t]*(?:-[ \t]+)*`),
-		flowProps:         regexp.MustCompile(`^(?:[&!][^ \t\r\n,\[\]{}]*[ \t\r\n]*)*`),
+		flowLead:          regexp.MustCompile(`^[ \t]*(?:(?:-|:|\?|---)[ \t]+)*`),
+		flowProps:         regexp.MustCompile(`^(?:(?:!<[^>]*>|[&!][^ \t\r\n,\[\]{}]*)[ \t\r\n]*)*`),
 		placeholderPrefix: regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]`),
 		block:             regexp.MustCompile(`^[|>][0-9+-]*$`),
 		placeholder:       regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
 		shell:             regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
 		shellFlag:         regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
 		shortOption:       regexp.MustCompile(`^[-+][A-Za-z]+$`),
-		shellArgOption:    regexp.MustCompile(`^(?:[-+][oO]|--rcfile|--init-file)$`),
+		shellArgOption:    regexp.MustCompile(`^(?:[-+][A-Za-z]*[oO][A-Za-z]*|--rcfile|--init-file)$`),
 		runStart:          regexp.MustCompile(`[\[,]\s*"`),
 		element:           regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
 		separator:         regexp.MustCompile(`^\s*,\s*"`),
 		keyColon:          regexp.MustCompile(`^\s*:`),
 	}
+}
+
+// credentialKey reports whether a mapping key names a credential. A key that is a
+// JSON string is read as the JSON passes read it, so a pagination cursor such as
+// "nextPageToken" is not one; any other key as the YAML line rule reads it.
+func (m matchers) credentialKey(key string, json bool) bool {
+	if json {
+		return m.keyEnd.MatchString(key)
+	}
+
+	return m.direct.MatchString(key)
 }
 
 // done reports whether v is already a lone redaction placeholder.
@@ -184,7 +198,8 @@ func (m matchers) yaml(s string) string {
 	var spans []span
 
 	for i, e := range entries {
-		if named[ids[i]] && strings.EqualFold(e.key, "value") || (e.multi || e.alone) && m.direct.MatchString(e.key) {
+		if named[ids[i]] && strings.EqualFold(e.key, "value") ||
+			(e.multi || e.alone) && m.credentialKey(e.key, e.json) {
 			spans = m.yamlValue(s, e, spans)
 		}
 	}
@@ -205,13 +220,20 @@ func nameValue(s string, e yamlEntry) string {
 // yamlValue adds the span that replaces e's value, unless it has none or an
 // earlier rule already replaced it.
 //
-// Under a double-quoted key a value that parses as a JSON scalar, with the comma
-// that may follow it, is a pretty-printed JSON member: the JSON passes read it, and
-// replacing it here would drop its quotes and break the document.
+// Under a key that is a JSON string a value that parses as a JSON scalar, with the
+// comma that may follow it, is a pretty-printed JSON member. A string has its
+// content replaced and keeps its quotes, so the document stays valid; any other
+// JSON scalar is left as it is, as the JSON passes leave it.
 func (m matchers) yamlValue(s string, e yamlEntry, spans []span) []span {
-	if e.end == e.start || m.done(s[e.start:e.end]) ||
-		e.json && json.Valid([]byte(strings.TrimSuffix(s[e.first:e.end], ","))) {
+	if e.end == e.start || m.done(s[e.start:e.end]) {
 		return spans
+	}
+	if v := strings.TrimSuffix(s[e.first:e.end], ","); e.json && json.Valid([]byte(v)) {
+		if v[0] != '"' || m.done(v[1:len(v)-1]) {
+			return spans
+		}
+
+		return append(spans, span{e.first + 1, e.first + len(v) - 1, placeholder("credential-field")})
 	}
 	if e.below {
 		return append(spans, span{e.colon, e.end, " " + placeholder("credential-field")})
@@ -497,6 +519,16 @@ const (
 func yamlEscape(esc string) (string, int, bool) {
 	if len(esc) < escapeWidth {
 		return "", 0, false
+	}
+	if esc[1] == '\n' || esc[1] == '\r' {
+		// An escaped line break joins the lines without the blanks that indent
+		// the next one.
+		n := escapeWidth
+		if strings.HasPrefix(esc[1:], "\r\n") {
+			n++
+		}
+
+		return "", n + len(esc[n:]) - len(strings.TrimLeft(esc[n:], " \t")), true
 	}
 	for k := 0; k < len(yamlEscapes); k += 2 {
 		if yamlEscapes[k] == esc[1] {

@@ -43,9 +43,9 @@ func (m matchers) flagValues(words []string) []wordValue {
 }
 
 // commandFrom returns the index of the command a shell runs when its options
-// start at words[j]: the first word after the option that holds 'c' and the
-// options that follow it (see afterOptions), past any other options and the
-// argument of those that take one. That is len(words) when no word is left, and
+// start at words[j]: the first word after the option that holds 'c', the argument
+// it takes when it also holds 'o', and the options that follow it (see
+// afterOptions), past any other options and the argument of those that take one. That is len(words) when no word is left, and
 // -1 when the options end without one. For one word
 // list the answer depends only on j, so memo keeps it for every option the scan
 // reads, and a later scan that reaches one of them stops there. Each option is
@@ -62,7 +62,7 @@ func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
 		}
 		path = append(path, j)
 		if m.shellFlag.MatchString(words[j]) {
-			c = m.afterOptions(words, j+1)
+			c = m.afterOptions(words, j+1+boolInt(m.shellArgOption.MatchString(words[j])))
 
 			break
 		}
