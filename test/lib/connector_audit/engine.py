@@ -1434,9 +1434,9 @@ def _find_flows(s, lines):
     return out
 
 
-def _flow_scalar_end(s, start):
+def _flow_scalar_end(s, start, key):
     """The offset after the flow scalar starting at s[start], and whether it is a quoted
-    one that closes, as scalarEnd."""
+    one that closes, as scalarEnd: a plain key ends at the line break."""
     if s[start] in "\"'":
         q = _close_quote(s, start)
         return (q + 1, True) if q >= 0 else (len(s), False)
@@ -1444,7 +1444,7 @@ def _flow_scalar_end(s, start):
     end = m.end() if m else start + 1
     for i in range(end, len(s)):
         c = s[i]
-        if c in ",[]{}" or (c == ":" and (i + 1 == len(s) or s[i + 1] in " \t\r\n,[]{}")) \
+        if c in ",[]{}" or (key and c == "\n") or (c == ":" and (i + 1 == len(s) or s[i + 1] in " \t\r\n,[]{}")) \
                 or (c == "#" and s[i - 1] in " \t\r\n"):
             break
         if c not in " \t\r\n":
@@ -1466,11 +1466,11 @@ def _read_flow(s, i):
             frames[-1]["value"] = False
 
     def skip(i):
-        # A '#' between tokens opens a comment, except right after a ':', as skipSpace.
+        # A '#' after a blank opens a comment; any other one starts a scalar, as skipSpace.
         while i < len(s):
             if s[i] in " \t\r\n":
                 i += 1
-            elif s[i] == "#" and s[i - 1] != ":":
+            elif s[i] == "#" and s[i - 1] in " \t\r\n":
                 nl = s.find("\n", i)
                 i = len(s) if nl < 0 else nl
             else:
@@ -1482,11 +1482,13 @@ def _read_flow(s, i):
         if i >= len(s) or (s[i] in ",:[]{}" and not _PLACEHOLDER_PREFIX.match(s, i)):
             return i
         start = i
-        i, closed = _flow_scalar_end(s, i)
+        i, closed = _flow_scalar_end(s, i, not top["value"])
         raw = s[start:i]
         text = _yaml_scalar(raw)
         if not top["value"]:
-            top["key"], top["json"] = text, raw[0] == '"' and _json_valid(raw)
+            # A second scalar before ':' never replaces a credential key, as scalar().
+            if not _DIRECT_KEY.match(top["key"]):
+                top["key"], top["json"] = text, raw[0] == '"' and _json_valid(raw)
             return i
         top["value"] = False
         if top["mapping"] and top["key"].lower() == "name" and _KEY_END_FULL.match(_fold(text)):
@@ -3225,6 +3227,7 @@ def _shared_selftest():
             ("yaml_explicit_key_over_lines", '? "pass\\\n  word"\n: %s\n' % live_secret),
             ("yaml_flow_hash_value_after_colon", '{"password":#%s}' % live_secret),
             ("yaml_flow_comment_after_key", 'x: {"password"#c\n: %s}\n' % live_secret),
+            ("yaml_flow_stray_hash", 'x: {a: "b"#, password: %s}\n' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [

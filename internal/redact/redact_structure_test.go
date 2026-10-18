@@ -663,6 +663,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "x: {\"password\"#c\n: " + field + "}\ny: {k: [b]#c\n password: " + field + "}\n",
 		},
 		{
+			name: "flow hash that opens no comment hides nothing after it",
+			in:   "x: {a: \"b\"#, password: c}\ny: {d: e,#f, token: g}\n",
+			want: "x: {a: \"b\"#, password: " + field + "}\ny: {d: e,#f, token: " + field + "}\n",
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,

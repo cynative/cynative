@@ -141,12 +141,16 @@ func (p *flowParser) scalar(top *flowFrame) {
 		return
 	}
 	start := p.i
-	end, closed := p.scalarEnd(start)
+	end, closed := p.scalarEnd(start, !top.value)
 	p.i = end
 	raw := p.s[start:p.i]
 	text := yamlScalar(raw)
 	if !top.value {
-		top.key, top.keyJSON = text, jsonKey(raw)
+		// Two scalars with no ':' or ',' between them are not valid YAML; the
+		// second never takes the place of a key that names a credential.
+		if !p.m.direct.MatchString(top.key) {
+			top.key, top.keyJSON = text, jsonKey(raw)
+		}
 
 		return
 	}
@@ -174,9 +178,10 @@ func (p *flowParser) scalar(top *flowFrame) {
 // scalarEnd returns the offset after the scalar that starts at s[start], and
 // whether it is a quoted one that closes: after its closing quote, or the end of
 // content when it has none, for a quoted one. A plain one, which may start with a
-// placeholder, runs over lines up to a flow indicator, a ':' before a blank or an
-// indicator, or a comment, without the blanks before that.
-func (p *flowParser) scalarEnd(start int) (int, bool) {
+// placeholder, runs up to a flow indicator, a ':' before a blank or an indicator,
+// or a comment, without the blanks before that; a value runs over lines, while a
+// key, which YAML keeps on one line, ends at the line break.
+func (p *flowParser) scalarEnd(start int, key bool) (int, bool) {
 	s := p.s
 	if s[start] == '"' || s[start] == '\'' {
 		if q := closeQuote(s, start); q >= 0 {
@@ -188,7 +193,7 @@ func (p *flowParser) scalarEnd(start int) (int, bool) {
 	end := start + max(p.m.placeholderAt(s, start), 1)
 	for i := end; i < len(s); i++ {
 		c := s[i]
-		if strings.IndexByte(",[]{}", c) >= 0 ||
+		if strings.IndexByte(",[]{}", c) >= 0 || key && c == '\n' ||
 			c == ':' && (i+1 == len(s) || strings.IndexByte(" \t\r\n,[]{}", s[i+1]) >= 0) ||
 			c == '#' && strings.IndexByte(" \t\r\n", s[i-1]) >= 0 {
 			break
@@ -207,10 +212,10 @@ func (p *flowParser) skipSpace() {
 		switch c := p.s[p.i]; {
 		case strings.IndexByte(" \t\r\n", c) >= 0:
 			p.i++
-		case c == '#' && p.s[p.i-1] != ':':
-			// A '#' between tokens opens a comment, so it never takes the place of
-			// a key already read. Right after a ':' it is read as the value, so a
-			// value spelled "#..." is replaced rather than skipped.
+		case c == '#' && strings.IndexByte(" \t\r\n", p.s[p.i-1]) >= 0:
+			// YAML opens a comment only after a blank. Any other '#' starts a
+			// scalar, which hides nothing after it and cannot replace a
+			// credential key (see scalar).
 			if nl := strings.IndexByte(p.s[p.i:], '\n'); nl >= 0 {
 				p.i += nl
 			} else {
