@@ -150,7 +150,8 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	}
 
 	// A shell command element is read as words by shellSpans, and only so, unless
-	// its shell name or one of the options before it is itself a flag's value. That name is replaced, so a
+	// it, its shell name or one of the options before it is itself a flag's value.
+	// That word is replaced, so a
 	// second Redact reads the element as a plain array element; it is read both
 	// ways here, the array reading first so its wider span wins, and the second
 	// Redact finds nothing left.
@@ -202,7 +203,7 @@ func (m matchers) shellCommands(s string, elems []element, words []string, taken
 		}
 		if c := m.commandFrom(words, memo, i+1); c > i && c < len(elems) {
 			_, seen := shell[c]
-			shell[c] = before[c] == before[i]
+			shell[c] = before[c+1] == before[i]
 			if !seen {
 				out = append(out, m.shellSpans(s, elems[c])...)
 			}

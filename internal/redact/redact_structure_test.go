@@ -556,6 +556,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `["sh","-c","-e","--","app --token ` + field + `"]`,
 		},
 		{
+			name: "flag that is an option's argument before the command",
+			in:   `["sh","-c","-o","--token","x y","+O","--password","z"]`,
+			want: `["sh","-c","-o","--token","` + field + `","+O","--password","` + field + `"]`,
+		},
+		{
 			name: "nested shell options after the command option",
 			in:   `["sh","-c","bash -c -o pipefail -- 'app --password x'; bash -ce"]`,
 			want: `["sh","-c","bash -c -o pipefail -- ` + field + `; bash -ce"]`,

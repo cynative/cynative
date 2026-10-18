@@ -1731,7 +1731,7 @@ def _find_commands(s):
                 continue
             c = _shell_command(words, i)
             if i < c < len(elems):
-                if not any(k in taken for k in range(i, c)):
+                if not any(k in taken for k in range(i, c + 1)):
                     shell.add(c)
                 out.extend(_shell_found(s, elems[c]))
         for i, off in values:
@@ -3130,6 +3130,7 @@ def _shared_selftest():
             ("yaml_flow_pair", 'env:\n- {name: DB_PASSWORD, value: %s}\n' % live_secret),
             ("yaml_key_yaml_only_escape", '"pass\\x77ord": "%s"\n' % live_secret),
             ("shell_options_after_command_option", '["sh","-c","-e","--","app --token %s"]' % live_secret),
+            ("shell_command_is_a_flag_value", '["sh","-c","-o","--token","%s"]' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [
