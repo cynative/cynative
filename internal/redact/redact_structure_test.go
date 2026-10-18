@@ -1,6 +1,7 @@
 package redact_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,6 +20,12 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 	const field = "[REDACTED:credential-field]"
 
 	pat := "ghp_" + strings.Repeat("a", 36)
+	// deep is a command six shells deep with no credential flag in it; the "--"
+	// lets the command pass run.
+	deep := "x --"
+	for range 6 {
+		deep = "sh -c '" + strings.ReplaceAll(deep, "'", `'\''`) + "'"
+	}
 	r := redact.New()
 	cases := []struct {
 		name string
@@ -427,15 +434,121 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 				`["--password","` + field + `","-c","app --token ` + field + `"]`,
 		},
 		{
-			name: "shell command value with command substitutions",
+			// A value a shell may expand runs to the end of the command (#404).
+			name: "shell command value with a command substitution",
 			in: `["sh","-c","app --password=$(printf '%s' \"a)\" | (cat)) b; x --token ` + "`cat f`" +
 				` y; z --token $(z"]`,
-			want: `["sh","-c","app --password=` + field + ` b; x --token ` + field + ` y; z --token ` + field + `"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
 		},
 		{
 			name: "shell command substitution edge 1",
 			in:   "[\"sh\", \"-c\", \"a --token `x\\\\`y` b; c --token $(e \\\\) \\\"q\\\\\\\"r) \\\" s) d; e --token $(f \\\"open\"]",
-			want: "[\"sh\", \"-c\", \"a --token [REDACTED:credential-field] b; c --token [REDACTED:credential-field] d; e --token [REDACTED:credential-field]\"]",
+			want: "[\"sh\", \"-c\", \"a --token [REDACTED:credential-field]\"]",
+		},
+		{
+			name: "shell command started inside a shell command",
+			in:   `["sh","-c","bash -c 'app --password hunter2' && echo ok"]`,
+			want: `["sh","-c","bash -c ` + field + ` && echo ok"]`,
+		},
+		{
+			name: "shell command started three shells deep",
+			in:   `["sh","-c","sh -c \"bash -ec 'app --token=x' --\"; echo ok"]`,
+			want: `["sh","-c","sh -c ` + field + `; echo ok"]`,
+		},
+		{
+			name: "shell command nested past the depth bound",
+			in:   `["sh","-c",` + strconv.Quote(deep) + `]`,
+			want: `["sh","-c","sh -c ` + field + `"]`,
+		},
+		{
+			name: "shell command flag inside a command substitution",
+			in:   `["sh","-c","echo $(app --password hunter2) done"]`,
+			want: `["sh","-c","echo $(app --password ` + field + `) done"]`,
+		},
+		{
+			name: "shell command flag inside a backquoted substitution",
+			in:   "[\"sh\",\"-c\",\"echo `app --token hunter2` done\"]",
+			want: `["sh","-c","echo ` + "`" + `app --token ` + field + `"]`,
+		},
+		{
+			name: "shell command value in a process substitution",
+			in:   `["sh","-c","app --password <(printf hunter2) next"]`,
+			want: `["sh","-c","app --password ` + field + `"]`,
+		},
+		{
+			name: "shell command value after a redirection",
+			in:   `["sh","-c","app --password  < /run/secret next"]`,
+			want: `["sh","-c","app --password  ` + field + `"]`,
+		},
+		{
+			name: "shell command value with a parameter expansion",
+			in:   `["sh","-c","app --password=${X:-hunter 2} next"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
+		},
+		{
+			name: "shell command value with ANSI-C quoting",
+			in:   `["sh","-c","app --password=$'hunter\\' 2' next"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
+		},
+		{
+			name: "shell command expanded value inside double quotes",
+			in:   `["sh","-c","app \"--token=$T x\" next"]`,
+			want: `["sh","-c","app \"--token=` + field + `\""]`,
+		},
+		{
+			name: "yaml double-quoted key",
+			in:   "\"password\": hunter2 # c\n",
+			want: "\"password\": " + field + " # c\n",
+		},
+		{
+			name: "yaml double-quoted key spelled with escapes",
+			in:   "\"pass\\x77or\\u0064\": hunter2\n'api_key': 'it''s'\n",
+			want: "\"pass\\x77or\\u0064\": " + field + "\n'api_key': " + field + "\n",
+		},
+		{
+			name: "yaml pair whose name is spelled with escapes",
+			in:   "- name: \"DB_PASS\\x57ORD\"\n  value: hunter2\n",
+			want: "- name: \"DB_PASS\\x57ORD\"\n  value: " + field + "\n",
+		},
+		{
+			name: "yaml explicit key",
+			in:   "? password\n: hunter2\n- ? \"api\\x5fkey\"\n  # c\n  :\n    hunter2\n    more\nnext: x\n",
+			want: "? password\n: " + field + "\n- ? \"api\\x5fkey\"\n  # c\n  : " + field + "\nnext: x\n",
+		},
+		{
+			name: "yaml flow mapping pair in a sequence",
+			in:   "env:\n- {name: DB_PASSWORD, value: hunter2}\n- {name: DB_HOST, value: db}\n",
+			want: "env:\n- {name: DB_PASSWORD, value: " + field + "}\n- {name: DB_HOST, value: db}\n",
+		},
+		{
+			name: "yaml flow mappings over lines",
+			in:   "env: [{value: 'hunter2',\n  # c\n  name: DB_PASSWORD}, {password: \"a\n b\", token: [a]}]\n",
+			want: "env: [{value: " + field + ",\n  # c\n  name: DB_PASSWORD}, {password: " + field + ", token: [a]}]\n",
+		},
+		{
+			name: "yaml flow one-pair mapping, properties and an explicit key",
+			in:   "x: [password: &a !t hunter2 # c\n , {? api_key : k}]\n",
+			want: "x: [password: &a !t " + field + " # c\n , {? api_key : " + field + "}]\n",
+		},
+		{
+			name: "yaml flow mapping cut off",
+			in:   "x: {name: DB_PASSWORD, secret: \"a, value: hunt",
+			want: "x: {name: DB_PASSWORD, secret: " + field,
+		},
+		{
+			name: "yaml flow mapping closed by the wrong bracket",
+			in:   "x: {name: DB_PASSWORD, value: hunter2]\n",
+			want: "x: {name: DB_PASSWORD, value: " + field + "]\n",
+		},
+		{
+			name: "yaml flow mapping cut off in a comment",
+			in:   "x: {name: DB_PASSWORD, value: hunter2 # c",
+			want: "x: {name: DB_PASSWORD, value: " + field + " # c",
+		},
+		{
+			name: "json pair with an unquoted value",
+			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
+			want: `{"name":"DB_PASSWORD","value":` + field + `}`,
 		},
 		{
 			name: "shell command substitution edge 2",
@@ -552,6 +665,18 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`["--password",1]`,
 		`["--token","[REDACTED:github-token]"]`,
 		`["--no-generate-secret","--client-name","example"]`,
+		"x: {name: DB_HOST, value: public, token: [a, b], secret: {k: v}}\n",
+		"x: [name: DB_PASSWORD, value: public]\n",
+		"x: {name: DB_PASSWORD, nested: {value: public}}\n",
+		"x: {password: [REDACTED:jwt], api_key: \"[REDACTED:jwt]\", key: a:b}\n",
+		"? public\n: value\n? password\n  : nested\n",
+		"\"pass\\qword\": public\n",
+		"x: [REDACTED:jwt]\n",
+		"x: {password: &a}\n",
+		"? password # a: b\n# c\n",
+		"- name: \"DB_PASSWORD\\\"\n  value: public\n",
+		"\"pass\\2word\": public\n\"\\x4\": a\n\"\\xZZ\": b\n\"\\UFFFFFFFF\": c\n\"\\N\\_\\L\\P\": d\n",
+		`["sh","-c","app --password=[REDACTED:jwt] && sh -c 'app --token [REDACTED:jwt]'"]`,
 	}
 	for _, in := range negatives {
 		if got := r.Redact(in); got != in {

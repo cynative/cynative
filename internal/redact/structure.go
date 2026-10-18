@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // The structural passes cover credential shapes a single regex cannot see: a YAML
@@ -59,6 +61,13 @@ type matchers struct {
 	// key's spelling, and quotedKey a line that opens with a quoted key; props is
 	// the anchor and tag properties that may open a value.
 	yamlKey, mappingLine, quotedKey, props *regexp.Regexp
+	// explicitKey is a "? key" line and explicitValue the ": value" line that
+	// follows it.
+	explicitKey, explicitValue *regexp.Regexp
+	// flowLead is a line's indentation and "- " markers, flowProps the anchor and
+	// tag properties before a node in a flow collection, and placeholderPrefix a
+	// placeholder at the start of the text.
+	flowLead, flowProps, placeholderPrefix *regexp.Regexp
 	// block is a YAML block scalar indicator.
 	block *regexp.Regexp
 	// placeholder is a value an earlier rule already replaced, kept for its label.
@@ -82,18 +91,25 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		yamlKey: regexp.MustCompile(
 			`^([ \t]*(?:-[ \t]+)*)([\w.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]+|$)`,
 		),
-		mappingLine:    regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
-		quotedKey:      regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
-		props:          regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
-		block:          regexp.MustCompile(`^[|>][0-9+-]*$`),
-		placeholder:    regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
-		shell:          regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
-		shellFlag:      regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
-		shellArgOption: regexp.MustCompile(`^(?:[-+][oO]|--rcfile|--init-file)$`),
-		runStart:       regexp.MustCompile(`[\[,]\s*"`),
-		element:        regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
-		separator:      regexp.MustCompile(`^\s*,\s*"`),
-		keyColon:       regexp.MustCompile(`^\s*:`),
+		explicitKey: regexp.MustCompile(
+			`^([ \t]*(?:-[ \t]+)*)\?[ \t]+([\w.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*(?:#.*)?$`,
+		),
+		explicitValue:     regexp.MustCompile(`^[ \t]*:(?:[ \t]+|$)`),
+		mappingLine:       regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
+		quotedKey:         regexp.MustCompile(`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|$)`),
+		props:             regexp.MustCompile(`^(?:[&!][^ \t]*(?:[ \t]+|$))*`),
+		flowLead:          regexp.MustCompile(`^[ \t]*(?:-[ \t]+)*`),
+		flowProps:         regexp.MustCompile(`^(?:[&!][^ \t\r\n,\[\]{}]*[ \t\r\n]*)*`),
+		placeholderPrefix: regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]`),
+		block:             regexp.MustCompile(`^[|>][0-9+-]*$`),
+		placeholder:       regexp.MustCompile(`^\[REDACTED:[a-z0-9-]+\]$`),
+		shell:             regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
+		shellFlag:         regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
+		shellArgOption:    regexp.MustCompile(`^(?:[-+][oO]|--rcfile|--init-file)$`),
+		runStart:          regexp.MustCompile(`[\[,]\s*"`),
+		element:           regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
+		separator:         regexp.MustCompile(`^\s*,\s*"`),
+		keyColon:          regexp.MustCompile(`^\s*:`),
 	}
 }
 
@@ -118,6 +134,9 @@ type yamlEntry struct {
 	below bool   // the value starts on a later line, so the replacement needs a space
 	multi bool   // the value runs past its key line
 	json  bool   // the key is double-quoted, as a pretty-printed JSON member's is
+	// alone marks a key the YAML line rule cannot read: a quoted key, or an
+	// explicit "? key" whose value is on the ": value" line after it.
+	alone bool
 }
 
 func splitLines(s string) []yamlLine {
@@ -149,7 +168,8 @@ func blankOrComment(t string) bool {
 // A mapping is read from its indentation (see mappings), keys of the form yamlKey
 // accepts.
 func (m matchers) yaml(s string) string {
-	entries := m.yamlEntries(s, splitLines(s))
+	lines := splitLines(s)
+	entries := m.yamlEntries(s, lines)
 	ids := mappings(entries)
 
 	named := make(map[int]bool)
@@ -162,12 +182,12 @@ func (m matchers) yaml(s string) string {
 	var spans []span
 
 	for i, e := range entries {
-		if named[ids[i]] && strings.EqualFold(e.key, "value") || e.multi && m.direct.MatchString(e.key) {
+		if named[ids[i]] && strings.EqualFold(e.key, "value") || (e.multi || e.alone) && m.direct.MatchString(e.key) {
 			spans = m.yamlValue(s, e, spans)
 		}
 	}
 
-	return applySpans(s, spans)
+	return applySpans(s, append(spans, m.flows(s, lines)...))
 }
 
 // nameValue returns the scalar of a "name" entry when it is a single line,
@@ -177,7 +197,7 @@ func nameValue(s string, e yamlEntry) string {
 		return ""
 	}
 
-	return unquote(strings.TrimRight(stripComment(s[e.first:e.end]), " \t\r"))
+	return yamlScalar(strings.TrimRight(stripComment(s[e.first:e.end]), " \t\r"))
 }
 
 // yamlValue adds the span that replaces e's value, unless it has none or an
@@ -211,21 +231,13 @@ func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 		if blankOrComment(text) {
 			continue
 		}
-		g := m.yamlKey.FindStringSubmatchIndex(text)
-		if g == nil {
+		e, line, ok := m.yamlEntry(s, lines, i)
+		if !ok {
 			out = append(out, yamlEntry{col: indentOf(text)})
 
 			continue
 		}
-		e := yamlEntry{
-			key:   unquote(text[g[4]:g[5]]),
-			json:  text[g[4]] == '"',
-			col:   g[3],
-			item:  strings.Contains(text[:g[3]], "-"),
-			colon: lines[i].start + g[5] + strings.IndexByte(text[g[5]:], ':') + 1,
-			start: lines[i].start + g[1],
-		}
-		e.end = e.start
+		i = line
 		if m.direct.MatchString(e.key) || strings.EqualFold(e.key, "name") || strings.EqualFold(e.key, "value") {
 			i = m.extent(s, lines, i, &e)
 		}
@@ -233,6 +245,53 @@ func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 	}
 
 	return out
+}
+
+// yamlEntry reads the "key: value" entry that starts on line i, with the index
+// of the line its value starts on. An explicit "? key" line pairs with the
+// ": value" line after it, at the same column, and comment lines between them.
+func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, bool) {
+	text := s[lines[i].start:lines[i].end]
+	if g := m.yamlKey.FindStringSubmatchIndex(text); g != nil {
+		raw := text[g[4]:g[5]]
+
+		return yamlEntry{
+			key:   yamlScalar(raw),
+			json:  raw[0] == '"',
+			alone: raw[0] == '"' || raw[0] == '\'',
+			col:   g[3],
+			item:  strings.Contains(text[:g[3]], "-"),
+			colon: lines[i].start + g[5] + strings.IndexByte(text[g[5]:], ':') + 1,
+			start: lines[i].start + g[1],
+			end:   lines[i].start + g[1],
+		}, i, true
+	}
+	g := m.explicitKey.FindStringSubmatchIndex(text)
+	if g == nil {
+		return yamlEntry{}, i, false
+	}
+	j := i + 1
+	for j < len(lines) && blankOrComment(s[lines[j].start:lines[j].end]) {
+		j++
+	}
+	if j == len(lines) {
+		return yamlEntry{}, i, false
+	}
+	next := s[lines[j].start:lines[j].end]
+	v := m.explicitValue.FindStringIndex(next)
+	if v == nil || indentOf(next) != g[3] {
+		return yamlEntry{}, i, false
+	}
+
+	return yamlEntry{
+		key:   yamlScalar(text[g[4]:g[5]]),
+		alone: true,
+		col:   g[3],
+		item:  strings.Contains(text[:g[3]], "-"),
+		colon: lines[j].start + g[3] + 1,
+		start: lines[j].start + v[1],
+		end:   lines[j].start + v[1],
+	}, j, true
 }
 
 // extent sets e's value end and returns the index of the value's last line. A
@@ -385,13 +444,74 @@ func stripComment(v string) string {
 	return v
 }
 
-// unquote strips one pair of matching YAML quotes.
-func unquote(v string) string {
-	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
-		return v[1 : len(v)-1]
+// yamlScalar reads a quoted YAML scalar: a single-quoted one with each doubled
+// quote read as one, a double-quoted one with its escapes decoded. Anything else,
+// a double-quoted scalar with an escape YAML does not define among them, comes
+// back as it is.
+func yamlScalar(v string) string {
+	if len(v) < 2 || v[0] != '"' && v[0] != '\'' || v[len(v)-1] != v[0] {
+		return v
+	}
+	body := v[1 : len(v)-1]
+	if v[0] == '\'' {
+		return strings.ReplaceAll(body, "''", "'")
 	}
 
-	return v
+	var b strings.Builder
+
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			b.WriteByte(body[i])
+
+			continue
+		}
+		dec, n, ok := yamlEscape(body[i:])
+		if !ok {
+			return v
+		}
+		b.WriteString(dec)
+		i += n - 1
+	}
+
+	return b.String()
+}
+
+// yamlEscapes maps the byte after a backslash in a double-quoted YAML scalar to
+// the byte it stands for, and yamlHexEscapes to the number of hex digits after
+// it. \N, \_, \L and \P stand for a non-ASCII character each.
+const (
+	yamlEscapes    = "0\x00a\ab\bt\t\t\tn\nv\vf\fr\re\x1b  \"\"//\\\\"
+	yamlHexEscapes = "x2u4U8"
+)
+
+// yamlEscape decodes the escape at the start of esc, returning the text it stands
+// for and its length.
+func yamlEscape(esc string) (string, int, bool) {
+	if len(esc) < escapeWidth {
+		return "", 0, false
+	}
+	for k := 0; k < len(yamlEscapes); k += 2 {
+		if yamlEscapes[k] == esc[1] {
+			return yamlEscapes[k+1 : k+2], escapeWidth, true
+		}
+	}
+	if k := strings.IndexByte("N_LP", esc[1]); k >= 0 {
+		return [...]string{"\u0085", "\u00a0", "\u2028", "\u2029"}[k], escapeWidth, true
+	}
+	k := strings.IndexByte(yamlHexEscapes, esc[1])
+	if k < 0 || k%2 == 1 {
+		return "", 0, false
+	}
+	n := int(yamlHexEscapes[k+1] - '0')
+	if len(esc) < escapeWidth+n {
+		return "", 0, false
+	}
+	r, err := strconv.ParseUint(esc[escapeWidth:escapeWidth+n], 16, 32)
+	if err != nil || r > unicode.MaxRune {
+		return "", 0, false
+	}
+
+	return string(rune(r)), escapeWidth + n, true
 }
 
 // mappings returns, for each entry, the index of the first entry of the mapping

@@ -198,30 +198,125 @@ func (m matchers) shellSpans(s string, e element) []span {
 	cmd, raw := decodeJSONString(s[e.start:e.end])
 	partial := cut(raw, e)
 	words := shellWords(cmd)
-	texts := make([]string, len(words))
-	for i, w := range words {
-		texts[i] = w.text
+	texts := wordTexts(words)
+
+	// end maps a word's end in cmd to the raw content. A word that runs into a bad
+	// escape, and a value read to the end of the command, also take the bytes after
+	// it.
+	end := func(off int, toEnd bool) int {
+		if toEnd || partial && off == len(cmd) {
+			return e.stop - boolInt(e.closed)
+		}
+
+		return e.start + raw[off]
 	}
 
 	var out []span
 
-	for _, v := range m.flagValues(texts) {
-		w := words[v.index]
-		start, repl := w.start, placeholder("credential-field")
-		if v.offset > 0 {
-			// A joined value starts after the '='. When the '=' is inside quotes, the
-			// span takes the closing quote too, so the replacement closes them again.
-			start = w.at[v.offset-1] + 1
-			repl += closeShellQuote(w.quote[v.offset-1])
-		}
-		// A word that runs into a bad escape also takes the bytes after it.
-		end := e.start + raw[w.end]
-		if partial && w.end == len(cmd) {
-			end = e.stop - boolInt(e.closed)
-		} else if m.done(w.text[v.offset:]) {
+	for _, v := range m.shellValues(cmd, words, texts) {
+		if !v.toEnd && (!partial || v.end != len(cmd)) && m.done(v.text) {
 			continue
 		}
-		out = append(out, span{e.start + raw[start], end, repl})
+		repl := placeholder("credential-field") + closeShellQuote(v.quote)
+		out = append(out, span{e.start + raw[v.start], end(v.end, v.toEnd), repl})
+	}
+	for _, c := range m.nestedCommands(texts) {
+		if m.nestedCredential(texts[c], maxShellNesting) {
+			out = append(
+				out,
+				span{e.start + raw[words[c].start], end(words[c].end, false), placeholder("credential-field")},
+			)
+		}
+	}
+
+	return out
+}
+
+// maxShellNesting bounds how many shells started inside a shell command are read.
+// A shell command nested deeper than that is redacted whole.
+const maxShellNesting = 4
+
+// shellValue is one credential value in a shell command: cmd[start:end], read as
+// text. A value that a shell may expand (it holds $, a backquote, '<', '>' or '(',
+// or follows a '<', '>' or '(' operator) can run past the word it starts in, so it
+// is read to the end of the command. quote is the quote the value starts inside,
+// which its replacement closes again.
+type shellValue struct {
+	start, end int
+	text       string
+	quote      byte
+	toEnd      bool
+}
+
+// shellValues finds the credential values among the words of shell command cmd.
+func (m matchers) shellValues(cmd string, words []shellWord, texts []string) []shellValue {
+	var out []shellValue
+
+	for _, v := range m.flagValues(texts) {
+		w := words[v.index]
+		sv := shellValue{start: w.start, end: w.end, text: w.text[v.offset:]}
+		if v.offset > 0 {
+			sv.start, sv.quote = w.at[v.offset-1]+1, w.quote[v.offset-1]
+		} else if prev := words[v.index-1].end; strings.ContainsAny(cmd[prev:w.start], shellExpanding) {
+			gap := cmd[prev:w.start]
+			sv.start, sv.toEnd = prev+len(gap)-len(strings.TrimLeft(gap, shellBlank)), true
+		}
+		if sv.toEnd || strings.ContainsAny(cmd[sv.start:w.end], shellExpanding+"$`") {
+			sv.end, sv.toEnd = len(cmd), true
+		}
+		out = append(out, sv)
+	}
+
+	return out
+}
+
+// shellExpanding is the operators that open a redirection, a process
+// substitution or a subshell, after which the next word is not a flag's value.
+const shellExpanding = "<>("
+
+// nestedCommands returns the index of each word a shell named in texts runs as a
+// command.
+func (m matchers) nestedCommands(texts []string) []int {
+	var out []int
+
+	memo := make(map[int]int)
+	for i, t := range texts {
+		if !m.shell.MatchString(t) {
+			continue
+		}
+		if c := m.commandFrom(texts, memo, i+1); c > i && c < len(texts) {
+			out = append(out, c)
+		}
+	}
+
+	return out
+}
+
+// nestedCredential reports whether shell command cmd, run by a shell inside
+// another shell command, holds a credential value that is not yet replaced, here
+// or in a shell it starts in turn. Past depth levels any shell it starts counts.
+func (m matchers) nestedCredential(cmd string, depth int) bool {
+	words := shellWords(cmd)
+	texts := wordTexts(words)
+	for _, v := range m.shellValues(cmd, words, texts) {
+		if v.toEnd || !m.done(v.text) {
+			return true
+		}
+	}
+	for _, c := range m.nestedCommands(texts) {
+		if depth == 0 || m.nestedCredential(texts[c], depth-1) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// wordTexts returns the text of each word.
+func wordTexts(words []shellWord) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = w.text
 	}
 
 	return out
@@ -368,70 +463,13 @@ func (w *shellWord) read(d string, i int) int {
 			}
 			i += escapeWidth
 		default:
-			// A command substitution is part of the word, operators and blanks in it
-			// included.
-			for end := max(expansionEnd(d, i), i+1); i < end; i++ {
-				w.add(d, i, 0)
-			}
+			w.add(d, i, 0)
+			i++
 		}
 	}
 	w.text = string(w.buf)
 
 	return min(i, len(d))
-}
-
-// expansionEnd returns the offset after the command substitution, $(...) with its
-// parentheses balanced or a backquoted one, that starts at d[i], the end of d when
-// it is not closed, or i when none starts there.
-func expansionEnd(d string, i int) int {
-	switch {
-	case d[i] == '`':
-		for j := i + 1; j < len(d); j++ {
-			switch d[j] {
-			case '\\':
-				j++
-			case '`':
-				return j + 1
-			}
-		}
-
-		return len(d)
-	case strings.HasPrefix(d[i:], "$("):
-		depth := 0
-		for j := i + 1; j < len(d); j++ {
-			switch d[j] {
-			case '\\':
-				j++
-			case '\'', '"':
-				j = quoteEnd(d, j)
-			case '(':
-				depth++
-			case ')':
-				if depth--; depth == 0 {
-					return j + 1
-				}
-			}
-		}
-
-		return len(d)
-	}
-
-	return i
-}
-
-// quoteEnd returns the offset of the quote that closes the one at d[j], or the end
-// of d; a double-quoted string skips its backslash escapes.
-func quoteEnd(d string, j int) int {
-	for k := j + 1; k < len(d); k++ {
-		switch {
-		case d[j] == '"' && d[k] == '\\':
-			k++
-		case d[k] == d[j]:
-			return k
-		}
-	}
-
-	return len(d)
 }
 
 // single reads a single-quoted string from d[i:], after its opening quote, and
