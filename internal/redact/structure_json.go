@@ -42,56 +42,83 @@ func (m matchers) flagValues(words []string) []wordValue {
 	return out
 }
 
+// scanMemo keeps, for one word list, the answer of each option scan by the index
+// it starts at: command for commandFrom and after for afterOptions.
+type scanMemo struct{ command, after map[int]int }
+
+func newScanMemo() scanMemo { return scanMemo{make(map[int]int), make(map[int]int)} }
+
 // commandFrom returns the index of the command a shell runs when its options
-// start at words[j]: the first word after the option that holds 'c', the arguments
-// it takes for each 'o' or 'O' it also holds (see optionArgs), and the options
-// that follow it (see
-// afterOptions), past any other options and the argument of those that take one. That is len(words) when no word is left, and
-// -1 when the options end without one. For one word
-// list the answer depends only on j, so memo keeps it for every option the scan
-// reads, and a later scan that reaches one of them stops there. Each option is
-// matched once however many shell names share its run.
-func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
+// start at words[j]: the first word after the option that holds 'c', the
+// arguments it takes for each 'o' or 'O' it also holds (see optionArgs), and the
+// options that follow it (see afterOptions), past any other options and the
+// arguments of those that take some. That is len(words) when no word is left,
+// and -1 when the options end without one. For one word list the answer depends
+// only on j, so memo keeps it for every option the scan reads, and a later scan
+// that reaches one of them stops there. Each option is matched once however many
+// shell names share its run.
+func (m matchers) commandFrom(words []string, memo scanMemo, j int) int {
 	var path []int
 
 	c := -1
 	for ; j < len(words) && words[j] != "" && strings.IndexByte("-+", words[j][0]) >= 0; j++ {
-		if known, ok := memo[j]; ok {
+		if known, ok := memo.command[j]; ok {
 			c = known
 
 			break
 		}
 		path = append(path, j)
 		if m.shellFlag.MatchString(words[j]) {
-			c = m.afterOptions(words, j+1+m.optionArgs(words[j]))
+			c = m.afterOptions(words, memo, j+1+m.optionArgs(words[j]))
 
 			break
 		}
 		j += m.optionArgs(words[j])
 	}
 	for _, p := range path {
-		memo[p] = c
+		memo.command[p] = c
 	}
 
 	return c
 }
 
 // afterOptions returns the index of the first word from words[j] on that is not
-// a short option, the argument of one that takes one, or a "--", which ends the
+// a short option, an argument of one that takes some, or a "--", which ends the
 // options and is skipped too. A shell reads those after the option that holds
-// 'c' before it takes the command.
-func (m matchers) afterOptions(words []string, j int) int {
+// 'c' before it takes the command. Its answer, too, depends only on j, so memo
+// keeps it for every word the scan reads, and each word is read once however
+// many shells' options reach it.
+func (m matchers) afterOptions(words []string, memo scanMemo, j int) int {
+	var path []int
+
+	end := -1
 	for ; j < len(words); j++ {
+		if known, ok := memo.after[j]; ok {
+			end = known
+
+			break
+		}
+		path = append(path, j)
 		if words[j] == "--" {
-			return j + 1
+			end = j + 1
+
+			break
 		}
 		if !m.shortOption.MatchString(words[j]) {
-			return j
+			end = j
+
+			break
 		}
 		j += m.optionArgs(words[j])
 	}
+	if end < 0 {
+		end = len(words)
+	}
+	for _, p := range path {
+		memo.after[p] = end
+	}
 
-	return min(j, len(words))
+	return end
 }
 
 // optionArgs returns how many of the words after shell option w are its
@@ -201,7 +228,7 @@ func (m matchers) shellCommands(s string, elems []element, words []string, taken
 	var (
 		before []int
 		shell  map[int]bool
-		memo   map[int]int
+		memo   scanMemo
 		out    []span
 	)
 
@@ -210,7 +237,7 @@ func (m matchers) shellCommands(s string, elems []element, words []string, taken
 			continue
 		}
 		if before == nil {
-			before, shell, memo = takenBefore(taken, len(elems)), make(map[int]bool), make(map[int]int)
+			before, shell, memo = takenBefore(taken, len(elems)), make(map[int]bool), newScanMemo()
 		}
 		if c := m.commandFrom(words, memo, i+1); c > i && c < len(elems) {
 			_, seen := shell[c]
@@ -312,7 +339,7 @@ const shellExpanding = "<>("
 func (m matchers) nestedCommands(texts []string) []int {
 	var out []int
 
-	memo := make(map[int]int)
+	memo := newScanMemo()
 	for i, t := range texts {
 		if !m.shell.MatchString(t) {
 			continue

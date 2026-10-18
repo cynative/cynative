@@ -1519,9 +1519,10 @@ def _reject_constant(_name):
 
 def _json_valid(v):
     """True when v parses as JSON, as json.Valid: NaN and Infinity, which json.loads
-    accepts, are not JSON."""
+    accepts, are not JSON, and a number is not converted, so one longer than the
+    interpreter's integer digit limit is still JSON."""
     try:
-        json.loads(v, parse_constant=_reject_constant)
+        json.loads(v, parse_constant=_reject_constant, parse_int=len, parse_float=len)
     except ValueError:
         return False
     return True
@@ -1545,16 +1546,26 @@ def _flag_values(words):
     return out
 
 
-def _after_options(words, j):
+def _after_options(words, j, memo):
     """The index of the first word from words[j] on past short options, their
-    arguments and a "--", as afterOptions."""
+    arguments and a "--", as afterOptions, memo keeping each answer by start."""
+    path, end = [], None
     while j < len(words):
+        if j in memo:
+            end = memo[j]
+            break
+        path.append(j)
         if words[j] == "--":
-            return j + 1
+            end = j + 1
+            break
         if not _SHORT_OPTION.match(words[j]):
-            return j
+            end = j
+            break
         j += 1 + _option_args(words[j])
-    return min(j, len(words))
+    end = len(words) if end is None else end
+    for p in path:
+        memo[p] = end
+    return end
 
 
 def _option_args(w):
@@ -1564,12 +1575,12 @@ def _option_args(w):
     return w.count("o") + w.count("O") if _SHORT_OPTION.match(w) else 0
 
 
-def _shell_command(words, i):
+def _shell_command(words, i, memo):
     """The index of the command a shell named at words[i] runs, or -1, as commandFrom."""
     j = i + 1
     while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
         if _SHELL_FLAG.match(words[j]):
-            return _after_options(words, j + 1 + _option_args(words[j]))
+            return _after_options(words, j + 1 + _option_args(words[j]), memo)
         j += 1 + _option_args(words[j])
     return -1
 
@@ -1694,10 +1705,10 @@ def _shell_values(cmd, words):
 
 def _nested_commands(texts):
     """The index of each word a shell named in texts runs, as nestedCommands."""
-    out = []
+    out, memo = [], {}
     for i, t in enumerate(texts):
         if _SHELL.match(t):
-            c = _shell_command(texts, i)
+            c = _shell_command(texts, i, memo)
             if i < c < len(texts):
                 out.append(c)
     return out
@@ -1751,15 +1762,24 @@ def _find_commands(s):
             raws.append(offsets)
         values = _flag_values(words)
         taken = {i for i, off in values if off == 0}
-        shell = set()
+        # before[k] counts the flag values among words[:k], as takenBefore.
+        before = [0]
+        for k in range(len(elems)):
+            before.append(before[-1] + (k in taken))
+        shell, read, memo = set(), set(), {}
         for i in range(len(elems)):
             if not _SHELL.match(words[i]):
                 continue
-            c = _shell_command(words, i)
+            c = _shell_command(words, i, memo)
             if i < c < len(elems):
-                if not any(k in taken for k in range(i, c + 1)):
+                # The last shell name that reaches a command decides how it is read.
+                if before[c + 1] == before[i]:
                     shell.add(c)
-                out.extend(_shell_found(s, elems[c]))
+                else:
+                    shell.discard(c)
+                if c not in read:
+                    read.add(c)
+                    out.extend(_shell_found(s, elems[c]))
         for i, off in values:
             if i not in shell:
                 start, end_, stop, closed = elems[i]
@@ -2417,6 +2437,7 @@ def _structural_spans():
         (_find_objects, '{"a":NaN,"DB_PASSW\\u004fRD":"x"}', [("x", 29, 30)]),
         (_find_objects, '[Infinity,"a {",{"DB_PASSW\\u004fRD":"x"}]', [("x", 37, 38)]),
         (_find_objects, '{"a":-NaN,"DB_PASSW\\u004fRD":"x"}', []),
+        (_find_yaml, '{"password":' + "1" * 4301 + "}", []),
         (_find_objects, '[NaN,"a {"DB_PASSW\\u004fRD":"x"}', [("x", 29, 30)]),
         (_find_objects, 'got ["DB_PASSW\\u004fRD":"x"]', []),
         (_find_objects, '{"token":"a"} x {"token":"b"}', [("a", 10, 11), ("b", 26, 27)]),
