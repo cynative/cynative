@@ -613,6 +613,16 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 				", \"pageToken\": \"d\"}\n",
 		},
 		{
+			name: "shell option run taking two arguments",
+			in:   `["bash","-coO","pipefail","extglob","app --password a"]`,
+			want: `["bash","-coO","pipefail","extglob","app --password ` + field + `"]`,
+		},
+		{
+			name: "joined spans followed by an empty one",
+			in:   `["sh","-c","echo sh -c '--password=$(printf hunter2)' --token="]`,
+			want: `["sh","-c","echo sh -c ` + field + `"]`,
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,

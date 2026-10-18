@@ -43,8 +43,9 @@ func (m matchers) flagValues(words []string) []wordValue {
 }
 
 // commandFrom returns the index of the command a shell runs when its options
-// start at words[j]: the first word after the option that holds 'c', the argument
-// it takes when it also holds 'o', and the options that follow it (see
+// start at words[j]: the first word after the option that holds 'c', the arguments
+// it takes for each 'o' or 'O' it also holds (see optionArgs), and the options
+// that follow it (see
 // afterOptions), past any other options and the argument of those that take one. That is len(words) when no word is left, and
 // -1 when the options end without one. For one word
 // list the answer depends only on j, so memo keeps it for every option the scan
@@ -62,13 +63,11 @@ func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
 		}
 		path = append(path, j)
 		if m.shellFlag.MatchString(words[j]) {
-			c = m.afterOptions(words, j+1+boolInt(m.shellArgOption.MatchString(words[j])))
+			c = m.afterOptions(words, j+1+m.optionArgs(words[j]))
 
 			break
 		}
-		if m.shellArgOption.MatchString(words[j]) {
-			j++
-		}
+		j += m.optionArgs(words[j])
 	}
 	for _, p := range path {
 		memo[p] = c
@@ -89,12 +88,24 @@ func (m matchers) afterOptions(words []string, j int) int {
 		if !m.shortOption.MatchString(words[j]) {
 			return j
 		}
-		if m.shellArgOption.MatchString(words[j]) {
-			j++
-		}
+		j += m.optionArgs(words[j])
 	}
 
 	return min(j, len(words))
+}
+
+// optionArgs returns how many of the words after shell option w are its
+// arguments: one for --rcfile and --init-file, and one for each 'o' or 'O' in a
+// run of short options, since each names a shell option in turn.
+func (m matchers) optionArgs(w string) int {
+	if w == "--rcfile" || w == "--init-file" {
+		return 1
+	}
+	if !m.shortOption.MatchString(w) {
+		return 0
+	}
+
+	return strings.Count(w, "o") + strings.Count(w, "O")
 }
 
 // commands redacts credential values in runs of JSON string array elements, and

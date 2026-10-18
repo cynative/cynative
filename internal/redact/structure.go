@@ -37,6 +37,7 @@ func applySpans(s string, spans []span) string {
 	for _, sp := range spans {
 		if sp.start < last || sp.start == prev && sp.end == sp.start {
 			last = max(last, sp.end)
+			prev = last
 
 			continue
 		}
@@ -76,10 +77,8 @@ type matchers struct {
 	// placeholder is a value an earlier rule already replaced, kept for its label.
 	placeholder *regexp.Regexp
 	// shell is a shell program, shellFlag the option that makes it run its next
-	// argument as a command, shortOption a short option or a run of them, and
-	// shellArgOption an option, or a run holding 'o' or 'O', that takes the next
-	// argument as its own.
-	shell, shellFlag, shortOption, shellArgOption *regexp.Regexp
+	// argument as a command, and shortOption a short option or a run of them.
+	shell, shellFlag, shortOption *regexp.Regexp
 	// runStart opens a JSON array element, element reads one string element (closed,
 	// or truncated to end of content), separator leads to the next string element and
 	// keyColon marks an object key.
@@ -110,7 +109,6 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		shell:             regexp.MustCompile(`^(?:[\w./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)$`),
 		shellFlag:         regexp.MustCompile(`^-[A-Za-z]*c[A-Za-z]*$`),
 		shortOption:       regexp.MustCompile(`^[-+][A-Za-z]+$`),
-		shellArgOption:    regexp.MustCompile(`^(?:[-+][A-Za-z]*[oO][A-Za-z]*|--rcfile|--init-file)$`),
 		runStart:          regexp.MustCompile(`[\[,]\s*"`),
 		element:           regexp.MustCompile(`^"((?:(?s:\\.)|[^"\\])*)(")?`),
 		separator:         regexp.MustCompile(`^\s*,\s*"`),

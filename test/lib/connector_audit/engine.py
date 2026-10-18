@@ -1044,7 +1044,10 @@ _JSON_FIELDS = r'(?:\s*,\s*"' + _JSON_VALUE + r'"\s*:\s*(?:"' + _JSON_VALUE + r'
 _WS = r"[\t\n\f\r ]"
 _PLACEHOLDER = re.compile(r"\[REDACTED:[a-z0-9-]+\]\Z")
 _KEY_END_FULL = re.compile(r"(?:" + _KEY_END + r")\Z", re.I | re.A)
-_DIRECT_KEY = re.compile(r"[\w.-]*(?:" + _CRED_SUFFIX + r")\Z", re.I | re.A)
+# Go folds the long s and the Kelvin sign to s and k under (?i), and the direct key
+# reads only its credential suffix case-insensitively, so only the suffix takes them.
+_DIRECT_KEY = re.compile(r"[\w.-]*(?:" + _CRED_SUFFIX.replace("s", "[s\u017f]").replace("k", "[k\u212a]") + r")\Z",
+                         re.I | re.A)
 _FLAG_FULL = re.compile(r"(?:" + _FLAG_ARG + r")\Z", re.I | re.A)
 _FLAG_JOINED = re.compile(r"(?:" + _FLAG_ARG + r")=", re.I | re.A)
 _YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')"
@@ -1067,7 +1070,7 @@ _YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
 _SHELL = re.compile(r"(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z")
 _SHELL_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
 _SHORT_OPTION = re.compile(r"[-+][A-Za-z]+\Z")
-_SHELL_ARG_OPTION = re.compile(r"(?:[-+][A-Za-z]*[oO][A-Za-z]*|--rcfile|--init-file)\Z")
+
 _RUN_START = re.compile(r'[\[,]' + _WS + r'*"')
 _ELEMENT = re.compile(r'"((?:\\[\s\S]|[^"\\])*)(")?')
 _SEPARATOR = re.compile(_WS + r'*,' + _WS + r'*"')
@@ -1550,10 +1553,15 @@ def _after_options(words, j):
             return j + 1
         if not _SHORT_OPTION.match(words[j]):
             return j
-        if _SHELL_ARG_OPTION.match(words[j]):
-            j += 1
-        j += 1
+        j += 1 + _option_args(words[j])
     return min(j, len(words))
+
+
+def _option_args(w):
+    """How many words after shell option w are its arguments, as optionArgs."""
+    if w in ("--rcfile", "--init-file"):
+        return 1
+    return w.count("o") + w.count("O") if _SHORT_OPTION.match(w) else 0
 
 
 def _shell_command(words, i):
@@ -1561,10 +1569,8 @@ def _shell_command(words, i):
     j = i + 1
     while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
         if _SHELL_FLAG.match(words[j]):
-            return _after_options(words, j + 1 + (1 if _SHELL_ARG_OPTION.match(words[j]) else 0))
-        if _SHELL_ARG_OPTION.match(words[j]):
-            j += 1
-        j += 1
+            return _after_options(words, j + 1 + _option_args(words[j]))
+        j += 1 + _option_args(words[j])
     return -1
 
 
@@ -3151,6 +3157,8 @@ def _shared_selftest():
             ("yaml_key_yaml_only_escape", '"pass\\x77ord": "%s"\n' % live_secret),
             ("shell_options_after_command_option", '["sh","-c","-e","--","app --token %s"]' % live_secret),
             ("shell_command_is_a_flag_value", '["sh","-c","-o","--token","%s"]' % live_secret),
+            ("yaml_flow_key_long_s", "x: {pa\u017f\u017fword: %s}\n" % live_secret),
+            ("shell_option_run_two_arguments", '["bash","-coO","pipefail","extglob","app --password %s"]' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [
