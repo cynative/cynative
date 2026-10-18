@@ -1055,8 +1055,10 @@ _YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s
 _YAML_MAPPING_LINE = re.compile(r":(?:[ \t]|[ \t]*\Z)")
 _YAML_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|\Z)")
 _YAML_PROPS = re.compile(r"(?:[&!][^ \t]*(?:[ \t]+|\Z))*")
-_YAML_EXPLICIT_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)\?[ \t]+([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')"
-                                r"[ \t]*(?:#.*)?\Z")
+_YAML_EXPLICIT_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)\?[ \t]+")
+_YAML_PLAIN_KEY = re.compile(r"[A-Za-z0-9_.-]+")
+_YAML_EXPLICIT_REST = re.compile(r"[ \t]*(?:#.*)?\Z")
+_FLOW_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'|[^\t\n\f\r \"'#\[\]{},&!*|>%@`][^#]*?)[ \t]*:[ \t]+")
 _YAML_EXPLICIT_VALUE = re.compile(r"[ \t]*:(?:[ \t]+|\Z)")
 _YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f",
                  "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\",
@@ -1329,7 +1331,10 @@ def _yaml_entry(s, lines, i):
     g = _YAML_EXPLICIT_KEY.match(text)
     if g is None:
         return None, i
-    j = i + 1
+    raw, last = _explicit_key_text(s, lines, i, lines[i][0] + g.end())
+    if raw is None:
+        return None, i
+    j = last + 1
     while j < len(lines) and _blank_or_comment(s[lines[j][0]:lines[j][1]]):
         j += 1
     if j == len(lines):
@@ -1338,10 +1343,27 @@ def _yaml_entry(s, lines, i):
     v = _YAML_EXPLICIT_VALUE.match(nxt)
     if v is None or _indent(nxt) != g.end(1):
         return None, i
-    e = {"key": _yaml_scalar(g.group(2)), "json": False, "alone": True, "col": g.end(1), "item": "-" in g.group(1),
+    e = {"key": _yaml_scalar(raw), "json": False, "alone": True, "col": g.end(1), "item": "-" in g.group(1),
          "colon": lines[j][0] + g.end(1) + 1, "start": lines[j][0] + v.end(), "below": False, "multi": False}
     e["end"] = e["first"] = e["start"]
     return e, j
+
+
+def _explicit_key_text(s, lines, i, start):
+    """The key of a "? key" entry starting at s[start] on line i as written, and its
+    last line, or (None, i), as explicitKeyText."""
+    if start == lines[i][1]:
+        return None, i
+    plain = _YAML_PLAIN_KEY.match(s, start, lines[i][1])
+    end = plain.end() if plain else start
+    if s[start] in "\"'":
+        end = _close_quote(s, start) + 1
+        if end == 0:
+            return None, i
+        i = _line_of(lines, i, end - 1)
+    if end == start or not _YAML_EXPLICIT_REST.match(s[end:lines[i][1]]):
+        return None, i
+    return s[start:end], i
 
 
 def _yaml_mappings(es):
@@ -1392,9 +1414,7 @@ def _find_yaml(s):
 def _flow_start(text):
     """The offset in a line of the flow collection it opens, or -1, as flowStart."""
     at = _FLOW_LEAD.match(text).end()
-    g = _YAML_KEY.match(text)
-    if g is not None:
-        at = g.end()
+    at += len(_FLOW_KEY.match(text, at).group(0)) if _FLOW_KEY.match(text, at) else 0
     at += len(_FLOW_PROPS.match(text, at).group(0))
     if at == len(text) or text[at] not in "{[" or _PLACEHOLDER_PREFIX.match(text, at):
         return -1
@@ -1445,8 +1465,20 @@ def _read_flow(s, i):
         if frames:
             frames[-1]["value"] = False
 
+    def skip(i):
+        # A token never starts with '#', so one here opens a comment.
+        while i < len(s):
+            if s[i] in " \t\r\n":
+                i += 1
+            elif s[i] == "#":
+                nl = s.find("\n", i)
+                i = len(s) if nl < 0 else nl
+            else:
+                break
+        return i
+
     def scalar(top, i):
-        i += len(_FLOW_PROPS.match(s, i).group(0))
+        i = skip(i + len(_FLOW_PROPS.match(s, i).group(0)))
         if i >= len(s) or (s[i] in ",:[]{}" and not _PLACEHOLDER_PREFIX.match(s, i)):
             return i
         start = i
@@ -1474,14 +1506,7 @@ def _read_flow(s, i):
         return i
 
     while True:
-        while i < len(s):
-            if s[i] in " \t\r\n":
-                i += 1
-            elif s[i] == "#" and s[i - 1] in " \t\r\n":
-                nl = s.find("\n", i)
-                i = len(s) if nl < 0 else nl
-            else:
-                break
+        i = skip(i)
         if i >= len(s):
             break
         c = s[i]
@@ -1697,20 +1722,33 @@ def _shell_values(cmd, words):
             gap = cmd[prev:w_start]
             if any(c in gap for c in "<>("):
                 start, to_end = prev + len(gap) - len(gap.lstrip(" \t\n")), True
-        if to_end or any(c in cmd[start:w_end] for c in "<>($`"):
+        if to_end or any(c in cmd[start:w_end] for c in "<>($`") or cmd[w_end:w_end + 1] in ("<", ">", "("):
             w_end, to_end = len(cmd), True
         out.append((start, w_end, text[off:], to_end))
     return out
 
 
+def _substitution_start(t):
+    """The offset just past the first "$(" or backquote in t, or -1, as substitutionStart."""
+    k = t.find("$(")
+    k = k + 2 if k >= 0 else -1
+    b = t.find("`")
+    return b + 1 if b >= 0 and (k < 0 or b < k) else k
+
+
 def _nested_commands(texts):
-    """The index of each word a shell named in texts runs, as nestedCommands."""
+    """(index, text) of each command run inside the words of a shell command, as
+    nestedCommands: the word a shell named there runs, and the text after a word's
+    first command substitution opens."""
     out, memo = [], {}
     for i, t in enumerate(texts):
+        k = _substitution_start(t)
+        if k >= 0:
+            out.append((i, t[k:]))
         if _SHELL.match(t):
             c = _shell_command(texts, i, memo)
             if i < c < len(texts):
-                out.append(c)
+                out.append((c, texts[c]))
     return out
 
 
@@ -1721,7 +1759,7 @@ def _nested_credential(cmd, depth):
     if any(to_end or not _PLACEHOLDER.match(text) for _a, _b, text, to_end in _shell_values(cmd, words)):
         return True
     texts = [w[2] for w in words]
-    return any(depth == 0 or _nested_credential(texts[c], depth - 1) for c in _nested_commands(texts))
+    return any(depth == 0 or _nested_credential(text, depth - 1) for _c, text in _nested_commands(texts))
 
 
 def _shell_found(s, e):
@@ -1737,8 +1775,8 @@ def _shell_found(s, e):
             out.append(_Found(s[start + raw[v_start]:stop - closed], start + raw[v_start], stop - closed))
         else:
             out.append(_Found(text, start + raw[v_start], start + raw[v_end]))
-    for c in _nested_commands([w[2] for w in words]):
-        if _nested_credential(words[c][2], 4):
+    for c, text in _nested_commands([w[2] for w in words]):
+        if _nested_credential(text, 4):
             a = start + raw[words[c][0]]
             b = stop - closed if partial and words[c][1] == len(cmd) else start + raw[words[c][1]]
             out.append(_Found(s[a:b], a, b))
@@ -3180,6 +3218,11 @@ def _shared_selftest():
             ("shell_command_is_a_flag_value", '["sh","-c","-o","--token","%s"]' % live_secret),
             ("yaml_flow_key_long_s", "x: {pa\u017f\u017fword: %s}\n" % live_secret),
             ("shell_option_run_two_arguments", '["bash","-coO","pipefail","extglob","app --password %s"]' % live_secret),
+            ("shell_joined_process_substitution", '["sh","-c","app --password=<(printf %s) next"]' % live_secret),
+            ("shell_quoted_command_substitution", '["sh","-c","echo \\"$(app --token %s)\\""]' % live_secret),
+            ("yaml_flow_comment_after_comma", "x: {name: DB_PASSWORD,# c\n value: %s}\n" % live_secret),
+            ("yaml_flow_under_plain_key_with_slash", "config/app.yaml: {password: %s}\n" % live_secret),
+            ("yaml_explicit_key_over_lines", '? "pass\\\n  word"\n: %s\n' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [

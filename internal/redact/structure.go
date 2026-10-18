@@ -64,9 +64,13 @@ type matchers struct {
 	// key's spelling, and quotedKey a line that opens with a quoted key; props is
 	// the anchor and tag properties that may open a value.
 	yamlKey, mappingLine, quotedKey, props *regexp.Regexp
-	// explicitKey is a "? key" line and explicitValue the ": value" line that
-	// follows it.
-	explicitKey, explicitValue *regexp.Regexp
+	// explicitKey opens a "? key" entry, plainKey is a plain key after it,
+	// explicitRest what may follow the key on its last line, and explicitValue
+	// the ": value" line after that.
+	explicitKey, plainKey, explicitRest, explicitValue *regexp.Regexp
+	// flowKey is a "key: " before a flow collection, a plain key holding any text
+	// a plain scalar may hold.
+	flowKey *regexp.Regexp
 	// flowLead is a line's indentation and its "- ", "? ", ": " and "--- " markers,
 	// flowProps the anchor and tag properties, verbatim tags included, before a
 	// node in a flow collection, and placeholderPrefix a
@@ -94,8 +98,11 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		yamlKey: regexp.MustCompile(
 			`^([ \t]*(?:-[ \t]+)*)([\w.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]+|$)`,
 		),
-		explicitKey: regexp.MustCompile(
-			`^([ \t]*(?:-[ \t]+)*)\?[ \t]+([\w.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*(?:#.*)?$`,
+		explicitKey:  regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)\?[ \t]+`),
+		plainKey:     regexp.MustCompile(`^[\w.-]+`),
+		explicitRest: regexp.MustCompile(`^[ \t]*(?:#.*)?$`),
+		flowKey: regexp.MustCompile(
+			`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#\[\]{},&!*|>%@` + "`" + `][^#]*?)[ \t]*:[ \t]+`,
 		),
 		explicitValue:     regexp.MustCompile(`^[ \t]*:(?:[ \t]+|$)`),
 		mappingLine:       regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),
@@ -293,7 +300,11 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 	if g == nil {
 		return yamlEntry{}, i, false
 	}
-	j := i + 1
+	raw, last, ok := m.explicitKeyText(s, lines, i, lines[i].start+g[1])
+	if !ok {
+		return yamlEntry{}, i, false
+	}
+	j := last + 1
 	for j < len(lines) && blankOrComment(s[lines[j].start:lines[j].end]) {
 		j++
 	}
@@ -307,7 +318,7 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 	}
 
 	return yamlEntry{
-		key:   yamlScalar(text[g[4]:g[5]]),
+		key:   yamlScalar(raw),
 		alone: true,
 		col:   g[3],
 		item:  strings.Contains(text[:g[3]], "-"),
@@ -465,6 +476,25 @@ func stripComment(v string) string {
 	}
 
 	return v
+}
+
+// explicitKeyText reads the key of a "? key" entry that starts at offset start on
+// line i: a plain key, or a quoted one, which may run over several lines to its
+// closing quote. It returns the key as written and the index of its last line,
+// and fails unless only blanks or a comment follow the key there.
+func (m matchers) explicitKeyText(s string, lines []yamlLine, i, start int) (string, int, bool) {
+	end := start + len(m.plainKey.FindString(s[start:lines[i].end]))
+	if start == lines[i].end {
+		return "", i, false
+	}
+	if c := s[start]; c == '"' || c == '\'' {
+		if end = closeQuote(s, start) + 1; end == 0 {
+			return "", i, false
+		}
+		i = lineOf(lines, i, end-1)
+	}
+
+	return s[start:end], i, end > start && m.explicitRest.MatchString(s[end:lines[i].end])
 }
 
 // jsonKey reports whether raw, a quoted key, is a JSON string, so the JSON passes

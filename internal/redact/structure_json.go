@@ -281,11 +281,8 @@ func (m matchers) shellSpans(s string, e element) []span {
 		out = append(out, span{e.start + raw[v.start], end(v.end, v.toEnd), repl})
 	}
 	for _, c := range m.nestedCommands(texts) {
-		if m.nestedCredential(texts[c], maxShellNesting) {
-			out = append(
-				out,
-				span{e.start + raw[words[c].start], end(words[c].end, false), placeholder("credential-field")},
-			)
+		if w := words[c.index]; m.nestedCredential(c.text, maxShellNesting) {
+			out = append(out, span{e.start + raw[w.start], end(w.end, false), placeholder("credential-field")})
 		}
 	}
 
@@ -298,8 +295,8 @@ const maxShellNesting = 4
 
 // shellValue is one credential value in a shell command: cmd[start:end], read as
 // text. A value that a shell may expand (it holds $, a backquote, '<', '>' or '(',
-// or follows a '<', '>' or '(' operator) can run past the word it starts in, so it
-// is read to the end of the command. quote is the quote the value starts inside,
+// or a '<', '>' or '(' operator comes right before or after it) can run past the
+// word it starts in, so it is read to the end of the command. quote is the quote the value starts inside,
 // which its replacement closes again.
 type shellValue struct {
 	start, end int
@@ -321,7 +318,8 @@ func (m matchers) shellValues(cmd string, words []shellWord, texts []string) []s
 			gap := cmd[prev:w.start]
 			sv.start, sv.toEnd = prev+len(gap)-len(strings.TrimLeft(gap, shellBlank)), true
 		}
-		if sv.toEnd || strings.ContainsAny(cmd[sv.start:w.end], shellExpanding+"$`") {
+		if sv.toEnd || strings.ContainsAny(cmd[sv.start:w.end], shellExpanding+"$`") ||
+			w.end < len(cmd) && strings.IndexByte(shellExpanding, cmd[w.end]) >= 0 {
 			sv.end, sv.toEnd = len(cmd), true
 		}
 		out = append(out, sv)
@@ -334,27 +332,53 @@ func (m matchers) shellValues(cmd string, words []shellWord, texts []string) []s
 // substitution or a subshell, after which the next word is not a flag's value.
 const shellExpanding = "<>("
 
-// nestedCommands returns the index of each word a shell named in texts runs as a
-// command.
-func (m matchers) nestedCommands(texts []string) []int {
-	var out []int
+// nested is a command run inside a shell command: the text of the word at index,
+// or the part of it after a command substitution opens.
+type nested struct {
+	index int
+	text  string
+}
+
+// nestedCommands returns each command run inside the words of a shell command:
+// the word a shell named there runs, and the text after the first "$(" or
+// backquote in a word, where a quoted command substitution keeps a whole command
+// in one word.
+func (m matchers) nestedCommands(texts []string) []nested {
+	var out []nested
 
 	memo := newScanMemo()
 	for i, t := range texts {
+		if k := substitutionStart(t); k >= 0 {
+			out = append(out, nested{i, t[k:]})
+		}
 		if !m.shell.MatchString(t) {
 			continue
 		}
 		if c := m.commandFrom(texts, memo, i+1); c > i && c < len(texts) {
-			out = append(out, c)
+			out = append(out, nested{c, texts[c]})
 		}
 	}
 
 	return out
 }
 
-// nestedCredential reports whether shell command cmd, run by a shell inside
-// another shell command, holds a credential value that is not yet replaced, here
-// or in a shell it starts in turn. Past depth levels any shell it starts counts.
+// substitutionStart returns the offset in t just past the first "$(" or
+// backquote, whichever comes first, or -1 when t holds neither.
+func substitutionStart(t string) int {
+	k := -1
+	if d := strings.Index(t, "$("); d >= 0 {
+		k = d + len("$(")
+	}
+	if b := strings.IndexByte(t, '`'); b >= 0 && (k < 0 || b < k) {
+		k = b + 1
+	}
+
+	return k
+}
+
+// nestedCredential reports whether shell command cmd, run inside another shell
+// command, holds a credential value that is not yet replaced, here or in a
+// command it runs in turn. Past depth levels any command it runs counts.
 func (m matchers) nestedCredential(cmd string, depth int) bool {
 	words := shellWords(cmd)
 	texts := wordTexts(words)
@@ -364,7 +388,7 @@ func (m matchers) nestedCredential(cmd string, depth int) bool {
 		}
 	}
 	for _, c := range m.nestedCommands(texts) {
-		if depth == 0 || m.nestedCredential(texts[c], depth-1) {
+		if depth == 0 || m.nestedCredential(c.text, depth-1) {
 			return true
 		}
 	}

@@ -39,9 +39,7 @@ func (m matchers) flows(s string, lines []yamlLine) []span {
 // -1.
 func (m matchers) flowStart(text string) int {
 	at := len(m.flowLead.FindString(text))
-	if g := m.yamlKey.FindStringIndex(text); g != nil {
-		at = g[1]
-	}
+	at += len(m.flowKey.FindString(text[at:]))
 	at += len(m.flowProps.FindString(text[at:]))
 	if at == len(text) || text[at] != '{' && text[at] != '[' || m.placeholderAt(text, at) > 0 {
 		return -1
@@ -138,6 +136,7 @@ func (p *flowParser) entryNode() {
 // key or value.
 func (p *flowParser) scalar(top *flowFrame) {
 	p.i += len(p.m.flowProps.FindString(p.s[p.i:]))
+	p.skipSpace()
 	if p.i >= len(p.s) || strings.IndexByte(",:[]{}", p.s[p.i]) >= 0 && p.m.placeholderAt(p.s, p.i) == 0 {
 		return
 	}
@@ -208,7 +207,9 @@ func (p *flowParser) skipSpace() {
 		switch c := p.s[p.i]; {
 		case strings.IndexByte(" \t\r\n", c) >= 0:
 			p.i++
-		case c == '#' && strings.IndexByte(" \t\r\n", p.s[p.i-1]) >= 0:
+		case c == '#':
+			// A token never starts with '#', so one here opens a comment, even
+			// right after a flow indicator.
 			if nl := strings.IndexByte(p.s[p.i:], '\n'); nl >= 0 {
 				p.i += nl
 			} else {

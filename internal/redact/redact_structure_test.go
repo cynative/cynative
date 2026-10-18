@@ -623,6 +623,36 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `["sh","-c","echo sh -c ` + field + `"]`,
 		},
 		{
+			name: "shell value with an operator right after it",
+			in:   `["sh","-c","app --password=<(printf a) next; b"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
+		},
+		{
+			name: "shell value with an operator right after a separate value",
+			in:   `["sh","-c","app --token x>(y) next"]`,
+			want: `["sh","-c","app --token ` + field + `"]`,
+		},
+		{
+			name: "command substitutions inside double quotes",
+			in:   "[\"sh\",\"-c\",\"echo \\\"$X$(app --token a)\\\" and \\\"`app --password b`\\\" done\"]",
+			want: `["sh","-c","echo ` + field + ` and ` + field + ` done"]`,
+		},
+		{
+			name: "flow comments after a property and after a comma",
+			in:   "x: {name: &n # c\n DB_PASSWORD, value: a}\ny: {name: DB_PASSWORD,# c\n value: b}\n",
+			want: "x: {name: &n # c\n DB_PASSWORD, value: " + field + "}\ny: {name: DB_PASSWORD,# c\n value: " + field + "}\n",
+		},
+		{
+			name: "flow collection under a plain key holding a slash or a space",
+			in:   "config/app.yaml: {password: a}\napp config: [token: b]\n",
+			want: "config/app.yaml: {password: " + field + "}\napp config: [token: " + field + "]\n",
+		},
+		{
+			name: "explicit quoted key over several lines",
+			in:   "? \"pass\\\n  word\" # c\n: a\n? 'api_key'\n: b\n",
+			want: "? \"pass\\\n  word\" # c\n: " + field + "\n? 'api_key'\n: " + field + "\n",
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,
@@ -752,6 +782,11 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		"? public\n: value\n? password\n  : nested\n",
 		"\"pass\\qword\": public\n",
 		"x: [REDACTED:jwt]\n",
+		"? \n: x\n",
+		"? 'pass: x\n  # c\n",
+		"? \"password\" x\n: public\n",
+		"Note: see {\"a\": 1} and [b: c]\n",
+		`["sh","-c","echo '$(cat x)' $(date) ` + "`date`" + ` --page x"]`,
 		"x: {password: &a}\n",
 		"? password # a: b\n# c\n",
 		"- name: \"DB_PASSWORD\\\"\n  value: public\n",
