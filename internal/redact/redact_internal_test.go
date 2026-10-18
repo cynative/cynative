@@ -33,6 +33,32 @@ func TestGated(t *testing.T) {
 	}
 }
 
+// TestRedact_ContentStillChangingAtTheLastRoundIsReplacedWhole lowers the round
+// bound below what the input needs, so Redact gives up on it and returns a
+// placeholder that a second Redact leaves as it is.
+func TestRedact_ContentStillChangingAtTheLastRoundIsReplacedWhole(t *testing.T) {
+	t.Parallel()
+
+	// The command pass removes the '<' that stops the truncated XML rule, so the
+	// second round redacts again and only the third changes nothing.
+	const in = `<token>["--token","<p`
+
+	r := New()
+	r.rounds = 3
+	if got, want := r.Redact(in), "<token>[REDACTED:credential-field]"; got != want {
+		t.Fatalf("Redact with 3 rounds = %q, want %q", got, want)
+	}
+
+	r.rounds = 2
+	got := r.Redact(in)
+	if want := "[REDACTED:unstable]"; got != want {
+		t.Fatalf("Redact with 2 rounds = %q, want %q", got, want)
+	}
+	if again := r.Redact(got); again != got {
+		t.Errorf("Redact(%q) = %q, want it unchanged", got, again)
+	}
+}
+
 // TestCommandFrom pins the memo that keeps the option scan linear: a scan
 // stores its answer, a found command or none, at every option it read, and a
 // later scan that reaches one of them returns that answer without reading on.
