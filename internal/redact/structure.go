@@ -119,10 +119,11 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 }
 
 // credentialKey reports whether a mapping key names a credential. A key that is a
-// JSON string is read as the JSON passes read it, so a pagination cursor such as
-// "nextPageToken" is not one; any other key as the YAML line rule reads it.
-func (m matchers) credentialKey(key string, json bool) bool {
-	if json {
+// JSON string, with a double-quoted value, is a member the JSON passes read too,
+// and is read as they read it, so a pagination cursor such as "nextPageToken" is
+// not one; any other key is read as the YAML line rule reads it.
+func (m matchers) credentialKey(key string, jsonMember bool) bool {
+	if jsonMember {
 		return m.keyEnd.MatchString(key)
 	}
 
@@ -199,7 +200,7 @@ func (m matchers) yaml(s string) string {
 
 	for i, e := range entries {
 		if named[ids[i]] && strings.EqualFold(e.key, "value") ||
-			(e.multi || e.alone) && m.credentialKey(e.key, e.json) {
+			(e.multi || e.alone) && m.credentialKey(e.key, e.json && e.end > e.first && s[e.first] == '"') {
 			spans = m.yamlValue(s, e, spans)
 		}
 	}

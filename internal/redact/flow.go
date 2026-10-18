@@ -165,7 +165,7 @@ func (p *flowParser) scalar(top *flowFrame) {
 		top.keyJSON && raw[0] != '"' && json.Valid([]byte(raw)) {
 		return
 	}
-	if p.m.credentialKey(top.key, top.keyJSON) {
+	if p.m.credentialKey(top.key, top.keyJSON && raw[0] == '"') {
 		p.spans = append(p.spans, sp)
 	} else if top.mapping && strings.EqualFold(top.key, "value") {
 		top.values = append(top.values, sp)

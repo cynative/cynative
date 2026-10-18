@@ -1369,7 +1369,8 @@ def _find_yaml(s):
     out = []
     for i, e in enumerate(entries):
         if not ((ids[i] in named and e["key"].lower() == "value")
-                or ((e["multi"] or e["alone"]) and _credential_key(e["key"], e["json"]))):
+                or ((e["multi"] or e["alone"])
+                    and _credential_key(e["key"], e["json"] and s[e["first"]:e["first"] + 1] == '"'))):
             continue
         if e["end"] == e["start"]:
             continue
@@ -1463,7 +1464,7 @@ def _read_flow(s, i):
                 or (top["json"] and raw[0] != '"' and _json_valid(raw)):
             return i
         found = _Found(s[a:b] if a > start else text if raw[0] in "\"'" else raw, a, b)
-        if _credential_key(top["key"], top["json"]):
+        if _credential_key(top["key"], top["json"] and raw[0] == '"'):
             out.append(found)
         elif top["mapping"] and top["key"].lower() == "value":
             top["values"].append(found)
@@ -1523,9 +1524,9 @@ def _json_valid(v):
     return True
 
 
-def _credential_key(key, is_json):
+def _credential_key(key, json_member):
     """True when a mapping key names a credential, as credentialKey."""
-    return bool(_KEY_END_FULL.match(_fold(key)) if is_json else _DIRECT_KEY.match(key))
+    return bool(_KEY_END_FULL.match(_fold(key)) if json_member else _DIRECT_KEY.match(key))
 
 
 def _flag_values(words):

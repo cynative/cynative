@@ -607,6 +607,12 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `{"x":-NaN,"DB_PASSW\u004fRD":"` + field + `","password":` + field + `}`,
 		},
 		{
+			name: "prefixed token under a JSON-string key with a value that is not a JSON string",
+			in:   "{\n  \"authToken\": |\n    a\n}\n\"authToken\": b\nx: {\"authToken\": c, \"pageToken\": \"d\"}\n",
+			want: "{\n  \"authToken\": " + field + "\n}\n\"authToken\": " + field + "\nx: {\"authToken\": " + field +
+				", \"pageToken\": \"d\"}\n",
+		},
+		{
 			name: "json pair with an unquoted value",
 			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
 			want: `{"name":"DB_PASSWORD","value":` + field + `}`,
@@ -703,7 +709,7 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`got {"x":1NaN,"DB_PASSW\u004fRD":"v"}`,
 		`got {"x":NaN1,"DB_PASSW\u004fRD":"v"}`,
 		`got {"x":nan,"DB_PASSW\u004fRD":"v"}`,
-		"{\n  \"nextPageToken\": \"a\",\n  \"n\\u0065xtToken\": |\n    b\n}\nx: {\"pageToken\": \"c\"}\n",
+		"{\n  \"nextPageToken\": \"a\",\n  \"n\\u0065xtToken\": \"b\"\n}\nx: {\"pageToken\": \"c\"}\n",
 		"secret:\n  # comment\n  secretName: public-reference\n",
 		"secret:\n  \"secretName\": public-reference\n",
 		"token:\n  [public-reference]\n",
