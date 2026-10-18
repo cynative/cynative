@@ -85,6 +85,8 @@ func FuzzRedact(f *testing.F) {
 	f.Add(`[NaN,"a {"DB_PASSW\u004fRD":"v"} {}1NaN"b {"t\u006fken":"w"}`)
 	f.Add(`"token:\b"\u0073ig=0`)
 	f.Add("\"\x00\\\"pAsswd\\\":\\\"\\\"pAsswd\\\":\\\"")
+	f.Add(`<token>["--token","<p`)
+	f.Add(`x["--token","<token>":0`)
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {

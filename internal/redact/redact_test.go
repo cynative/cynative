@@ -292,6 +292,11 @@ func TestRedact_XMLEndsAtStringQuote(t *testing.T) {
 			want: `<password>` + field,
 		},
 		{
+			name: "truncated value after the command pass removes a later tag",
+			in:   `<token>["--token","<p`,
+			want: `<token>` + field,
+		},
+		{
 			name: "encoded string without a credential tag kept as written",
 			in:   `{"r":"{\"h\":\"<b>x</b>\"}\u0020"}`,
 			want: `{"r":"{\"h\":\"<b>x</b>\"}\u0020"}`,
