@@ -1772,15 +1772,17 @@ def _substitution_start(t):
     return b + 1 if b >= 0 and (k < 0 or b < k) else k
 
 
-def _nested_commands(texts):
-    """(index, text, substitution) of each command run inside the words of a shell
-    command, as nestedCommands: the word a shell named there runs, once however many
-    shells run it, and the text after a word's first command substitution opens."""
-    out, memo, run = [], ({}, {}), set()
+def _nested_commands(cmd, words):
+    """(index, text, substitution) of each command run inside shell command cmd, as
+    nestedCommands: the word a shell named there runs, once however many shells run
+    it, and the rest of cmd from just after the first substitution opener in a word."""
+    texts = [w[2] for w in words]
+    out, memo, run, sub = [], ({}, {}), set(), False
     for i, t in enumerate(texts):
         k = _substitution_start(t)
-        if k >= 0:
-            out.append((i, t[k:], True))
+        if k >= 0 and not sub:
+            sub = True
+            out.append((i, cmd[words[i][3][k - 1] + 1:], True))
         if _SHELL.match(t):
             c = _shell_command(texts, i, memo)
             if i < c < len(texts) and c not in run:
@@ -1795,8 +1797,7 @@ def _nested_credential(cmd, depth):
     words = _shell_words(cmd)
     if any(to_end or not _PLACEHOLDER.match(text) for _a, _b, text, to_end in _shell_values(cmd, words)):
         return True
-    texts = [w[2] for w in words]
-    return any(depth == 0 or _nested_credential(text, depth - 1) for _c, text, _sub in _nested_commands(texts))
+    return any(depth == 0 or _nested_credential(text, depth - 1) for _c, text, _sub in _nested_commands(cmd, words))
 
 
 def _shell_found(s, e):
@@ -1812,7 +1813,7 @@ def _shell_found(s, e):
             out.append(_Found(s[start + raw[v_start]:stop - closed], start + raw[v_start], stop - closed))
         else:
             out.append(_Found(text, start + raw[v_start], start + raw[v_end]))
-    for c, text, sub in _nested_commands([w[2] for w in words]):
+    for c, text, sub in _nested_commands(cmd, words):
         if _nested_credential(text, 4):
             # A substitution is replaced to the end of the command, as shellSpans.
             a = start + raw[words[c][0]]
@@ -3266,6 +3267,7 @@ def _shared_selftest():
             ("yaml_flow_stray_hash", 'x: {a: "b"#, password: %s}\n' % live_secret),
             ("shell_substitution_nested_quotes", '["sh","-c","echo \\"$(app --password \\"a %s\\")\\""]' % live_secret),
             ("yaml_flow_under_plain_key_with_hash", "config/app#v1.yaml: {password: %s}\n" % live_secret),
+            ("shell_substitution_quoted_argument", '["sh","-c","echo \\"$(app \\"a b\\" --password %s)\\""]' % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [

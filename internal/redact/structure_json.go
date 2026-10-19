@@ -280,10 +280,9 @@ func (m matchers) shellSpans(s string, e element) []span {
 		repl := placeholder("credential-field") + closeShellQuote(v.quote)
 		out = append(out, span{e.start + raw[v.start], end(v.end, v.toEnd), repl})
 	}
-	// A substitution's quotes nest inside the word's own, which the word reader
-	// does not follow, so its command may run past the word: it is replaced to
-	// the end of the command.
-	for _, c := range m.nestedCommands(texts) {
+	// A substitution's command runs to the end of cmd (see nestedCommands), so it
+	// is replaced to the end of the command.
+	for _, c := range m.nestedCommands(cmd, words) {
 		if w := words[c.index]; m.nestedCredential(c.text, maxShellNesting) {
 			out = append(out, span{e.start + raw[w.start], end(w.end, c.substitution), placeholder("credential-field")})
 		}
@@ -336,24 +335,29 @@ func (m matchers) shellValues(cmd string, words []shellWord, texts []string) []s
 const shellExpanding = "<>("
 
 // nested is a command run inside a shell command: the text of the word at index,
-// or, for a substitution, the part of it after a command substitution opens.
+// or, for a substitution, the command from just after the substitution opens in
+// that word to its end.
 type nested struct {
 	index        int
 	text         string
 	substitution bool
 }
 
-// nestedCommands returns each command run inside the words of a shell command:
-// the word a shell named there runs, and the text after the first "$(" or
-// backquote in a word, where a quoted command substitution keeps a whole command
-// in one word. A word several shells run is returned once.
-func (m matchers) nestedCommands(texts []string) []nested {
+// nestedCommands returns each command run inside shell command cmd, split into
+// words: the word a shell named there runs, once however many shells run it, and
+// the rest of cmd from just after the first "$(" or backquote in a word. A quoted
+// substitution's own quotes nest inside the word's, which the word reader does
+// not follow, so its command is read from the raw text, through the end of cmd;
+// that also covers every substitution after it.
+func (m matchers) nestedCommands(cmd string, words []shellWord) []nested {
 	var out []nested
 
-	memo, run := newScanMemo(), make(map[int]bool)
+	texts := wordTexts(words)
+	memo, run, sub := newScanMemo(), make(map[int]bool), false
 	for i, t := range texts {
-		if k := substitutionStart(t); k >= 0 {
-			out = append(out, nested{i, t[k:], true})
+		if k := substitutionStart(t); k >= 0 && !sub {
+			sub = true
+			out = append(out, nested{i, cmd[words[i].at[k-1]+1:], true})
 		}
 		if !m.shell.MatchString(t) {
 			continue
@@ -392,7 +396,7 @@ func (m matchers) nestedCredential(cmd string, depth int) bool {
 			return true
 		}
 	}
-	for _, c := range m.nestedCommands(texts) {
+	for _, c := range m.nestedCommands(cmd, words) {
 		if depth == 0 || m.nestedCredential(c.text, depth-1) {
 			return true
 		}

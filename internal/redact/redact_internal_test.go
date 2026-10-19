@@ -172,7 +172,8 @@ func TestNestedCommands(t *testing.T) {
 	t.Parallel()
 
 	m := newMatchers("password", "password", "--password")
-	got := m.nestedCommands([]string{"sh", "-co", "sh", "-c", "app"})
+	cmd := "sh -co sh -c app"
+	got := m.nestedCommands(cmd, shellWords(cmd))
 	if want := []nested{{4, "app", false}}; !slices.Equal(got, want) {
 		t.Fatalf("nestedCommands = %v, want %v", got, want)
 	}

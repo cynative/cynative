@@ -468,7 +468,7 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 		{
 			name: "shell command flag inside a backquoted substitution",
 			in:   "[\"sh\",\"-c\",\"echo `app --token hunter2` done\"]",
-			want: `["sh","-c","echo ` + "`" + `app --token ` + field + `"]`,
+			want: `["sh","-c","echo ` + field + `"]`,
 		},
 		{
 			name: "shell command value in a process substitution",
@@ -670,6 +670,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 		{
 			name: "command substitution whose quotes nest inside the word's",
 			in:   `["sh","-c","echo \"$(app --password \"sword fish\")\" done"]`,
+			want: `["sh","-c","echo ` + field + `"]`,
+		},
+		{
+			name: "command substitution with a quoted argument before the flag",
+			in:   `["sh","-c","echo \"$(app \"a b\" --password c)\" done"]`,
 			want: `["sh","-c","echo ` + field + `"]`,
 		},
 		{
