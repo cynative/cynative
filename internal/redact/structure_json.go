@@ -280,9 +280,12 @@ func (m matchers) shellSpans(s string, e element) []span {
 		repl := placeholder("credential-field") + closeShellQuote(v.quote)
 		out = append(out, span{e.start + raw[v.start], end(v.end, v.toEnd), repl})
 	}
+	// A substitution's quotes nest inside the word's own, which the word reader
+	// does not follow, so its command may run past the word: it is replaced to
+	// the end of the command.
 	for _, c := range m.nestedCommands(texts) {
 		if w := words[c.index]; m.nestedCredential(c.text, maxShellNesting) {
-			out = append(out, span{e.start + raw[w.start], end(w.end, false), placeholder("credential-field")})
+			out = append(out, span{e.start + raw[w.start], end(w.end, c.substitution), placeholder("credential-field")})
 		}
 	}
 
@@ -333,29 +336,31 @@ func (m matchers) shellValues(cmd string, words []shellWord, texts []string) []s
 const shellExpanding = "<>("
 
 // nested is a command run inside a shell command: the text of the word at index,
-// or the part of it after a command substitution opens.
+// or, for a substitution, the part of it after a command substitution opens.
 type nested struct {
-	index int
-	text  string
+	index        int
+	text         string
+	substitution bool
 }
 
 // nestedCommands returns each command run inside the words of a shell command:
 // the word a shell named there runs, and the text after the first "$(" or
 // backquote in a word, where a quoted command substitution keeps a whole command
-// in one word.
+// in one word. A word several shells run is returned once.
 func (m matchers) nestedCommands(texts []string) []nested {
 	var out []nested
 
-	memo := newScanMemo()
+	memo, run := newScanMemo(), make(map[int]bool)
 	for i, t := range texts {
 		if k := substitutionStart(t); k >= 0 {
-			out = append(out, nested{i, t[k:]})
+			out = append(out, nested{i, t[k:], true})
 		}
 		if !m.shell.MatchString(t) {
 			continue
 		}
-		if c := m.commandFrom(texts, memo, i+1); c > i && c < len(texts) {
-			out = append(out, nested{c, texts[c]})
+		if c := m.commandFrom(texts, memo, i+1); c > i && c < len(texts) && !run[c] {
+			run[c] = true
+			out = append(out, nested{c, texts[c], false})
 		}
 	}
 

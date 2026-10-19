@@ -635,7 +635,7 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 		{
 			name: "command substitutions inside double quotes",
 			in:   "[\"sh\",\"-c\",\"echo \\\"$X$(app --token a)\\\" and \\\"`app --password b`\\\" done\"]",
-			want: `["sh","-c","echo ` + field + ` and ` + field + ` done"]`,
+			want: `["sh","-c","echo ` + field + `"]`,
 		},
 		{
 			name: "flow comments after a property and after a comma",
@@ -666,6 +666,16 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			name: "flow hash that opens no comment hides nothing after it",
 			in:   "x: {a: \"b\"#, password: c}\ny: {d: e,#f, token: g}\n",
 			want: "x: {a: \"b\"#, password: " + field + "}\ny: {d: e,#f, token: " + field + "}\n",
+		},
+		{
+			name: "command substitution whose quotes nest inside the word's",
+			in:   `["sh","-c","echo \"$(app --password \"sword fish\")\" done"]`,
+			want: `["sh","-c","echo ` + field + `"]`,
+		},
+		{
+			name: "flow collection under a plain key holding a hash",
+			in:   "config/app#v1.yaml: {password: a}\n",
+			want: "config/app#v1.yaml: {password: " + field + "}\n",
 		},
 		{
 			name: "json pair with an unquoted value",
@@ -801,6 +811,7 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		"? 'pass: x\n  # c\n",
 		"? \"password\" x\n: public\n",
 		"Note: see {\"a\": 1} and [b: c]\n",
+		"a #b: {password: public}\n",
 		`["sh","-c","echo '$(cat x)' $(date) ` + "`date`" + ` --page x"]`,
 		"x: {password: &a}\n",
 		"? password # a: b\n# c\n",

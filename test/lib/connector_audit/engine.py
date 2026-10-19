@@ -1058,7 +1058,8 @@ _YAML_PROPS = re.compile(r"(?:[&!][^ \t]*(?:[ \t]+|\Z))*")
 _YAML_EXPLICIT_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)\?[ \t]+")
 _YAML_PLAIN_KEY = re.compile(r"[A-Za-z0-9_.-]+")
 _YAML_EXPLICIT_REST = re.compile(r"[ \t]*(?:#.*)?\Z")
-_FLOW_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*'|[^\t\n\f\r \"'#\[\]{},&!*|>%@`][^#]*?)[ \t]*:[ \t]+")
+_FLOW_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*')[ \t]*:[ \t]+")
+_FLOW_KEY_FIRST_EXCLUDED = "\t\n\f\r \"'#[]{},&!*|>%@`"
 _YAML_EXPLICIT_VALUE = re.compile(r"[ \t]*:(?:[ \t]+|\Z)")
 _YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f",
                  "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\",
@@ -1414,11 +1415,35 @@ def _find_yaml(s):
 def _flow_start(text):
     """The offset in a line of the flow collection it opens, or -1, as flowStart."""
     at = _FLOW_LEAD.match(text).end()
-    at += len(_FLOW_KEY.match(text, at).group(0)) if _FLOW_KEY.match(text, at) else 0
+    at += _flow_key_len(text, at)
     at += len(_FLOW_PROPS.match(text, at).group(0))
     if at == len(text) or text[at] not in "{[" or _PLACEHOLDER_PREFIX.match(text, at):
         return -1
     return at
+
+
+def _flow_key_len(text, at):
+    """The length of the "key: " at text[at], or 0, as the flowKey pattern: a quoted
+    key, or a plain one whose '#' never follows a blank, up to the first ':' before a
+    blank. Scanned by hand, since a lazy regex backtracks quadratically on blanks."""
+    q = _FLOW_QUOTED_KEY.match(text, at)
+    if q:
+        return q.end() - at
+    if at >= len(text) or text[at] in _FLOW_KEY_FIRST_EXCLUDED:
+        return 0
+    i = at + 1
+    while True:
+        j = i
+        while j < len(text) and text[j] in " \t":
+            j += 1
+        if j + 1 < len(text) and text[j] == ":" and text[j + 1] in " \t":
+            j += 1
+            while j < len(text) and text[j] in " \t":
+                j += 1
+            return j - at
+        if j >= len(text) or (j > i and text[j] == "#"):
+            return 0
+        i = j + 1
 
 
 def _find_flows(s, lines):
@@ -1603,13 +1628,22 @@ def _option_args(w):
 
 
 def _shell_command(words, i, memo):
-    """The index of the command a shell named at words[i] runs, or -1, as commandFrom."""
-    j = i + 1
+    """The index of the command a shell named at words[i] runs, or -1, as commandFrom;
+    memo is a pair of dicts keeping commandFrom's and afterOptions' answers by start."""
+    command_memo, after_memo = memo
+    path, c, j = [], -1, i + 1
     while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
+        if j in command_memo:
+            c = command_memo[j]
+            break
+        path.append(j)
         if _SHELL_FLAG.match(words[j]):
-            return _after_options(words, j + 1 + _option_args(words[j]), memo)
+            c = _after_options(words, j + 1 + _option_args(words[j]), after_memo)
+            break
         j += 1 + _option_args(words[j])
-    return -1
+    for q in path:
+        command_memo[q] = c
+    return c
 
 
 def _decode_json_string(body):
@@ -1739,18 +1773,19 @@ def _substitution_start(t):
 
 
 def _nested_commands(texts):
-    """(index, text) of each command run inside the words of a shell command, as
-    nestedCommands: the word a shell named there runs, and the text after a word's
-    first command substitution opens."""
-    out, memo = [], {}
+    """(index, text, substitution) of each command run inside the words of a shell
+    command, as nestedCommands: the word a shell named there runs, once however many
+    shells run it, and the text after a word's first command substitution opens."""
+    out, memo, run = [], ({}, {}), set()
     for i, t in enumerate(texts):
         k = _substitution_start(t)
         if k >= 0:
-            out.append((i, t[k:]))
+            out.append((i, t[k:], True))
         if _SHELL.match(t):
             c = _shell_command(texts, i, memo)
-            if i < c < len(texts):
-                out.append((c, texts[c]))
+            if i < c < len(texts) and c not in run:
+                run.add(c)
+                out.append((c, texts[c], False))
     return out
 
 
@@ -1761,7 +1796,7 @@ def _nested_credential(cmd, depth):
     if any(to_end or not _PLACEHOLDER.match(text) for _a, _b, text, to_end in _shell_values(cmd, words)):
         return True
     texts = [w[2] for w in words]
-    return any(depth == 0 or _nested_credential(text, depth - 1) for _c, text in _nested_commands(texts))
+    return any(depth == 0 or _nested_credential(text, depth - 1) for _c, text, _sub in _nested_commands(texts))
 
 
 def _shell_found(s, e):
@@ -1777,10 +1812,11 @@ def _shell_found(s, e):
             out.append(_Found(s[start + raw[v_start]:stop - closed], start + raw[v_start], stop - closed))
         else:
             out.append(_Found(text, start + raw[v_start], start + raw[v_end]))
-    for c, text in _nested_commands([w[2] for w in words]):
+    for c, text, sub in _nested_commands([w[2] for w in words]):
         if _nested_credential(text, 4):
+            # A substitution is replaced to the end of the command, as shellSpans.
             a = start + raw[words[c][0]]
-            b = stop - closed if partial and words[c][1] == len(cmd) else start + raw[words[c][1]]
+            b = stop - closed if sub or (partial and words[c][1] == len(cmd)) else start + raw[words[c][1]]
             out.append(_Found(s[a:b], a, b))
     return out
 
@@ -1806,7 +1842,7 @@ def _find_commands(s):
         before = [0]
         for k in range(len(elems)):
             before.append(before[-1] + (k in taken))
-        shell, read, memo = set(), set(), {}
+        shell, read, memo = set(), set(), ({}, {})
         for i in range(len(elems)):
             if not _SHELL.match(words[i]):
                 continue
@@ -3228,6 +3264,8 @@ def _shared_selftest():
             ("yaml_flow_hash_value_after_colon", '{"password":#%s}' % live_secret),
             ("yaml_flow_comment_after_key", 'x: {"password"#c\n: %s}\n' % live_secret),
             ("yaml_flow_stray_hash", 'x: {a: "b"#, password: %s}\n' % live_secret),
+            ("shell_substitution_nested_quotes", '["sh","-c","echo \\"$(app --password \\"a %s\\")\\""]' % live_secret),
+            ("yaml_flow_under_plain_key_with_hash", "config/app#v1.yaml: {password: %s}\n" % live_secret),
             ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
         ]
         shape404_clean = [

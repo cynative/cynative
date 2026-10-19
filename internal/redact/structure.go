@@ -69,7 +69,7 @@ type matchers struct {
 	// the ": value" line after that.
 	explicitKey, plainKey, explicitRest, explicitValue *regexp.Regexp
 	// flowKey is a "key: " before a flow collection, a plain key holding any text
-	// a plain scalar may hold.
+	// a plain scalar may hold: a '#' too, unless a blank comes before it.
 	flowKey *regexp.Regexp
 	// flowLead is a line's indentation and its "- ", "? ", ": " and "--- " markers,
 	// flowProps the anchor and tag properties, verbatim tags included, before a
@@ -102,7 +102,7 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		plainKey:     regexp.MustCompile(`^[\w.-]+`),
 		explicitRest: regexp.MustCompile(`^[ \t]*(?:#.*)?$`),
 		flowKey: regexp.MustCompile(
-			`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#\[\]{},&!*|>%@` + "`" + `][^#]*?)[ \t]*:[ \t]+`,
+			`^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#\[\]{},&!*|>%@` + "`" + `](?:[^ \t]|[ \t]+[^ \t#])*?)[ \t]*:[ \t]+`,
 		),
 		explicitValue:     regexp.MustCompile(`^[ \t]*:(?:[ \t]+|$)`),
 		mappingLine:       regexp.MustCompile(`:(?:[ \t]|[ \t]*$)`),

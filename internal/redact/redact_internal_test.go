@@ -166,3 +166,14 @@ func TestAfterOptions(t *testing.T) {
 		t.Errorf("afterOptions from a stored word = %d, want 4", got)
 	}
 }
+
+// TestNestedCommands pins that a command several shells run is read once.
+func TestNestedCommands(t *testing.T) {
+	t.Parallel()
+
+	m := newMatchers("password", "password", "--password")
+	got := m.nestedCommands([]string{"sh", "-co", "sh", "-c", "app"})
+	if want := []nested{{4, "app", false}}; !slices.Equal(got, want) {
+		t.Fatalf("nestedCommands = %v, want %v", got, want)
+	}
+}
