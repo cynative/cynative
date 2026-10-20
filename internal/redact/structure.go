@@ -159,6 +159,7 @@ type yamlEntry struct {
 	json  bool   // the key is double-quoted, as a pretty-printed JSON member's is
 	tag   bool   // a tag property comes before the value
 	lead  bool   // the key has properties before it, or is a compact mapping after "? "
+	node  int    // offset of the key node, its properties included; -1 for an explicit key
 	// alone marks a key the YAML line rule cannot read: a quoted key, or an
 	// explicit "? key" whose value is on the ": value" line after it.
 	alone bool
@@ -195,7 +196,7 @@ func blankOrComment(t string) bool {
 func (m matchers) yaml(s string) string {
 	lines := splitLines(s)
 	f := m.flows(s, lines)
-	entries := m.yamlEntries(s, lines, f.ranges)
+	entries := m.yamlEntries(s, lines, f.keys)
 	ids := mappings(entries)
 
 	named := make(map[int]bool)
@@ -261,11 +262,11 @@ func (m matchers) yamlValue(s string, e yamlEntry, spans []span) []span {
 // is a compact mapping after "? " on its line (see yamlEntry), skips no lines:
 // its value may be read to its end (see leadExtent), and every line after its
 // first is still read as an entry, as it was before such keys were read at all.
-// One inside a flow collection, which flows reads, is not read to its end.
-func (m matchers) yamlEntries(s string, lines []yamlLine, flows []yamlLine) []yamlEntry {
+// One the flow reader read as a key is not read to its end.
+func (m matchers) yamlEntries(s string, lines []yamlLine, flowKeys map[int]bool) []yamlEntry {
 	var out []yamlEntry
 
-	read := leadCursors{flows: flows}
+	read := leadCursors{flowKeys: flowKeys}
 	for i := 0; i < len(lines); i++ {
 		text := s[lines[i].start:lines[i].end]
 		if blankOrComment(text) {
@@ -293,38 +294,33 @@ func (m matchers) yamlEntries(s string, lines []yamlLine, flows []yamlLine) []ya
 
 // leadCursors hold the ends of the last values leadExtent read: of a "name" or
 // "value" key, and of a credential-named key whose value is replaced; and the
-// flow collections, sorted by start, with the next one to pass and the furthest
-// end among those passed.
+// offsets where the flow reader read a key node, its properties included.
 type leadCursors struct {
 	pair, cred int
-	flows      []yamlLine
-	next, end  int
-}
-
-// inFlow reports whether offset at, which never decreases from call to call, is
-// inside a flow collection.
-func (c *leadCursors) inFlow(at int) bool {
-	for ; c.next < len(c.flows) && c.flows[c.next].start <= at; c.next++ {
-		c.end = max(c.end, c.flows[c.next].end)
-	}
-
-	return at < c.end
+	flowKeys   map[int]bool
 }
 
 // leadExtent reads to its end the value of e, a key that only properties or a
 // "? " made readable, on line, when it is a "name" or "value" key or a
 // credential-named one whose value is not left in place (see cursor). One that
 // starts inside a value of its own kind already read is not read again, which
-// keeps nested ones linear; a "name" or "value" value does not hide a credential
-// key inside it.
+// keeps nested ones linear, unless it is a "name" or "value" whose value ends on
+// its line; a "name" or "value" value does not hide a credential key inside it.
 func (m matchers) leadExtent(s string, lines []yamlLine, line int, e *yamlEntry, c *leadCursors) {
-	if c.inFlow(e.start) {
+	if c.flowKeys[e.node] {
+		// The flow reader replaces this value itself, and the block reading would
+		// run past the flow collection's ',' or closing bracket.
 		return
 	}
 	if strings.EqualFold(e.key, "name") || strings.EqualFold(e.key, "value") {
-		if e.start >= c.pair {
+		switch {
+		case e.start >= c.pair:
 			m.extent(s, lines, line, e)
 			c.pair = e.end
+		case oneLine(s, lines, line, e.col):
+			// Nested in another such value, it is read only when it ends on its
+			// line, which costs nothing more, so a pair inside still pairs.
+			m.extent(s, lines, line, e)
 		}
 
 		return
@@ -348,6 +344,19 @@ func hasTag(props string) bool {
 	}
 
 	return false
+}
+
+// oneLine reports whether the next line after line i that is neither blank nor
+// a comment, if any, is indented no further than col, so a value of a key at col
+// on line i ends there.
+func oneLine(s string, lines []yamlLine, i, col int) bool {
+	for j := i + 1; j < len(lines); j++ {
+		if text := s[lines[j].start:lines[j].end]; !blankOrComment(text) {
+			return indentOf(text) <= col
+		}
+	}
+
+	return true
 }
 
 // cursor reports whether e, a key on line l, is a JSON-string key the JSON
@@ -380,6 +389,7 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 			col:   g[3],
 			item:  strings.Contains(text[:g[3]], "-"),
 			colon: lines[i].start + g[7] + strings.IndexByte(text[g[7]:], ':') + 1,
+			node:  lines[i].start + g[3],
 			start: lines[i].start + g[1],
 			first: lines[i].start + g[1],
 			end:   lines[i].start + g[1],
@@ -414,6 +424,7 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 		key:   yamlScalar(raw),
 		alone: true,
 		lead:  props,
+		node:  -1,
 		col:   g[3],
 		item:  strings.Contains(text[:g[3]], "-"),
 		colon: lines[j].start + g[3] + 1,

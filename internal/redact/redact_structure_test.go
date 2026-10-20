@@ -575,17 +575,30 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			name: "yaml name or value key with properties pairs, and a key inside a value left in place",
 			in: "- name: DB_PASSWORD\n  &v value: s1\n- &n name: API_KEY\n  value: s2\n" +
 				"!!str \"nextPageToken\": \"\n  &a password: s3\n  \"\n!!str \"pageToken\":\n  \"\n  &b token: s4\n  \"\n" +
-				"&c value: |\n  &d secret: s5\n",
+				"&c value: |\n  &d secret: s5\n&e value: |\n  - &n name: DB_PASSWORD\n    &v value: s6\n    other: |\n      x\n",
 			want: "- name: DB_PASSWORD\n  &v value: " + field + "\n- &n name: API_KEY\n  value: " + field + "\n" +
 				"!!str \"nextPageToken\": \"\n  &a password: " + field + "\n  \"\n!!str \"pageToken\":\n  \"\n  &b token: " +
-				field + "\n  \"\n&c value: |\n  &d secret: " + field + "\n",
+				field + "\n  \"\n&c value: |\n  &d secret: " + field + "\n&e value: |\n  - &n name: DB_PASSWORD\n    &v value: " +
+				field + "\n    other: |\n      x\n",
 		},
 		{
 			name: "yaml flow entry with properties keeps the closing bracket",
 			in: "{\n &k password: s1 }\n[\n &j token: s2, x]\n\"nextPageToken\": &c 123\nx: {\"pageToken\": &d 4}\n" +
-				"!!str y: [\n  {a: b},\n  &k secret: s3, z]\n",
+				"!!str y: [\n  {a: b},\n  &k secret: s3, z]\nexample: |\n  [\"unfinished\n&a password: s4\n" +
+				"!!str x: {public: '\n  &b token: s5\n'}\n",
 			want: "{\n &k password: " + field + " }\n[\n &j token: " + field + ", x]\n\"nextPageToken\": &c 123\n" +
-				"x: {\"pageToken\": &d 4}\n!!str y: [\n  {a: b},\n  &k secret: " + field + ", z]\n",
+				"x: {\"pageToken\": &d 4}\n!!str y: [\n  {a: b},\n  &k secret: " + field + ", z]\n" +
+				"example: |\n  [\"unfinished\n&a password: " + field + "\n!!str x: {public: '\n  &b token: " + field + "\n'}\n",
+		},
+		{
+			name: "yaml pair with properties nested in a value with properties at the end of content",
+			in:   "&a value: |\n  - &n name: API_KEY\n    &v value: s1",
+			want: "&a value: |\n  - &n name: API_KEY\n    &v value: " + field,
+		},
+		{
+			name: "yaml key with properties before a flow collection inside a multi-line explicit key",
+			in:   "? &k '\n  &a password: s1\n  [a]\n  '\n: x\n",
+			want: "? &k '\n  &a password: " + field + "\n  [a]\n  '\n: x\n",
 		},
 		{
 			name: "yaml flow verbatim tag holding a blank",

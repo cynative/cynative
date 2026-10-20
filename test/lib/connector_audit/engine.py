@@ -1299,11 +1299,11 @@ def _name_value(s, e):
     return _yaml_scalar(_strip_comment(s[e["first"]:e["end"]]).rstrip(" \t\r"))
 
 
-def _yaml_entries(s, lines, flows):
+def _yaml_entries(s, lines, flow_keys):
     """Every non-blank, non-comment line as an entry, as yamlEntries: a key read only
     because properties come before it, or because it is a compact mapping after "? ",
     skips no lines, and its value may be read to its end (see _yaml_lead_extent)."""
-    out, i, read = [], 0, {"pair": 0, "cred": 0, "flows": flows, "next": 0, "end": 0}
+    out, i, read = [], 0, {"pair": 0, "cred": 0, "flow_keys": flow_keys}
     while i < len(lines):
         text = s[lines[i][0]:lines[i][1]]
         if _blank_or_comment(text):
@@ -1328,17 +1328,15 @@ def _yaml_entries(s, lines, flows):
 def _yaml_lead_extent(s, lines, line, e, read):
     """Read the value of a key only properties or "? " made readable, as leadExtent:
     read["pair"] and read["cred"] are the ends of the last "name"/"value" value and the
-    last replaced credential value read; one inside a flow collection is not read."""
-    flows = read["flows"]
-    while read["next"] < len(flows) and flows[read["next"]][0] <= e["start"]:
-        read["end"] = max(read["end"], flows[read["next"]][1])
-        read["next"] += 1
-    if e["start"] < read["end"]:
+    last replaced credential value read; one the flow reader read as a key is not read."""
+    if e["node"] in read["flow_keys"]:
         return
     if e["key"].lower() in ("name", "value"):
         if e["start"] >= read["pair"]:
             _yaml_extent(s, lines, line, e)
             read["pair"] = e["end"]
+        elif _one_line(s, lines, line, e["col"]):
+            _yaml_extent(s, lines, line, e)
         return
     if not _DIRECT_KEY.match(e["key"]) or _yaml_cursor(s, lines[line], e) or e["start"] < read["cred"]:
         return
@@ -1351,6 +1349,16 @@ def _has_tag(props):
     """True when properties props hold a tag, which, unlike an anchor, can change the
     node's type, as hasTag."""
     return any(p[0] == "!" for p in props.split())
+
+
+def _one_line(s, lines, i, col):
+    """True when the next non-blank, non-comment line after line i, if any, is indented
+    no further than col, as oneLine."""
+    for j in range(i + 1, len(lines)):
+        text = s[lines[j][0]:lines[j][1]]
+        if not _blank_or_comment(text):
+            return _indent(text) <= col
+    return True
 
 
 def _yaml_cursor(s, line, e):
@@ -1371,7 +1379,7 @@ def _yaml_entry(s, lines, i):
         lead = bool(g.group(2)) or "?" in g.group(1)
         alone = raw[0] in "\"'" or lead or g.group(1).count("-") > 1
         e = {"key": _yaml_scalar(raw), "json": raw[0] == '"' and _json_valid(raw), "alone": alone,
-             "lead": lead, "col": g.end(1),
+             "lead": lead, "node": lines[i][0] + g.end(1), "col": g.end(1),
              "item": "-" in g.group(1), "colon": lines[i][0] + g.end(3) + text[g.end(3):].index(":") + 1,
              "start": lines[i][0] + g.end(0), "below": False, "multi": False}
         e["end"] = e["first"] = e["start"]
@@ -1394,7 +1402,7 @@ def _yaml_entry(s, lines, i):
     v = _YAML_EXPLICIT_VALUE.match(nxt)
     if v is None or _indent(nxt) != g.end(1):
         return None, i
-    e = {"key": _yaml_scalar(raw), "json": False, "alone": True, "lead": props, "col": g.end(1),
+    e = {"key": _yaml_scalar(raw), "json": False, "alone": True, "lead": props, "node": -1, "col": g.end(1),
          "item": "-" in g.group(1),
          "colon": lines[j][0] + g.end(1) + 1, "start": lines[j][0] + v.end(), "below": False, "multi": False}
     e["end"] = e["first"] = e["start"]
@@ -1462,8 +1470,8 @@ def _find_yaml(s):
     if ":" not in s:
         return []
     lines = _yaml_lines(s)
-    flows, ranges = _find_flows(s, lines)
-    entries = _yaml_entries(s, lines, ranges)
+    flows, flow_keys = _find_flows(s, lines)
+    entries = _yaml_entries(s, lines, flow_keys)
     ids = _yaml_mappings(entries)
     named = {ids[i] for i, e in enumerate(entries)
              if e["key"].lower() == "name" and _KEY_END_FULL.match(_fold(_name_value(s, e)))}
@@ -1525,25 +1533,23 @@ def _flow_key_len(text, at):
 
 
 def _find_flows(s, lines):
-    """Credential values in YAML flow collections and the extent of each collection, as
+    """Credential values in YAML flow collections and where each key node starts, as
     flows in flow.go: a collection found only because properties come before its key
     skips none of its lines but another one of its kind."""
-    out, ranges, nxt, propped = [], [], 0, 0
+    out, keys, nxt, propped = [], set(), 0, 0
     for start, end in lines:
         if start < nxt:
             continue
         at = _flow_start(s[start:end], False)
         if at >= 0:
-            found, nxt = _read_flow(s, start + at)
+            found, nxt = _read_flow(s, start + at, keys)
             out.extend(found)
-            ranges.append((start + at, nxt))
             continue
         at = _flow_start(s[start:end], True)
         if at >= 0 and start >= propped:
-            found, propped = _read_flow(s, start + at)
+            found, propped = _read_flow(s, start + at, keys)
             out.extend(found)
-            ranges.append((start + at, propped))
-    return out, ranges
+    return out, keys
 
 
 def _flow_scalar_end(s, start, key):
@@ -1564,10 +1570,11 @@ def _flow_scalar_end(s, start, key):
     return end, False
 
 
-def _read_flow(s, i):
+def _read_flow(s, i, keys):
     """The credential values of the flow collection at s[i] and the offset after it, as
-    flowParser.parse. A found value is the source text, or the decoded text of a quoted
-    one, so a quoted placeholder the redactor leaves is accepted."""
+    flowParser.parse, adding to keys the offset where each key node starts. A found
+    value is the source text, or the decoded text of a quoted one, so a quoted
+    placeholder the redactor leaves is accepted."""
     out, frames = [], []
 
     def close():
@@ -1590,6 +1597,7 @@ def _read_flow(s, i):
         return i
 
     def scalar(top, i):
+        node = i
         tag = False
         while True:
             # A comment may sit between properties, and between them and the node.
@@ -1605,6 +1613,7 @@ def _read_flow(s, i):
         raw = s[start:i]
         text = _yaml_scalar(raw)
         if not top["value"]:
+            keys.add(node)
             # A second scalar before ':' never replaces a credential key, as scalar().
             if not _DIRECT_KEY.match(top["key"]):
                 top["key"], top["json"] = text, raw[0] == '"' and _json_valid(raw)
@@ -3406,6 +3415,10 @@ def _shared_selftest():
             ("yaml_key_with_properties_in_cursor_value_below", '!!str "pageToken":\n  "\n  &b token: %s\n  "\n' % live_secret),
             ("yaml_key_with_properties_in_unnamed_value_block", "&c value: |\n  &d secret: %s\n" % live_secret),
             ("yaml_pair_value_with_tag", "- !!str name: DB_PASSWORD\n  !!str value: %s\n" % live_secret),
+            ("yaml_key_with_properties_after_unclosed_bracket", 'example: |\n  ["unfinished\n&a password: %s\n' % live_secret),
+            ("yaml_key_with_properties_in_quoted_flow_value", "!!str x: {public: '\n  &a password: %s\n'}\n" % live_secret),
+            ("yaml_nested_pair_with_properties", "&a value: |\n  - &n name: DB_PASSWORD\n    &v value: %s\n" % live_secret),
+            ("yaml_key_with_properties_before_flow_in_explicit_key", "? &k '\n  &a password: %s\n  [a]\n  '\n: x\n" % live_secret),
         ]
         shape439_clean = [
             '!!str "password": [REDACTED:credential-field]\n',

@@ -22,7 +22,7 @@ import (
 // first are still read as they were before such collections were read at all,
 // and only another one of its kind is skipped inside it.
 func (m matchers) flows(s string, lines []yamlLine) flowResult {
-	var out flowResult
+	out := flowResult{keys: make(map[int]bool)}
 
 	next, propped := 0, 0
 	for _, l := range lines {
@@ -31,30 +31,24 @@ func (m matchers) flows(s string, lines []yamlLine) flowResult {
 		}
 		text := s[l.start:l.end]
 		if at := m.flowStart(text, false); at >= 0 {
-			p := flowParser{m: m, s: s, i: l.start + at}
+			p := flowParser{m: m, s: s, i: l.start + at, keys: out.keys}
 			next = p.parse()
-			out.add(&p, l.start+at, next)
+			out.spans = append(out.spans, p.spans...)
 		} else if at = m.flowStart(text, true); at >= 0 && l.start >= propped {
-			p := flowParser{m: m, s: s, i: l.start + at}
+			p := flowParser{m: m, s: s, i: l.start + at, keys: out.keys}
 			propped = p.parse()
-			out.add(&p, l.start+at, propped)
+			out.spans = append(out.spans, p.spans...)
 		}
 	}
 
 	return out
 }
 
-// flowResult is what flows read: the spans of credential values, and the extent
-// of each collection, sorted by start.
+// flowResult is what flows read: the spans of credential values, and the
+// offsets where a key node starts, its properties included.
 type flowResult struct {
-	spans  []span
-	ranges []yamlLine
-}
-
-// add records what p read in the collection from start to end.
-func (r *flowResult) add(p *flowParser, start, end int) {
-	r.spans = append(r.spans, p.spans...)
-	r.ranges = append(r.ranges, yamlLine{start, end})
+	spans []span
+	keys  map[int]bool
 }
 
 // flowStart returns the offset in line text of the flow collection it opens, or
@@ -85,6 +79,7 @@ type flowParser struct {
 	i      int
 	frames []*flowFrame
 	spans  []span
+	keys   map[int]bool // where each key node read starts, its properties included
 }
 
 // flowFrame is one open flow collection. An entry is a node, or a key node, a ':'
@@ -162,6 +157,7 @@ func (p *flowParser) entryNode() {
 // string is left as it is unless a tag comes before it (a tag can make 1234 a
 // string).
 func (p *flowParser) scalar(top *flowFrame) {
+	node := p.i
 	tag := p.properties()
 	if p.i >= len(p.s) || strings.IndexByte(",:[]{}", p.s[p.i]) >= 0 && p.m.placeholderAt(p.s, p.i) == 0 {
 		return
@@ -172,6 +168,7 @@ func (p *flowParser) scalar(top *flowFrame) {
 	raw := p.s[start:p.i]
 	text := yamlScalar(raw)
 	if !top.value {
+		p.keys[node] = true
 		// Two scalars with no ':' or ',' between them are not valid YAML; the
 		// second never takes the place of a key that names a credential.
 		if !p.m.direct.MatchString(top.key) {
