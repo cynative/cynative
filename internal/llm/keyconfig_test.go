@@ -69,6 +69,24 @@ func TestValidateKeyConfigs(t *testing.T) {
 			},
 			false,
 		},
+		{"cloudflare_missing_config", "cloudflare", []schemas.Key{keyWithConfig(nil)}, true},
+		{
+			"cloudflare_empty_account_id",
+			"cloudflare",
+			[]schemas.Key{
+				keyWithConfig(func(k *schemas.Key) { k.CloudflareKeyConfig = &schemas.CloudflareKeyConfig{} }),
+			},
+			true,
+		},
+		{
+			"cloudflare_with_account_id",
+			"cloudflare",
+			[]schemas.Key{keyWithConfig(func(k *schemas.Key) {
+				k.CloudflareKeyConfig = &schemas.CloudflareKeyConfig{AccountID: *schemas.NewSecretVar("acct-123")}
+			})},
+			false,
+		},
+		{"required_provider_zero_keys_cloudflare", "cloudflare", nil, true},
 		{"required_provider_zero_keys_vertex", "vertex", nil, true},
 		{"required_provider_zero_keys_azure", "azure", nil, true},
 	}

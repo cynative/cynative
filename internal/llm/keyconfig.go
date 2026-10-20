@@ -14,31 +14,38 @@ import (
 // vertex branch tests only for nil. So this catches the common
 // misconfiguration, not every one.
 //
-// Two providers form the closed required set. Re-verified against
-// github.com/maximhq/bifrost/core@v1.8.6, where the failure mode is not a panic:
-// validateKey (utils.go:174) rejects the key, key selection logs a warning and
-// skips it (bifrost.go:9012-9014), and the request then fails at bifrost.go:9033
-// with "no keys found that support model: X", naming neither the provider nor
-// the field that was missing. Mirroring the check here turns that into a
-// load-time error that says what to set.
+// Three providers form the closed required set. Re-verified against
+// github.com/maximhq/bifrost/core@v1.12.0, where the failure mode is not a panic:
+// validateKey (utils.go:132) rejects the key, key selection logs a warning and
+// skips it (bifrost.go:10761-10763), and the request then fails at
+// bifrost.go:10777 with "no keys found that support model: X", naming neither
+// the provider nor the field that was missing. Mirroring the check here turns
+// that into a load-time error that says what to set.
 //   - azure:  validateKey requires azure_key_config and a non-empty endpoint
-//     (utils.go:177-183).
-//   - vertex: validateKey requires vertex_key_config (utils.go:194-197). The
+//     (utils.go:135-141).
+//   - vertex: validateKey requires vertex_key_config (utils.go:152-155). The
 //     unguarded dereference earlier versions of this comment cited still exists
-//     (getAuthTokenSource, providers/vertex/vertex.go:209), but nothing reaches
+//     (getAuthTokenSource, providers/vertex/vertex.go:236), but nothing reaches
 //     it with a nil config because validateKey rejects the key first.
+//   - cloudflare: validateKey requires cloudflare_key_config and a non-empty
+//     account_id (utils.go:177-183). Here the account ID is checked as well as
+//     the block, since it is the block's only field and the request URL
+//     cannot be built without it (cloudflare.go:77-85).
 //
-// Bifrost hard-requires a config for ollama, vllm and sgl too (utils.go:198-218),
-// and for github-copilot whenever the key value is empty (utils.go:219-247).
-// Cynative does not mirror those, so they still surface as the opaque runtime
-// error above; extending the set is a separate decision, not a bump.
+// Bifrost hard-requires a config for ollama, vllm and sgl too
+// (utils.go:156-176), and for github-copilot whenever the key value is empty
+// (utils.go:184-213). Cynative does not mirror those, so they still surface as
+// the opaque runtime error above; extending the set is a separate decision,
+// not a bump. validateKey also rejects an oauth_key_config on any provider but
+// openai (utils.go:234-237), which cynative does not mirror either.
 //
 // The remaining KeyConfig-bearing providers need no check at all: Replicate
 // nil-checks (replicate.go:107); Databricks nil-checks each of its four reads
-// (databricks.go:122, 164, 310, 341) and runs from a token plus a base_url with
+// (databricks.go:127, 169, 265, 286) and runs from a token plus a base_url with
 // no config whatsoever; Bedrock's config is optional (AWS credential chain /
 // bare API-key Value). The fields are checked directly (no reflection), so an
-// upstream rename of AzureKeyConfig/VertexKeyConfig fails at compile time.
+// upstream rename of AzureKeyConfig/VertexKeyConfig/CloudflareKeyConfig fails at
+// compile time.
 func ValidateKeyConfigs(entry *ProviderEntry) error {
 	if entry == nil {
 		return nil
@@ -50,6 +57,11 @@ func ValidateKeyConfigs(entry *ProviderEntry) error {
 	}
 	if provider == schemas.Vertex {
 		return requireKeyConfigs(entry.Keys, provider, func(k schemas.Key) bool { return k.VertexKeyConfig != nil })
+	}
+	if provider == schemas.Cloudflare {
+		return requireKeyConfigs(entry.Keys, provider, func(k schemas.Key) bool {
+			return k.CloudflareKeyConfig != nil && k.CloudflareKeyConfig.AccountID.GetValue() != ""
+		})
 	}
 	return nil // every other provider's per-key config is optional or absent.
 }

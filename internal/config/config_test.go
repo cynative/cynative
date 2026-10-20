@@ -972,6 +972,25 @@ func TestLoad_AzureKeyWithoutEndpoint_Errors(t *testing.T) {
 	}
 }
 
+func TestLoad_CloudflareTokenWithoutAccountID_Errors(t *testing.T) {
+	t.Parallel()
+
+	// The canonical token synthesizes a key; the missing account ID must fail
+	// ValidateLLM rather than reach Bifrost, which would skip the key.
+	cfg, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER": "cloudflare",
+		"CYNATIVE_LLM_MODEL":    "@cf/meta/llama-4-scout-17b-16e-instruct",
+		"CLOUDFLARE_API_TOKEN":  "cf-token",
+	}).Load("")
+	if err != nil {
+		t.Fatalf("Load should succeed; LLM validation moved to ValidateLLM: %v", err)
+	}
+
+	if vErr := config.ValidateLLM(&cfg.LLM); !errors.Is(vErr, llm.ErrKeyConfigRequired) {
+		t.Fatalf("ValidateLLM = %v, want ErrKeyConfigRequired", vErr)
+	}
+}
+
 // --- AWS hardening config tests ---
 
 func TestDefaultConfig_populatesAWSDefaults(t *testing.T) {

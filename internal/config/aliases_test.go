@@ -231,6 +231,82 @@ func TestLoad_AzureKeyConfigAlias_FoldsIntoKey(t *testing.T) {
 	}
 }
 
+func TestLoad_CloudflareAccountID_ResolvesFromEnv(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		token     string
+		wantValue string
+	}{
+		{name: "canonical token", token: "cf-token", wantValue: "cf-token"},
+		{name: "account id alone still synthesizes a key", token: "", wantValue: ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := map[string]string{
+				"CYNATIVE_LLM_PROVIDER":              "cloudflare",
+				"CYNATIVE_LLM_MODEL":                 "@cf/meta/llama-4-scout-17b-16e-instruct",
+				"CYNATIVE_LLM_CLOUDFLARE_ACCOUNT_ID": "acct-123",
+			}
+			if c.token != "" {
+				env["CLOUDFLARE_API_TOKEN"] = c.token
+			}
+			cfg, err := loaderEnv(t, env).Load("")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(cfg.LLM.Keys) != 1 || cfg.LLM.Keys[0].CloudflareKeyConfig == nil {
+				t.Fatalf("expected cloudflare key config in keys[0], got %+v", cfg.LLM.Keys)
+			}
+			if got := cfg.LLM.Keys[0].CloudflareKeyConfig.AccountID.Val; got != "acct-123" {
+				t.Errorf("account_id: got %q", got)
+			}
+			if got := cfg.LLM.Keys[0].Value.Val; got != c.wantValue {
+				t.Errorf("key value: got %q, want %q", got, c.wantValue)
+			}
+			if cfg.LLM.Cloudflare != nil {
+				t.Error("Cloudflare alias should be cleared after materialize")
+			}
+		})
+	}
+}
+
+func TestLoad_OAuthKeyConfigAlias_FoldsIntoKey(t *testing.T) {
+	t.Parallel()
+
+	// OPENAI_API_KEY is exported on purpose: with an oauth block it must not
+	// become the key value, or Bifrost would send it to the gateway verbatim.
+	cfg, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER":            "openai",
+		"CYNATIVE_LLM_MODEL":               "gpt-5",
+		"OPENAI_API_KEY":                   "sk-static",
+		"CYNATIVE_LLM_OAUTH_GRANT_TYPE":    "client_credentials",
+		"CYNATIVE_LLM_OAUTH_TOKEN_URL":     "https://login.example.com/token",
+		"CYNATIVE_LLM_OAUTH_CLIENT_ID":     "cid",
+		"CYNATIVE_LLM_OAUTH_CLIENT_SECRET": "csecret",
+	}).Load("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LLM.Keys) != 1 || cfg.LLM.Keys[0].OAuthKeyConfig == nil {
+		t.Fatalf("expected oauth key config in keys[0], got %+v", cfg.LLM.Keys)
+	}
+	got := cfg.LLM.Keys[0].OAuthKeyConfig
+	if got.GrantType != "client_credentials" || got.TokenURL.Val != "https://login.example.com/token" ||
+		got.ClientID == nil || got.ClientID.Val != "cid" || got.ClientSecret == nil || got.ClientSecret.Val != "csecret" {
+		t.Errorf("oauth config: got %+v", got)
+	}
+	if v := cfg.LLM.Keys[0].Value.Val; v != "" {
+		t.Errorf("key value: got %q, want empty so Bifrost mints the bearer", v)
+	}
+	if cfg.LLM.OAuth != nil {
+		t.Error("OAuth alias should be cleared after materialize")
+	}
+}
+
 func TestLoad_BedrockMantleKeyConfigAlias_FoldsIntoKey(t *testing.T) {
 	t.Parallel()
 

@@ -43,6 +43,7 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `sarvam`       | `SARVAM_API_KEY`                   | [sarvam.md](sarvam.md) |
 | `wafer`        | `WAFER_API_KEY`                    | [wafer.md](wafer.md) |
 | `databricks`   | `DATABRICKS_TOKEN`                 | [databricks.md](databricks.md) |
+| `cloudflare`   | `CLOUDFLARE_API_TOKEN`             | [cloudflare.md](cloudflare.md) |
 | `opencode-go`  | `OPENCODE_API_KEY`                 | [opencode-go.md](opencode-go.md) |
 | `opencode-zen` | `OPENCODE_API_KEY`                 | [opencode-zen.md](opencode-zen.md) |
 | `ollama`       | (none — local endpoint)            | [ollama.md](ollama.md) |
@@ -69,7 +70,7 @@ llm:
       x-custom: value
     insecure_skip_verify: false                    # optional
   openai_config: {...}             # top-level squashed provider config
-  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/vllm/ollama/sgl/replicate/databricks/github_copilot)
+  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/vllm/ollama/sgl/replicate/databricks/github_copilot/cloudflare/oauth)
   keys: [...]                      # advanced: multi-key load balancing
 ```
 
@@ -94,6 +95,8 @@ Provider-specific (nested) identity fields:
 - **Bedrock Mantle:** `CYNATIVE_LLM_BEDROCK_MANTLE_REGION`
 - **vLLM / SGL:** `CYNATIVE_LLM_VLLM_URL`, `CYNATIVE_LLM_VLLM_MODEL_NAME`, `CYNATIVE_LLM_SGL_URL`
 - **Databricks:** `CYNATIVE_LLM_DATABRICKS_WORKSPACE_URL`, `CYNATIVE_LLM_DATABRICKS_API_FORMAT`, `CYNATIVE_LLM_DATABRICKS_CLIENT_ID`, `CYNATIVE_LLM_DATABRICKS_CLIENT_SECRET`
+- **Cloudflare:** `CYNATIVE_LLM_CLOUDFLARE_ACCOUNT_ID`
+- **OAuth (openai only):** `CYNATIVE_LLM_OAUTH_GRANT_TYPE`, `CYNATIVE_LLM_OAUTH_TOKEN_URL`, `CYNATIVE_LLM_OAUTH_CLIENT_ID`, `CYNATIVE_LLM_OAUTH_CLIENT_SECRET`, and for `jwt_bearer` `CYNATIVE_LLM_OAUTH_PRIVATE_KEY`, `CYNATIVE_LLM_OAUTH_ISSUER`, `CYNATIVE_LLM_OAUTH_AUDIENCE` (see [openai.md](openai.md); `scopes` and `extra_params` need YAML)
 - **GitHub Copilot:** `CYNATIVE_LLM_GITHUB_COPILOT_APP_ID`, `CYNATIVE_LLM_GITHUB_COPILOT_INSTALLATION_ID`, `CYNATIVE_LLM_GITHUB_COPILOT_REPOSITORY_ID`, `CYNATIVE_LLM_GITHUB_COPILOT_PRIVATE_KEY` (see [github-copilot.md](github-copilot.md): these are inert on the pinned Bifrost)
 
 Any nested Bifrost field is reachable by upper-snake-casing its JSON path: `CYNATIVE_LLM_<PATH>` (e.g. `CYNATIVE_LLM_NETWORK_CONFIG_MAX_CONNS_PER_HOST`, `CYNATIVE_LLM_OPENAI_CONFIG_DISABLE_STORE`).

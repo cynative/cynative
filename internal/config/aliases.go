@@ -46,6 +46,10 @@ func materializeKey(entry *llm.ProviderEntry, env llm.LookupEnv) {
 // keyValueForEntry resolves the synthesized key's Value: the api_key alias if
 // set, else the provider's canonical env var when no keys are configured. The
 // bool is false when no value source applies (e.g. Bedrock's AWS chain).
+//
+// An llm.oauth block turns the fallback off. Bifrost sends a non-empty Value
+// verbatim and ignores the OAuth config, so an exported OPENAI_API_KEY would
+// otherwise reach the gateway that block points at instead of a minted token.
 func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.SecretVar, bool) {
 	if entry.APIKey != "" {
 		// Route through ResolveEnvVar so an "env.X" value resolves the variable
@@ -54,7 +58,7 @@ func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.Secr
 		// an unset reference as a clean load-time error.
 		return llm.ResolveEnvVar(entry.APIKey, env), true
 	}
-	if len(entry.Keys) == 0 {
+	if len(entry.Keys) == 0 && entry.OAuth == nil {
 		if envName, ok := llm.CanonicalEnvKey(schemas.ModelProvider(entry.Provider)); ok {
 			if val, found := env(envName); found && val != "" {
 				return llm.EnvSecretVar("env."+envName, val), true
@@ -70,7 +74,7 @@ func anyHoistedKeyConfig(entry *llm.ProviderEntry) bool {
 	return entry.Azure != nil || entry.Vertex != nil || entry.Bedrock != nil ||
 		entry.BedrockMantle != nil || entry.VLLM != nil || entry.Ollama != nil ||
 		entry.SGL != nil || entry.Replicate != nil || entry.Databricks != nil ||
-		entry.GithubCopilot != nil
+		entry.GithubCopilot != nil || entry.Cloudflare != nil || entry.OAuth != nil
 }
 
 // applyHoistedKeyConfigs copies the hoisted key configs onto key. Absent ones
@@ -86,6 +90,8 @@ func applyHoistedKeyConfigs(entry *llm.ProviderEntry, key *schemas.Key) {
 	key.ReplicateKeyConfig = entry.Replicate
 	key.DatabricksKeyConfig = entry.Databricks
 	key.GithubCopilotKeyConfig = entry.GithubCopilot
+	key.CloudflareKeyConfig = entry.Cloudflare
+	key.OAuthKeyConfig = entry.OAuth
 }
 
 // clearHoistedKeyConfigs zeroes the hoisted aliases after they have been folded.
@@ -100,6 +106,8 @@ func clearHoistedKeyConfigs(entry *llm.ProviderEntry) {
 	entry.Replicate = nil
 	entry.Databricks = nil
 	entry.GithubCopilot = nil
+	entry.Cloudflare = nil
+	entry.OAuth = nil
 }
 
 // detectAliasConflicts returns ErrAliasConflict if any alias on entry is set

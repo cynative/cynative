@@ -53,6 +53,10 @@ type ProviderEntry struct {
 	// can export. github-copilot therefore spells itself three ways on purpose:
 	// the provider id and its doc filename keep the hyphen, this alias and its
 	// env vars use an underscore.
+	//
+	// OAuth is the one alias not named after a provider: Bifrost's
+	// oauth_key_config mints the bearer for openai when the key value is
+	// empty, and validateKey rejects it on any other provider.
 	Azure         *schemas.AzureKeyConfig         `json:"azure,omitempty"`
 	Vertex        *schemas.VertexKeyConfig        `json:"vertex,omitempty"`
 	Bedrock       *schemas.BedrockKeyConfig       `json:"bedrock,omitempty"`
@@ -63,6 +67,8 @@ type ProviderEntry struct {
 	Replicate     *schemas.ReplicateKeyConfig     `json:"replicate,omitempty"`
 	Databricks    *schemas.DatabricksKeyConfig    `json:"databricks,omitempty"`
 	GithubCopilot *schemas.GithubCopilotKeyConfig `json:"github_copilot,omitempty"`
+	Cloudflare    *schemas.CloudflareKeyConfig    `json:"cloudflare,omitempty"`
+	OAuth         *schemas.OAuthKeyConfig         `json:"oauth,omitempty"`
 }
 
 // FileAccount implements schemas.Account by exposing a single configured

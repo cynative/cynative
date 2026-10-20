@@ -68,6 +68,36 @@ llm:
     base_url: https://my-proxy.example.com
 ```
 
+## OAuth-minted bearer tokens
+
+A gateway that takes short-lived OAuth tokens instead of a static key can be
+reached through `llm.oauth`, Bifrost's `oauth_key_config`. Bifrost mints the
+bearer from the token endpoint, caches it and refreshes it before it expires.
+
+```yaml
+llm:
+  provider: openai
+  model: my-deployment-name
+  network_config:
+    base_url: https://my-gateway.example.com
+  oauth:
+    grant_type: client_credentials       # or jwt_bearer
+    token_url: https://login.example.com/oauth2/token
+    client_id: env.GATEWAY_CLIENT_ID
+    client_secret: env.GATEWAY_CLIENT_SECRET
+    scopes: [inference]
+```
+
+Leave `llm.api_key` unset: a non-empty key value always wins and the OAuth
+config is then ignored. `OPENAI_API_KEY` is not read when `llm.oauth` is set,
+so an exported OpenAI key never reaches the gateway. The
+`jwt_bearer` grant takes `private_key`, `issuer` and `audience` instead of the
+client pair; see Bifrost's
+[`schemas.OAuthKeyConfig`](https://github.com/maximhq/bifrost/blob/main/core/schemas/account.go)
+for every field. Only the `openai` provider honours this block. On any other
+provider Bifrost skips the key and the run fails with
+`no keys found that support model`.
+
 ## Links
 
 - OpenAI API reference: <https://platform.openai.com/docs/api-reference>
