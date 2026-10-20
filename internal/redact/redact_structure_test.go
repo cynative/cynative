@@ -653,6 +653,11 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "? \"pass\\\n  word\" # c\n: " + field + "\n? 'api_key'\n: " + field + "\n",
 		},
 		{
+			name: "explicit key on the line after a bare indicator",
+			in:   "?\n  password\n: a\n- ? # c\n\n    'api_key'\n  : b\n?\ntoken\n: c\n",
+			want: "?\n  password\n: " + field + "\n- ? # c\n\n    'api_key'\n  : " + field + "\n?\ntoken\n: c\n",
+		},
+		{
 			name: "flow value spelled with a leading hash right after the colon",
 			in:   "{\"password\":#a}\nx: {\"token\":#b, c: d}\n",
 			want: "{\"password\":" + field + "}\nx: {\"token\":" + field + ", c: d}\n",

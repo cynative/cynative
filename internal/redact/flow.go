@@ -65,12 +65,12 @@ type flowParser struct {
 // flowFrame is one open flow collection. An entry is a node, or a key node, a ':'
 // and a value node; key is the last key read, and value is set once its ':' is.
 type flowFrame struct {
-	mapping bool
 	key     string
+	values  []span // the mapping's "value" members
+	mapping bool
 	keyJSON bool
 	value   bool
-	named   bool   // the mapping's "name" member is a credential name
-	values  []span // the mapping's "value" members
+	named   bool // the mapping's "name" member is a credential name
 }
 
 // parse reads the collection and returns the offset after it. A collection that

@@ -1055,7 +1055,7 @@ _YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s
 _YAML_MAPPING_LINE = re.compile(r":(?:[ \t]|[ \t]*\Z)")
 _YAML_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|\Z)")
 _YAML_PROPS = re.compile(r"(?:[&!][^ \t]*(?:[ \t]+|\Z))*")
-_YAML_EXPLICIT_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)\?[ \t]+")
+_YAML_EXPLICIT_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)\?(?:[ \t]+|\Z)")
 _YAML_PLAIN_KEY = re.compile(r"[A-Za-z0-9_.-]+")
 _YAML_EXPLICIT_REST = re.compile(r"[ \t]*(?:#.*)?\Z")
 _FLOW_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*')[ \t]*:[ \t]+")
@@ -1332,7 +1332,10 @@ def _yaml_entry(s, lines, i):
     g = _YAML_EXPLICIT_KEY.match(text)
     if g is None:
         return None, i
-    raw, last = _explicit_key_text(s, lines, i, lines[i][0] + g.end())
+    k, start = _explicit_key_start(s, lines, i, g.end(1), lines[i][0] + g.end())
+    if k is None:
+        return None, i
+    raw, last = _explicit_key_text(s, lines, k, start)
     if raw is None:
         return None, i
     j = last + 1
@@ -1350,11 +1353,27 @@ def _yaml_entry(s, lines, i):
     return e, j
 
 
+def _explicit_key_start(s, lines, i, col, start):
+    """The line and offset where the key of the "? " entry on line i begins, or
+    (None, start), as explicitKeyStart: right after the indicator at column col, or,
+    when only blanks or a comment follow it, on the next line that is neither,
+    provided it is indented past the indicator."""
+    if not _YAML_EXPLICIT_REST.match(s[start:lines[i][1]]):
+        return i, start
+    j = i + 1
+    while j < len(lines) and _blank_or_comment(s[lines[j][0]:lines[j][1]]):
+        j += 1
+    if j == len(lines):
+        return None, start
+    indent = _indent(s[lines[j][0]:lines[j][1]])
+    if indent <= col:
+        return None, start
+    return j, lines[j][0] + indent
+
+
 def _explicit_key_text(s, lines, i, start):
-    """The key of a "? key" entry starting at s[start] on line i as written, and its
-    last line, or (None, i), as explicitKeyText."""
-    if start == lines[i][1]:
-        return None, i
+    """The key of a "? key" entry starting at s[start], a character other than a
+    blank, on line i as written, and its last line, or (None, i), as explicitKeyText."""
     plain = _YAML_PLAIN_KEY.match(s, start, lines[i][1])
     end = plain.end() if plain else start
     if s[start] in "\"'":
@@ -3262,6 +3281,7 @@ def _shared_selftest():
             ("yaml_flow_comment_after_comma", "x: {name: DB_PASSWORD,# c\n value: %s}\n" % live_secret),
             ("yaml_flow_under_plain_key_with_slash", "config/app.yaml: {password: %s}\n" % live_secret),
             ("yaml_explicit_key_over_lines", '? "pass\\\n  word"\n: %s\n' % live_secret),
+            ("yaml_explicit_key_on_next_line", '?\n  # c\n  password\n: %s\n' % live_secret),
             ("yaml_flow_hash_value_after_colon", '{"password":#%s}' % live_secret),
             ("yaml_flow_comment_after_key", 'x: {"password"#c\n: %s}\n' % live_secret),
             ("yaml_flow_stray_hash", 'x: {a: "b"#, password: %s}\n' % live_secret),
@@ -3277,6 +3297,7 @@ def _shared_selftest():
             '["sh","-c","app --password=[REDACTED:credential-field]"]',
             '["sh","-c","app --password=[REDACTED:credential-field]"]',
             '"pass\\x77ord": [REDACTED:credential-field]\n',
+            '?\n  # c\n  password\n: [REDACTED:credential-field]\n',
             '? password\n: [REDACTED:credential-field]\n',
             'env:\n- {name: DB_PASSWORD, value: [REDACTED:credential-field]}\n',
             'x: [{token: [REDACTED:credential-field]}]\n',

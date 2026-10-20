@@ -98,7 +98,7 @@ func newMatchers(credName, keyEnd, flagArg string) matchers {
 		yamlKey: regexp.MustCompile(
 			`^([ \t]*(?:-[ \t]+)*)([\w.-]+|"(?:[^"\\]|\\.)*"|'(?:[^']|'')*')[ \t]*:(?:[ \t]+|$)`,
 		),
-		explicitKey:  regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)\?[ \t]+`),
+		explicitKey:  regexp.MustCompile(`^([ \t]*(?:-[ \t]+)*)\?(?:[ \t]+|$)`),
 		plainKey:     regexp.MustCompile(`^[\w.-]+`),
 		explicitRest: regexp.MustCompile(`^[ \t]*(?:#.*)?$`),
 		flowKey: regexp.MustCompile(
@@ -300,7 +300,11 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 	if g == nil {
 		return yamlEntry{}, i, false
 	}
-	raw, last, ok := m.explicitKeyText(s, lines, i, lines[i].start+g[1])
+	k, start, ok := m.explicitKeyStart(s, lines, i, g[3], lines[i].start+g[1])
+	if !ok {
+		return yamlEntry{}, i, false
+	}
+	raw, last, ok := m.explicitKeyText(s, lines, k, start)
 	if !ok {
 		return yamlEntry{}, i, false
 	}
@@ -478,15 +482,32 @@ func stripComment(v string) string {
 	return v
 }
 
-// explicitKeyText reads the key of a "? key" entry that starts at offset start on
-// line i: a plain key, or a quoted one, which may run over several lines to its
+// explicitKeyStart returns the line and offset where the key of the "? " entry on
+// line i begins: at start, right after the indicator at column col, or, when only
+// blanks or a comment follow the indicator, on the next line that is neither,
+// provided it is indented past the indicator.
+func (m matchers) explicitKeyStart(s string, lines []yamlLine, i, col, start int) (int, int, bool) {
+	if !m.explicitRest.MatchString(s[start:lines[i].end]) {
+		return i, start, true
+	}
+	j := i + 1
+	for j < len(lines) && blankOrComment(s[lines[j].start:lines[j].end]) {
+		j++
+	}
+	if j == len(lines) {
+		return i, start, false
+	}
+	indent := indentOf(s[lines[j].start:lines[j].end])
+
+	return j, lines[j].start + indent, indent > col
+}
+
+// explicitKeyText reads the key of a "? key" entry that starts at offset start, a
+// character other than a blank, on line i: a plain key, or a quoted one, which may run over several lines to its
 // closing quote. It returns the key as written and the index of its last line,
 // and fails unless only blanks or a comment follow the key there.
 func (m matchers) explicitKeyText(s string, lines []yamlLine, i, start int) (string, int, bool) {
 	end := start + len(m.plainKey.FindString(s[start:lines[i].end]))
-	if start == lines[i].end {
-		return "", i, false
-	}
 	if c := s[start]; c == '"' || c == '\'' {
 		if end = closeQuote(s, start) + 1; end == 0 {
 			return "", i, false
@@ -517,6 +538,7 @@ func yamlScalar(v string) string {
 	}
 
 	var b strings.Builder
+	b.Grow(len(body))
 
 	for i := 0; i < len(body); i++ {
 		if body[i] != '\\' {
