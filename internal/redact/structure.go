@@ -157,7 +157,7 @@ type yamlEntry struct {
 	below bool   // the value starts on a later line, so the replacement needs a space
 	multi bool   // the value runs past its key line
 	json  bool   // the key is double-quoted, as a pretty-printed JSON member's is
-	props bool   // anchor or tag properties come before the value
+	tag   bool   // a tag property comes before the value
 	lead  bool   // the key has properties before it, or is a compact mapping after "? "
 	// alone marks a key the YAML line rule cannot read: a quoted key, or an
 	// explicit "? key" whose value is on the ": value" line after it.
@@ -194,7 +194,8 @@ func blankOrComment(t string) bool {
 // accepts.
 func (m matchers) yaml(s string) string {
 	lines := splitLines(s)
-	entries := m.yamlEntries(s, lines)
+	f := m.flows(s, lines)
+	entries := m.yamlEntries(s, lines, f.ranges)
 	ids := mappings(entries)
 
 	named := make(map[int]bool)
@@ -213,7 +214,7 @@ func (m matchers) yaml(s string) string {
 		}
 	}
 
-	return applySpans(s, append(spans, m.flows(s, lines)...))
+	return applySpans(s, append(spans, f.spans...))
 }
 
 // nameValue returns the scalar of a "name" entry when it is a single line,
@@ -230,15 +231,15 @@ func nameValue(s string, e yamlEntry) string {
 // earlier rule already replaced it.
 //
 // Under a key that is a JSON string a value that parses as a JSON scalar, with the
-// comma that may follow it, and has no properties before it (a tag can make
-// 1234 a string), is a pretty-printed JSON member. A string has its
+// comma that may follow it, and has no tag before it (a tag can make 1234 a
+// string), is a pretty-printed JSON member. A string has its
 // content replaced and keeps its quotes, so the document stays valid; any other
 // JSON scalar is left as it is, as the JSON passes leave it.
 func (m matchers) yamlValue(s string, e yamlEntry, spans []span) []span {
 	if e.end == e.start || m.done(s[e.start:e.end]) {
 		return spans
 	}
-	if v := strings.TrimSuffix(s[e.first:e.end], ","); e.json && !e.props && json.Valid([]byte(v)) {
+	if v := strings.TrimSuffix(s[e.first:e.end], ","); e.json && !e.tag && json.Valid([]byte(v)) {
 		if v[0] != '"' || m.done(v[1:len(v)-1]) {
 			return spans
 		}
@@ -257,14 +258,14 @@ func (m matchers) yamlValue(s string, e yamlEntry, spans []span) []span {
 // the lines it runs over are skipped; any other key's lines are read as entries
 // too, so a pair inside an embedded document (a ConfigMap's "config.yaml: |") is
 // still found. A key read only because properties come before it, or because it
-// is a compact mapping after "? " on its line (see yamlEntry), skips no lines: a
-// credential-named one has its value read to its end, unless it starts inside
-// another such value already read, and every line after its first is still read
-// as an entry, as it was before such keys were read at all.
-func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
+// is a compact mapping after "? " on its line (see yamlEntry), skips no lines:
+// its value may be read to its end (see leadExtent), and every line after its
+// first is still read as an entry, as it was before such keys were read at all.
+// One inside a flow collection, which flows reads, is not read to its end.
+func (m matchers) yamlEntries(s string, lines []yamlLine, flows []yamlLine) []yamlEntry {
 	var out []yamlEntry
 
-	read := 0 // the end of the last value read for a lead key
+	read := leadCursors{flows: flows}
 	for i := 0; i < len(lines); i++ {
 		text := s[lines[i].start:lines[i].end]
 		if blankOrComment(text) {
@@ -278,10 +279,7 @@ func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 		}
 		switch {
 		case e.lead:
-			if m.direct.MatchString(e.key) && e.start >= read {
-				m.extent(s, lines, line, &e)
-				read = e.end
-			}
+			m.leadExtent(s, lines, line, &e, &read)
 		case m.direct.MatchString(e.key) || strings.EqualFold(e.key, "name") || strings.EqualFold(e.key, "value"):
 			i = m.extent(s, lines, line, &e)
 		default:
@@ -291,6 +289,74 @@ func (m matchers) yamlEntries(s string, lines []yamlLine) []yamlEntry {
 	}
 
 	return out
+}
+
+// leadCursors hold the ends of the last values leadExtent read: of a "name" or
+// "value" key, and of a credential-named key whose value is replaced; and the
+// flow collections, sorted by start, with the next one to pass and the furthest
+// end among those passed.
+type leadCursors struct {
+	pair, cred int
+	flows      []yamlLine
+	next, end  int
+}
+
+// inFlow reports whether offset at, which never decreases from call to call, is
+// inside a flow collection.
+func (c *leadCursors) inFlow(at int) bool {
+	for ; c.next < len(c.flows) && c.flows[c.next].start <= at; c.next++ {
+		c.end = max(c.end, c.flows[c.next].end)
+	}
+
+	return at < c.end
+}
+
+// leadExtent reads to its end the value of e, a key that only properties or a
+// "? " made readable, on line, when it is a "name" or "value" key or a
+// credential-named one whose value is not left in place (see cursor). One that
+// starts inside a value of its own kind already read is not read again, which
+// keeps nested ones linear; a "name" or "value" value does not hide a credential
+// key inside it.
+func (m matchers) leadExtent(s string, lines []yamlLine, line int, e *yamlEntry, c *leadCursors) {
+	if c.inFlow(e.start) {
+		return
+	}
+	if strings.EqualFold(e.key, "name") || strings.EqualFold(e.key, "value") {
+		if e.start >= c.pair {
+			m.extent(s, lines, line, e)
+			c.pair = e.end
+		}
+
+		return
+	}
+	if !m.direct.MatchString(e.key) || m.cursor(s, lines[line], *e) || e.start < c.cred {
+		return
+	}
+	m.extent(s, lines, line, e)
+	if m.credentialKey(e.key, e.json && e.end > e.first && s[e.first] == '"') {
+		c.cred = e.end
+	}
+}
+
+// hasTag reports whether properties props hold a tag, which, unlike an anchor,
+// can change what type the node is.
+func hasTag(props string) bool {
+	for p := range strings.FieldsSeq(props) {
+		if p[0] == '!' {
+			return true
+		}
+	}
+
+	return false
+}
+
+// cursor reports whether e, a key on line l, is a JSON-string key the JSON
+// vocabulary does not count as a credential ("nextPageToken") with a
+// double-quoted value on its line, a value the pass leaves in place.
+func (m matchers) cursor(s string, l yamlLine, e yamlEntry) bool {
+	v := s[e.start:l.end]
+
+	return e.json && !m.keyEnd.MatchString(e.key) && strings.HasPrefix(v[len(m.props.FindString(v)):], `"`)
 }
 
 // yamlEntry reads the "key: value" entry that starts on line i, with the index
@@ -363,7 +429,7 @@ func (m matchers) yamlEntry(s string, lines []yamlLine, i int) (yamlEntry, int, 
 // there, or a flow collection on the key line, is not a value this pass replaces.
 func (m matchers) extent(s string, lines []yamlLine, i int, e *yamlEntry) int {
 	e.first = e.start + len(m.props.FindString(s[e.start:lines[i].end]))
-	e.props = e.first > e.start
+	e.tag = hasTag(s[e.start:e.first])
 	line := i
 	if v := s[e.first:lines[i].end]; v == "" || v[0] == '#' {
 		if line = m.scalarBelow(s, lines, i, e.col); line < 0 {
@@ -373,7 +439,7 @@ func (m matchers) extent(s string, lines []yamlLine, i int, e *yamlEntry) int {
 		e.first = lines[line].start + indentOf(s[lines[line].start:lines[line].end])
 		if p := len(m.props.FindString(s[e.first:lines[line].end])); e.first+p < lines[line].end {
 			e.first += p
-			e.props = e.props || p > 0
+			e.tag = e.tag || hasTag(s[e.first-p:e.first])
 		}
 	} else if (v[0] == '[' || v[0] == '{') && !strings.HasPrefix(v, "[REDACTED:") {
 		return i

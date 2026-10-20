@@ -1255,7 +1255,7 @@ def _yaml_scalar(v):
 def _yaml_extent(s, lines, i, e):
     """Set e's value end (and first/below/multi) and return its last line, as extent."""
     e["first"] = e["start"] + len(_YAML_PROPS.match(s, e["start"], lines[i][1]).group(0))
-    e["props"] = e["first"] > e["start"]
+    e["tag"] = _has_tag(s[e["start"]:e["first"]])
     line = i
     v = s[e["first"]:lines[i][1]]
     if v == "" or v[0] == "#":
@@ -1267,7 +1267,7 @@ def _yaml_extent(s, lines, i, e):
         p = len(_YAML_PROPS.match(s, e["first"], lines[line][1]).group(0))
         if e["first"] + p < lines[line][1]:
             e["first"] += p
-            e["props"] = e["props"] or p > 0
+            e["tag"] = e["tag"] or _has_tag(s[e["first"] - p:e["first"]])
     elif v[0] in "[{" and not v.startswith("[REDACTED:"):
         return i
     v = s[e["first"]:lines[line][1]]
@@ -1299,12 +1299,11 @@ def _name_value(s, e):
     return _yaml_scalar(_strip_comment(s[e["first"]:e["end"]]).rstrip(" \t\r"))
 
 
-def _yaml_entries(s, lines):
+def _yaml_entries(s, lines, flows):
     """Every non-blank, non-comment line as an entry, as yamlEntries: a key read only
     because properties come before it, or because it is a compact mapping after "? ",
-    skips no lines, and a credential-named one has its value read to its end unless it
-    starts inside another such value."""
-    out, i, read = [], 0, 0
+    skips no lines, and its value may be read to its end (see _yaml_lead_extent)."""
+    out, i, read = [], 0, {"pair": 0, "cred": 0, "flows": flows, "next": 0, "end": 0}
     while i < len(lines):
         text = s[lines[i][0]:lines[i][1]]
         if _blank_or_comment(text):
@@ -1316,9 +1315,7 @@ def _yaml_entries(s, lines):
             i += 1
             continue
         if e.get("lead"):
-            if _DIRECT_KEY.match(e["key"]) and e["start"] >= read:
-                _yaml_extent(s, lines, line, e)
-                read = e["end"]
+            _yaml_lead_extent(s, lines, line, e, read)
         elif _DIRECT_KEY.match(e["key"]) or e["key"].lower() in ("name", "value"):
             i = _yaml_extent(s, lines, line, e)
         else:
@@ -1326,6 +1323,42 @@ def _yaml_entries(s, lines):
         i += 1
         out.append(e)
     return out
+
+
+def _yaml_lead_extent(s, lines, line, e, read):
+    """Read the value of a key only properties or "? " made readable, as leadExtent:
+    read["pair"] and read["cred"] are the ends of the last "name"/"value" value and the
+    last replaced credential value read; one inside a flow collection is not read."""
+    flows = read["flows"]
+    while read["next"] < len(flows) and flows[read["next"]][0] <= e["start"]:
+        read["end"] = max(read["end"], flows[read["next"]][1])
+        read["next"] += 1
+    if e["start"] < read["end"]:
+        return
+    if e["key"].lower() in ("name", "value"):
+        if e["start"] >= read["pair"]:
+            _yaml_extent(s, lines, line, e)
+            read["pair"] = e["end"]
+        return
+    if not _DIRECT_KEY.match(e["key"]) or _yaml_cursor(s, lines[line], e) or e["start"] < read["cred"]:
+        return
+    _yaml_extent(s, lines, line, e)
+    if _credential_key(e["key"], e["json"] and s[e["first"]:e["first"] + 1] == '"'):
+        read["cred"] = e["end"]
+
+
+def _has_tag(props):
+    """True when properties props hold a tag, which, unlike an anchor, can change the
+    node's type, as hasTag."""
+    return any(p[0] == "!" for p in props.split())
+
+
+def _yaml_cursor(s, line, e):
+    """True when e, a key on line, is a JSON-string key the JSON vocabulary does not
+    count as a credential, with a double-quoted value on its line, as cursor."""
+    v = s[e["start"]:line[1]]
+    v = v[len(_YAML_PROPS.match(v).group(0)):]
+    return e["json"] and not _KEY_END_FULL.match(_fold(e["key"])) and v.startswith('"')
 
 
 def _yaml_entry(s, lines, i):
@@ -1429,7 +1462,8 @@ def _find_yaml(s):
     if ":" not in s:
         return []
     lines = _yaml_lines(s)
-    entries = _yaml_entries(s, lines)
+    flows, ranges = _find_flows(s, lines)
+    entries = _yaml_entries(s, lines, ranges)
     ids = _yaml_mappings(entries)
     named = {ids[i] for i, e in enumerate(entries)
              if e["key"].lower() == "name" and _KEY_END_FULL.match(_fold(_name_value(s, e)))}
@@ -1443,14 +1477,14 @@ def _find_yaml(s):
             continue
         v = s[e["first"]:e["end"]]
         v = v[:-1] if v.endswith(",") else v
-        if e["json"] and not e.get("props") and _json_valid(v):
+        if e["json"] and not e.get("tag") and _json_valid(v):
             # A JSON string keeps its quotes; any other JSON scalar is left, as yamlValue.
             if v[0] == '"':
                 out.append(_Found(v[1:-1], e["first"] + 1, e["first"] + len(v) - 1))
             continue
         start = e["colon"] if e["below"] else e["start"]
         out.append(_Found(s[start:e["end"]], start, e["end"]))
-    return out + _find_flows(s, lines)
+    return out + flows
 
 
 def _flow_start(text, key_props):
@@ -1491,10 +1525,10 @@ def _flow_key_len(text, at):
 
 
 def _find_flows(s, lines):
-    """Credential values in YAML flow collections, as flows in flow.go: a collection
-    found only because properties come before its key skips none of its lines but
-    another one of its kind."""
-    out, nxt, propped = [], 0, 0
+    """Credential values in YAML flow collections and the extent of each collection, as
+    flows in flow.go: a collection found only because properties come before its key
+    skips none of its lines but another one of its kind."""
+    out, ranges, nxt, propped = [], [], 0, 0
     for start, end in lines:
         if start < nxt:
             continue
@@ -1502,12 +1536,14 @@ def _find_flows(s, lines):
         if at >= 0:
             found, nxt = _read_flow(s, start + at)
             out.extend(found)
+            ranges.append((start + at, nxt))
             continue
         at = _flow_start(s[start:end], True)
         if at >= 0 and start >= propped:
             found, propped = _read_flow(s, start + at)
             out.extend(found)
-    return out
+            ranges.append((start + at, propped))
+    return out, ranges
 
 
 def _flow_scalar_end(s, start, key):
@@ -1554,13 +1590,13 @@ def _read_flow(s, i):
         return i
 
     def scalar(top, i):
-        props = False
+        tag = False
         while True:
             # A comment may sit between properties, and between them and the node.
             pr = _FLOW_PROPS.match(s, i).group(0)
             if not pr:
                 break
-            props = True
+            tag = tag or _has_tag(pr)
             i = skip(i + len(pr))
         if i >= len(s) or (s[i] in ",:[]{}" and not _PLACEHOLDER_PREFIX.match(s, i)):
             return i
@@ -1581,7 +1617,7 @@ def _read_flow(s, i):
             # A string under a JSON-string key keeps its quotes, as in scalar().
             a, b = start + 1, i - (1 if closed else 0)
         if _PLACEHOLDER.match(raw) or _PLACEHOLDER.match(text) or _PLACEHOLDER.match(s[a:b]) \
-                or (top["json"] and not props and raw[0] != '"' and _json_valid(raw)):
+                or (top["json"] and not tag and raw[0] != '"' and _json_valid(raw)):
             return i
         found = _Found(s[a:b] if a > start else text if raw[0] in "\"'" else raw, a, b)
         if _credential_key(top["key"], top["json"] and raw[0] == '"'):
@@ -3364,6 +3400,12 @@ def _shared_selftest():
             ("yaml_tagged_cursor_key_keeps_inner_lines",
              '!!str "nextPageToken": "\n  - name: DB_PASSWORD\n    value: %s\n  "\n' % live_secret),
             ("yaml_flow_verbatim_tag_with_blank", "{ !<a b> token: %s }\n" % live_secret),
+            ("yaml_pair_value_with_properties", "- name: DB_PASSWORD\n  &v value: %s\n" % live_secret),
+            ("yaml_pair_name_with_properties", "- &n name: API_KEY\n  value: %s\n" % live_secret),
+            ("yaml_key_with_properties_in_cursor_value", '!!str "nextPageToken": "\n  &a password: %s\n  "\n' % live_secret),
+            ("yaml_key_with_properties_in_cursor_value_below", '!!str "pageToken":\n  "\n  &b token: %s\n  "\n' % live_secret),
+            ("yaml_key_with_properties_in_unnamed_value_block", "&c value: |\n  &d secret: %s\n" % live_secret),
+            ("yaml_pair_value_with_tag", "- !!str name: DB_PASSWORD\n  !!str value: %s\n" % live_secret),
         ]
         shape439_clean = [
             '!!str "password": [REDACTED:credential-field]\n',
@@ -3378,6 +3420,10 @@ def _shared_selftest():
             "!!str x: {public: '\n  {password: [REDACTED:credential-field]}\n'}\n",
             '!!str "nextPageToken": "\n  - name: DB_PASSWORD\n    value: [REDACTED:credential-field]\n  "\n',
             "{ !<a b> token: [REDACTED:credential-field] }\n",
+            "{\n &k password: [REDACTED:credential-field] }\n[\n &j token: [REDACTED:credential-field], x]\n"
+            '"nextPageToken": &c 123\nx: {"pageToken": &d 4}\n!!str y: [\n  {a: b},\n  &k secret: [REDACTED:credential-field], z]\n',
+            "- name: DB_PASSWORD\n  &v value: [REDACTED:credential-field]\n- &n name: API_KEY\n"
+            "  value: [REDACTED:credential-field]\n",
         ]
         # --live-secrets edge paths (class-1 file mechanism): an empty file is valid
         # (ambient-credential runs enumerate no env secret) and a missing/unreadable path

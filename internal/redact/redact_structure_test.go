@@ -534,9 +534,9 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "? password : " + field + "\n- ? api_key: " + field + "\n  : v\n? x\n: y\n",
 		},
 		{
-			name: "yaml tagged value under a JSON key",
+			name: "yaml tagged value under a JSON key, and an anchor that changes no type",
 			in:   "!!str \"password\": !!str 1234\n\"api_key\": &a 5\nx: {\"token\": !!str 6}\n\"secret\":\n  !!str 7\n",
-			want: "!!str \"password\": " + field + "\n\"api_key\": " + field + "\nx: {\"token\": !!str " + field + "}\n" +
+			want: "!!str \"password\": " + field + "\n\"api_key\": &a 5\nx: {\"token\": !!str " + field + "}\n" +
 				"\"secret\": " + field + "\n",
 		},
 		{
@@ -570,6 +570,22 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "? &k '\n  \"password\": " + field + "\n  '\n: x\n!!str x: {public: '\n  {password: " + field +
 				"}\n  !!str y: {token: s3}\n'}\n!!str \"nextPageToken\": \"\n  - name: DB_PASSWORD\n    value: " + field +
 				"\n  \"\n",
+		},
+		{
+			name: "yaml name or value key with properties pairs, and a key inside a value left in place",
+			in: "- name: DB_PASSWORD\n  &v value: s1\n- &n name: API_KEY\n  value: s2\n" +
+				"!!str \"nextPageToken\": \"\n  &a password: s3\n  \"\n!!str \"pageToken\":\n  \"\n  &b token: s4\n  \"\n" +
+				"&c value: |\n  &d secret: s5\n",
+			want: "- name: DB_PASSWORD\n  &v value: " + field + "\n- &n name: API_KEY\n  value: " + field + "\n" +
+				"!!str \"nextPageToken\": \"\n  &a password: " + field + "\n  \"\n!!str \"pageToken\":\n  \"\n  &b token: " +
+				field + "\n  \"\n&c value: |\n  &d secret: " + field + "\n",
+		},
+		{
+			name: "yaml flow entry with properties keeps the closing bracket",
+			in: "{\n &k password: s1 }\n[\n &j token: s2, x]\n\"nextPageToken\": &c 123\nx: {\"pageToken\": &d 4}\n" +
+				"!!str y: [\n  {a: b},\n  &k secret: s3, z]\n",
+			want: "{\n &k password: " + field + " }\n[\n &j token: " + field + ", x]\n\"nextPageToken\": &c 123\n" +
+				"x: {\"pageToken\": &d 4}\n!!str y: [\n  {a: b},\n  &k secret: " + field + ", z]\n",
 		},
 		{
 			name: "yaml flow verbatim tag holding a blank",

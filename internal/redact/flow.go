@@ -14,15 +14,15 @@ import (
 // line's indentation and "- " markers, or after a "key: " on the line. A JSON
 // document is a flow collection too: under a key that is a JSON string, a
 // double-quoted value has its content replaced and keeps its quotes, and any
-// other JSON scalar is left as it is, as the JSON passes leave it, unless
-// properties come before it.
+// other JSON scalar is left as it is, as the JSON passes leave it, unless a tag
+// comes before it.
 //
 // The lines a collection runs over are not read again, except for one found only
 // because properties come before its key ("!!str x: {...}"): the lines after its
 // first are still read as they were before such collections were read at all,
 // and only another one of its kind is skipped inside it.
-func (m matchers) flows(s string, lines []yamlLine) []span {
-	var spans []span
+func (m matchers) flows(s string, lines []yamlLine) flowResult {
+	var out flowResult
 
 	next, propped := 0, 0
 	for _, l := range lines {
@@ -33,15 +33,28 @@ func (m matchers) flows(s string, lines []yamlLine) []span {
 		if at := m.flowStart(text, false); at >= 0 {
 			p := flowParser{m: m, s: s, i: l.start + at}
 			next = p.parse()
-			spans = append(spans, p.spans...)
+			out.add(&p, l.start+at, next)
 		} else if at = m.flowStart(text, true); at >= 0 && l.start >= propped {
 			p := flowParser{m: m, s: s, i: l.start + at}
 			propped = p.parse()
-			spans = append(spans, p.spans...)
+			out.add(&p, l.start+at, propped)
 		}
 	}
 
-	return spans
+	return out
+}
+
+// flowResult is what flows read: the spans of credential values, and the extent
+// of each collection, sorted by start.
+type flowResult struct {
+	spans  []span
+	ranges []yamlLine
+}
+
+// add records what p read in the collection from start to end.
+func (r *flowResult) add(p *flowParser, start, end int) {
+	r.spans = append(r.spans, p.spans...)
+	r.ranges = append(r.ranges, yamlLine{start, end})
 }
 
 // flowStart returns the offset in line text of the flow collection it opens, or
@@ -146,20 +159,10 @@ func (p *flowParser) entryNode() {
 
 // scalar reads the scalar at p.i, after any anchor or tag, as the current entry's
 // key or value. Under a key that is a JSON string, a JSON scalar other than a
-// string is left as it is unless properties come before it (a tag can make 1234
-// a string).
+// string is left as it is unless a tag comes before it (a tag can make 1234 a
+// string).
 func (p *flowParser) scalar(top *flowFrame) {
-	props := false
-	for {
-		// A comment may sit between properties, and between them and the node.
-		pr := p.m.flowProps.FindString(p.s[p.i:])
-		if pr == "" {
-			break
-		}
-		props = true
-		p.i += len(pr)
-		p.skipSpace()
-	}
+	tag := p.properties()
 	if p.i >= len(p.s) || strings.IndexByte(",:[]{}", p.s[p.i]) >= 0 && p.m.placeholderAt(p.s, p.i) == 0 {
 		return
 	}
@@ -188,13 +191,28 @@ func (p *flowParser) scalar(top *flowFrame) {
 		sp = span{start + 1, p.i - boolInt(closed), sp.repl}
 	}
 	if p.m.done(raw) || p.m.done(text) || p.m.done(p.s[sp.start:sp.end]) ||
-		top.keyJSON && !props && raw[0] != '"' && json.Valid([]byte(raw)) {
+		top.keyJSON && !tag && raw[0] != '"' && json.Valid([]byte(raw)) {
 		return
 	}
 	if p.m.credentialKey(top.key, top.keyJSON && raw[0] == '"') {
 		p.spans = append(p.spans, sp)
 	} else if top.mapping && strings.EqualFold(top.key, "value") {
 		top.values = append(top.values, sp)
+	}
+}
+
+// properties steps past the anchor and tag properties at p.i, with any comment
+// between them and before the node, and reports whether they hold a tag.
+func (p *flowParser) properties() bool {
+	tag := false
+	for {
+		pr := p.m.flowProps.FindString(p.s[p.i:])
+		if pr == "" {
+			return tag
+		}
+		tag = tag || hasTag(pr)
+		p.i += len(pr)
+		p.skipSpace()
 	}
 }
 
