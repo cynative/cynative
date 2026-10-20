@@ -96,6 +96,8 @@ func FuzzRedact(f *testing.F) {
 	f.Add("\"\x00\\\"pAsswd\\\":\\\"\\\"pAsswd\\\":\\\"")
 	f.Add(`<token>["--token","<p`)
 	f.Add(`x["--token","<token>":0`)
+	f.Add("!!str \"password\": !!str 1\n- - &a token: b\n? &k\n  api_key\n: c\n? secret : d\n")
+	f.Add("x: {\"token\": !!str 1, k: v}\n!!str y: {password: z}\n\"secret\":\n  !!str 2\n")
 
 	r := redact.New()
 	f.Fuzz(func(t *testing.T, s string) {
