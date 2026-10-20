@@ -92,6 +92,7 @@ func TestCanonicalEnvKey_HappyPath(t *testing.T) {
 		{schemas.OpencodeGo, "OPENCODE_API_KEY", true},
 		{schemas.OpencodeZen, "OPENCODE_API_KEY", true},
 		{schemas.Databricks, "DATABRICKS_TOKEN", true},
+		{schemas.Cloudflare, "CLOUDFLARE_API_TOKEN", true},
 		{schemas.Bedrock, "", false},
 		{schemas.GithubCopilot, "", false},
 		{schemas.Ollama, "", false},

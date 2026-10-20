@@ -218,7 +218,12 @@ The LLM connection is configured separately and is not changed by this
 policy. Bifrost, the embedded LLM client, does not read the proxy variables;
 its own `proxy_config` block (`type: http`, `socks5` or `environment`) governs
 the model connection, and the Bedrock provider's client follows the proxy
-variables through Go's default behavior. That path resolves them through the
+variables through Go's default behavior. So do the token requests Bifrost
+makes on its own when no `proxy_config` is set: the Vertex, Azure and
+Databricks credential exchanges and the `llm.oauth` mint read `HTTPS_PROXY`
+and `NO_PROXY` through Bifrost's own parser, so cynative's startup checks on
+those variables do not apply to them, and the chat request itself still goes
+direct. That path resolves them through the
 copy of `httpproxy` vendored into Go's standard library, which reads the
 upper-case spelling first, so two spellings carrying different values can send
 the model connection and the connectors to different proxies; set both to the

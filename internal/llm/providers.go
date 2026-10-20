@@ -99,6 +99,7 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.Sarvam:        "SARVAM_API_KEY",
 	schemas.Wafer:         "WAFER_API_KEY",
 	schemas.Databricks:    "DATABRICKS_TOKEN",
+	schemas.Cloudflare:    "CLOUDFLARE_API_TOKEN",
 	schemas.Bedrock:       "",
 	schemas.BedrockMantle: "",
 	schemas.Ollama:        "",
