@@ -516,6 +516,67 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: "? password\n: " + field + "\n- ? \"api\\x5fkey\"\n  # c\n  : " + field + "\nnext: x\n",
 		},
 		{
+			name: "yaml key with a tag or an anchor",
+			in: "!!str \"password\": a\n&c password: b\n- &d !<tag:yaml.org,2002:str> api_key: c\n" +
+				"  &e token: d # c\nnext: x\n",
+			want: "!!str \"password\": " + field + "\n&c password: " + field + "\n- &d !<tag:yaml.org,2002:str> api_key: " +
+				field + "\n  &e token: " + field + " # c\nnext: x\n",
+		},
+		{
+			name: "yaml explicit key with a tag or an anchor",
+			in:   "? !!str password\n: a\n? &k !t\n  \"api_key\"\n: b\n?\n  !<tag:a,b>\n  # c\n  token\n: c\n",
+			want: "? !!str password\n: " + field + "\n? &k !t\n  \"api_key\"\n: " + field +
+				"\n?\n  !<tag:a,b>\n  # c\n  token\n: " + field + "\n",
+		},
+		{
+			name: "yaml compact mapping as an explicit key",
+			in:   "? password : a\n- ? api_key: b\n  : v\n? x\n: y\n",
+			want: "? password : " + field + "\n- ? api_key: " + field + "\n  : v\n? x\n: y\n",
+		},
+		{
+			name: "yaml tagged value under a JSON key",
+			in:   "!!str \"password\": !!str 1234\n\"api_key\": &a 5\nx: {\"token\": !!str 6}\n\"secret\":\n  !!str 7\n",
+			want: "!!str \"password\": " + field + "\n\"api_key\": " + field + "\nx: {\"token\": !!str " + field + "}\n" +
+				"\"secret\": " + field + "\n",
+		},
+		{
+			name: "yaml properties before a key that opens a flow collection",
+			in:   "!!str x: {password: a}\n- &b y: [token: b]\n",
+			want: "!!str x: {password: " + field + "}\n- &b y: [token: " + field + "]\n",
+		},
+		{
+			name: "yaml key after two sequence markers",
+			in:   "- - password: a\n",
+			want: "- - password: " + field + "\n",
+		},
+		{
+			name: "yaml name or value key after properties keeps its lines readable",
+			in: "&a value: |\n  \"password\": h1\n&b value: |\n  - name: DB_PASSWORD\n    value: h2\n" +
+				"- value: |\n    h3\n    password: \"\n  name: DB_PASSWORD\n? &c\n  value\n: |\n  \"token\": h4\n" +
+				"- - name: DB_PASSWORD\n    value: h5\n",
+			want: "&a value: |\n  \"password\": " + field + "\n&b value: |\n  - name: DB_PASSWORD\n    value: " + field +
+				"\n- value: " + field + "\n  name: DB_PASSWORD\n? &c\n  value\n: |\n  \"token\": " + field +
+				"\n- - name: DB_PASSWORD\n    value: " + field + "\n",
+		},
+		{
+			name: "yaml flow explicit key with a comment between its properties",
+			in:   "{ ? !!str # c\n &a token\n : hunter2 }\n",
+			want: "{ ? !!str # c\n &a token\n : " + field + " }\n",
+		},
+		{
+			name: "yaml key read through properties leaves the lines after it readable",
+			in: "? &k '\n  \"password\": s1\n  '\n: x\n!!str x: {public: '\n  {password: s2}\n  !!str y: {token: s3}\n'}\n" +
+				"!!str \"nextPageToken\": \"\n  - name: DB_PASSWORD\n    value: s4\n  \"\n",
+			want: "? &k '\n  \"password\": " + field + "\n  '\n: x\n!!str x: {public: '\n  {password: " + field +
+				"}\n  !!str y: {token: s3}\n'}\n!!str \"nextPageToken\": \"\n  - name: DB_PASSWORD\n    value: " + field +
+				"\n  \"\n",
+		},
+		{
+			name: "yaml flow verbatim tag holding a blank",
+			in:   "{ !<a b> token: s1 }\n",
+			want: "{ !<a b> token: " + field + " }\n",
+		},
+		{
 			name: "yaml flow mapping pair in a sequence",
 			in:   "env:\n- {name: DB_PASSWORD, value: hunter2}\n- {name: DB_HOST, value: db}\n",
 			want: "env:\n- {name: DB_PASSWORD, value: " + field + "}\n- {name: DB_HOST, value: db}\n",

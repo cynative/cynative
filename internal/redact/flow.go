@@ -14,31 +14,43 @@ import (
 // line's indentation and "- " markers, or after a "key: " on the line. A JSON
 // document is a flow collection too: under a key that is a JSON string, a
 // double-quoted value has its content replaced and keeps its quotes, and any
-// other JSON scalar is left as it is, as the JSON passes leave it.
+// other JSON scalar is left as it is, as the JSON passes leave it, unless
+// properties come before it.
+//
+// The lines a collection runs over are not read again, except for one found only
+// because properties come before its key ("!!str x: {...}"): the lines after its
+// first are still read as they were before such collections were read at all,
+// and only another one of its kind is skipped inside it.
 func (m matchers) flows(s string, lines []yamlLine) []span {
 	var spans []span
 
-	next := 0
+	next, propped := 0, 0
 	for _, l := range lines {
 		if l.start < next {
 			continue
 		}
-		at := m.flowStart(s[l.start:l.end])
-		if at < 0 {
-			continue
+		text := s[l.start:l.end]
+		if at := m.flowStart(text, false); at >= 0 {
+			p := flowParser{m: m, s: s, i: l.start + at}
+			next = p.parse()
+			spans = append(spans, p.spans...)
+		} else if at = m.flowStart(text, true); at >= 0 && l.start >= propped {
+			p := flowParser{m: m, s: s, i: l.start + at}
+			propped = p.parse()
+			spans = append(spans, p.spans...)
 		}
-		p := flowParser{m: m, s: s, i: l.start + at}
-		next = p.parse()
-		spans = append(spans, p.spans...)
 	}
 
 	return spans
 }
 
 // flowStart returns the offset in line text of the flow collection it opens, or
-// -1.
-func (m matchers) flowStart(text string) int {
+// -1; with keyProps, properties may also come before the key.
+func (m matchers) flowStart(text string, keyProps bool) int {
 	at := len(m.flowLead.FindString(text))
+	if keyProps {
+		at += len(m.flowProps.FindString(text[at:]))
+	}
 	at += len(m.flowKey.FindString(text[at:]))
 	at += len(m.flowProps.FindString(text[at:]))
 	if at == len(text) || text[at] != '{' && text[at] != '[' || m.placeholderAt(text, at) > 0 {
@@ -133,10 +145,21 @@ func (p *flowParser) entryNode() {
 }
 
 // scalar reads the scalar at p.i, after any anchor or tag, as the current entry's
-// key or value.
+// key or value. Under a key that is a JSON string, a JSON scalar other than a
+// string is left as it is unless properties come before it (a tag can make 1234
+// a string).
 func (p *flowParser) scalar(top *flowFrame) {
-	p.i += len(p.m.flowProps.FindString(p.s[p.i:]))
-	p.skipSpace()
+	props := false
+	for {
+		// A comment may sit between properties, and between them and the node.
+		pr := p.m.flowProps.FindString(p.s[p.i:])
+		if pr == "" {
+			break
+		}
+		props = true
+		p.i += len(pr)
+		p.skipSpace()
+	}
 	if p.i >= len(p.s) || strings.IndexByte(",:[]{}", p.s[p.i]) >= 0 && p.m.placeholderAt(p.s, p.i) == 0 {
 		return
 	}
@@ -165,7 +188,7 @@ func (p *flowParser) scalar(top *flowFrame) {
 		sp = span{start + 1, p.i - boolInt(closed), sp.repl}
 	}
 	if p.m.done(raw) || p.m.done(text) || p.m.done(p.s[sp.start:sp.end]) ||
-		top.keyJSON && raw[0] != '"' && json.Valid([]byte(raw)) {
+		top.keyJSON && !props && raw[0] != '"' && json.Valid([]byte(raw)) {
 		return
 	}
 	if p.m.credentialKey(top.key, top.keyJSON && raw[0] == '"') {
