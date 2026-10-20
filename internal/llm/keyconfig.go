@@ -14,7 +14,7 @@ import (
 // vertex branch tests only for nil. So this catches the common
 // misconfiguration, not every one.
 //
-// Two providers form the closed required set. Re-verified against
+// Three providers form the closed required set. Re-verified against
 // github.com/maximhq/bifrost/core@v1.12.0, where the failure mode is not a panic:
 // validateKey (utils.go:132) rejects the key, key selection logs a warning and
 // skips it (bifrost.go:10761-10763), and the request then fails at
@@ -27,9 +27,13 @@ import (
 //     unguarded dereference earlier versions of this comment cited still exists
 //     (getAuthTokenSource, providers/vertex/vertex.go:236), but nothing reaches
 //     it with a nil config because validateKey rejects the key first.
+//   - cloudflare: validateKey requires cloudflare_key_config and a non-empty
+//     account_id (utils.go:177-183). Here the account ID is checked as well as
+//     the block, since it is the block's only field and the request URL
+//     cannot be built without it (cloudflare.go:77-85).
 //
-// Bifrost hard-requires a config for ollama, vllm, sgl and cloudflare too
-// (utils.go:156-183), and for github-copilot whenever the key value is empty
+// Bifrost hard-requires a config for ollama, vllm and sgl too
+// (utils.go:156-176), and for github-copilot whenever the key value is empty
 // (utils.go:184-213). Cynative does not mirror those, so they still surface as
 // the opaque runtime error above; extending the set is a separate decision,
 // not a bump. validateKey also rejects an oauth_key_config on any provider but
@@ -40,7 +44,8 @@ import (
 // (databricks.go:127, 169, 265, 286) and runs from a token plus a base_url with
 // no config whatsoever; Bedrock's config is optional (AWS credential chain /
 // bare API-key Value). The fields are checked directly (no reflection), so an
-// upstream rename of AzureKeyConfig/VertexKeyConfig fails at compile time.
+// upstream rename of AzureKeyConfig/VertexKeyConfig/CloudflareKeyConfig fails at
+// compile time.
 func ValidateKeyConfigs(entry *ProviderEntry) error {
 	if entry == nil {
 		return nil
@@ -52,6 +57,11 @@ func ValidateKeyConfigs(entry *ProviderEntry) error {
 	}
 	if provider == schemas.Vertex {
 		return requireKeyConfigs(entry.Keys, provider, func(k schemas.Key) bool { return k.VertexKeyConfig != nil })
+	}
+	if provider == schemas.Cloudflare {
+		return requireKeyConfigs(entry.Keys, provider, func(k schemas.Key) bool {
+			return k.CloudflareKeyConfig != nil && k.CloudflareKeyConfig.AccountID.GetValue() != ""
+		})
 	}
 	return nil // every other provider's per-key config is optional or absent.
 }

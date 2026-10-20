@@ -27,9 +27,7 @@ Quote the model in YAML: an unquoted `@` cannot start a plain scalar.
 
 Workers AI serves its OpenAI-compatible API per account, at
 `https://api.cloudflare.com/client/v4/accounts/<account_id>/ai/v1/chat/completions`.
-The account ID is required. Without it Bifrost skips the key, logs
-`cloudflare_key_config is required, skipping key` to stderr, and the run fails
-with `no keys found that support model`. `network_config.base_url` replaces only the
+The account ID is required; cynative refuses to start without it. `network_config.base_url` replaces only the
 `https://api.cloudflare.com/client/v4` part; the account path is always appended.
 
 Model names are Workers AI's full IDs, such as `@cf/meta/...` or `@cf/openai/...`.
