@@ -80,11 +80,11 @@ func TestCommandFrom(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			memo := make(map[int]int)
+			memo := newScanMemo()
 			if got := m.commandFrom(tc.words, memo, 1); got != tc.want {
 				t.Fatalf("commandFrom = %d, want %d", got, tc.want)
 			}
-			if !maps.Equal(memo, tc.memo) {
+			if !maps.Equal(memo.command, tc.memo) {
 				t.Fatalf("memo = %v, want %v", memo, tc.memo)
 			}
 			// From the stored option on every word is a -c, so a scan that read
@@ -142,5 +142,39 @@ func TestSkipToken(t *testing.T) {
 				t.Errorf("skipToken(%q, %d) = %d, want %d", tc.in, tc.before, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestAfterOptions pins that afterOptions keeps its answer for every word it reads,
+// so shells whose options reach the same words read each of them once.
+func TestAfterOptions(t *testing.T) {
+	t.Parallel()
+
+	m := newMatchers("password", "password", "--password")
+	words := []string{"-e", "-o", "pipefail", "--", "cmd"}
+	memo := newScanMemo()
+	if got := m.afterOptions(words, memo, 0); got != 4 {
+		t.Fatalf("afterOptions = %d, want 4", got)
+	}
+	if want := map[int]int{0: 4, 1: 4, 3: 4}; !maps.Equal(memo.after, want) {
+		t.Fatalf("memo = %v, want %v", memo.after, want)
+	}
+	// From the stored word on every word is a short option, so a scan that read
+	// words[1] again would run to the end.
+	words = []string{"-e", "-o", "-x", "-x", "-x"}
+	if got := m.afterOptions(words, memo, 1); got != 4 {
+		t.Errorf("afterOptions from a stored word = %d, want 4", got)
+	}
+}
+
+// TestNestedCommands pins that a command several shells run is read once.
+func TestNestedCommands(t *testing.T) {
+	t.Parallel()
+
+	m := newMatchers("password", "password", "--password")
+	cmd := "sh -co sh -c app"
+	got := m.nestedCommands(cmd, shellWords(cmd))
+	if want := []nested{{4, "app", false}}; !slices.Equal(got, want) {
+		t.Fatalf("nestedCommands = %v, want %v", got, want)
 	}
 }

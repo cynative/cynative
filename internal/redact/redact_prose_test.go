@@ -67,7 +67,7 @@ func TestRedact_JSONAfterText(t *testing.T) {
 		{
 			name: "string never closed after an invalid escape",
 			in:   `"{\"token: x\":\"y\",\"t\\u006fken\":\"HEAD\nTAIL\"}\q`,
-			want: `"{\"token: x\":\"y\",\"t\\u006fken\":\"` + field,
+			want: `"{\"token: x\":\"y\",\"t\\u006fken\":\"` + field + `\"}`,
 		},
 		{
 			name: "encoded string after a quoted label",
