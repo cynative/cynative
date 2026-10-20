@@ -21,6 +21,9 @@ type Redactor struct {
 	locJSON    *regexp.Regexp
 	// marks is a run of placeholders, which the encoded pass aligns on.
 	marks *regexp.Regexp
+	// rounds bounds how many rounds Redact runs, counting the one that changes
+	// nothing.
+	rounds int
 }
 
 // New builds a Redactor with the production rule set and header denylist.
@@ -39,24 +42,32 @@ func New() *Redactor {
 		locDump: regexp.MustCompile(`(?im)^(location:[ \t]*)((?:https?://|//|/)\S*)`),
 		locJSON: regexp.MustCompile(`(?i)("location"\s*:\s*\[\s*")((?:https?://|//|/)[^"]*)(")`),
 		marks:   regexp.MustCompile(`(?:\[REDACTED:[a-z0-9-]+\])+`),
+		rounds:  maxRounds,
 	}
 }
 
 // maxNesting bounds how many levels of JSON-encoded strings Redact reads into.
 const maxNesting = 4
 
+// maxRounds bounds the rounds Redact runs before it gives up on content.
+const maxRounds = 8
+
 // Redact replaces every secret-shaped substring in s with its type placeholder.
-// Placeholders contain no secret-shaped substrings, so Redact is idempotent. A
-// placeholder the encoded pass writes into a string can change how the rules read
-// the content around it, so when that pass changes s the rules run over it again,
-// which leaves nothing for a second Redact to find.
+// A rule can rewrite text another rule reads, so one round over the output can
+// find what an earlier round missed (#436). Redact runs rounds until one changes
+// nothing and returns that output, which a second Redact therefore leaves as it
+// is. If no round within the bound changes nothing, the whole content becomes
+// one placeholder.
 func (r *Redactor) Redact(s string) string {
-	s = r.apply(s)
-	if t := r.encoded(s, maxNesting-1); t != s {
-		s = r.apply(t)
+	for range r.rounds {
+		t := r.redact(s, maxNesting)
+		if t == s {
+			return s
+		}
+		s = t
 	}
 
-	return s
+	return placeholder("unstable")
 }
 
 // redact runs the rules over s, then over the decoded content of the JSON strings

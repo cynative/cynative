@@ -2,6 +2,7 @@ package redact
 
 import (
 	"encoding/json"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -41,38 +42,97 @@ func (m matchers) flagValues(words []string) []wordValue {
 	return out
 }
 
+// scanMemo keeps, for one word list, the answer of each option scan by the index
+// it starts at: command for commandFrom and after for afterOptions.
+type scanMemo struct{ command, after map[int]int }
+
+func newScanMemo() scanMemo { return scanMemo{make(map[int]int), make(map[int]int)} }
+
 // commandFrom returns the index of the command a shell runs when its options
-// start at words[j]: the word after the option that holds 'c', past any other
-// options and the argument of those that take one. That is len(words) when the
-// option is the last word, and -1 when the options end without one. For one word
-// list the answer depends only on j, so memo keeps it for every option the scan
-// reads, and a later scan that reaches one of them stops there. Each option is
-// matched once however many shell names share its run.
-func (m matchers) commandFrom(words []string, memo map[int]int, j int) int {
+// start at words[j]: the first word after the option that holds 'c', the
+// arguments it takes for each 'o' or 'O' it also holds (see optionArgs), and the
+// options that follow it (see afterOptions), past any other options and the
+// arguments of those that take some. That is len(words) when no word is left,
+// and -1 when the options end without one. For one word list the answer depends
+// only on j, so memo keeps it for every option the scan reads, and a later scan
+// that reaches one of them stops there. Each option is matched once however many
+// shell names share its run.
+func (m matchers) commandFrom(words []string, memo scanMemo, j int) int {
 	var path []int
 
 	c := -1
 	for ; j < len(words) && words[j] != "" && strings.IndexByte("-+", words[j][0]) >= 0; j++ {
-		if known, ok := memo[j]; ok {
+		if known, ok := memo.command[j]; ok {
 			c = known
 
 			break
 		}
 		path = append(path, j)
 		if m.shellFlag.MatchString(words[j]) {
-			c = j + 1
+			c = m.afterOptions(words, memo, j+1+m.optionArgs(words[j]))
 
 			break
 		}
-		if m.shellArgOption.MatchString(words[j]) {
-			j++
-		}
+		j += m.optionArgs(words[j])
 	}
 	for _, p := range path {
-		memo[p] = c
+		memo.command[p] = c
 	}
 
 	return c
+}
+
+// afterOptions returns the index of the first word from words[j] on that is not
+// a short option, an argument of one that takes some, or a "--", which ends the
+// options and is skipped too. A shell reads those after the option that holds
+// 'c' before it takes the command. Its answer, too, depends only on j, so memo
+// keeps it for every word the scan reads, and each word is read once however
+// many shells' options reach it.
+func (m matchers) afterOptions(words []string, memo scanMemo, j int) int {
+	var path []int
+
+	end := -1
+	for ; j < len(words); j++ {
+		if known, ok := memo.after[j]; ok {
+			end = known
+
+			break
+		}
+		path = append(path, j)
+		if words[j] == "--" {
+			end = j + 1
+
+			break
+		}
+		if !m.shortOption.MatchString(words[j]) {
+			end = j
+
+			break
+		}
+		j += m.optionArgs(words[j])
+	}
+	if end < 0 {
+		end = len(words)
+	}
+	for _, p := range path {
+		memo.after[p] = end
+	}
+
+	return end
+}
+
+// optionArgs returns how many of the words after shell option w are its
+// arguments: one for --rcfile and --init-file, and one for each 'o' or 'O' in a
+// run of short options, since each names a shell option in turn.
+func (m matchers) optionArgs(w string) int {
+	if w == "--rcfile" || w == "--init-file" {
+		return 1
+	}
+	if !m.shortOption.MatchString(w) {
+		return 0
+	}
+
+	return strings.Count(w, "o") + strings.Count(w, "O")
 }
 
 // commands redacts credential values in runs of JSON string array elements, and
@@ -128,7 +188,8 @@ func (m matchers) commandSpans(s string, elems []element) []span {
 	}
 
 	// A shell command element is read as words by shellSpans, and only so, unless
-	// its shell name or one of the options before it is itself a flag's value. That name is replaced, so a
+	// it, its shell name or one of the options before it is itself a flag's value.
+	// That word is replaced, so a
 	// second Redact reads the element as a plain array element; it is read both
 	// ways here, the array reading first so its wider span wins, and the second
 	// Redact finds nothing left.
@@ -167,7 +228,7 @@ func (m matchers) shellCommands(s string, elems []element, words []string, taken
 	var (
 		before []int
 		shell  map[int]bool
-		memo   map[int]int
+		memo   scanMemo
 		out    []span
 	)
 
@@ -176,11 +237,11 @@ func (m matchers) shellCommands(s string, elems []element, words []string, taken
 			continue
 		}
 		if before == nil {
-			before, shell, memo = takenBefore(taken, len(elems)), make(map[int]bool), make(map[int]int)
+			before, shell, memo = takenBefore(taken, len(elems)), make(map[int]bool), newScanMemo()
 		}
 		if c := m.commandFrom(words, memo, i+1); c > i && c < len(elems) {
 			_, seen := shell[c]
-			shell[c] = before[c] == before[i]
+			shell[c] = before[c+1] == before[i]
 			if !seen {
 				out = append(out, m.shellSpans(s, elems[c])...)
 			}
@@ -197,30 +258,158 @@ func (m matchers) shellSpans(s string, e element) []span {
 	cmd, raw := decodeJSONString(s[e.start:e.end])
 	partial := cut(raw, e)
 	words := shellWords(cmd)
-	texts := make([]string, len(words))
-	for i, w := range words {
-		texts[i] = w.text
+	texts := wordTexts(words)
+
+	// end maps a word's end in cmd to the raw content. A word that runs into a bad
+	// escape, and a value read to the end of the command, also take the bytes after
+	// it.
+	end := func(off int, toEnd bool) int {
+		if toEnd || partial && off == len(cmd) {
+			return e.stop - boolInt(e.closed)
+		}
+
+		return e.start + raw[off]
 	}
 
 	var out []span
 
-	for _, v := range m.flagValues(texts) {
-		w := words[v.index]
-		start, repl := w.start, placeholder("credential-field")
-		if v.offset > 0 {
-			// A joined value starts after the '='. When the '=' is inside quotes, the
-			// span takes the closing quote too, so the replacement closes them again.
-			start = w.at[v.offset-1] + 1
-			repl += closeShellQuote(w.quote[v.offset-1])
-		}
-		// A word that runs into a bad escape also takes the bytes after it.
-		end := e.start + raw[w.end]
-		if partial && w.end == len(cmd) {
-			end = e.stop - boolInt(e.closed)
-		} else if m.done(w.text[v.offset:]) {
+	for _, v := range m.shellValues(cmd, words, texts) {
+		if !v.toEnd && (!partial || v.end != len(cmd)) && m.done(v.text) {
 			continue
 		}
-		out = append(out, span{e.start + raw[start], end, repl})
+		repl := placeholder("credential-field") + closeShellQuote(v.quote)
+		out = append(out, span{e.start + raw[v.start], end(v.end, v.toEnd), repl})
+	}
+	// A substitution's command runs to the end of cmd (see nestedCommands), so it
+	// is replaced to the end of the command.
+	for _, c := range m.nestedCommands(cmd, words) {
+		if w := words[c.index]; m.nestedCredential(c.text, maxShellNesting) {
+			out = append(out, span{e.start + raw[w.start], end(w.end, c.substitution), placeholder("credential-field")})
+		}
+	}
+
+	return out
+}
+
+// maxShellNesting bounds how many shells started inside a shell command are read.
+// A shell command nested deeper than that is redacted whole.
+const maxShellNesting = 4
+
+// shellValue is one credential value in a shell command: cmd[start:end], read as
+// text. A value that a shell may expand (it holds $, a backquote, '<', '>' or '(',
+// or a '<', '>' or '(' operator comes right before or after it) can run past the
+// word it starts in, so it is read to the end of the command. quote is the quote the value starts inside,
+// which its replacement closes again.
+type shellValue struct {
+	start, end int
+	text       string
+	quote      byte
+	toEnd      bool
+}
+
+// shellValues finds the credential values among the words of shell command cmd.
+func (m matchers) shellValues(cmd string, words []shellWord, texts []string) []shellValue {
+	var out []shellValue
+
+	for _, v := range m.flagValues(texts) {
+		w := words[v.index]
+		sv := shellValue{start: w.start, end: w.end, text: w.text[v.offset:]}
+		if v.offset > 0 {
+			sv.start, sv.quote = w.at[v.offset-1]+1, w.quote[v.offset-1]
+		} else if prev := words[v.index-1].end; strings.ContainsAny(cmd[prev:w.start], shellExpanding) {
+			gap := cmd[prev:w.start]
+			sv.start, sv.toEnd = prev+len(gap)-len(strings.TrimLeft(gap, shellBlank)), true
+		}
+		if sv.toEnd || strings.ContainsAny(cmd[sv.start:w.end], shellExpanding+"$`") ||
+			w.end < len(cmd) && strings.IndexByte(shellExpanding, cmd[w.end]) >= 0 {
+			sv.end, sv.toEnd = len(cmd), true
+		}
+		out = append(out, sv)
+	}
+
+	return out
+}
+
+// shellExpanding is the operators that open a redirection, a process
+// substitution or a subshell, after which the next word is not a flag's value.
+const shellExpanding = "<>("
+
+// nested is a command run inside a shell command: the text of the word at index,
+// or, for a substitution, the command from just after the substitution opens in
+// that word to its end.
+type nested struct {
+	index        int
+	text         string
+	substitution bool
+}
+
+// nestedCommands returns each command run inside shell command cmd, split into
+// words: the word a shell named there runs, once however many shells run it, and
+// the rest of cmd from just after the first "$(" or backquote in a word. A quoted
+// substitution's own quotes nest inside the word's, which the word reader does
+// not follow, so its command is read from the raw text, through the end of cmd;
+// that also covers every substitution after it.
+func (m matchers) nestedCommands(cmd string, words []shellWord) []nested {
+	var out []nested
+
+	texts := wordTexts(words)
+	memo, run, sub := newScanMemo(), make(map[int]bool), false
+	for i, t := range texts {
+		if k := substitutionStart(t); k >= 0 && !sub {
+			sub = true
+			out = append(out, nested{i, cmd[words[i].at[k-1]+1:], true})
+		}
+		if !m.shell.MatchString(t) {
+			continue
+		}
+		if c := m.commandFrom(texts, memo, i+1); c > i && c < len(texts) && !run[c] {
+			run[c] = true
+			out = append(out, nested{c, texts[c], false})
+		}
+	}
+
+	return out
+}
+
+// substitutionStart returns the offset in t just past the first "$(" or
+// backquote, whichever comes first, or -1 when t holds neither.
+func substitutionStart(t string) int {
+	k := -1
+	if d := strings.Index(t, "$("); d >= 0 {
+		k = d + len("$(")
+	}
+	if b := strings.IndexByte(t, '`'); b >= 0 && (k < 0 || b < k) {
+		k = b + 1
+	}
+
+	return k
+}
+
+// nestedCredential reports whether shell command cmd, run inside another shell
+// command, holds a credential value that is not yet replaced, here or in a
+// command it runs in turn. Past depth levels any command it runs counts.
+func (m matchers) nestedCredential(cmd string, depth int) bool {
+	words := shellWords(cmd)
+	texts := wordTexts(words)
+	for _, v := range m.shellValues(cmd, words, texts) {
+		if v.toEnd || !m.done(v.text) {
+			return true
+		}
+	}
+	for _, c := range m.nestedCommands(cmd, words) {
+		if depth == 0 || m.nestedCredential(c.text, depth-1) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// wordTexts returns the text of each word.
+func wordTexts(words []shellWord) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = w.text
 	}
 
 	return out
@@ -367,70 +556,13 @@ func (w *shellWord) read(d string, i int) int {
 			}
 			i += escapeWidth
 		default:
-			// A command substitution is part of the word, operators and blanks in it
-			// included.
-			for end := max(expansionEnd(d, i), i+1); i < end; i++ {
-				w.add(d, i, 0)
-			}
+			w.add(d, i, 0)
+			i++
 		}
 	}
 	w.text = string(w.buf)
 
 	return min(i, len(d))
-}
-
-// expansionEnd returns the offset after the command substitution, $(...) with its
-// parentheses balanced or a backquoted one, that starts at d[i], the end of d when
-// it is not closed, or i when none starts there.
-func expansionEnd(d string, i int) int {
-	switch {
-	case d[i] == '`':
-		for j := i + 1; j < len(d); j++ {
-			switch d[j] {
-			case '\\':
-				j++
-			case '`':
-				return j + 1
-			}
-		}
-
-		return len(d)
-	case strings.HasPrefix(d[i:], "$("):
-		depth := 0
-		for j := i + 1; j < len(d); j++ {
-			switch d[j] {
-			case '\\':
-				j++
-			case '\'', '"':
-				j = quoteEnd(d, j)
-			case '(':
-				depth++
-			case ')':
-				if depth--; depth == 0 {
-					return j + 1
-				}
-			}
-		}
-
-		return len(d)
-	}
-
-	return i
-}
-
-// quoteEnd returns the offset of the quote that closes the one at d[j], or the end
-// of d; a double-quoted string skips its backslash escapes.
-func quoteEnd(d string, j int) int {
-	for k := j + 1; k < len(d); k++ {
-		switch {
-		case d[j] == '"' && d[k] == '\\':
-			k++
-		case d[k] == d[j]:
-			return k
-		}
-	}
-
-	return len(d)
 }
 
 // single reads a single-quoted string from d[i:], after its opening quote, and
@@ -516,15 +648,73 @@ type object struct {
 // objects redacts, in every JSON object, the string value of each member whose
 // decoded name is a credential name, and every "value" member of an object whose
 // "name" member is one. Decoding the names catches spellings with escapes and
-// repeated members, which the line regexes cannot see. The decoder reads values
-// one after another, so NDJSON is covered too; at the first syntax error it stops,
-// and a credential value cut off there is redacted to the end of content.
+// repeated members, which the line regexes cannot see. A JSON value can start
+// anywhere in the content, such as the body of an HTTP dump after its headers, so
+// a read starts at each '{' or '[' no earlier read took (see jsonStarts). The decoder reads values one
+// after another, so NDJSON is covered too, and a credential value cut off at a
+// syntax error is redacted to the end of content.
+//
+// Content that holds NaN or Infinity is read twice, with the constants rejected,
+// as Go's decoder does, and read as values (see constReader), and the spans of
+// both reads are kept. Reading past a constant finds the members after it, but it
+// can also take a '{' inside a string that a read stopped at the constant would
+// have started from, so neither read alone finds everything. Spans from the two
+// reads cannot partly overlap, so applySpans drops only duplicates: each is the
+// content of a member's string value, whose opening quote follows a colon and so
+// is never an escaped quote inside a string the other read took, and the content
+// holds no unescaped quote unless it runs to the end of content.
 func (m matchers) objects(s string) string {
-	t := strings.TrimLeft(s, " \t\r\n")
-	if t == "" || t[0] != '{' && t[0] != '[' {
-		return s
+	var spans []span
+
+	read := func(constants bool) {
+		jsonStarts(s, "{[", func(start int) (int, bool) {
+			found, resume := m.objectsFrom(s, start, constants)
+			spans = append(spans, found...)
+
+			return resume, false
+		})
 	}
-	dec := json.NewDecoder(strings.NewReader(s))
+	read(false)
+	if strings.Contains(s, "NaN") || strings.Contains(s, "Infinity") {
+		read(true)
+	}
+
+	return applySpans(s, spans)
+}
+
+// jsonStarts calls read for each offset in s where a byte of starts may begin a
+// JSON value and no earlier read took it. read returns the offset to look from
+// next, at or after the token it stopped at, and whether nothing after that is
+// left to read; the next start is after this one either way. A later read never
+// starts inside a string an earlier read took: text before a value can open a
+// string that the value's first quote closes, as in x {"a {"key":"v"}, but each
+// escaped quote in that string could start a new read over the rest, and a rule
+// that redacts the string can remove the escape, so a second Redact would read
+// differently.
+func jsonStarts(s, starts string, read func(start int) (int, bool)) {
+	for pos := 0; ; {
+		k := strings.IndexAny(s[pos:], starts)
+		if k < 0 {
+			return
+		}
+		next, done := read(pos + k)
+		if done {
+			return
+		}
+		pos = max(next, pos+k+1)
+	}
+}
+
+// objectsFrom reads JSON values from s[start:] up to the first syntax error or the
+// end of content, and returns the spans of their credential members and where to
+// look for the next JSON value. With constants, NaN, Infinity and -Infinity are
+// read as values (see constReader).
+func (m matchers) objectsFrom(s string, start int, constants bool) ([]span, int) {
+	var src io.Reader = strings.NewReader(s[start:])
+	if constants {
+		src = &constReader{s: s[start:]}
+	}
+	dec := json.NewDecoder(src)
 	dec.UseNumber()
 
 	var (
@@ -533,7 +723,7 @@ func (m matchers) objects(s string) string {
 	)
 
 	for {
-		before := int(dec.InputOffset())
+		before := start + int(dec.InputOffset())
 		tok, err := dec.Token()
 		if err != nil {
 			spans = m.truncated(s, before, stack, spans)
@@ -541,7 +731,7 @@ func (m matchers) objects(s string) string {
 				spans = m.objectSpans(o, spans)
 			}
 
-			return applySpans(s, spans)
+			return spans, before
 		}
 
 		var top *object
@@ -559,7 +749,7 @@ func (m matchers) objects(s string) string {
 				top.key, top.wantValue = v, true
 			default:
 				q := before + strings.IndexByte(s[before:], '"')
-				top.members = append(top.members, member{top.key, v, q + 1, int(dec.InputOffset()) - 1})
+				top.members = append(top.members, member{top.key, v, q + 1, start + int(dec.InputOffset()) - 1})
 				top.wantValue = false
 			}
 		default:
@@ -568,6 +758,63 @@ func (m matchers) objects(s string) string {
 			}
 		}
 	}
+}
+
+// constReader reads s with each NaN, Infinity and -Infinity outside a JSON string
+// spelled as an empty array of the same length, so offsets do not move. Go's
+// decoder rejects the three, and a read that stopped at one would not pair the
+// members after it, while Python's json reads them as numbers (the connector
+// audit's prepass reads JSON with it). "Outside a string" is as read from the
+// start of s. An array cannot run into the bytes around it the way a number can,
+// so inside an object or array 1NaN, NaN1 and -NaN stay errors, as they are for
+// Python; between top-level values both read 1NaN and NaN1 as two values.
+type constReader struct {
+	s, pend    string
+	i          int
+	inStr, esc bool
+}
+
+func (r *constReader) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) && (r.pend != "" || r.i < len(r.s)) {
+		if r.pend == "" {
+			r.pend = r.next()
+		}
+		c := copy(p[n:], r.pend)
+		r.pend = r.pend[c:]
+		n += c
+	}
+	if r.pend == "" && r.i == len(r.s) {
+		return n, io.EOF
+	}
+
+	return n, nil
+}
+
+// next returns what the reader passes on for the bytes at i: a constant's array,
+// or the next byte.
+func (r *constReader) next() string {
+	rest := r.s[r.i:]
+	if !r.inStr {
+		for _, c := range [...]string{"NaN", "Infinity", "-Infinity"} {
+			if strings.HasPrefix(rest, c) {
+				r.i += len(c)
+
+				return "[" + strings.Repeat(" ", len(c)-len("[]")) + "]"
+			}
+		}
+	}
+	switch b := rest[0]; {
+	case r.esc:
+		r.esc = false
+	case r.inStr && b == '\\':
+		r.esc = true
+	case b == '"':
+		r.inStr = !r.inStr
+	}
+	r.i++
+
+	return rest[:1]
 }
 
 // delim opens or closes an object or array, collecting a closed object's spans.

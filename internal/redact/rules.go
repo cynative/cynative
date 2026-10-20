@@ -167,9 +167,10 @@ func credentialRules() []rule {
 			),
 			repl: `${1}` + placeholder("credential-field") + `${2}`,
 		},
-		{ // XML: <key>value</key>.
-			re:   regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*(</[A-Za-z0-9_:.-]+>)`),
-			repl: `${1}` + placeholder("credential-field") + `${2}`,
+		{ // XML: <key>value</key>, ending at the end of the JSON string it sits in
+			// (see xmlFields). The closing tag's name is not checked.
+			keywords: []string{"<"},
+			fn:       xmlFields{re: regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*(</[A-Za-z0-9_:.-]+>)`)}.apply,
 		},
 		{ // YAML: "key: value" line — key ENDS in a credential name, so DB_/AWS_/client-
 			// prefixes are allowed, plus an optional "- " sequence-item marker. Line-
@@ -201,11 +202,11 @@ func credentialRules() []rule {
 			re:   regexp.MustCompile(`((?i:X-Amz-Security-Token)=)` + signingValue),
 			repl: `${1}` + placeholder("aws-session-token"),
 		},
-		{ // XML credential value truncated to end-of-content (no closing tag);
-			// allow an optional trailing < so a value cut at the start of a closing
-			// tag (e.g. <SecretAccessKey>val<) still redacts.
-			re:   regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*<?\z`),
-			repl: `${1}` + placeholder("credential-field"),
+		{ // XML credential value that runs, with no '<' in it, to the end of content
+			// or of the JSON string it sits in; allow an optional trailing < so a value
+			// cut at the start of a closing tag (e.g. <SecretAccessKey>val<) still redacts.
+			keywords: []string{"<"},
+			fn:       xmlFields{re: regexp.MustCompile(`(<(?i:` + credName + `)>)[^<]*<?\z`)}.apply,
 		},
 		// The structural passes below read what the regexes left, so a second Redact
 		// finds the same structure this one leaves: a regex that drops a quote or a

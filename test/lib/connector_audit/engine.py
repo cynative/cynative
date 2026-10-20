@@ -1038,25 +1038,42 @@ _JSON_FIELDS = r'(?:\s*,\s*"' + _JSON_VALUE + r'"\s*:\s*(?:"' + _JSON_VALUE + r'
 # key there is still found). Go also redacts the decoded content of JSON strings
 # (internal/redact/encoded.go) as the prepass expands them, with these differences:
 # Go reads only a string that holds an escape, keys included, four levels deep at
-# most, and reads a surrogate pair as two U+FFFD; and past an error it reads only a
-# string that is never closed, while the prepass expands only a string json.loads
-# parses whole.
+# most, and reads a surrogate pair as two U+FFFD; it reads a string that is never
+# closed to the end of content, and past any other error it reads on from the next
+# token, while the prepass expands only a string json.loads parses whole.
 _WS = r"[\t\n\f\r ]"
 _PLACEHOLDER = re.compile(r"\[REDACTED:[a-z0-9-]+\]\Z")
 _KEY_END_FULL = re.compile(r"(?:" + _KEY_END + r")\Z", re.I | re.A)
-_DIRECT_KEY = re.compile(r"[\w.-]*(?:" + _CRED_SUFFIX + r")\Z", re.I | re.A)
+# Go folds the long s and the Kelvin sign to s and k under (?i), and the direct key
+# reads only its credential suffix case-insensitively, so only the suffix takes them.
+_DIRECT_KEY = re.compile(r"[\w.-]*(?:" + _CRED_SUFFIX.replace("s", "[s\u017f]").replace("k", "[k\u212a]") + r")\Z",
+                         re.I | re.A)
 _FLAG_FULL = re.compile(r"(?:" + _FLAG_ARG + r")\Z", re.I | re.A)
 _FLAG_JOINED = re.compile(r"(?:" + _FLAG_ARG + r")=", re.I | re.A)
-_YAML_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')"
+_YAML_KEY = re.compile(r"([ \t]*(?:[-?][ \t]+)*)((?:[&!][^ \t]*[ \t]+)*)([A-Za-z0-9_.-]+|\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')"
                        r"[ \t]*:(?:[ \t]+|\Z)")
 _YAML_MAPPING_LINE = re.compile(r":(?:[ \t]|[ \t]*\Z)")
 _YAML_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\[\s\S])*\"|'(?:[^']|'')*')[ \t]*:(?:[ \t]|\Z)")
 _YAML_PROPS = re.compile(r"(?:[&!][^ \t]*(?:[ \t]+|\Z))*")
+_YAML_EXPLICIT_KEY = re.compile(r"([ \t]*(?:-[ \t]+)*)\?(?:[ \t]+|\Z)")
+_YAML_PLAIN_KEY = re.compile(r"[A-Za-z0-9_.-]+")
+_YAML_EXPLICIT_REST = re.compile(r"[ \t]*(?:#.*)?\Z")
+_FLOW_QUOTED_KEY = re.compile(r"(?:\"(?:[^\"\\]|\\.)*\"|'(?:[^']|'')*')[ \t]*:[ \t]+")
+_FLOW_KEY_FIRST_EXCLUDED = "\t\n\f\r \"'#[]{},&!*|>%@`"
+_YAML_EXPLICIT_VALUE = re.compile(r"[ \t]*:(?:[ \t]+|\Z)")
+_YAML_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "t": "\t", "\t": "\t", "n": "\n", "v": "\v", "f": "\f",
+                 "r": "\r", "e": "\x1b", " ": " ", '"': '"', "/": "/", "\\": "\\",
+                 "N": "\x85", "_": "\xa0", "L": "\u2028", "P": "\u2029"}
+_YAML_HEX_ESCAPES = {"x": 2, "u": 4, "U": 8}
+_FLOW_LEAD = re.compile(r"[ \t]*(?:(?:-|:|\?|---)[ \t]+)*")
+_FLOW_PROPS = re.compile(r"(?:(?:!<[^<>]*>|[&!][^ \t\r\n,\[\]{}]*)[ \t\r\n]*)*")
+_PLACEHOLDER_PREFIX = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
 _HEX4 = re.compile(r"[0-9a-fA-F]{4}")
 _YAML_BLOCK = re.compile(r"[|>][0-9+-]*\Z")
 _SHELL = re.compile(r"(?:[A-Za-z0-9_./-]*/)?(?:sh|bash|dash|ash|ksh|zsh)\Z")
 _SHELL_FLAG = re.compile(r"-[A-Za-z]*c[A-Za-z]*\Z")
-_SHELL_ARG_OPTION = re.compile(r"(?:[-+][oO]|--rcfile|--init-file)\Z")
+_SHORT_OPTION = re.compile(r"[-+][A-Za-z]+\Z")
+
 _RUN_START = re.compile(r'[\[,]' + _WS + r'*"')
 _ELEMENT = re.compile(r'"((?:\\[\s\S]|[^"\\])*)(")?')
 _SEPARATOR = re.compile(_WS + r'*,' + _WS + r'*"')
@@ -1114,6 +1131,7 @@ class _Detector:
         out, last = [], 0
         for m in sorted(self._find(text), key=lambda f: f.start()):
             if m.start() < last:
+                last = max(last, m.end())
                 continue
             out.append(text[last:m.start()])
             out.append(repl(m))
@@ -1199,15 +1217,45 @@ def _strip_comment(v):
     return v
 
 
-def _unquote(v):
-    if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
-        return v[1:-1]
-    return v
+def _yaml_scalar(v):
+    """A quoted YAML scalar read, as yamlScalar: doubled single quotes read as one,
+    double-quoted escapes decoded, and v as it is past an escape YAML does not define."""
+    if len(v) < 2 or v[0] not in "\"'" or v[-1] != v[0]:
+        return v
+    body = v[1:-1]
+    if v[0] == "'":
+        return body.replace("''", "'")
+    out, i = [], 0
+    while i < len(body):
+        if body[i] != "\\":
+            out.append(body[i])
+            i += 1
+            continue
+        esc = body[i + 1:i + 2]
+        if esc in ("\n", "\r"):
+            # An escaped line break joins the lines without the next one's indentation.
+            i += 3 if body.startswith("\r\n", i + 1) else 2
+            while i < len(body) and body[i] in " \t":
+                i += 1
+            continue
+        if esc in _YAML_ESCAPES:
+            out.append(_YAML_ESCAPES[esc])
+            i += 2
+            continue
+        n = _YAML_HEX_ESCAPES.get(esc)
+        digits = body[i + 2:i + 2 + n] if n else ""
+        if not n or len(digits) < n or not re.fullmatch(r"[0-9a-fA-F]+", digits) \
+                or int(digits, 16) > 0x10FFFF:
+            return v
+        out.append(chr(int(digits, 16)))
+        i += 2 + n
+    return "".join(out)
 
 
 def _yaml_extent(s, lines, i, e):
     """Set e's value end (and first/below/multi) and return its last line, as extent."""
     e["first"] = e["start"] + len(_YAML_PROPS.match(s, e["start"], lines[i][1]).group(0))
+    e["tag"] = _has_tag(s[e["start"]:e["first"]])
     line = i
     v = s[e["first"]:lines[i][1]]
     if v == "" or v[0] == "#":
@@ -1219,6 +1267,7 @@ def _yaml_extent(s, lines, i, e):
         p = len(_YAML_PROPS.match(s, e["first"], lines[line][1]).group(0))
         if e["first"] + p < lines[line][1]:
             e["first"] += p
+            e["tag"] = e["tag"] or _has_tag(s[e["first"] - p:e["first"]])
     elif v[0] in "[{" and not v.startswith("[REDACTED:"):
         return i
     v = s[e["first"]:lines[line][1]]
@@ -1247,30 +1296,157 @@ def _name_value(s, e):
     comment, or "", as nameValue."""
     if e["end"] <= e.get("first", e["start"]) or "\n" in s[e["first"]:e["end"]]:
         return ""
-    return _unquote(_strip_comment(s[e["first"]:e["end"]]).rstrip(" \t\r"))
+    return _yaml_scalar(_strip_comment(s[e["first"]:e["end"]]).rstrip(" \t\r"))
 
 
-def _yaml_entries(s, lines):
-    out, i = [], 0
+def _yaml_entries(s, lines, flow_keys):
+    """Every non-blank, non-comment line as an entry, as yamlEntries: a key read only
+    because properties come before it, or because it is a compact mapping after "? ",
+    skips no lines, and its value may be read to its end (see _yaml_lead_extent)."""
+    out, i, read = [], 0, {"pair": 0, "cred": 0, "flow_keys": flow_keys}
     while i < len(lines):
         text = s[lines[i][0]:lines[i][1]]
         if _blank_or_comment(text):
             i += 1
             continue
-        g = _YAML_KEY.match(text)
-        if g is None:
-            out.append({"key": "", "col": _indent(text), "item": False, "multi": False})
+        e, line = _yaml_entry(s, lines, i)
+        if e is None:
+            out.append({"key": "", "col": _indent(text), "item": False, "multi": False, "alone": False})
             i += 1
             continue
-        e = {"key": _unquote(g.group(2)), "json": g.group(2)[0] == '"', "col": g.end(1), "item": "-" in g.group(1),
-             "colon": lines[i][0] + g.end(2) + text[g.end(2):].index(":") + 1,
-             "start": lines[i][0] + g.end(0), "below": False, "multi": False}
-        e["end"] = e["first"] = e["start"]
-        if _DIRECT_KEY.match(e["key"]) or e["key"].lower() in ("name", "value"):
-            i = _yaml_extent(s, lines, i, e)
+        if e.get("lead"):
+            _yaml_lead_extent(s, lines, line, e, read)
+        elif _DIRECT_KEY.match(e["key"]) or e["key"].lower() in ("name", "value"):
+            i = _yaml_extent(s, lines, line, e)
+        else:
+            i = line
         i += 1
         out.append(e)
     return out
+
+
+def _yaml_lead_extent(s, lines, line, e, read):
+    """Read the value of a key only properties or "? " made readable, as leadExtent:
+    read["pair"] and read["cred"] are the ends of the last "name"/"value" value and the
+    last replaced credential value read; one the flow reader read as a key is not read."""
+    if e["node"] in read["flow_keys"]:
+        return
+    if e["key"].lower() in ("name", "value"):
+        if e["start"] >= read["pair"]:
+            _yaml_extent(s, lines, line, e)
+            read["pair"] = e["end"]
+        elif _one_line(s, lines, line, e["col"]):
+            _yaml_extent(s, lines, line, e)
+        return
+    if not _DIRECT_KEY.match(e["key"]) or _yaml_cursor(s, lines[line], e) or e["start"] < read["cred"]:
+        return
+    _yaml_extent(s, lines, line, e)
+    if _credential_key(e["key"], e["json"] and s[e["first"]:e["first"] + 1] == '"'):
+        read["cred"] = e["end"]
+
+
+def _has_tag(props):
+    """True when properties props hold a tag, which, unlike an anchor, can change the
+    node's type, as hasTag."""
+    return any(p[0] == "!" for p in props.split())
+
+
+def _one_line(s, lines, i, col):
+    """True when the next non-blank, non-comment line after line i, if any, is indented
+    no further than col, as oneLine."""
+    for j in range(i + 1, len(lines)):
+        text = s[lines[j][0]:lines[j][1]]
+        if not _blank_or_comment(text):
+            return _indent(text) <= col
+    return True
+
+
+def _yaml_cursor(s, line, e):
+    """True when e, a key on line, is a JSON-string key the JSON vocabulary does not
+    count as a credential, with a double-quoted value on its line, as cursor."""
+    v = s[e["start"]:line[1]]
+    v = v[len(_YAML_PROPS.match(v).group(0)):]
+    return e["json"] and not _KEY_END_FULL.match(_fold(e["key"])) and v.startswith('"')
+
+
+def _yaml_entry(s, lines, i):
+    """The "key: value" entry starting on line i and the line its value starts on, or
+    (None, i), as yamlEntry: an explicit "? key" pairs with the ": value" line after it."""
+    text = s[lines[i][0]:lines[i][1]]
+    g = _YAML_KEY.match(text)
+    if g is not None:
+        raw = g.group(3)
+        lead = bool(g.group(2)) or "?" in g.group(1)
+        alone = raw[0] in "\"'" or lead or g.group(1).count("-") > 1
+        e = {"key": _yaml_scalar(raw), "json": raw[0] == '"' and _json_valid(raw), "alone": alone,
+             "lead": lead, "node": lines[i][0] + g.end(1), "col": g.end(1),
+             "item": "-" in g.group(1), "colon": lines[i][0] + g.end(3) + text[g.end(3):].index(":") + 1,
+             "start": lines[i][0] + g.end(0), "below": False, "multi": False}
+        e["end"] = e["first"] = e["start"]
+        return e, i
+    g = _YAML_EXPLICIT_KEY.match(text)
+    if g is None:
+        return None, i
+    k, start, props = _explicit_key_start(s, lines, i, g.end(1), lines[i][0] + g.end())
+    if k is None:
+        return None, i
+    raw, last = _explicit_key_text(s, lines, k, start)
+    if raw is None:
+        return None, i
+    j = last + 1
+    while j < len(lines) and _blank_or_comment(s[lines[j][0]:lines[j][1]]):
+        j += 1
+    if j == len(lines):
+        return None, i
+    nxt = s[lines[j][0]:lines[j][1]]
+    v = _YAML_EXPLICIT_VALUE.match(nxt)
+    if v is None or _indent(nxt) != g.end(1):
+        return None, i
+    e = {"key": _yaml_scalar(raw), "json": False, "alone": True, "lead": props, "node": -1, "col": g.end(1),
+         "item": "-" in g.group(1),
+         "colon": lines[j][0] + g.end(1) + 1, "start": lines[j][0] + v.end(), "below": False, "multi": False}
+    e["end"] = e["first"] = e["start"]
+    return e, j
+
+
+def _explicit_key_start(s, lines, i, col, start):
+    """The line and offset where the key of the "? " entry on line i begins, after any
+    properties, or (None, start), as explicitKeyStart: right after the indicator at
+    column col, or, when only properties, blanks or a comment follow it, on the next
+    line that is neither blank nor a comment, provided it is indented past the
+    indicator, and so on while a line holds only properties; and whether it stepped
+    over any properties."""
+    props = False
+    while True:
+        p = len(_YAML_PROPS.match(s, start, lines[i][1]).group(0))
+        start += p
+        props = props or p > 0
+        if not _YAML_EXPLICIT_REST.match(s[start:lines[i][1]]):
+            return i, start, props
+        j = i + 1
+        while j < len(lines) and _blank_or_comment(s[lines[j][0]:lines[j][1]]):
+            j += 1
+        if j == len(lines):
+            return None, start, props
+        indent = _indent(s[lines[j][0]:lines[j][1]])
+        if indent <= col:
+            return None, start, props
+        i, start = j, lines[j][0] + indent
+
+
+def _explicit_key_text(s, lines, i, start):
+    """The key of a "? key" entry starting at s[start], a character other than a
+    blank, on line i as written, and its last line, or (None, i), as explicitKeyText."""
+    plain = _YAML_PLAIN_KEY.match(s, start, lines[i][1])
+    end = plain.end() if plain else start
+    if s[start] in "\"'":
+        end = _close_quote(s, start) + 1
+        if end == 0:
+            return None, i
+        i = _line_of(lines, i, end - 1)
+    if end == start or not _YAML_EXPLICIT_REST.match(s[end:lines[i][1]]):
+        return None, i
+    return s[start:end], i
 
 
 def _yaml_mappings(es):
@@ -1290,76 +1466,226 @@ def _yaml_mappings(es):
     return ids
 
 
-def _json_scalar(v):
-    """True when v, without a trailing comma, parses as a JSON scalar, as the
-    json.Valid check in yamlValue."""
-    if v.endswith(","):
-        v = v[:-1]
-    try:
-        json.loads(v)
-    except ValueError:
-        return False
-    return True
-
-
-def _quote_end(d, j):
-    """The offset of the quote closing the one at d[j], or len(d), as quoteEnd."""
-    k = j + 1
-    while k < len(d):
-        if d[j] == '"' and d[k] == "\\":
-            k += 1
-        elif d[k] == d[j]:
-            return k
-        k += 1
-    return len(d)
-
-
-def _expansion_end(d, i):
-    """The offset after the command substitution starting at d[i], as expansionEnd."""
-    if d[i] == "`":
-        j = i + 1
-        while j < len(d):
-            if d[j] == "\\":
-                j += 1
-            elif d[j] == "`":
-                return j + 1
-            j += 1
-        return len(d)
-    if d.startswith("$(", i):
-        depth, j = 0, i + 1
-        while j < len(d):
-            if d[j] == "\\":
-                j += 1
-            elif d[j] in "\"'":
-                j = _quote_end(d, j)
-            elif d[j] == "(":
-                depth += 1
-            elif d[j] == ")":
-                depth -= 1
-                if depth == 0:
-                    return j + 1
-            j += 1
-        return len(d)
-    return i
-
-
 def _find_yaml(s):
     if ":" not in s:
         return []
-    entries = _yaml_entries(s, _yaml_lines(s))
+    lines = _yaml_lines(s)
+    flows, flow_keys = _find_flows(s, lines)
+    entries = _yaml_entries(s, lines, flow_keys)
     ids = _yaml_mappings(entries)
     named = {ids[i] for i, e in enumerate(entries)
              if e["key"].lower() == "name" and _KEY_END_FULL.match(_fold(_name_value(s, e)))}
     out = []
     for i, e in enumerate(entries):
         if not ((ids[i] in named and e["key"].lower() == "value")
-                or (e["multi"] and _DIRECT_KEY.match(e["key"]))):
+                or ((e["multi"] or e["alone"])
+                    and _credential_key(e["key"], e["json"] and s[e["first"]:e["first"] + 1] == '"'))):
             continue
-        if e["end"] == e["start"] or (e["json"] and _json_scalar(s[e["first"]:e["end"]])):
+        if e["end"] == e["start"]:
+            continue
+        v = s[e["first"]:e["end"]]
+        v = v[:-1] if v.endswith(",") else v
+        if e["json"] and not e.get("tag") and _json_valid(v):
+            # A JSON string keeps its quotes; any other JSON scalar is left, as yamlValue.
+            if v[0] == '"':
+                out.append(_Found(v[1:-1], e["first"] + 1, e["first"] + len(v) - 1))
             continue
         start = e["colon"] if e["below"] else e["start"]
         out.append(_Found(s[start:e["end"]], start, e["end"]))
-    return out
+    return out + flows
+
+
+def _flow_start(text, key_props):
+    """The offset in a line of the flow collection it opens, or -1, as flowStart; with
+    key_props, properties may also come before the key."""
+    at = _FLOW_LEAD.match(text).end()
+    if key_props:
+        at += len(_FLOW_PROPS.match(text, at).group(0))
+    at += _flow_key_len(text, at)
+    at += len(_FLOW_PROPS.match(text, at).group(0))
+    if at == len(text) or text[at] not in "{[" or _PLACEHOLDER_PREFIX.match(text, at):
+        return -1
+    return at
+
+
+def _flow_key_len(text, at):
+    """The length of the "key: " at text[at], or 0, as the flowKey pattern: a quoted
+    key, or a plain one whose '#' never follows a blank, up to the first ':' before a
+    blank. Scanned by hand, since a lazy regex backtracks quadratically on blanks."""
+    q = _FLOW_QUOTED_KEY.match(text, at)
+    if q:
+        return q.end() - at
+    if at >= len(text) or text[at] in _FLOW_KEY_FIRST_EXCLUDED:
+        return 0
+    i = at + 1
+    while True:
+        j = i
+        while j < len(text) and text[j] in " \t":
+            j += 1
+        if j + 1 < len(text) and text[j] == ":" and text[j + 1] in " \t":
+            j += 1
+            while j < len(text) and text[j] in " \t":
+                j += 1
+            return j - at
+        if j >= len(text) or (j > i and text[j] == "#"):
+            return 0
+        i = j + 1
+
+
+def _find_flows(s, lines):
+    """Credential values in YAML flow collections and where each key node starts, as
+    flows in flow.go: a collection found only because properties come before its key
+    skips none of its lines but another one of its kind."""
+    out, keys, nxt, propped = [], set(), 0, 0
+    for start, end in lines:
+        if start < nxt:
+            continue
+        at = _flow_start(s[start:end], False)
+        if at >= 0:
+            found, nxt = _read_flow(s, start + at, keys)
+            out.extend(found)
+            continue
+        at = _flow_start(s[start:end], True)
+        if at >= 0 and start >= propped:
+            found, propped = _read_flow(s, start + at, keys)
+            out.extend(found)
+    return out, keys
+
+
+def _flow_scalar_end(s, start, key):
+    """The offset after the flow scalar starting at s[start], and whether it is a quoted
+    one that closes, as scalarEnd: a plain key ends at the line break."""
+    if s[start] in "\"'":
+        q = _close_quote(s, start)
+        return (q + 1, True) if q >= 0 else (len(s), False)
+    m = _PLACEHOLDER_PREFIX.match(s, start)
+    end = m.end() if m else start + 1
+    for i in range(end, len(s)):
+        c = s[i]
+        if c in ",[]{}" or (key and c == "\n") or (c == ":" and (i + 1 == len(s) or s[i + 1] in " \t\r\n,[]{}")) \
+                or (c == "#" and s[i - 1] in " \t\r\n"):
+            break
+        if c not in " \t\r\n":
+            end = i + 1
+    return end, False
+
+
+def _read_flow(s, i, keys):
+    """The credential values of the flow collection at s[i] and the offset after it, as
+    flowParser.parse, adding to keys the offset where each key node starts. A found
+    value is the source text, or the decoded text of a quoted one, so a quoted
+    placeholder the redactor leaves is accepted."""
+    out, frames = [], []
+
+    def close():
+        top = frames.pop()
+        if top["named"]:
+            out.extend(top["values"])
+        if frames:
+            frames[-1]["value"] = False
+
+    def skip(i):
+        # A '#' after a blank opens a comment; any other one starts a scalar, as skipSpace.
+        while i < len(s):
+            if s[i] in " \t\r\n":
+                i += 1
+            elif s[i] == "#" and s[i - 1] in " \t\r\n":
+                nl = s.find("\n", i)
+                i = len(s) if nl < 0 else nl
+            else:
+                break
+        return i
+
+    def scalar(top, i):
+        node = i
+        tag = False
+        while True:
+            # A comment may sit between properties, and between them and the node.
+            pr = _FLOW_PROPS.match(s, i).group(0)
+            if not pr:
+                break
+            tag = tag or _has_tag(pr)
+            i = skip(i + len(pr))
+        if i >= len(s) or (s[i] in ",:[]{}" and not _PLACEHOLDER_PREFIX.match(s, i)):
+            return i
+        start = i
+        i, closed = _flow_scalar_end(s, i, not top["value"])
+        raw = s[start:i]
+        text = _yaml_scalar(raw)
+        if not top["value"]:
+            keys.add(node)
+            # A second scalar before ':' never replaces a credential key, as scalar().
+            if not _DIRECT_KEY.match(top["key"]):
+                top["key"], top["json"] = text, raw[0] == '"' and _json_valid(raw)
+            return i
+        top["value"] = False
+        if top["mapping"] and top["key"].lower() == "name" and _KEY_END_FULL.match(_fold(text)):
+            top["named"] = True
+        a, b = start, i
+        if top["json"] and raw[0] == '"':
+            # A string under a JSON-string key keeps its quotes, as in scalar().
+            a, b = start + 1, i - (1 if closed else 0)
+        if _PLACEHOLDER.match(raw) or _PLACEHOLDER.match(text) or _PLACEHOLDER.match(s[a:b]) \
+                or (top["json"] and not tag and raw[0] != '"' and _json_valid(raw)):
+            return i
+        found = _Found(s[a:b] if a > start else text if raw[0] in "\"'" else raw, a, b)
+        if _credential_key(top["key"], top["json"] and raw[0] == '"'):
+            out.append(found)
+        elif top["mapping"] and top["key"].lower() == "value":
+            top["values"].append(found)
+        return i
+
+    while True:
+        i = skip(i)
+        if i >= len(s):
+            break
+        c = s[i]
+        if c in "{[" and not _PLACEHOLDER_PREFIX.match(s, i):
+            if frames and not frames[-1]["value"]:
+                frames[-1]["key"], frames[-1]["json"] = "", False
+            frames.append({"mapping": c == "{", "key": "", "json": False, "value": False, "named": False,
+                           "values": []})
+            i += 1
+        elif c in "}]":
+            if frames[-1]["mapping"] != (c == "}"):
+                break
+            close()
+            i += 1
+            if not frames:
+                return out, i
+        elif c == ",":
+            frames[-1].update(key="", json=False, value=False)
+            i += 1
+        elif c == ":":
+            frames[-1]["value"] = True
+            i += 1
+        elif c == "?" and i + 1 < len(s) and s[i + 1] in " \t\r\n":
+            i += 1
+        else:
+            i = scalar(frames[-1], i)
+    while frames:
+        close()
+    return out, i
+
+
+def _reject_constant(_name):
+    raise ValueError("not JSON")
+
+
+def _json_valid(v):
+    """True when v parses as JSON, as json.Valid: NaN and Infinity, which json.loads
+    accepts, are not JSON, and a number is not converted, so one longer than the
+    interpreter's integer digit limit is still JSON."""
+    try:
+        json.loads(v, parse_constant=_reject_constant, parse_int=len, parse_float=len)
+    except ValueError:
+        return False
+    return True
+
+
+def _credential_key(key, json_member):
+    """True when a mapping key names a credential, as credentialKey."""
+    return bool(_KEY_END_FULL.match(_fold(key)) if json_member else _DIRECT_KEY.match(key))
 
 
 def _flag_values(words):
@@ -1375,16 +1701,52 @@ def _flag_values(words):
     return out
 
 
-def _shell_command(words, i):
-    """The index of the command a shell named at words[i] runs, or -1, as shellCommand."""
-    j = i + 1
+def _after_options(words, j, memo):
+    """The index of the first word from words[j] on past short options, their
+    arguments and a "--", as afterOptions, memo keeping each answer by start."""
+    path, end = [], None
+    while j < len(words):
+        if j in memo:
+            end = memo[j]
+            break
+        path.append(j)
+        if words[j] == "--":
+            end = j + 1
+            break
+        if not _SHORT_OPTION.match(words[j]):
+            end = j
+            break
+        j += 1 + _option_args(words[j])
+    end = len(words) if end is None else end
+    for p in path:
+        memo[p] = end
+    return end
+
+
+def _option_args(w):
+    """How many words after shell option w are its arguments, as optionArgs."""
+    if w in ("--rcfile", "--init-file"):
+        return 1
+    return w.count("o") + w.count("O") if _SHORT_OPTION.match(w) else 0
+
+
+def _shell_command(words, i, memo):
+    """The index of the command a shell named at words[i] runs, or -1, as commandFrom;
+    memo is a pair of dicts keeping commandFrom's and afterOptions' answers by start."""
+    command_memo, after_memo = memo
+    path, c, j = [], -1, i + 1
     while j < len(words) and words[j][:1] in ("-", "+") and words[j]:
+        if j in command_memo:
+            c = command_memo[j]
+            break
+        path.append(j)
         if _SHELL_FLAG.match(words[j]):
-            return j + 1
-        if _SHELL_ARG_OPTION.match(words[j]):
-            j += 1
-        j += 1
-    return -1
+            c = _after_options(words, j + 1 + _option_args(words[j]), after_memo)
+            break
+        j += 1 + _option_args(words[j])
+    for q in path:
+        command_memo[q] = c
+    return c
 
 
 def _decode_json_string(body):
@@ -1459,10 +1821,8 @@ def _shell_words(d):
                     add(i + 1)
                 i += 2
             else:
-                end = max(_expansion_end(d, i), i + 1)
-                while i < end:
-                    add(i)
-                    i += 1
+                add(i)
+                i += 1
         i = min(i, len(d))
         if text or quoted:
             out.append((start, i, "".join(text), at))
@@ -1487,21 +1847,81 @@ def _array_run(s, q):
         q = sep.end() - 1
 
 
+def _shell_values(cmd, words):
+    """(start, end, text, to_end) of each credential value in shell command cmd, as
+    shellValues: a value a shell may expand runs to the end of the command."""
+    out = []
+    for i, off in _flag_values([w[2] for w in words]):
+        w_start, w_end, text, at = words[i]
+        start, to_end = w_start, False
+        if off > 0:
+            start = at[off - 1] + 1
+        else:
+            prev = words[i - 1][1]
+            gap = cmd[prev:w_start]
+            if any(c in gap for c in "<>("):
+                start, to_end = prev + len(gap) - len(gap.lstrip(" \t\n")), True
+        if to_end or any(c in cmd[start:w_end] for c in "<>($`") or cmd[w_end:w_end + 1] in ("<", ">", "("):
+            w_end, to_end = len(cmd), True
+        out.append((start, w_end, text[off:], to_end))
+    return out
+
+
+def _substitution_start(t):
+    """The offset just past the first "$(" or backquote in t, or -1, as substitutionStart."""
+    k = t.find("$(")
+    k = k + 2 if k >= 0 else -1
+    b = t.find("`")
+    return b + 1 if b >= 0 and (k < 0 or b < k) else k
+
+
+def _nested_commands(cmd, words):
+    """(index, text, substitution) of each command run inside shell command cmd, as
+    nestedCommands: the word a shell named there runs, once however many shells run
+    it, and the rest of cmd from just after the first substitution opener in a word."""
+    texts = [w[2] for w in words]
+    out, memo, run, sub = [], ({}, {}), set(), False
+    for i, t in enumerate(texts):
+        k = _substitution_start(t)
+        if k >= 0 and not sub:
+            sub = True
+            out.append((i, cmd[words[i][3][k - 1] + 1:], True))
+        if _SHELL.match(t):
+            c = _shell_command(texts, i, memo)
+            if i < c < len(texts) and c not in run:
+                run.add(c)
+                out.append((c, texts[c], False))
+    return out
+
+
+def _nested_credential(cmd, depth):
+    """True when cmd, run by a shell inside a shell command, holds a credential value
+    not yet replaced, as nestedCredential."""
+    words = _shell_words(cmd)
+    if any(to_end or not _PLACEHOLDER.match(text) for _a, _b, text, to_end in _shell_values(cmd, words)):
+        return True
+    return any(depth == 0 or _nested_credential(text, depth - 1) for _c, text, _sub in _nested_commands(cmd, words))
+
+
 def _shell_found(s, e):
     start, end, stop, closed = e
     cmd, raw = _decode_json_string(s[start:end])
     partial = raw[-1] < end - start
     words = _shell_words(cmd)
     out = []
-    for i, off in _flag_values([w[2] for w in words]):
-        w_start, w_end, text, at = words[i]
-        dec_start = at[off - 1] + 1 if off > 0 else w_start
-        if partial and w_end == len(cmd):
-            # A word that runs into a bad escape takes the bytes after it, so its
-            # value is the raw text, which no placeholder check can mistake.
-            out.append(_Found(s[start + raw[dec_start]:stop - closed], start + raw[dec_start], stop - closed))
+    for v_start, v_end, text, to_end in _shell_values(cmd, words):
+        if to_end or (partial and v_end == len(cmd)):
+            # A value read to the end of the command, or one that runs into a bad
+            # escape, is reported raw, which no placeholder check can mistake.
+            out.append(_Found(s[start + raw[v_start]:stop - closed], start + raw[v_start], stop - closed))
         else:
-            out.append(_Found(text[off:], start + raw[dec_start], start + raw[w_end]))
+            out.append(_Found(text, start + raw[v_start], start + raw[v_end]))
+    for c, text, sub in _nested_commands(cmd, words):
+        if _nested_credential(text, 4):
+            # A substitution is replaced to the end of the command, as shellSpans.
+            a = start + raw[words[c][0]]
+            b = stop - closed if sub or (partial and words[c][1] == len(cmd)) else start + raw[words[c][1]]
+            out.append(_Found(s[a:b], a, b))
     return out
 
 
@@ -1522,15 +1942,24 @@ def _find_commands(s):
             raws.append(offsets)
         values = _flag_values(words)
         taken = {i for i, off in values if off == 0}
-        shell = set()
+        # before[k] counts the flag values among words[:k], as takenBefore.
+        before = [0]
+        for k in range(len(elems)):
+            before.append(before[-1] + (k in taken))
+        shell, read, memo = set(), set(), ({}, {})
         for i in range(len(elems)):
             if not _SHELL.match(words[i]):
                 continue
-            c = _shell_command(words, i)
+            c = _shell_command(words, i, memo)
             if i < c < len(elems):
-                if not any(k in taken for k in range(i, c)):
+                # The last shell name that reaches a command decides how it is read.
+                if before[c + 1] == before[i]:
                     shell.add(c)
-                out.extend(_shell_found(s, elems[c]))
+                else:
+                    shell.discard(c)
+                if c not in read:
+                    read.add(c)
+                    out.extend(_shell_found(s, elems[c]))
         for i, off in values:
             if i not in shell:
                 start, end_, stop, closed = elems[i]
@@ -1548,42 +1977,114 @@ def _json_text(raw):
     return _decode_json_string(raw)[0]
 
 
+# A '{' or '[' a JSON value can follow. A read from any other fails at once and finds
+# nothing, and every JSONDecodeError counts the lines before its position, so skipping
+# those keeps a run of braces in prose linear. A read that starts and then fails
+# inside a value, as in '{"a"' repeated, still pays that count, which grows with the
+# square of the length.
+_JSON_START = re.compile(r'\{(?=' + _WS + r'*["}])|\[(?=' + _WS + r'*[-0-9"\[\]{tfnNI])')
+
+
+def _no_constant(name):
+    """Go's decoder rejects NaN and Infinity. The error carries no position, so the
+    read reports no member of the value it was in, where Go may report the members
+    before it: this finds less, never more."""
+    raise ValueError("not JSON: " + name)
+
+
 def _find_objects(s):
     """String values of credential-named members, and the "value" members of an object
-    whose "name" member is a credential name, with names decoded, as objects()."""
-    t = s.lstrip(" \t\r\n")
-    if not t or t[0] not in "{[":
-        return []
-    paired = set()
+    whose "name" member is a credential name, with names decoded, as objects(). Like
+    Go, it reads a JSON value from every '{' or '[' a previous read did not cover, so an
+    object after other text (an HTTP dump's body) is read too, and a read that stops at
+    a syntax error resumes there. Like Go, it reads text that holds NaN or Infinity
+    twice, with the constants rejected and read as values, and keeps what either read
+    finds."""
+    found = {(f.start(), f.end()): f for f in _read_objects(s, False)}
+    if "NaN" in s or "Infinity" in s:
+        for f in _read_objects(s, True):
+            found.setdefault((f.start(), f.end()), f)
+    return [found[k] for k in sorted(found)]
 
-    def hook(pairs):
-        if any(k.lower() == "name" and isinstance(v, str) and _KEY_END_FULL.match(_fold(v)) for k, v in pairs):
-            paired.update(v for k, v in pairs if k.lower() == "value" and isinstance(v, str))
-        return dict(pairs)
 
-    # Read value after value (NDJSON too) up to the first syntax error, as Go's
-    # decoder does; members past it are not read.
-    dec, idx, stop = json.JSONDecoder(object_pairs_hook=hook), 0, len(s)
+def _read_objects(s, constants):
+    """The members found reading s from every start, with NaN, Infinity and -Infinity
+    read as values when constants is true and rejected otherwise."""
+    dec = json.JSONDecoder(**({} if constants else {"parse_constant": _no_constant}))
+    out, pos = [], 0
     while True:
-        while idx < len(s) and s[idx] in " \t\r\n":
-            idx += 1
-        if idx >= len(s):
+        start = _JSON_START.search(s, pos)
+        if start is None:
+            return out
+        # Read value after value (NDJSON too) up to the first syntax error, as Go's
+        # decoder does; members past it are not read.
+        idx, stop = start.start(), len(s)
+        while True:
+            while idx < len(s) and s[idx] in " \t\r\n":
+                idx += 1
+            if idx >= len(s):
+                break
+            # No value starts here, so raw_decode would raise at idx; stopping without
+            # it skips building a JSONDecodeError, which counts the lines before idx.
+            if s[idx] not in '-0123456789"{[tfnNI':
+                stop = idx
+                break
+            try:
+                _, idx = dec.raw_decode(s, idx)
+            except (ValueError, RecursionError) as e:
+                stop = getattr(e, "pos", idx)
+                break
+        out.extend(_object_members(s, start.start(), stop))
+        pos = max(stop, start.start() + 1)
+
+
+_OBJECT_TOKEN = re.compile(r'["{}\[\]]')
+
+
+def _object_members(s, start, stop):
+    """The credential members of the JSON text a read took from start up to stop: a
+    string that ends before stop, a colon, and a string value that starts by stop (it
+    may run past it, cut off). Like Go, a "value" member pairs with a "name" member of
+    its own object only, and an object still open at stop is paired with the members
+    it holds so far. Only the read's own text is searched for keys, so a run of '{'
+    that opens no JSON costs one short search each."""
+    out, stack = [], []  # an open object's members, or None for an array
+    i = start
+    while True:
+        t = _OBJECT_TOKEN.search(s, i, stop)
+        if t is None:
             break
-        try:
-            _, idx = dec.raw_decode(s, idx)
-        except (ValueError, RecursionError) as e:
-            stop = getattr(e, "pos", idx)
-            break
-    # Every string, read once from left to right, so a member's span is exact.
-    out, strings = [], list(_ELEMENT.finditer(s))
-    for k, v in zip(strings, strings[1:]):
-        colon = _MEMBER_COLON.match(s, k.end())
-        if k.group(2) is None or k.start() > stop or colon is None or colon.end() != v.start():
+        c, i = t.group(), t.end()
+        if c in "{[":
+            stack.append([] if c == "{" else None)
             continue
-        key, val = _json_text(k.group(1)), _json_text(v.group(1))
-        if _KEY_END_FULL.match(_fold(key)) or (key.lower() == "value" and val in paired):
-            out.append(_Found(val, v.start(1), v.end(1) if v.group(2) else len(s)))
+        if c in "}]":
+            if stack:
+                out.extend(_credential_members(stack.pop()))
+            continue
+        # A string followed by a colon is a key. Outside an object one can only end
+        # where the read stopped, so its value starts after stop and is skipped.
+        k = _ELEMENT.match(s, t.start(), stop)
+        i = k.end()
+        colon = _MEMBER_COLON.match(s, i) if k.group(2) else None
+        v = _ELEMENT.match(s, colon.end()) if colon else None
+        if v is None or v.start() > stop:
+            continue
+        found = _Found(_json_text(v.group(1)), v.start(1), v.end(1) if v.group(2) else len(s))
+        stack[-1].append((_json_text(k.group(1)), found))
+        i = v.end()
+    for members in stack:
+        out.extend(_credential_members(members))
     return out
+
+
+def _credential_members(members):
+    """The values of one object's credential-named members, and of its "value"
+    members when one of its "name" members is a credential name, as objectSpans."""
+    if members is None:
+        return []
+    named = any(k.lower() == "name" and _KEY_END_FULL.match(_fold(f.group(1))) for k, f in members)
+    return [f for k, f in members if _KEY_END_FULL.match(_fold(k)) or (named and k.lower() == "value")]
 
 
 # class-2: whole-content secret families (internal/redact contentRules), scanned
@@ -2104,9 +2605,28 @@ def _structural_spans():
         (_find_yaml, "password:\n  &pw \"a\nb\"\nn: p\n", [("\n  &pw \"a\nb\"", 9, 21)]),
         (_find_commands, '["\\u002d\\u002dpassword","y"]', [("y", 25, 26)]),
         (_find_yaml, "x: y\npassword: \"first\nTAIL\nnext: k\n", [("\"first\nTAIL\nnext: k\n", 15, 35)]),
-        (_find_commands, '["sh","-c","app --password=$(printf a b) c"]', [("$(printf a b)", 27, 40)]),
+        (_find_commands, '["sh","-c","app --password=$(printf a b) c"]', [("$(printf a b) c", 27, 42)]),
+        (_find_commands, '["sh","-c","bash -c \'app --token \\"x\\"\' && a --password <(b) c"]',
+         [("<(b) c", 56, 62), ("'app --token \\\"x\\\"'", 20, 39)]),
+        (_find_yaml, "? \"pass\\x77ord\"\n: a\n- {name: DB_PASSWORD, value: 'b'}\nc: [token: d # e\n]\n",
+         [("a", 18, 19), ("b", 49, 52), ("d", 65, 66)]),
         (_find_yaml, "password: &pw |\n  # x\nnext: p\n", [("&pw |\n  # x", 10, 21)]),
         (_find_objects, '{"DB_PASSW\\u004fRD":"\\u0068i"}', [("hi", 21, 28)]),
+        (_find_objects, 'got {x} {"DB_PASSW\\u004fRD":"hi"} x {"token":"t"}', [("hi", 29, 31), ("t", 46, 47)]),
+        (_find_objects, '{"a":1 "DB_PASSW\\u004fRD":"x"}', []),
+        (_find_objects, '{"a":NaN,"DB_PASSW\\u004fRD":"x"}', [("x", 29, 30)]),
+        (_find_objects, '[Infinity,"a {",{"DB_PASSW\\u004fRD":"x"}]', [("x", 37, 38)]),
+        (_find_objects, '{"a":-NaN,"DB_PASSW\\u004fRD":"x"}', []),
+        (_find_yaml, '{"password":' + "1" * 4301 + "}", []),
+        (_find_objects, '[NaN,"a {"DB_PASSW\\u004fRD":"x"}', [("x", 29, 30)]),
+        (_find_objects, 'got ["DB_PASSW\\u004fRD":"x"]', []),
+        (_find_objects, '{"token":"a"} x {"token":"b"}', [("a", 10, 11), ("b", 26, 27)]),
+        (_find_objects, '{"DB_PASSW\\u004fRD":"a\\qb"}', [("a", 21, 25)]),
+        (_find_objects, '{"n\\u0061me":"DB_PASSWORD","value":"hunter2', [("hunter2", 36, 43)]),
+        (_find_objects, '{"n\\u0061me":"DB_PASSWORD","value":"same","obj":{"value":"same"}}', [("same", 36, 40)]),
+        (_find_objects, '{"n\\u0061me":"API_KEY","value":"v"} {"value":"v"}', [("v", 32, 33)]),
+        (_find_objects, '{"value":"v","n\\u0061me":"API_KEY"}', [("v", 10, 11)]),
+        (_find_objects, '{"n\\u0061me":"API_KEY","o":{"value":"x"', []),
     ]
     for find, text, want in cases:
         got = [(f.group(1), f.start(), f.end()) for f in find(text)]
@@ -2821,6 +3341,103 @@ def _shared_selftest():
             '"cmd":["sh","-c","app --token [REDACTED:credential-field] --port 80"],'
             '"DB_PASSW\\u004fRD":"\\u005bREDACTED:credential-field]"}'
             % (live_secret, live_secret, live_secret, live_secret))
+        # class-3 (#404 shapes): a shell started inside a shell command, a flag inside a
+        # command substitution, values a shell may expand, a YAML key that is quoted or
+        # explicit, and YAML flow collections. The clean bodies are the redactor's output.
+        shape404_leaks = [
+            ("shell_nested", '["sh","-c","bash -c \'app --password %s\' && echo ok"]' % live_secret),
+            ("shell_in_substitution", '["sh","-c","echo $(app --token %s) done"]' % live_secret),
+            ("shell_process_substitution", '["sh","-c","app --password <(printf %s) next"]' % live_secret),
+            ("shell_process_substitution_part_redacted",
+             '["sh","-c","app --password <([REDACTED:credential-field] %s) next"]' % live_secret),
+            ("shell_parameter_expansion", '["sh","-c","app --password=${X:-%s 2} next"]' % live_secret),
+            ("shell_ansi_c_quoting", '["sh","-c","app --password=$\'x\\\\\' %s\' next"]' % live_secret),
+            ("yaml_quoted_key", '"pass\\x77ord": %s\n' % live_secret),
+            ("yaml_explicit_key", '? password\n: %s\n' % live_secret),
+            ("yaml_flow_pair", 'env:\n- {name: DB_PASSWORD, value: %s}\n' % live_secret),
+            ("yaml_key_yaml_only_escape", '"pass\\x77ord": "%s"\n' % live_secret),
+            ("shell_options_after_command_option", '["sh","-c","-e","--","app --token %s"]' % live_secret),
+            ("shell_command_is_a_flag_value", '["sh","-c","-o","--token","%s"]' % live_secret),
+            ("yaml_flow_key_long_s", "x: {pa\u017f\u017fword: %s}\n" % live_secret),
+            ("shell_option_run_two_arguments", '["bash","-coO","pipefail","extglob","app --password %s"]' % live_secret),
+            ("shell_joined_process_substitution", '["sh","-c","app --password=<(printf %s) next"]' % live_secret),
+            ("shell_quoted_command_substitution", '["sh","-c","echo \\"$(app --token %s)\\""]' % live_secret),
+            ("yaml_flow_comment_after_comma", "x: {name: DB_PASSWORD,# c\n value: %s}\n" % live_secret),
+            ("yaml_flow_under_plain_key_with_slash", "config/app.yaml: {password: %s}\n" % live_secret),
+            ("yaml_explicit_key_over_lines", '? "pass\\\n  word"\n: %s\n' % live_secret),
+            ("yaml_explicit_key_on_next_line", '?\n  # c\n  password\n: %s\n' % live_secret),
+            ("yaml_flow_hash_value_after_colon", '{"password":#%s}' % live_secret),
+            ("yaml_flow_comment_after_key", 'x: {"password"#c\n: %s}\n' % live_secret),
+            ("yaml_flow_stray_hash", 'x: {a: "b"#, password: %s}\n' % live_secret),
+            ("shell_substitution_nested_quotes", '["sh","-c","echo \\"$(app --password \\"a %s\\")\\""]' % live_secret),
+            ("yaml_flow_under_plain_key_with_hash", "config/app#v1.yaml: {password: %s}\n" % live_secret),
+            ("shell_substitution_quoted_argument", '["sh","-c","echo \\"$(app \\"a b\\" --password %s)\\""]' % live_secret),
+            ("yaml_flow_key", "x: [{token: '%s'}]\n" % live_secret),
+        ]
+        shape404_clean = [
+            '["sh","-c","bash -c [REDACTED:credential-field] && echo ok"]',
+            '["sh","-c","echo $(app --token [REDACTED:credential-field]) done"]',
+            '["sh","-c","app --password [REDACTED:credential-field]"]',
+            '["sh","-c","app --password=[REDACTED:credential-field]"]',
+            '["sh","-c","app --password=[REDACTED:credential-field]"]',
+            '"pass\\x77ord": [REDACTED:credential-field]\n',
+            '?\n  # c\n  password\n: [REDACTED:credential-field]\n',
+            '? password\n: [REDACTED:credential-field]\n',
+            'env:\n- {name: DB_PASSWORD, value: [REDACTED:credential-field]}\n',
+            'x: [{token: [REDACTED:credential-field]}]\n',
+        ]
+        # #439 shapes: properties before a YAML key, a compact mapping as an explicit
+        # key, a key after two sequence markers and a tagged value under a JSON key.
+        # The clean bodies are the redactor's output.
+        shape439_leaks = [
+            ("yaml_tag_before_quoted_key", '!!str "password": %s\n' % live_secret),
+            ("yaml_anchor_before_key", "&c password: %s\n" % live_secret),
+            ("yaml_anchor_before_item_key", "- &d api_key: %s\n" % live_secret),
+            ("yaml_tag_before_explicit_key", "? !!str password\n: %s\n" % live_secret),
+            ("yaml_properties_line_before_explicit_key", "?\n  &k\n  token\n: %s\n" % live_secret),
+            ("yaml_compact_explicit_key", "? password : %s\n" % live_secret),
+            ("yaml_compact_explicit_key_in_item", "- ? api_key: %s\n  : v\n" % live_secret),
+            ("yaml_key_after_two_markers", "- - password: %s\n" % live_secret),
+            ("yaml_tagged_value_under_json_key", '!!str "password": !!str %s\n' % live_secret),
+            ("yaml_tagged_value_below_json_key", '"secret":\n  !!str %s\n' % live_secret),
+            ("yaml_tagged_value_under_flow_json_key", 'x: {"token": !!str %s}\n' % live_secret),
+            ("yaml_tag_before_flow_key", "!!str x: {password: %s}\n" % live_secret),
+            ("yaml_credential_in_property_value_block_scalar", '&a value: |\n  "password": %s\n' % live_secret),
+            ("yaml_flow_explicit_key_comment_between_properties", "{ ? !!str # c\n &a token\n : %s }\n" % live_secret),
+            ("yaml_explicit_key_with_properties_keeps_key_lines", "? &k '\n  \"password\": %s\n  '\n: x\n" % live_secret),
+            ("yaml_tagged_flow_key_keeps_inner_lines", "!!str x: {public: '\n  {password: %s}\n'}\n" % live_secret),
+            ("yaml_tagged_cursor_key_keeps_inner_lines",
+             '!!str "nextPageToken": "\n  - name: DB_PASSWORD\n    value: %s\n  "\n' % live_secret),
+            ("yaml_flow_verbatim_tag_with_blank", "{ !<a b> token: %s }\n" % live_secret),
+            ("yaml_pair_value_with_properties", "- name: DB_PASSWORD\n  &v value: %s\n" % live_secret),
+            ("yaml_pair_name_with_properties", "- &n name: API_KEY\n  value: %s\n" % live_secret),
+            ("yaml_key_with_properties_in_cursor_value", '!!str "nextPageToken": "\n  &a password: %s\n  "\n' % live_secret),
+            ("yaml_key_with_properties_in_cursor_value_below", '!!str "pageToken":\n  "\n  &b token: %s\n  "\n' % live_secret),
+            ("yaml_key_with_properties_in_unnamed_value_block", "&c value: |\n  &d secret: %s\n" % live_secret),
+            ("yaml_pair_value_with_tag", "- !!str name: DB_PASSWORD\n  !!str value: %s\n" % live_secret),
+            ("yaml_key_with_properties_after_unclosed_bracket", 'example: |\n  ["unfinished\n&a password: %s\n' % live_secret),
+            ("yaml_key_with_properties_in_quoted_flow_value", "!!str x: {public: '\n  &a password: %s\n'}\n" % live_secret),
+            ("yaml_nested_pair_with_properties", "&a value: |\n  - &n name: DB_PASSWORD\n    &v value: %s\n" % live_secret),
+            ("yaml_key_with_properties_before_flow_in_explicit_key", "? &k '\n  &a password: %s\n  [a]\n  '\n: x\n" % live_secret),
+        ]
+        shape439_clean = [
+            '!!str "password": [REDACTED:credential-field]\n',
+            "&c password: [REDACTED:credential-field]\n- &d api_key: [REDACTED:credential-field]\n",
+            "? !!str password\n: [REDACTED:credential-field]\n?\n  &k\n  token\n: [REDACTED:credential-field]\n",
+            "? password : [REDACTED:credential-field]\n- ? api_key: [REDACTED:credential-field]\n  : v\n",
+            "- - password: [REDACTED:credential-field]\n!!str x: {password: [REDACTED:credential-field]}\n",
+            '"secret": [REDACTED:credential-field]\nx: {"token": !!str [REDACTED:credential-field]}\n',
+            '&a value: |\n  "password": [REDACTED:credential-field]\n',
+            "{ ? !!str # c\n &a token\n : [REDACTED:credential-field] }\n",
+            "? &k '\n  \"password\": [REDACTED:credential-field]\n  '\n: x\n"
+            "!!str x: {public: '\n  {password: [REDACTED:credential-field]}\n'}\n",
+            '!!str "nextPageToken": "\n  - name: DB_PASSWORD\n    value: [REDACTED:credential-field]\n  "\n',
+            "{ !<a b> token: [REDACTED:credential-field] }\n",
+            "{\n &k password: [REDACTED:credential-field] }\n[\n &j token: [REDACTED:credential-field], x]\n"
+            '"nextPageToken": &c 123\nx: {"pageToken": &d 4}\n!!str y: [\n  {a: b},\n  &k secret: [REDACTED:credential-field], z]\n',
+            "- name: DB_PASSWORD\n  &v value: [REDACTED:credential-field]\n- &n name: API_KEY\n"
+            "  value: [REDACTED:credential-field]\n",
+        ]
         # --live-secrets edge paths (class-1 file mechanism): an empty file is valid
         # (ambient-credential runs enumerate no env secret) and a missing/unreadable path
         # is a wiring bug that fails closed.
@@ -2909,6 +3526,18 @@ def _shared_selftest():
         ] + [
             ("cred_401_" + name, 4, (lambda line: lambda: _guard(lambda: cp([line])))(_body_line(body)))
             for name, body in shape401_leaks
+        ] + [
+            ("cred_404_" + name, 4, (lambda line: lambda: _guard(lambda: cp([line])))(_body_line(body)))
+            for name, body in shape404_leaks
+        ] + [
+            ("cred_404_clean_%d" % i, 0, (lambda line: lambda: _guard(lambda: cp([line])))(_body_line(body)))
+            for i, body in enumerate(shape404_clean)
+        ] + [
+            ("cred_439_" + name, 4, (lambda line: lambda: _guard(lambda: cp([line])))(_body_line(body)))
+            for name, body in shape439_leaks
+        ] + [
+            ("cred_439_clean_%d" % i, 0, (lambda line: lambda: _guard(lambda: cp([line])))(_body_line(body)))
+            for i, body in enumerate(shape439_clean)
         ] + [
             ("cred_401_clean", 0, lambda: _guard(lambda: cp([shape401_clean]))),
             ("cred_401_pretty_json_clean", 0, lambda: _guard(lambda: cp([_body_line(

@@ -1,6 +1,7 @@
 package redact_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,6 +20,12 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 	const field = "[REDACTED:credential-field]"
 
 	pat := "ghp_" + strings.Repeat("a", 36)
+	// deep is a command six shells deep with no credential flag in it; the "--"
+	// lets the command pass run.
+	deep := "x --"
+	for range 6 {
+		deep = "sh -c '" + strings.ReplaceAll(deep, "'", `'\''`) + "'"
+	}
 	r := redact.New()
 	cases := []struct {
 		name string
@@ -238,6 +245,41 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 			want: `{"items":[{"name":"DB_PASSWORD","meta":{"a":[1,2e999]},"value":"` + field + `"}]}`,
 		},
 		{
+			name: "json escaped key after NaN",
+			in:   `{"x":NaN,"DB_PASSW\u004fRD":"hunter2"}`,
+			want: `{"x":NaN,"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json pair after Infinity and -Infinity",
+			in:   `{"a":[Infinity,-Infinity],"n\u0061me":"DB_PASSWORD","value":"hunter2"}`,
+			want: `{"a":[Infinity,-Infinity],"n\u0061me":"DB_PASSWORD","value":"` + field + `"}`,
+		},
+		{
+			name: "json escaped key after NaN in an encoded string",
+			in:   `{"b":"{\"x\":NaN,\"DB_PASSW\\u004fRD\":\"hunter2\"}"}`,
+			want: `{"b":"{\"x\":NaN,\"DB_PASSW\\u004fRD\":\"` + field + `\"}"}`,
+		},
+		{
+			name: "json NaN after strings that end in escapes",
+			in:   `{"a":"\\","b":"\"","x":NaN,"DB_PASSW\u004fRD":"hunter2"}`,
+			want: `{"a":"\\","b":"\"","x":NaN,"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json object after NaN inside a string a read past NaN takes",
+			in:   `[NaN,"a {"DB_PASSW\u004fRD":"v"}`,
+			want: `[NaN,"a {"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json object after top-level 1NaN inside a string",
+			in:   `{}1NaN"a {"DB_PASSW\u004fRD":"v"}`,
+			want: `{}1NaN"a {"DB_PASSW\u004fRD":"` + field + `"}`,
+		},
+		{
+			name: "json key that spells NaN",
+			in:   `{"xNaN_s\u0065cret":"hunter2"}`,
+			want: `{"xNaN_s\u0065cret":"` + field + `"}`,
+		},
+		{
 			name: "json pair truncated after its name",
 			in:   `{"name":"DB_PASSWORD","meta":{},"value":"hunt`,
 			want: `{"name":"DB_PASSWORD","meta":{},"value":"` + field,
@@ -392,15 +434,353 @@ func TestRedact_StructuredCredentialShapes(t *testing.T) {
 				`["--password","` + field + `","-c","app --token ` + field + `"]`,
 		},
 		{
-			name: "shell command value with command substitutions",
+			// A value a shell may expand runs to the end of the command (#404).
+			name: "shell command value with a command substitution",
 			in: `["sh","-c","app --password=$(printf '%s' \"a)\" | (cat)) b; x --token ` + "`cat f`" +
 				` y; z --token $(z"]`,
-			want: `["sh","-c","app --password=` + field + ` b; x --token ` + field + ` y; z --token ` + field + `"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
 		},
 		{
 			name: "shell command substitution edge 1",
 			in:   "[\"sh\", \"-c\", \"a --token `x\\\\`y` b; c --token $(e \\\\) \\\"q\\\\\\\"r) \\\" s) d; e --token $(f \\\"open\"]",
-			want: "[\"sh\", \"-c\", \"a --token [REDACTED:credential-field] b; c --token [REDACTED:credential-field] d; e --token [REDACTED:credential-field]\"]",
+			want: "[\"sh\", \"-c\", \"a --token [REDACTED:credential-field]\"]",
+		},
+		{
+			name: "shell command started inside a shell command",
+			in:   `["sh","-c","bash -c 'app --password hunter2' && echo ok"]`,
+			want: `["sh","-c","bash -c ` + field + ` && echo ok"]`,
+		},
+		{
+			name: "shell command started three shells deep",
+			in:   `["sh","-c","sh -c \"bash -ec 'app --token=x' --\"; echo ok"]`,
+			want: `["sh","-c","sh -c ` + field + `; echo ok"]`,
+		},
+		{
+			name: "shell command nested past the depth bound",
+			in:   `["sh","-c",` + strconv.Quote(deep) + `]`,
+			want: `["sh","-c","sh -c ` + field + `"]`,
+		},
+		{
+			name: "shell command flag inside a command substitution",
+			in:   `["sh","-c","echo $(app --password hunter2) done"]`,
+			want: `["sh","-c","echo $(app --password ` + field + `) done"]`,
+		},
+		{
+			name: "shell command flag inside a backquoted substitution",
+			in:   "[\"sh\",\"-c\",\"echo `app --token hunter2` done\"]",
+			want: `["sh","-c","echo ` + field + `"]`,
+		},
+		{
+			name: "shell command value in a process substitution",
+			in:   `["sh","-c","app --password <(printf hunter2) next"]`,
+			want: `["sh","-c","app --password ` + field + `"]`,
+		},
+		{
+			name: "shell command value after a redirection",
+			in:   `["sh","-c","app --password  < /run/secret next"]`,
+			want: `["sh","-c","app --password  ` + field + `"]`,
+		},
+		{
+			name: "shell command value with a parameter expansion",
+			in:   `["sh","-c","app --password=${X:-hunter 2} next"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
+		},
+		{
+			name: "shell command value with ANSI-C quoting",
+			in:   `["sh","-c","app --password=$'hunter\\' 2' next"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
+		},
+		{
+			name: "shell command expanded value inside double quotes",
+			in:   `["sh","-c","app \"--token=$T x\" next"]`,
+			want: `["sh","-c","app \"--token=` + field + `\""]`,
+		},
+		{
+			name: "yaml double-quoted key",
+			in:   "\"password\": hunter2 # c\n",
+			want: "\"password\": " + field + " # c\n",
+		},
+		{
+			name: "yaml double-quoted key spelled with escapes",
+			in:   "\"pass\\x77or\\u0064\": hunter2\n'api_key': 'it''s'\n",
+			want: "\"pass\\x77or\\u0064\": " + field + "\n'api_key': " + field + "\n",
+		},
+		{
+			name: "yaml pair whose name is spelled with escapes",
+			in:   "- name: \"DB_PASS\\x57ORD\"\n  value: hunter2\n",
+			want: "- name: \"DB_PASS\\x57ORD\"\n  value: " + field + "\n",
+		},
+		{
+			name: "yaml explicit key",
+			in:   "? password\n: hunter2\n- ? \"api\\x5fkey\"\n  # c\n  :\n    hunter2\n    more\nnext: x\n",
+			want: "? password\n: " + field + "\n- ? \"api\\x5fkey\"\n  # c\n  : " + field + "\nnext: x\n",
+		},
+		{
+			name: "yaml key with a tag or an anchor",
+			in: "!!str \"password\": a\n&c password: b\n- &d !<tag:yaml.org,2002:str> api_key: c\n" +
+				"  &e token: d # c\nnext: x\n",
+			want: "!!str \"password\": " + field + "\n&c password: " + field + "\n- &d !<tag:yaml.org,2002:str> api_key: " +
+				field + "\n  &e token: " + field + " # c\nnext: x\n",
+		},
+		{
+			name: "yaml explicit key with a tag or an anchor",
+			in:   "? !!str password\n: a\n? &k !t\n  \"api_key\"\n: b\n?\n  !<tag:a,b>\n  # c\n  token\n: c\n",
+			want: "? !!str password\n: " + field + "\n? &k !t\n  \"api_key\"\n: " + field +
+				"\n?\n  !<tag:a,b>\n  # c\n  token\n: " + field + "\n",
+		},
+		{
+			name: "yaml compact mapping as an explicit key",
+			in:   "? password : a\n- ? api_key: b\n  : v\n? x\n: y\n",
+			want: "? password : " + field + "\n- ? api_key: " + field + "\n  : v\n? x\n: y\n",
+		},
+		{
+			name: "yaml tagged value under a JSON key, and an anchor that changes no type",
+			in:   "!!str \"password\": !!str 1234\n\"api_key\": &a 5\nx: {\"token\": !!str 6}\n\"secret\":\n  !!str 7\n",
+			want: "!!str \"password\": " + field + "\n\"api_key\": &a 5\nx: {\"token\": !!str " + field + "}\n" +
+				"\"secret\": " + field + "\n",
+		},
+		{
+			name: "yaml properties before a key that opens a flow collection",
+			in:   "!!str x: {password: a}\n- &b y: [token: b]\n",
+			want: "!!str x: {password: " + field + "}\n- &b y: [token: " + field + "]\n",
+		},
+		{
+			name: "yaml key after two sequence markers",
+			in:   "- - password: a\n",
+			want: "- - password: " + field + "\n",
+		},
+		{
+			name: "yaml name or value key after properties keeps its lines readable",
+			in: "&a value: |\n  \"password\": h1\n&b value: |\n  - name: DB_PASSWORD\n    value: h2\n" +
+				"- value: |\n    h3\n    password: \"\n  name: DB_PASSWORD\n? &c\n  value\n: |\n  \"token\": h4\n" +
+				"- - name: DB_PASSWORD\n    value: h5\n",
+			want: "&a value: |\n  \"password\": " + field + "\n&b value: |\n  - name: DB_PASSWORD\n    value: " + field +
+				"\n- value: " + field + "\n  name: DB_PASSWORD\n? &c\n  value\n: |\n  \"token\": " + field +
+				"\n- - name: DB_PASSWORD\n    value: " + field + "\n",
+		},
+		{
+			name: "yaml flow explicit key with a comment between its properties",
+			in:   "{ ? !!str # c\n &a token\n : hunter2 }\n",
+			want: "{ ? !!str # c\n &a token\n : " + field + " }\n",
+		},
+		{
+			name: "yaml key read through properties leaves the lines after it readable",
+			in: "? &k '\n  \"password\": s1\n  '\n: x\n!!str x: {public: '\n  {password: s2}\n  !!str y: {token: s3}\n'}\n" +
+				"!!str \"nextPageToken\": \"\n  - name: DB_PASSWORD\n    value: s4\n  \"\n",
+			want: "? &k '\n  \"password\": " + field + "\n  '\n: x\n!!str x: {public: '\n  {password: " + field +
+				"}\n  !!str y: {token: s3}\n'}\n!!str \"nextPageToken\": \"\n  - name: DB_PASSWORD\n    value: " + field +
+				"\n  \"\n",
+		},
+		{
+			name: "yaml name or value key with properties pairs, and a key inside a value left in place",
+			in: "- name: DB_PASSWORD\n  &v value: s1\n- &n name: API_KEY\n  value: s2\n" +
+				"!!str \"nextPageToken\": \"\n  &a password: s3\n  \"\n!!str \"pageToken\":\n  \"\n  &b token: s4\n  \"\n" +
+				"&c value: |\n  &d secret: s5\n&e value: |\n  - &n name: DB_PASSWORD\n    &v value: s6\n    other: |\n      x\n",
+			want: "- name: DB_PASSWORD\n  &v value: " + field + "\n- &n name: API_KEY\n  value: " + field + "\n" +
+				"!!str \"nextPageToken\": \"\n  &a password: " + field + "\n  \"\n!!str \"pageToken\":\n  \"\n  &b token: " +
+				field + "\n  \"\n&c value: |\n  &d secret: " + field + "\n&e value: |\n  - &n name: DB_PASSWORD\n    &v value: " +
+				field + "\n    other: |\n      x\n",
+		},
+		{
+			name: "yaml flow entry with properties keeps the closing bracket",
+			in: "{\n &k password: s1 }\n[\n &j token: s2, x]\n\"nextPageToken\": &c 123\nx: {\"pageToken\": &d 4}\n" +
+				"!!str y: [\n  {a: b},\n  &k secret: s3, z]\nexample: |\n  [\"unfinished\n&a password: s4\n" +
+				"!!str x: {public: '\n  &b token: s5\n'}\n",
+			want: "{\n &k password: " + field + " }\n[\n &j token: " + field + ", x]\n\"nextPageToken\": &c 123\n" +
+				"x: {\"pageToken\": &d 4}\n!!str y: [\n  {a: b},\n  &k secret: " + field + ", z]\n" +
+				"example: |\n  [\"unfinished\n&a password: " + field + "\n!!str x: {public: '\n  &b token: " + field + "\n'}\n",
+		},
+		{
+			name: "yaml pair with properties nested in a value with properties at the end of content",
+			in:   "&a value: |\n  - &n name: API_KEY\n    &v value: s1",
+			want: "&a value: |\n  - &n name: API_KEY\n    &v value: " + field,
+		},
+		{
+			name: "yaml key with properties before a flow collection inside a multi-line explicit key",
+			in:   "? &k '\n  &a password: s1\n  [a]\n  '\n: x\n",
+			want: "? &k '\n  &a password: " + field + "\n  [a]\n  '\n: x\n",
+		},
+		{
+			name: "yaml flow verbatim tag holding a blank",
+			in:   "{ !<a b> token: s1 }\n",
+			want: "{ !<a b> token: " + field + " }\n",
+		},
+		{
+			name: "yaml flow mapping pair in a sequence",
+			in:   "env:\n- {name: DB_PASSWORD, value: hunter2}\n- {name: DB_HOST, value: db}\n",
+			want: "env:\n- {name: DB_PASSWORD, value: " + field + "}\n- {name: DB_HOST, value: db}\n",
+		},
+		{
+			name: "yaml flow mappings over lines",
+			in:   "env: [{value: 'hunter2',\n  # c\n  name: DB_PASSWORD}, {password: \"a\n b\", token: [a]}]\n",
+			want: "env: [{value: " + field + ",\n  # c\n  name: DB_PASSWORD}, {password: " + field + ", token: [a]}]\n",
+		},
+		{
+			name: "yaml flow one-pair mapping, properties and an explicit key",
+			in:   "x: [password: &a !t hunter2 # c\n , {? api_key : k}]\n",
+			want: "x: [password: &a !t " + field + " # c\n , {? api_key : " + field + "}]\n",
+		},
+		{
+			name: "yaml flow mapping cut off",
+			in:   "x: {name: DB_PASSWORD, secret: \"a, value: hunt",
+			want: "x: {name: DB_PASSWORD, secret: " + field,
+		},
+		{
+			name: "yaml flow mapping closed by the wrong bracket",
+			in:   "x: {name: DB_PASSWORD, value: hunter2]\n",
+			want: "x: {name: DB_PASSWORD, value: " + field + "]\n",
+		},
+		{
+			name: "yaml flow mapping cut off in a comment",
+			in:   "x: {name: DB_PASSWORD, value: hunter2 # c",
+			want: "x: {name: DB_PASSWORD, value: " + field + " # c",
+		},
+		{
+			name: "quoted key with an escape only YAML defines",
+			in:   "\"pass\\x77ord\": \"hunter2\"\nx: {\"api\\x5fkey\": \"k\"}\n",
+			want: "\"pass\\x77ord\": " + field + "\nx: {\"api\\x5fkey\": " + field + "}\n",
+		},
+		{
+			name: "shell options after the command option",
+			in:   `["sh","-c","-e","--","app --token x"]`,
+			want: `["sh","-c","-e","--","app --token ` + field + `"]`,
+		},
+		{
+			name: "flag that is an option's argument before the command",
+			in:   `["sh","-c","-o","--token","x y","+O","--password","z"]`,
+			want: `["sh","-c","-o","--token","` + field + `","+O","--password","` + field + `"]`,
+		},
+		{
+			name: "nested shell options after the command option",
+			in:   `["sh","-c","bash -c -o pipefail -- 'app --password x'; bash -ce"]`,
+			want: `["sh","-c","bash -c -o pipefail -- ` + field + `; bash -ce"]`,
+		},
+		{
+			name: "nested shell whose command word overlaps an expanded value",
+			in:   `["sh","-c","echo sh -c --password=$(printf hunter2)"]`,
+			want: `["sh","-c","echo sh -c ` + field + `"]`,
+		},
+		{
+			name: "flow mapping mixing plain and JSON-string keys",
+			in:   "x: {name: DB_PASSWORD, \"value\": \"a\"}\ny: {public: b, \"pass\\u0077ord\": \"c\", \"pageToken\": \"d\"}\n",
+			want: "x: {name: DB_PASSWORD, \"value\": \"" + field + "\"}\ny: {public: b, \"pass\\u0077ord\": \"" + field +
+				"\", \"pageToken\": \"d\"}\n",
+		},
+		{
+			name: "yaml block value under an escaped JSON-string key",
+			in:   "a: b\n\"pass\\u0077ord\": \"c\",\n\"token\": 12\n",
+			want: "a: b\n\"pass\\u0077ord\": \"" + field + "\",\n\"token\": 12\n",
+		},
+		{
+			name: "flow collections after explicit, value and document markers",
+			in:   "? env\n: {password: a}\n--- {token: b}\n? [api_key: c]\n",
+			want: "? env\n: {password: " + field + "}\n--- {token: " + field + "}\n? [api_key: " + field + "]\n",
+		},
+		{
+			name: "flow value after a verbatim tag",
+			in:   "x: {password: !<tag:yaml.org,2002:str> a}\n",
+			want: "x: {password: !<tag:yaml.org,2002:str> " + field + "}\n",
+		},
+		{
+			name: "flow name joined over lines with an escaped line break",
+			in:   "x: {name: \"DB_PASS\\\n  WORD\", value: a}\ny: {name: \"API_\\\r\n\tKEY\", value: b}\n",
+			want: "x: {name: \"DB_PASS\\\n  WORD\", value: " + field + "}\ny: {name: \"API_\\\r\n\tKEY\", value: " + field + "}\n",
+		},
+		{
+			name: "shell option run that takes an argument",
+			in:   `["bash","-c","-eo","pipefail","app --password a","bash","-ceo","pipefail","app --token b"]`,
+			want: `["bash","-c","-eo","pipefail","app --password ` + field + `","bash","-ceo","pipefail","app --token ` + field + `"]`,
+		},
+		{
+			name: "json object at the start of a line with a constant JSON does not define",
+			in:   `{"x":-NaN,"DB_PASSW\u004fRD":"v","password":NaN}`,
+			want: `{"x":-NaN,"DB_PASSW\u004fRD":"` + field + `","password":` + field + `}`,
+		},
+		{
+			name: "prefixed token under a JSON-string key with a value that is not a JSON string",
+			in:   "{\n  \"authToken\": |\n    a\n}\n\"authToken\": b\nx: {\"authToken\": c, \"pageToken\": \"d\"}\n",
+			want: "{\n  \"authToken\": " + field + "\n}\n\"authToken\": " + field + "\nx: {\"authToken\": " + field +
+				", \"pageToken\": \"d\"}\n",
+		},
+		{
+			name: "shell option run taking two arguments",
+			in:   `["bash","-coO","pipefail","extglob","app --password a"]`,
+			want: `["bash","-coO","pipefail","extglob","app --password ` + field + `"]`,
+		},
+		{
+			name: "joined spans followed by an empty one",
+			in:   `["sh","-c","echo sh -c '--password=$(printf hunter2)' --token="]`,
+			want: `["sh","-c","echo sh -c ` + field + `"]`,
+		},
+		{
+			name: "shell value with an operator right after it",
+			in:   `["sh","-c","app --password=<(printf a) next; b"]`,
+			want: `["sh","-c","app --password=` + field + `"]`,
+		},
+		{
+			name: "shell value with an operator right after a separate value",
+			in:   `["sh","-c","app --token x>(y) next"]`,
+			want: `["sh","-c","app --token ` + field + `"]`,
+		},
+		{
+			name: "command substitutions inside double quotes",
+			in:   "[\"sh\",\"-c\",\"echo \\\"$X$(app --token a)\\\" and \\\"`app --password b`\\\" done\"]",
+			want: `["sh","-c","echo ` + field + `"]`,
+		},
+		{
+			name: "flow comments after a property and after a comma",
+			in:   "x: {name: &n # c\n DB_PASSWORD, value: a}\ny: {name: DB_PASSWORD,# c\n value: b}\n",
+			want: "x: {name: &n # c\n DB_PASSWORD, value: " + field + "}\ny: {name: DB_PASSWORD,# c\n value: " + field + "}\n",
+		},
+		{
+			name: "flow collection under a plain key holding a slash or a space",
+			in:   "config/app.yaml: {password: a}\napp config: [token: b]\n",
+			want: "config/app.yaml: {password: " + field + "}\napp config: [token: " + field + "]\n",
+		},
+		{
+			name: "explicit quoted key over several lines",
+			in:   "? \"pass\\\n  word\" # c\n: a\n? 'api_key'\n: b\n",
+			want: "? \"pass\\\n  word\" # c\n: " + field + "\n? 'api_key'\n: " + field + "\n",
+		},
+		{
+			name: "explicit key on the line after a bare indicator",
+			in:   "?\n  password\n: a\n- ? # c\n\n    'api_key'\n  : b\n?\ntoken\n: c\n",
+			want: "?\n  password\n: " + field + "\n- ? # c\n\n    'api_key'\n  : " + field + "\n?\ntoken\n: c\n",
+		},
+		{
+			name: "flow value spelled with a leading hash right after the colon",
+			in:   "{\"password\":#a}\nx: {\"token\":#b, c: d}\n",
+			want: "{\"password\":" + field + "}\nx: {\"token\":" + field + ", c: d}\n",
+		},
+		{
+			name: "flow comment right after a key or a collection",
+			in:   "x: {\"password\"#c\n: a}\ny: {k: [b]#c\n password: c}\n",
+			want: "x: {\"password\"#c\n: " + field + "}\ny: {k: [b]#c\n password: " + field + "}\n",
+		},
+		{
+			name: "flow hash that opens no comment hides nothing after it",
+			in:   "x: {a: \"b\"#, password: c}\ny: {d: e,#f, token: g}\n",
+			want: "x: {a: \"b\"#, password: " + field + "}\ny: {d: e,#f, token: " + field + "}\n",
+		},
+		{
+			name: "command substitution whose quotes nest inside the word's",
+			in:   `["sh","-c","echo \"$(app --password \"sword fish\")\" done"]`,
+			want: `["sh","-c","echo ` + field + `"]`,
+		},
+		{
+			name: "command substitution with a quoted argument before the flag",
+			in:   `["sh","-c","echo \"$(app \"a b\" --password c)\" done"]`,
+			want: `["sh","-c","echo ` + field + `"]`,
+		},
+		{
+			name: "flow collection under a plain key holding a hash",
+			in:   "config/app#v1.yaml: {password: a}\n",
+			want: "config/app#v1.yaml: {password: " + field + "}\n",
+		},
+		{
+			name: "json pair with an unquoted value",
+			in:   `{"name":"DB_PASSWORD","value":hunter2}`,
+			want: `{"name":"DB_PASSWORD","value":` + field + `}`,
 		},
 		{
 			name: "shell command substitution edge 2",
@@ -488,6 +868,13 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`{"value":1,"name":"DB_PASSWORD","nested":{"value":"x"}}`,
 		`{"a":"\q","DB_PASSWORD":1}`,
 		`{"DB_PASSW\u004fRD" "x`,
+		// Text before each object keeps the YAML flow pass off it, so these pin the
+		// JSON object pass alone.
+		`got {"x":-NaN,"DB_PASSW\u004fRD":"v"}`,
+		`got {"x":1NaN,"DB_PASSW\u004fRD":"v"}`,
+		`got {"x":NaN1,"DB_PASSW\u004fRD":"v"}`,
+		`got {"x":nan,"DB_PASSW\u004fRD":"v"}`,
+		"{\n  \"nextPageToken\": \"a\",\n  \"n\\u0065xtToken\": \"b\"\n}\nx: {\"pageToken\": \"c\"}\n",
 		"secret:\n  # comment\n  secretName: public-reference\n",
 		"secret:\n  \"secretName\": public-reference\n",
 		"token:\n  [public-reference]\n",
@@ -513,6 +900,24 @@ func TestRedact_StructuredShapeNegatives(t *testing.T) {
 		`["--password",1]`,
 		`["--token","[REDACTED:github-token]"]`,
 		`["--no-generate-secret","--client-name","example"]`,
+		"x: {name: DB_HOST, value: public, token: [a, b], secret: {k: v}}\n",
+		"x: [name: DB_PASSWORD, value: public]\n",
+		"x: {name: DB_PASSWORD, nested: {value: public}}\n",
+		"x: {password: [REDACTED:jwt], api_key: \"[REDACTED:jwt]\", key: a:b}\n",
+		"? public\n: value\n? password\n  : nested\n",
+		"\"pass\\qword\": public\n",
+		"x: [REDACTED:jwt]\n",
+		"? \n: x\n",
+		"? 'pass: x\n  # c\n",
+		"? \"password\" x\n: public\n",
+		"Note: see {\"a\": 1} and [b: c]\n",
+		"a #b: {password: public}\n",
+		`["sh","-c","echo '$(cat x)' $(date) ` + "`date`" + ` --page x"]`,
+		"x: {password: &a}\n",
+		"? password # a: b\n# c\n",
+		"- name: \"DB_PASSWORD\\\"\n  value: public\n",
+		"\"pass\\2word\": public\n\"\\x4\": a\n\"\\xZZ\": b\n\"\\UFFFFFFFF\": c\n\"\\N\\_\\L\\P\": d\n",
+		`["sh","-c","app --password=[REDACTED:jwt] && sh -c 'app --token [REDACTED:jwt]'"]`,
 	}
 	for _, in := range negatives {
 		if got := r.Redact(in); got != in {
