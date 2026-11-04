@@ -678,13 +678,14 @@ func TestLoad_FutureProofedBifrostFields_OpenAI(t *testing.T) {
     max_retries: 3
     extra_headers:
       x-custom-header: hello
+      x-env-header: env.CYN_TEST_HEADER
     retry_backoff_initial: "500ms"
     retry_backoff_max: "5s"
   openai_config:
     disable_store: true
 `
 
-	cfg, err := config.NewLoader(envMap(nil)).Load(writeConfig(t, yaml))
+	cfg, err := config.NewLoader(envMap(map[string]string{"CYN_TEST_HEADER": "from-env"})).Load(writeConfig(t, yaml))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -701,8 +702,13 @@ func TestLoad_FutureProofedBifrostFields_OpenAI(t *testing.T) {
 	if cfg.LLM.NetworkConfig.RetryBackoffMax != 5*time.Second {
 		t.Errorf("RetryBackoffMax: got %v, want 5s", cfg.LLM.NetworkConfig.RetryBackoffMax)
 	}
-	if cfg.LLM.NetworkConfig.ExtraHeaders["x-custom-header"] != "hello" {
-		t.Errorf("ExtraHeaders: got %v", cfg.LLM.NetworkConfig.ExtraHeaders)
+	headers := cfg.LLM.NetworkConfig.ExtraHeaders
+	if plain := headers["x-custom-header"]; plain.GetValue() != "hello" {
+		t.Errorf("ExtraHeaders[x-custom-header]: got %q, want %q", plain.GetValue(), "hello")
+	}
+	if ref := headers["x-env-header"]; ref.GetValue() != "from-env" || ref.EnvKey() != "CYN_TEST_HEADER" {
+		t.Errorf("ExtraHeaders[x-env-header]: got %q from %q, want %q from CYN_TEST_HEADER",
+			ref.GetValue(), ref.EnvKey(), "from-env")
 	}
 	if cfg.LLM.OpenAIConfig == nil || !cfg.LLM.OpenAIConfig.DisableStore {
 		t.Errorf("OpenAIConfig.DisableStore: got %+v", cfg.LLM.OpenAIConfig)

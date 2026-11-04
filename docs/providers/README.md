@@ -66,7 +66,7 @@ llm:
     base_url: https://...                          # optional
     default_request_timeout_in_seconds: 60         # optional; integer seconds
     max_retries: 3                                 # optional; default 3 (0 disables retries)
-    extra_headers:                                 # optional
+    extra_headers:                                 # optional; a value may be env.VAR
       x-custom: value
     insecure_skip_verify: false                    # optional
   openai_config: {...}             # top-level squashed provider config
