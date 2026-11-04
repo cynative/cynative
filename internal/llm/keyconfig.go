@@ -15,10 +15,10 @@ import (
 // misconfiguration, not every one.
 //
 // Three providers form the closed required set. Re-verified against
-// github.com/maximhq/bifrost/core@v1.12.0, where the failure mode is not a panic:
+// github.com/maximhq/bifrost/core@v1.13.0, where the failure mode is not a panic:
 // validateKey (utils.go:132) rejects the key, key selection logs a warning and
-// skips it (bifrost.go:10761-10763), and the request then fails at
-// bifrost.go:10777 with "no keys found that support model: X", naming neither
+// skips it (bifrost.go:10785-10787), and the request then fails at
+// bifrost.go:10801 with "no keys found that support model: X", naming neither
 // the provider nor the field that was missing. Mirroring the check here turns
 // that into a load-time error that says what to set.
 //   - azure:  validateKey requires azure_key_config and a non-empty endpoint
