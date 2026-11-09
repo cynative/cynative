@@ -60,7 +60,7 @@ the federated token. Every field also has an env form, for example
 `CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_FEDERATION_RULE_ID` and
 `CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_IDENTITY_SOURCE_PATH`. Only the
 `anthropic` provider honours this block. On any other provider Bifrost skips
-the key and the run fails with `no keys found that support model`.
+the key, so a single-key setup fails with `no keys found that support model`.
 
 ## Reasoning (extended thinking)
 
