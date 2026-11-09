@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.14.2](https://github.com/cynative/cynative/compare/v1.14.1...v1.14.2) (2026-11-09)
+
+
+### Dependencies
+
+* Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#447](https://github.com/cynative/cynative/issues/447)) ([1cf4f9d](https://github.com/cynative/cynative/commit/1cf4f9de79451e161599431822210af4e1f013ee))
+* Bump the "all-dependencies" group with 2 updates across multiple ecosystems ([#451](https://github.com/cynative/cynative/issues/451)) ([9be102e](https://github.com/cynative/cynative/commit/9be102eb1934a4af24982a603aacb40669114d83))
+
 ## [1.14.1](https://github.com/cynative/cynative/compare/v1.14.0...v1.14.1) (2026-10-21)
 
 
