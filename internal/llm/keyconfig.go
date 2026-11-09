@@ -15,35 +15,36 @@ import (
 // misconfiguration, not every one.
 //
 // Three providers form the closed required set. Re-verified against
-// github.com/maximhq/bifrost/core@v1.13.0, where the failure mode is not a panic:
-// validateKey (utils.go:132) rejects the key, key selection logs a warning and
-// skips it (bifrost.go:10785-10787), and the request then fails at
-// bifrost.go:10801 with "no keys found that support model: X", naming neither
+// github.com/maximhq/bifrost/core@v1.14.1, where the failure mode is not a panic:
+// validateKey (utils.go:136) rejects the key, key selection logs a warning and
+// skips it (bifrost.go:11217-11219), and the request then fails at
+// bifrost.go:11233 with "no keys found that support model: X", naming neither
 // the provider nor the field that was missing. Mirroring the check here turns
 // that into a load-time error that says what to set.
 //   - azure:  validateKey requires azure_key_config and a non-empty endpoint
-//     (utils.go:135-141).
-//   - vertex: validateKey requires vertex_key_config (utils.go:152-155). The
+//     (utils.go:139-145).
+//   - vertex: validateKey requires vertex_key_config (utils.go:161-164). The
 //     unguarded dereference earlier versions of this comment cited still exists
 //     (getAuthTokenSource, providers/vertex/vertex.go:236), but nothing reaches
 //     it with a nil config because validateKey rejects the key first.
 //   - cloudflare: validateKey requires cloudflare_key_config and a non-empty
-//     account_id (utils.go:177-183). Here the account ID is checked as well as
+//     account_id (utils.go:186-192). Here the account ID is checked as well as
 //     the block, since it is the block's only field and the request URL
 //     cannot be built without it (cloudflare.go:77-85).
 //
 // Bifrost hard-requires a config for ollama, vllm and sgl too
-// (utils.go:156-176), and for github-copilot whenever the key value is empty
-// (utils.go:184-213). Cynative does not mirror those, so they still surface as
+// (utils.go:165-185). Cynative does not mirror those, so they still surface as
 // the opaque runtime error above; extending the set is a separate decision,
 // not a bump. validateKey also rejects an oauth_key_config on any provider but
-// openai (utils.go:234-237), which cynative does not mirror either.
+// openai (utils.go:213-216), which cynative does not mirror either.
 //
 // The remaining KeyConfig-bearing providers need no check at all: Replicate
 // nil-checks (replicate.go:107); Databricks nil-checks each of its four reads
 // (databricks.go:127, 169, 265, 286) and runs from a token plus a base_url with
 // no config whatsoever; Bedrock's config is optional (AWS credential chain /
-// bare API-key Value). The fields are checked directly (no reflection), so an
+// bare API-key Value); validateKey fills in an empty SageMaker config
+// (utils.go:156-160), and its missing region fails the request with a message
+// that names the field (providers/sagemaker/utils.go:68). The fields are checked directly (no reflection), so an
 // upstream rename of AzureKeyConfig/VertexKeyConfig/CloudflareKeyConfig fails at
 // compile time.
 func ValidateKeyConfigs(entry *ProviderEntry) error {

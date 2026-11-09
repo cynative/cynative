@@ -919,6 +919,41 @@ func TestLoad_BedrockRegion_ResolvesFromEnv(t *testing.T) {
 	}
 }
 
+func TestLoad_SageMakerRegion_ResolvesFromEnv(t *testing.T) {
+	t.Parallel()
+
+	// No api_key: SageMaker mints its bearer from the AWS credential chain, so
+	// the region alone must synthesize a key, and the alias must be cleared.
+	cfg, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER":                    "sagemaker",
+		"CYNATIVE_LLM_MODEL":                       "my-endpoint",
+		"CYNATIVE_LLM_SAGEMAKER_REGION":            "us-west-2",
+		"CYNATIVE_LLM_SAGEMAKER_ROLE_ARN":          "arn:aws:iam::123456789012:role/invoke",
+		"CYNATIVE_LLM_SAGEMAKER_ENDPOINTS_RUNTIME": "runtime.example.test",
+	}).Load("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LLM.Keys) != 1 || cfg.LLM.Keys[0].SageMakerKeyConfig == nil {
+		t.Fatalf("expected sagemaker key config in keys[0], got %+v", cfg.LLM.Keys)
+	}
+	if cfg.LLM.Keys[0].SageMakerKeyConfig.Region == nil ||
+		cfg.LLM.Keys[0].SageMakerKeyConfig.Region.Val != "us-west-2" {
+		t.Errorf("region: got %+v", cfg.LLM.Keys[0].SageMakerKeyConfig.Region)
+	}
+	if got := cfg.LLM.Keys[0].SageMakerKeyConfig.RoleARN; got == nil ||
+		got.Val != "arn:aws:iam::123456789012:role/invoke" {
+		t.Errorf("role_arn: got %+v", got)
+	}
+	if got := cfg.LLM.Keys[0].SageMakerKeyConfig.Endpoints; got == nil || got.Runtime == nil ||
+		got.Runtime.Val != "runtime.example.test" {
+		t.Errorf("endpoints.runtime: got %+v", got)
+	}
+	if cfg.LLM.SageMaker != nil {
+		t.Error("SageMaker alias should be cleared after materialize")
+	}
+}
+
 func TestLoad_VertexConfig_ResolvesFromEnv(t *testing.T) {
 	t.Parallel()
 

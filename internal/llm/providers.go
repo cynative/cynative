@@ -60,14 +60,13 @@ func ChatProviders() []schemas.ModelProvider {
 // CanonicalEnvKeyLookup maps each chat-capable Bifrost provider to the
 // conventional environment variable cynative reads when neither llm.api_key
 // nor llm.keys were configured. An empty string means "this provider has no
-// canonical single-env fallback" (Bedrock and Bedrock Mantle use the AWS
-// credential chain, Mantle alternatively an explicit API key via llm.api_key;
+// canonical single-env fallback" (Bedrock, Bedrock Mantle and SageMaker use the
+// AWS credential chain, Mantle and SageMaker alternatively an explicit key via
+// llm.api_key;
 // Vertex needs structured project/region config in llm.vertex.* and gets
 // credentials via the Google ADC chain; Ollama/VLLM/SGL authenticate via the
-// local endpoint URL; GitHub Copilot's only reachable credential is a Copilot
-// API token that expires in about 30 minutes, which is not something an
-// operator parks in a shell profile, so it is passed explicitly via
-// llm.api_key). The "ok bool" returned by CanonicalEnvKey distinguishes
+// local endpoint URL; GitHub Copilot takes a fine-grained PAT, a GitHub OAuth
+// token or a Copilot API token, passed explicitly via llm.api_key). The "ok bool" returned by CanonicalEnvKey distinguishes
 // "provider not configured here" from "configured, but no env fallback".
 //
 // The key set MUST stay set-equal to ChatProviders(); the
@@ -100,8 +99,11 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.Wafer:         "WAFER_API_KEY",
 	schemas.Databricks:    "DATABRICKS_TOKEN",
 	schemas.Cloudflare:    "CLOUDFLARE_API_TOKEN",
+	schemas.MiniMax:       "MINIMAX_API_KEY",
+	schemas.BytePlus:      "ARK_API_KEY",
 	schemas.Bedrock:       "",
 	schemas.BedrockMantle: "",
+	schemas.SageMaker:     "",
 	schemas.Ollama:        "",
 	schemas.VLLM:          "",
 	schemas.SGL:           "",
