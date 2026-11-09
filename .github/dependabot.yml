@@ -34,6 +34,14 @@ updates:
       # follow without Dependabot's help. Drop this entry when that happens.
       - dependency-name: "github.com/gobwas/glob"
         update-types: ["version-update:semver-major"]
+      # depguard v2.3.0 requires gobwas/glob v1.0.0, so bumping this indirect
+      # module (via golangci-lint, whose v2.15.0 still pins v2.2.1) drags glob
+      # to v1 through the module graph and hits the same go mod tidy failure
+      # the glob entry above blocks. Patch updates stay allowed. Drop this
+      # entry together with the glob entry, when fileglob/goreleaser ship a
+      # release built against the glob v1 layout.
+      - dependency-name: "github.com/OpenPeeDeeP/depguard/v2"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       # go-header v1 is a breaking API rewrite that golangci-lint (which pins
       # the v0.5.x API) cannot compile against, so forcing the major bump on
       # this indirect module breaks `go tool golangci-lint`. Minor/patch
