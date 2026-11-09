@@ -72,9 +72,9 @@ func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.Secr
 // anyHoistedKeyConfig reports whether any hoisted per-provider key config is set.
 func anyHoistedKeyConfig(entry *llm.ProviderEntry) bool {
 	return entry.Azure != nil || entry.Vertex != nil || entry.Bedrock != nil ||
-		entry.BedrockMantle != nil || entry.VLLM != nil || entry.Ollama != nil ||
-		entry.SGL != nil || entry.Replicate != nil || entry.Databricks != nil ||
-		entry.GithubCopilot != nil || entry.Cloudflare != nil || entry.OAuth != nil
+		entry.BedrockMantle != nil || entry.SageMaker != nil || entry.VLLM != nil ||
+		entry.Ollama != nil || entry.SGL != nil || entry.Replicate != nil ||
+		entry.Databricks != nil || entry.Cloudflare != nil || entry.OAuth != nil
 }
 
 // applyHoistedKeyConfigs copies the hoisted key configs onto key. Absent ones
@@ -84,12 +84,12 @@ func applyHoistedKeyConfigs(entry *llm.ProviderEntry, key *schemas.Key) {
 	key.VertexKeyConfig = entry.Vertex
 	key.BedrockKeyConfig = entry.Bedrock
 	key.BedrockMantleKeyConfig = entry.BedrockMantle
+	key.SageMakerKeyConfig = entry.SageMaker
 	key.VLLMKeyConfig = entry.VLLM
 	key.OllamaKeyConfig = entry.Ollama
 	key.SGLKeyConfig = entry.SGL
 	key.ReplicateKeyConfig = entry.Replicate
 	key.DatabricksKeyConfig = entry.Databricks
-	key.GithubCopilotKeyConfig = entry.GithubCopilot
 	key.CloudflareKeyConfig = entry.Cloudflare
 	key.OAuthKeyConfig = entry.OAuth
 }
@@ -100,12 +100,12 @@ func clearHoistedKeyConfigs(entry *llm.ProviderEntry) {
 	entry.Vertex = nil
 	entry.Bedrock = nil
 	entry.BedrockMantle = nil
+	entry.SageMaker = nil
 	entry.VLLM = nil
 	entry.Ollama = nil
 	entry.SGL = nil
 	entry.Replicate = nil
 	entry.Databricks = nil
-	entry.GithubCopilot = nil
 	entry.Cloudflare = nil
 	entry.OAuth = nil
 }

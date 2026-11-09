@@ -47,13 +47,6 @@ type ProviderEntry struct {
 	// CYNATIVE_LLM_AZURE_ENDPOINT). materializeLLM folds whichever is set into
 	// the synthesized keys[0]; after materialize these are nil.
 	//
-	// The json tag is the env-var stem, not the Bifrost provider id: applyEnv
-	// upper-snake-cases the json path and replaces only dots, so a hyphenated
-	// tag would derive CYNATIVE_LLM_GITHUB-COPILOT_APP_ID, which no POSIX shell
-	// can export. github-copilot therefore spells itself three ways on purpose:
-	// the provider id and its doc filename keep the hyphen, this alias and its
-	// env vars use an underscore.
-	//
 	// OAuth is the one alias not named after a provider: Bifrost's
 	// oauth_key_config mints the bearer for openai when the key value is
 	// empty, and validateKey rejects it on any other provider.
@@ -61,12 +54,12 @@ type ProviderEntry struct {
 	Vertex        *schemas.VertexKeyConfig        `json:"vertex,omitempty"`
 	Bedrock       *schemas.BedrockKeyConfig       `json:"bedrock,omitempty"`
 	BedrockMantle *schemas.BedrockMantleKeyConfig `json:"bedrock_mantle,omitempty"`
+	SageMaker     *schemas.SageMakerKeyConfig     `json:"sagemaker,omitempty"`
 	VLLM          *schemas.VLLMKeyConfig          `json:"vllm,omitempty"`
 	Ollama        *schemas.OllamaKeyConfig        `json:"ollama,omitempty"`
 	SGL           *schemas.SGLKeyConfig           `json:"sgl,omitempty"`
 	Replicate     *schemas.ReplicateKeyConfig     `json:"replicate,omitempty"`
 	Databricks    *schemas.DatabricksKeyConfig    `json:"databricks,omitempty"`
-	GithubCopilot *schemas.GithubCopilotKeyConfig `json:"github_copilot,omitempty"`
 	Cloudflare    *schemas.CloudflareKeyConfig    `json:"cloudflare,omitempty"`
 	OAuth         *schemas.OAuthKeyConfig         `json:"oauth,omitempty"`
 }
