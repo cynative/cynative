@@ -29,6 +29,39 @@ Get a key from <https://console.anthropic.com/settings/keys>. Cynative reads
 it from `llm.api_key`, `CYNATIVE_LLM_API_KEY`, or `ANTHROPIC_API_KEY` —
 in that order.
 
+## Workload identity federation
+
+A workload that holds an OIDC identity token (a Kubernetes projected service
+account token, a CI OIDC token) can authenticate without a static key through
+`llm.anthropic.workload_identity`, Bifrost's `anthropic_key_config`. Bifrost
+exchanges the identity token at `{base_url}/v1/oauth/token` for a short-lived
+access token, caches it and exchanges again before it expires.
+
+```yaml
+llm:
+  provider: anthropic
+  model: claude-opus-4-7
+  anthropic:
+    workload_identity:
+      federation_rule_id: fdrl_...
+      organization_id: 00000000-0000-0000-0000-000000000000
+      service_account_id: svac_...
+      workspace_id: wrkspc_...           # only when the rule spans several workspaces
+      identity_source:
+        type: file                       # re-read on every exchange, so a rotated token is picked up
+        path: /var/run/secrets/tokens/anthropic
+        # or: type: inline, token: env.ANTHROPIC_IDENTITY_TOKEN
+```
+
+Leave `llm.api_key` unset: a non-empty key value always wins and the
+federation is then skipped. `ANTHROPIC_API_KEY` is not read when
+`llm.anthropic.workload_identity` is set, so an exported key never replaces
+the federated token. Every field also has an env form, for example
+`CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_FEDERATION_RULE_ID` and
+`CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_IDENTITY_SOURCE_PATH`. Only the
+`anthropic` provider honours this block. On any other provider Bifrost skips
+the key and the run fails with `no keys found that support model`.
+
 ## Reasoning (extended thinking)
 
 ```yaml

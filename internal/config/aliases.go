@@ -50,6 +50,8 @@ func materializeKey(entry *llm.ProviderEntry, env llm.LookupEnv) {
 // An llm.oauth block turns the fallback off. Bifrost sends a non-empty Value
 // verbatim and ignores the OAuth config, so an exported OPENAI_API_KEY would
 // otherwise reach the gateway that block points at instead of a minted token.
+// An llm.anthropic.workload_identity block turns it off for the same reason:
+// a non-empty Value goes out as x-api-key and the federation is skipped.
 func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.SecretVar, bool) {
 	if entry.APIKey != "" {
 		// Route through ResolveEnvVar so an "env.X" value resolves the variable
@@ -58,7 +60,7 @@ func keyValueForEntry(entry *llm.ProviderEntry, env llm.LookupEnv) (schemas.Secr
 		// an unset reference as a clean load-time error.
 		return llm.ResolveEnvVar(entry.APIKey, env), true
 	}
-	if len(entry.Keys) == 0 && entry.OAuth == nil {
+	if len(entry.Keys) == 0 && entry.OAuth == nil && !entry.Anthropic.HasWorkloadIdentity() {
 		if envName, ok := llm.CanonicalEnvKey(schemas.ModelProvider(entry.Provider)); ok {
 			if val, found := env(envName); found && val != "" {
 				return llm.EnvSecretVar("env."+envName, val), true
@@ -74,7 +76,8 @@ func anyHoistedKeyConfig(entry *llm.ProviderEntry) bool {
 	return entry.Azure != nil || entry.Vertex != nil || entry.Bedrock != nil ||
 		entry.BedrockMantle != nil || entry.SageMaker != nil || entry.VLLM != nil ||
 		entry.Ollama != nil || entry.SGL != nil || entry.Replicate != nil ||
-		entry.Databricks != nil || entry.Cloudflare != nil || entry.OAuth != nil
+		entry.Databricks != nil || entry.Cloudflare != nil || entry.Anthropic != nil ||
+		entry.OAuth != nil
 }
 
 // applyHoistedKeyConfigs copies the hoisted key configs onto key. Absent ones
@@ -91,6 +94,7 @@ func applyHoistedKeyConfigs(entry *llm.ProviderEntry, key *schemas.Key) {
 	key.ReplicateKeyConfig = entry.Replicate
 	key.DatabricksKeyConfig = entry.Databricks
 	key.CloudflareKeyConfig = entry.Cloudflare
+	key.AnthropicKeyConfig = entry.Anthropic
 	key.OAuthKeyConfig = entry.OAuth
 }
 
@@ -107,6 +111,7 @@ func clearHoistedKeyConfigs(entry *llm.ProviderEntry) {
 	entry.Replicate = nil
 	entry.Databricks = nil
 	entry.Cloudflare = nil
+	entry.Anthropic = nil
 	entry.OAuth = nil
 }
 

@@ -73,7 +73,7 @@ llm:
       x-custom: value
     insecure_skip_verify: false                    # optional
   openai_config: {...}             # top-level squashed provider config
-  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/sagemaker/vllm/ollama/sgl/replicate/databricks/cloudflare/oauth)
+  azure: {...}                     # per-provider key config alias (azure/vertex/bedrock/bedrock_mantle/sagemaker/vllm/ollama/sgl/replicate/databricks/cloudflare/anthropic/oauth)
   keys: [...]                      # advanced: multi-key load balancing
 ```
 
@@ -100,6 +100,7 @@ Provider-specific (nested) identity fields:
 - **vLLM / SGL:** `CYNATIVE_LLM_VLLM_URL`, `CYNATIVE_LLM_VLLM_MODEL_NAME`, `CYNATIVE_LLM_SGL_URL`
 - **Databricks:** `CYNATIVE_LLM_DATABRICKS_WORKSPACE_URL`, `CYNATIVE_LLM_DATABRICKS_API_FORMAT`, `CYNATIVE_LLM_DATABRICKS_CLIENT_ID`, `CYNATIVE_LLM_DATABRICKS_CLIENT_SECRET`
 - **Cloudflare:** `CYNATIVE_LLM_CLOUDFLARE_ACCOUNT_ID`
+- **Anthropic workload identity:** `CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_FEDERATION_RULE_ID`, `..._ORGANIZATION_ID`, `..._SERVICE_ACCOUNT_ID`, `..._WORKSPACE_ID`, `..._IDENTITY_SOURCE_TYPE`, `..._IDENTITY_SOURCE_PATH`, `..._IDENTITY_SOURCE_TOKEN` (see [anthropic.md](anthropic.md))
 - **OAuth (openai only):** `CYNATIVE_LLM_OAUTH_GRANT_TYPE`, `CYNATIVE_LLM_OAUTH_TOKEN_URL`, `CYNATIVE_LLM_OAUTH_CLIENT_ID`, `CYNATIVE_LLM_OAUTH_CLIENT_SECRET`, and for `jwt_bearer` `CYNATIVE_LLM_OAUTH_PRIVATE_KEY`, `CYNATIVE_LLM_OAUTH_ISSUER`, `CYNATIVE_LLM_OAUTH_AUDIENCE` (see [openai.md](openai.md); `scopes` and `extra_params` need YAML)
 
 Any nested Bifrost field is reachable by upper-snake-casing its JSON path: `CYNATIVE_LLM_<PATH>` (e.g. `CYNATIVE_LLM_NETWORK_CONFIG_MAX_CONNS_PER_HOST`, `CYNATIVE_LLM_OPENAI_CONFIG_DISABLE_STORE`).

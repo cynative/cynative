@@ -307,6 +307,48 @@ func TestLoad_OAuthKeyConfigAlias_FoldsIntoKey(t *testing.T) {
 	}
 }
 
+func TestLoad_AnthropicWorkloadIdentityAlias_FoldsIntoKey(t *testing.T) {
+	t.Parallel()
+
+	// ANTHROPIC_API_KEY is exported on purpose: with workload identity set it
+	// must not become the key value, or Bifrost would send it as x-api-key and
+	// skip the federation.
+	cfg, err := loaderEnv(t, map[string]string{
+		"CYNATIVE_LLM_PROVIDER": "anthropic",
+		"CYNATIVE_LLM_MODEL":    "claude-sonnet-5-5",
+		"ANTHROPIC_API_KEY":     "sk-ant-static",
+		"CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_FEDERATION_RULE_ID":   "fdrl_1",
+		"CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_ORGANIZATION_ID":      "org-1",
+		"CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_SERVICE_ACCOUNT_ID":   "svac_1",
+		"CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_IDENTITY_SOURCE_TYPE": "file",
+		"CYNATIVE_LLM_ANTHROPIC_WORKLOAD_IDENTITY_IDENTITY_SOURCE_PATH": "/var/run/token",
+	}).Load("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.LLM.Keys) != 1 || !cfg.LLM.Keys[0].AnthropicKeyConfig.HasWorkloadIdentity() {
+		t.Fatalf("expected anthropic workload identity in keys[0], got %+v", cfg.LLM.Keys)
+	}
+	wif := cfg.LLM.Keys[0].AnthropicKeyConfig.WorkloadIdentity
+	ids := [3]string{wif.FederationRuleID.Val, wif.OrganizationID.Val, wif.ServiceAccountID.Val}
+	if ids != [3]string{"fdrl_1", "org-1", "svac_1"} {
+		t.Errorf("rule, organization, service account: got %q", ids)
+	}
+	src := wif.IdentitySource
+	if src == nil || src.Type != "file" || src.Path == nil || src.Path.Val != "/var/run/token" {
+		t.Errorf("identity source: got %+v", src)
+	}
+	if vErr := wif.Validate(); vErr != nil {
+		t.Errorf("Bifrost would reject the folded config: %v", vErr)
+	}
+	if v := cfg.LLM.Keys[0].Value.Val; v != "" {
+		t.Errorf("key value: got %q, want empty so Bifrost federates", v)
+	}
+	if cfg.LLM.Anthropic != nil {
+		t.Error("Anthropic alias should be cleared after materialize")
+	}
+}
+
 func TestLoad_BedrockMantleKeyConfigAlias_FoldsIntoKey(t *testing.T) {
 	t.Parallel()
 

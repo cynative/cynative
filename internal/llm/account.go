@@ -49,7 +49,9 @@ type ProviderEntry struct {
 	//
 	// OAuth is the one alias not named after a provider: Bifrost's
 	// oauth_key_config mints the bearer for openai when the key value is
-	// empty, and validateKey rejects it on any other provider.
+	// empty, and validateKey rejects it on any other provider. Anthropic
+	// carries workload identity federation, which Bifrost likewise honours
+	// only on anthropic and only when the key value is empty.
 	Azure         *schemas.AzureKeyConfig         `json:"azure,omitempty"`
 	Vertex        *schemas.VertexKeyConfig        `json:"vertex,omitempty"`
 	Bedrock       *schemas.BedrockKeyConfig       `json:"bedrock,omitempty"`
@@ -61,6 +63,7 @@ type ProviderEntry struct {
 	Replicate     *schemas.ReplicateKeyConfig     `json:"replicate,omitempty"`
 	Databricks    *schemas.DatabricksKeyConfig    `json:"databricks,omitempty"`
 	Cloudflare    *schemas.CloudflareKeyConfig    `json:"cloudflare,omitempty"`
+	Anthropic     *schemas.AnthropicKeyConfig     `json:"anthropic,omitempty"`
 	OAuth         *schemas.OAuthKeyConfig         `json:"oauth,omitempty"`
 }
 
