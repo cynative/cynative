@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.14.3](https://github.com/cynative/cynative/compare/v1.14.2...v1.14.3) (2026-11-10)
+
+
+### Bug Fixes
+
+* **release:** build xar on GCC 14 and later ([#454](https://github.com/cynative/cynative/issues/454)) ([c8c64ab](https://github.com/cynative/cynative/commit/c8c64abe3c49ac961f23216ddd3d9bfe51d4e084))
+
+
+### Dependencies
+
+* Bump the "all-dependencies" group with 1 update across multiple ecosystems ([#452](https://github.com/cynative/cynative/issues/452)) ([1e9bf7b](https://github.com/cynative/cynative/commit/1e9bf7b8c5156194415f9612e2ba43576800fab9))
+
 ## [1.14.2](https://github.com/cynative/cynative/compare/v1.14.1...v1.14.2) (2026-11-09)
 
 
