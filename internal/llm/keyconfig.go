@@ -15,10 +15,10 @@ import (
 // misconfiguration, not every one.
 //
 // Three providers form the closed required set. Re-verified against
-// github.com/maximhq/bifrost/core@v1.14.1, where the failure mode is not a panic:
+// github.com/maximhq/bifrost/core@v1.15.0, where the failure mode is not a panic:
 // validateKey (utils.go:136) rejects the key, key selection logs a warning and
-// skips it (bifrost.go:11217-11219), and the request then fails at
-// bifrost.go:11233 with "no keys found that support model: X", naming neither
+// skips it (bifrost.go:11395-11397), and the request then fails at
+// bifrost.go:11411 with "no keys found that support model: X", naming neither
 // the provider nor the field that was missing. Mirroring the check here turns
 // that into a load-time error that says what to set.
 //   - azure:  validateKey requires azure_key_config and a non-empty endpoint
@@ -36,7 +36,9 @@ import (
 // (utils.go:165-185). Cynative does not mirror those, so they still surface as
 // the opaque runtime error above; extending the set is a separate decision,
 // not a bump. validateKey also rejects an oauth_key_config on any provider but
-// openai (utils.go:213-216), which cynative does not mirror either.
+// openai (utils.go:213-216) and an anthropic_key_config.workload_identity on
+// any provider but anthropic (utils.go:224-234), which cynative does not
+// mirror either.
 //
 // The remaining KeyConfig-bearing providers need no check at all: Replicate
 // nil-checks (replicate.go:107); Databricks nil-checks each of its four reads

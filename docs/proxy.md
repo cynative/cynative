@@ -223,7 +223,9 @@ makes on its own when no `proxy_config` is set: the Vertex, Azure and
 Databricks credential exchanges and the `llm.oauth` mint read `HTTPS_PROXY`
 and `NO_PROXY` through Bifrost's own parser, so cynative's startup checks on
 those variables do not apply to them, and the chat request itself still goes
-direct. That path resolves them through the
+direct. The Anthropic workload identity exchange is the exception: it uses
+the chat request's client settings, so it follows `proxy_config` and goes
+direct without one. That path resolves them through the
 copy of `httpproxy` vendored into Go's standard library, which reads the
 upper-case spelling first, so two spellings carrying different values can send
 the model connection and the connectors to different proxies; set both to the

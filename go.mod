@@ -28,12 +28,12 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/invopop/jsonschema v0.14.0
 	github.com/jmespath/go-jmespath v0.4.1-0.20220621161143-b0104c826a24
-	github.com/maximhq/bifrost/core v1.14.1
+	github.com/maximhq/bifrost/core v1.15.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/net v0.62.0
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 	google.golang.org/api v0.311.0
@@ -293,7 +293,7 @@ require (
 	github.com/google/pprof v0.0.0-20261016150608-1facf8f91b50 // indirect
 	github.com/google/s2a-go v0.1.11 // indirect
 	github.com/google/wire v0.7.0 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.24 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.25 // indirect
 	github.com/googleapis/gax-go/v2 v2.27.0 // indirect
 	github.com/gordonklaus/ineffassign v0.2.0 // indirect
 	github.com/goreleaser/chglog v0.7.4 // indirect
@@ -380,7 +380,7 @@ require (
 	github.com/moby/moby/api v1.56.1 // indirect
 	github.com/moby/moby/client v0.6.2 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/modelcontextprotocol/registry v1.8.7 // indirect
+	github.com/modelcontextprotocol/registry v1.8.8 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/molecule-man/go-brrr v1.3.1 // indirect
@@ -405,7 +405,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/pandatix/go-abnf v0.5.3 // indirect
+	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/pb33f/go-yaml v0.1.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.2 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
@@ -450,13 +450,13 @@ require (
 	github.com/sigstore/protobuf-specs v0.5.2 // indirect
 	github.com/sigstore/rekor v1.5.5 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.4.1 // indirect
-	github.com/sigstore/sigstore v1.11.2 // indirect
+	github.com/sigstore/sigstore v1.11.3 // indirect
 	github.com/sigstore/sigstore-go v1.4.0 // indirect
 	github.com/sigstore/timestamp-authority/v2 v2.2.0 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/sivchari/containedctx v1.0.3 // indirect
 	github.com/skeema/knownhosts v1.3.3 // indirect
-	github.com/slack-go/slack v0.33.0 // indirect
+	github.com/slack-go/slack v0.35.0 // indirect
 	github.com/sonatard/noctx v0.5.1 // indirect
 	github.com/sourcegraph/go-diff v0.9.0 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
@@ -472,10 +472,10 @@ require (
 	github.com/tetafro/godot v1.5.6 // indirect
 	github.com/theupdateframework/go-tuf v0.7.0 // indirect
 	github.com/theupdateframework/go-tuf/v2 v2.4.2 // indirect
-	github.com/tidwall/gjson v1.20.0 // indirect
+	github.com/tidwall/gjson v1.20.1 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.2.2 // indirect
-	github.com/tidwall/sjson v1.2.6 // indirect
+	github.com/tidwall/sjson v1.2.7 // indirect
 	github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c // indirect
 	github.com/timonwong/loggercheck v0.13.1 // indirect
 	github.com/tomarrell/wrapcheck/v2 v2.13.0 // indirect
@@ -531,7 +531,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.5 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	gocloud.dev v0.47.0 // indirect
-	golang.org/x/arch v0.32.0 // indirect
+	golang.org/x/arch v0.33.0 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/exp v0.0.0-20261014143641-f0251eb4aa3e // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260811152304-ee035b5b010f // indirect
@@ -572,3 +572,11 @@ tool (
 	github.com/matryer/moq
 	github.com/uudashr/gocognit/cmd/gocognit
 )
+
+// bifrost/core v1.15.0 calls mcp-go's client.WithRequestClientCapabilities,
+// which it gets from this fork through a replace directive in its own go.mod.
+// Go ignores replace directives in dependencies, so without this line the
+// build selects mark3labs/mcp-go v1.5.0, which lacks the function. Keep the
+// pseudo-version equal to the one bifrost/core's go.mod names. Drop this line
+// once bifrost/core stops replacing mcp-go.
+replace github.com/mark3labs/mcp-go => github.com/maximhq/mcp-go v0.0.0-20261102181017-b7da3bc145a1
