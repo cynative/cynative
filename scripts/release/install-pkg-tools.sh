@@ -59,6 +59,9 @@ install_xar() {
   cp -a "${repo}/third_party/xar/xar" "${work}/xar"
   # OpenSSL 3 removed OpenSSL_add_all_ciphers; repoint the libcrypto probe (no-op if already fixed upstream).
   sed -i 's/OpenSSL_add_all_ciphers/CRYPTO_free/' "${work}/xar/configure.ac"
+  # linuxattr.c calls malloc/free without <stdlib.h>; GCC 14+ makes that an error (no-op if already included).
+  grep -q '^#include <stdlib.h>' "${work}/xar/lib/linuxattr.c" \
+    || sed -i '/^#include <stdio.h>/a #include <stdlib.h>' "${work}/xar/lib/linuxattr.c"
   ( cd "${work}/xar" && autoconf && ./configure && make && sudo make install )
   sudo ldconfig 2>/dev/null || true
   command -v xar
