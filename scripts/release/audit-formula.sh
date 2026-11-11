@@ -34,7 +34,13 @@ command -v jq >/dev/null 2>&1 || { echo "::error::jq not found" >&2; exit 1; }
 # Untap first so local re-runs are idempotent; untap again on exit to clean up.
 brew untap cynative/audit >/dev/null 2>&1 || true
 brew tap-new --no-git cynative/audit >/dev/null
-trap 'brew untap cynative/audit >/dev/null 2>&1 || true' EXIT
+trap 'brew untrust --formula cynative/audit/cynative >/dev/null 2>&1 || true
+      brew untap cynative/audit >/dev/null 2>&1 || true' EXIT
+# Homebrew refuses to load a formula from a non-official tap until it is
+# trusted (docs/Tap-Trust.md upstream), and `brew audit` names the formula
+# without installing it, so nothing trusts it implicitly. Trust only this one
+# formula, not the tap; the trap drops the entry so no stale trust outlives it.
+brew trust --formula cynative/audit/cynative >/dev/null
 
 formula="$(brew --repository cynative/audit)/Formula/cynative.rb"
 "${here}/render-formula.sh" "${version}" \
