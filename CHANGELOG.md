@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.4](https://github.com/cynative/cynative/compare/v1.14.3...v1.14.4) (2026-11-11)
+
+
+### Bug Fixes
+
+* **release:** trust the audited formula under Homebrew 7 ([#463](https://github.com/cynative/cynative/issues/463)) ([9b9213f](https://github.com/cynative/cynative/commit/9b9213f3bac2c7061dd906ae38979c51949fe65b))
+
 ## [1.14.3](https://github.com/cynative/cynative/compare/v1.14.2...v1.14.3) (2026-11-10)
 
 
