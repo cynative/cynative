@@ -42,6 +42,13 @@ updates:
       # release built against the glob v1 layout.
       - dependency-name: "github.com/OpenPeeDeeP/depguard/v2"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # protogetter v1.0.2 (a patch release) requires gobwas/glob v1.0.0, so
+      # bumping this indirect module (via golangci-lint, whose v2.15.0 still
+      # pins v1.0.1) drags glob to v1 and hits the same go mod tidy failure as
+      # depguard above. Every update type is ignored because the patch bump is
+      # the one that breaks. Drop this entry together with the glob entry, when
+      # fileglob/goreleaser ship a release built against the glob v1 layout.
+      - dependency-name: "github.com/ghostiam/protogetter"
       # go-header v1 is a breaking API rewrite that golangci-lint (which pins
       # the v0.5.x API) cannot compile against, so forcing the major bump on
       # this indirect module breaks `go tool golangci-lint`. Minor/patch
