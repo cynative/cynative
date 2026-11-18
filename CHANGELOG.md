@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.5](https://github.com/cynative/cynative/compare/v1.14.4...v1.14.5) (2026-11-18)
+
+
+### Bug Fixes
+
+* allow go install by dropping the mcp-go replace ([#467](https://github.com/cynative/cynative/issues/467)) ([2672614](https://github.com/cynative/cynative/commit/26726146e6f8833d009f0a637e0ad655e6da183c)), closes [#466](https://github.com/cynative/cynative/issues/466)
+
 ## [1.14.4](https://github.com/cynative/cynative/compare/v1.14.3...v1.14.4) (2026-11-11)
 
 
