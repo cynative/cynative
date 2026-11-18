@@ -363,7 +363,7 @@ require (
 	github.com/manuelarte/funcorder v0.6.0 // indirect
 	github.com/maratori/testableexamples v1.0.1 // indirect
 	github.com/maratori/testpackage v1.1.2 // indirect
-	github.com/mark3labs/mcp-go v1.5.0 // indirect
+	github.com/mark3labs/mcp-go v1.5.1-0.20261103124459-acf999d599ff // indirect
 	github.com/matoous/godox v1.1.0 // indirect
 	github.com/matryer/moq v0.8.1 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
@@ -572,11 +572,3 @@ tool (
 	github.com/matryer/moq
 	github.com/uudashr/gocognit/cmd/gocognit
 )
-
-// bifrost/core v1.15.0 calls mcp-go's client.WithRequestClientCapabilities,
-// which it gets from this fork through a replace directive in its own go.mod.
-// Go ignores replace directives in dependencies, so without this line the
-// build selects mark3labs/mcp-go v1.5.0, which lacks the function. Keep the
-// pseudo-version equal to the one bifrost/core's go.mod names. Drop this line
-// once bifrost/core stops replacing mcp-go.
-replace github.com/mark3labs/mcp-go => github.com/maximhq/mcp-go v0.0.0-20261102181017-b7da3bc145a1
