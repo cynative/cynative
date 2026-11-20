@@ -151,7 +151,7 @@ jobs:
             exit 1
           fi
           echo "Testing SHA $actual"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       # Fail loud on a missing or renamed variable, before minting credentials. There are
@@ -293,7 +293,7 @@ jobs:
             exit 1
           fi
           echo "Testing SHA $actual"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       # The AWS role variable gets its own named check because
@@ -428,7 +428,7 @@ jobs:
             exit 1
           fi
           echo "Testing SHA $actual"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: Preflight the required repo variables
@@ -547,7 +547,7 @@ jobs:
             exit 1
           fi
           echo "Testing SHA $actual"
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
       - name: Preflight the required repo variables
