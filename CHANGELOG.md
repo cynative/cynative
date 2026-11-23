@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.14.7](https://github.com/cynative/cynative/compare/v1.14.6...v1.14.7) (2026-11-23)
+
+
+### Dependencies
+
+* bump actions/setup-go from 7.0.0 to 7.1.0 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump cloud.google.com/go/storage from 1.70.0 to 1.71.0 ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* bump github.com/aws/aws-sdk-go-v2/config from 1.33.18 to 1.33.19 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/aws/aws-sdk-go-v2/credentials from 1.21.0 to 1.21.1 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/manager from 1.23.24 to 1.23.25 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager from 0.5.7 to 0.5.8 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/aws/aws-sdk-go-v2/service/ecr from 1.67.6 to 1.68.0 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/aws/aws-sdk-go-v2/service/kms from 1.62.6 to 1.63.0 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/awslabs/amazon-ecr-credential-helper/ecr-login from 0.12.0 to 0.13.0 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/go-openapi/analysis from 1.0.1 to 1.0.2 ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* bump github.com/go-openapi/loads from 0.25.3 to 0.25.4 ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* bump github.com/go-openapi/validate from 1.0.1 to 1.0.2 ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* bump github.com/grpc-ecosystem/grpc-gateway/v2 from 2.33.0 to 2.34.0 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/sergi/go-diff from 1.4.0 to 1.4.5 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/tidwall/gjson from 1.20.3 to 1.20.4 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump github.com/valyala/fasthttp from 1.78.0 to 1.79.0 ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* bump golang.org/x/exp from 0.0.0-20261014143641-f0251eb4aa3e to 0.0.0-20261113113407-e3970619a1a4 ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump golang.org/x/tools from 0.52.0 to 0.52.1-0.20261106145633-d407941a339a ([fa47c0b](https://github.com/cynative/cynative/commit/fa47c0b810d265659dd773b33ab10cebdccf6717))
+* bump google.golang.org/genproto/googleapis/api from 0.0.0-20261026165753-2ffab32bce7e to 0.0.0-20261110000943-09e21b237f2c ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* bump google.golang.org/genproto/googleapis/rpc from 0.0.0-20261104224025-d1e00e9f33ab to 0.0.0-20261110000943-09e21b237f2c ([71f7867](https://github.com/cynative/cynative/commit/71f7867c94c58b47e5017c5a7560a0180e31df07))
+* Bump the "all-dependencies" group with 2 updates across multiple ecosystems ([#475](https://github.com/cynative/cynative/issues/475)) ([4adefe0](https://github.com/cynative/cynative/commit/4adefe0e08ae4182871db306ac83ede4ce18f19d))
+
 ## [1.14.6](https://github.com/cynative/cynative/compare/v1.14.5...v1.14.6) (2026-11-18)
 
 
