@@ -32,12 +32,12 @@ func TestCanonicalEnvKeyLookup_MatchesChatProviders(t *testing.T) {
 	}
 }
 
-// TestChatProviders_ExcludedPair hardcodes the non-chat exclusions:
+// TestChatProviders_ExcludedSet hardcodes the non-chat exclusions:
 // StandardProviders minus ChatProviders() must be exactly
-// {elevenlabs, runway, typesafe}, and each must be rejected at config
+// {elevenlabs, machgen, runway, soniox, typesafe}, and each must be rejected at config
 // validation. An exclusion silently added, dropped, or no longer present
 // upstream fails here until re-triaged against the Bifrost sources.
-func TestChatProviders_ExcludedPair(t *testing.T) {
+func TestChatProviders_ExcludedSet(t *testing.T) {
 	t.Parallel()
 
 	chat := llm.ChatProviders()
@@ -47,7 +47,9 @@ func TestChatProviders_ExcludedPair(t *testing.T) {
 			got = append(got, p)
 		}
 	}
-	want := []schemas.ModelProvider{schemas.Elevenlabs, schemas.Runway, schemas.Typesafe}
+	want := []schemas.ModelProvider{
+		schemas.Elevenlabs, schemas.MachGen, schemas.Runway, schemas.Soniox, schemas.Typesafe,
+	}
 	slices.Sort(got)
 	slices.Sort(want)
 

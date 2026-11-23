@@ -47,6 +47,8 @@ No `~/.cynative/config.yaml` is needed for the simple path. Write YAML only when
 | `cloudflare`   | `CLOUDFLARE_API_TOKEN`             | [cloudflare.md](cloudflare.md) |
 | `minimax`      | `MINIMAX_API_KEY`                  | [minimax.md](minimax.md) |
 | `byteplus`     | `ARK_API_KEY`                      | [byteplus.md](byteplus.md) |
+| `baseten`      | `BASETEN_API_KEY`                  | [baseten.md](baseten.md) |
+| `kimchi`       | `KIMCHI_API_KEY`                   | [kimchi.md](kimchi.md) |
 | `opencode-go`  | `OPENCODE_API_KEY`                 | [opencode-go.md](opencode-go.md) |
 | `opencode-zen` | `OPENCODE_API_KEY`                 | [opencode-zen.md](opencode-zen.md) |
 | `ollama`       | (none — local endpoint)            | [ollama.md](ollama.md) |
