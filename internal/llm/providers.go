@@ -38,14 +38,16 @@ func ValidateProvider(entry *ProviderEntry) error {
 //nolint:gochecknoglobals,exhaustive // static exclusion set; deliberately partial, lists only the non-chat providers
 var nonChatProviders = map[schemas.ModelProvider]bool{
 	schemas.Elevenlabs: true,
+	schemas.MachGen:    true,
 	schemas.Runway:     true,
+	schemas.Soniox:     true,
 	schemas.Typesafe:   true,
 }
 
 // ChatProviders returns every provider cynative can select: Bifrost's
 // canonical schemas.StandardProviders minus the non-chat exclusions. Deriving
 // the catalog keeps it current across Bifrost bumps; the package tests pin
-// the exclusion pair and tie each chat provider to a CanonicalEnvKeyLookup
+// the exclusion set and tie each chat provider to a CanonicalEnvKeyLookup
 // row and a docs/providers/<name>.md guide.
 func ChatProviders() []schemas.ModelProvider {
 	providers := make([]schemas.ModelProvider, 0, len(schemas.StandardProviders))
@@ -101,6 +103,8 @@ var CanonicalEnvKeyLookup = map[schemas.ModelProvider]string{
 	schemas.Cloudflare:    "CLOUDFLARE_API_TOKEN",
 	schemas.MiniMax:       "MINIMAX_API_KEY",
 	schemas.BytePlus:      "ARK_API_KEY",
+	schemas.Baseten:       "BASETEN_API_KEY",
+	schemas.Kimchi:        "KIMCHI_API_KEY",
 	schemas.Bedrock:       "",
 	schemas.BedrockMantle: "",
 	schemas.SageMaker:     "",
