@@ -380,7 +380,7 @@ require (
 	github.com/moby/moby/api v1.57.0 // indirect
 	github.com/moby/moby/client v0.6.3 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/modelcontextprotocol/registry v1.8.11 // indirect
+	github.com/modelcontextprotocol/registry v1.8.13 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/molecule-man/go-brrr v1.3.1 // indirect
@@ -405,7 +405,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/osscontainertools/docker-credential-acr v1.0.1 // indirect
+	github.com/osscontainertools/docker-credential-acr v1.0.2 // indirect
 	github.com/pandatix/go-abnf v0.5.5 // indirect
 	github.com/pb33f/go-yaml v0.2.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.2 // indirect
@@ -473,7 +473,7 @@ require (
 	github.com/tetafro/godot v1.5.6 // indirect
 	github.com/theupdateframework/go-tuf v0.7.1 // indirect
 	github.com/theupdateframework/go-tuf/v2 v2.4.2 // indirect
-	github.com/tidwall/gjson v1.20.5 // indirect
+	github.com/tidwall/gjson v1.20.6 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
 	github.com/tidwall/pretty v1.3.0 // indirect
 	github.com/tidwall/sjson v1.2.11 // indirect
@@ -492,7 +492,7 @@ require (
 	github.com/uudashr/gocognit v1.3.0 // indirect
 	github.com/uudashr/iface v1.5.3 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
-	github.com/valyala/fasthttp v1.79.0 // indirect
+	github.com/valyala/fasthttp v1.80.0 // indirect
 	github.com/wagoodman/go-progress v0.0.0-20230925121702-07e42b3cdba0 // indirect
 	github.com/whyrusleeping/cbor-gen v0.3.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
