@@ -62,6 +62,7 @@ require (
 	dev.gaijin.team/go/exhaustruct/v4 v4.0.0 // indirect
 	dev.gaijin.team/go/exhaustruct/v5 v5.2.0 // indirect
 	dev.gaijin.team/go/golib v0.9.0 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/42wim/httpsig v1.3.0 // indirect
 	github.com/4meepo/tagalign v1.4.4 // indirect
 	github.com/Abirdcfly/dupword v0.1.8 // indirect
@@ -372,7 +373,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/mgechev/revive v1.17.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
@@ -380,7 +380,7 @@ require (
 	github.com/moby/moby/api v1.57.0 // indirect
 	github.com/moby/moby/client v0.6.3 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/modelcontextprotocol/registry v1.8.13 // indirect
+	github.com/modelcontextprotocol/registry v1.8.16 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/molecule-man/go-brrr v1.3.1 // indirect
@@ -394,7 +394,7 @@ require (
 	github.com/multiformats/go-base32 v0.1.0 // indirect
 	github.com/multiformats/go-base36 v0.2.0 // indirect
 	github.com/multiformats/go-multibase v0.3.0 // indirect
-	github.com/multiformats/go-multihash v0.2.3 // indirect
+	github.com/multiformats/go-multihash v0.3.0 // indirect
 	github.com/multiformats/go-varint v0.1.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nakabonne/nestif v0.3.1 // indirect
@@ -448,12 +448,12 @@ require (
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/shopspring/decimal v1.6.0 // indirect
 	github.com/sigstore/cosign/v3 v3.1.4 // indirect
-	github.com/sigstore/protobuf-specs v0.5.2 // indirect
-	github.com/sigstore/rekor v1.6.3 // indirect
-	github.com/sigstore/rekor-tiles/v2 v2.4.2 // indirect
-	github.com/sigstore/sigstore v1.11.3 // indirect
-	github.com/sigstore/sigstore-go v1.4.0 // indirect
-	github.com/sigstore/timestamp-authority/v2 v2.2.1 // indirect
+	github.com/sigstore/protobuf-specs v0.5.3-0.20261112181914-a84bc5ff572a // indirect
+	github.com/sigstore/rekor v1.6.5 // indirect
+	github.com/sigstore/rekor-tiles/v2 v2.4.6 // indirect
+	github.com/sigstore/sigstore v1.11.4 // indirect
+	github.com/sigstore/sigstore-go v1.4.1 // indirect
+	github.com/sigstore/timestamp-authority/v2 v2.2.2 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/sivchari/containedctx v1.0.3 // indirect
 	github.com/skeema/knownhosts v1.3.3 // indirect
@@ -475,7 +475,7 @@ require (
 	github.com/theupdateframework/go-tuf/v2 v2.4.2 // indirect
 	github.com/tidwall/gjson v1.20.6 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
-	github.com/tidwall/pretty v1.3.0 // indirect
+	github.com/tidwall/pretty v1.3.1 // indirect
 	github.com/tidwall/sjson v1.2.11 // indirect
 	github.com/tiktoken-go/tokenizer v0.10.0 // indirect
 	github.com/timakin/bodyclose v0.0.0-20260723120731-857993a2939c // indirect
@@ -556,7 +556,7 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260721132016-d427ff9ee9ad // indirect
 	k8s.io/utils v0.0.0-20260626114624-be93311217bd // indirect
-	lukechampine.com/blake3 v1.5.1 // indirect
+	lukechampine.com/blake3 v1.5.3 // indirect
 	mvdan.cc/gofumpt v0.12.0 // indirect
 	mvdan.cc/unparam v0.0.0-20260823230713-2fa3d841b0c8 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
