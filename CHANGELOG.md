@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.14.8](https://github.com/cynative/cynative/compare/v1.14.7...v1.14.8) (2026-11-27)
+
+
+### Dependencies
+
+* bump amannn/action-semantic-pull-request from 6.1.2 to 6.1.3 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump amannn/action-semantic-pull-request from 6.1.3 to 6.1.4 ([f1ebd65](https://github.com/cynative/cynative/commit/f1ebd6530dbda9c29977f832d9926a27457fa4b8))
+* bump github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys from 1.5.0 to 1.6.0 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump github.com/dlclark/regexp2/v2 from 2.13.1 to 2.13.2 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump github.com/goreleaser/chglog from 0.7.5 to 0.7.6 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump github.com/modelcontextprotocol/registry from 1.8.10 to 1.8.11 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump github.com/modelcontextprotocol/registry from 1.8.11 to 1.8.13 ([e22702f](https://github.com/cynative/cynative/commit/e22702f561a93895a93f104b6a8252e9ce4e27bc))
+* bump github.com/modelcontextprotocol/registry from 1.8.13 to 1.8.16 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/multiformats/go-multihash from 0.2.3 to 0.3.0 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/osscontainertools/docker-credential-acr from 1.0.1 to 1.0.2 ([e22702f](https://github.com/cynative/cynative/commit/e22702f561a93895a93f104b6a8252e9ce4e27bc))
+* bump github.com/pierrec/lz4/v4 from 4.1.33 to 4.1.34 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump github.com/polydawn/refmt from 0.90.0 to 0.90.1 ([f1ebd65](https://github.com/cynative/cynative/commit/f1ebd6530dbda9c29977f832d9926a27457fa4b8))
+* bump github.com/sigstore/rekor from 1.6.2 to 1.6.3 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump github.com/sigstore/rekor from 1.6.3 to 1.6.5 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/sigstore/rekor-tiles/v2 from 2.4.2 to 2.4.6 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/sigstore/sigstore from 1.11.3 to 1.11.4 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/sigstore/sigstore-go from 1.4.0 to 1.4.1 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/sigstore/timestamp-authority/v2 from 2.2.1 to 2.2.2 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/tidwall/gjson from 1.20.5 to 1.20.6 ([e22702f](https://github.com/cynative/cynative/commit/e22702f561a93895a93f104b6a8252e9ce4e27bc))
+* bump github.com/tidwall/pretty from 1.3.0 to 1.3.1 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+* bump github.com/valyala/fasthttp from 1.79.0 to 1.80.0 ([e22702f](https://github.com/cynative/cynative/commit/e22702f561a93895a93f104b6a8252e9ce4e27bc))
+* bump go.opentelemetry.io/auto/sdk from 1.2.1 to 1.2.2 ([e0bf15c](https://github.com/cynative/cynative/commit/e0bf15c4e27e0173cbb43458e4c1ab1dea1ac8b4))
+* bump lukechampine.com/blake3 from 1.5.1 to 1.5.3 ([dc26311](https://github.com/cynative/cynative/commit/dc26311bed74b4d03e01f7ff43d0e945fb2905c1))
+
 ## [1.14.7](https://github.com/cynative/cynative/compare/v1.14.6...v1.14.7) (2026-11-23)
 
 
